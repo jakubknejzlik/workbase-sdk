@@ -1,0 +1,38 @@
+diff --git a/dist/index.js b/dist/index.js
+index bd21e898f431298b70e941833c78819a1eb53a36..197934ddd4c800ecbfdf88e7191c1cc56699b327 100644
+--- a/dist/index.js
++++ b/dist/index.js
+@@ -1,12 +1,6 @@
+ 'use client';
+-function __insertCSS(code) {
+-  if (!code || typeof document == 'undefined') return
+-  let head = document.head || document.getElementsByTagName('head')[0]
+-  let style = document.createElement('style')
+-  style.type = 'text/css'
+-  head.appendChild(style)
+-  ;style.styleSheet ? (style.styleSheet.cssText = code) : style.appendChild(document.createTextNode(code))
+-}
++// Workbase CSP: styles are bundled from sonner/dist/styles.css.
++function __insertCSS(code) {}
+ 
+ Object.defineProperty(exports, '__esModule', { value: true });
+ 
+diff --git a/dist/index.mjs b/dist/index.mjs
+index d0c7a5a1fa1ed8b19c27bea968bb404f2437a07e..3f9906740efe69ec274fb675e1ba8df59ce2b8f6 100644
+--- a/dist/index.mjs
++++ b/dist/index.mjs
+@@ -1,12 +1,6 @@
+ 'use client';
+-function __insertCSS(code) {
+-  if (!code || typeof document == 'undefined') return
+-  let head = document.head || document.getElementsByTagName('head')[0]
+-  let style = document.createElement('style')
+-  style.type = 'text/css'
+-  head.appendChild(style)
+-  ;style.styleSheet ? (style.styleSheet.cssText = code) : style.appendChild(document.createTextNode(code))
+-}
++// Workbase CSP: styles are bundled from sonner/dist/styles.css.
++function __insertCSS(code) {}
+ 
+ import React from 'react';
+ import ReactDOM from 'react-dom';

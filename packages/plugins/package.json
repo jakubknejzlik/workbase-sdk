@@ -1,0 +1,59 @@
+{
+  "name": "@workbasehq/plugins",
+  "version": "0.2.11",
+  "type": "module",
+  "exports": {
+    "./audit": "./audit/src/index.ts",
+    "./console": "./console/src/index.ts",
+    "./console/contract": "./console/src/contract.ts",
+    "./identity": "./identity/src/index.ts",
+    "./idp-auth": "./idp-auth/src/index.ts",
+    "./idp-auth/fake": "./idp-auth/src/fake.ts",
+    "./local-auth": "./local-auth/src/index.ts",
+    "./machine-credentials": "./machine-credentials/src/index.ts",
+    "./mail-outbox": "./mail-outbox/src/index.ts",
+    "./members": "./members/src/index.ts",
+    "./organizations": "./organizations/src/index.ts",
+    "./permissions": "./permissions/src/index.ts",
+    "./local-auth/auth": "./local-auth/src/auth.ts",
+    "./local-auth/better-auth": "./local-auth/src/better-auth.ts",
+    "./local-auth/session-authentication": "./local-auth/src/session-authentication.ts",
+    "./machine-credentials/routes": "./machine-credentials/src/routes.ts",
+    "./local-auth/better-auth-als-preseed": "./local-auth/src/better-auth-als-preseed.ts",
+    "./local-auth/identity-providers": "./local-auth/src/identity-providers.ts",
+    "./console/assets": {
+      "types": "./console/src/assets.d.mts",
+      "default": "./console/src/assets.mjs"
+    }
+  },
+  "dependencies": {
+    "zod": "4.6.7",
+    "better-auth": "1.7.1"
+  },
+  "peerDependencies": {
+    "@workbasehq/core": "0.2.11"
+  },
+  "devDependencies": {
+    "@workbasehq/test-support": "workspace:*",
+    "@workbasehq/core": "workspace:*"
+  },
+  "files": [
+    "*/src/**",
+    "console/assets",
+    "LICENSE",
+    "NOTICE"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "license": "Apache-2.0",
+  "description": "Shared Workbase plugins exposed through ten explicit subpaths.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jakubknejzlik/workbase-sdk.git",
+    "directory": "packages/plugins"
+  },
+  "scripts": {
+    "prepack": "bun ../../scripts/stage-console-assets.ts"
+  }
+}

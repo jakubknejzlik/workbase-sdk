@@ -1,0 +1,12 @@
+Workbase generic browser console
+Copyright 2026 Jakub Knejzlík
+
+Licensed under the Apache License, Version 2.0. See LICENSE.
+
+This distribution includes shared components derived from Tiketo CMS
+(tiketocz/tiketo-cms), reference commit
+1593f1931901f60d0458bff21eddc8c3b06aa758.
+Workbase includes adapted component rendering and host integration.
+Existing upstream license and notice headers are retained where present.
+This attribution describes component provenance, not bundled instance models,
+customer data, branding, or domain workflows.

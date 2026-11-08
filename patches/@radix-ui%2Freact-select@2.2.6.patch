@@ -1,0 +1,60 @@
+diff --git a/dist/index.js b/dist/index.js
+index dc37ac4a018a086c4244a09a67215dbaa9b4de65..320ebcc3aa1ccfb683b0b4eef9e813ec4ee1c420 100644
+--- a/dist/index.js
++++ b/dist/index.js
+@@ -502,7 +502,7 @@ var SelectContentImpl = React.forwardRef(
+         position,
+         isPositioned,
+         searchRef,
+-        children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_react_remove_scroll.RemoveScroll, { as: Slot, allowPinchZoom: true, children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
++        children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_react_remove_scroll.RemoveScroll, { as: Slot, enabled: false, removeScrollBar: false, allowPinchZoom: true, children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
+           import_react_focus_scope.FocusScope,
+           {
+             asChild: true,
+@@ -781,15 +781,7 @@ var SelectViewport = React.forwardRef(
+     const composedRefs = (0, import_react_compose_refs.useComposedRefs)(forwardedRef, contentContext.onViewportChange);
+     const prevScrollTopRef = React.useRef(0);
+     return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(import_jsx_runtime.Fragment, { children: [
+-      /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
+-        "style",
+-        {
+-          dangerouslySetInnerHTML: {
+-            __html: `[data-radix-select-viewport]{scrollbar-width:none;-ms-overflow-style:none;-webkit-overflow-scrolling:touch;}[data-radix-select-viewport]::-webkit-scrollbar{display:none}`
+-          },
+-          nonce
+-        }
+-      ),
++      /* Workbase CSP: viewport rules live in the asset CSS. */ null,
+       /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Collection.Slot, { scope: __scopeSelect, children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
+         import_react_primitive.Primitive.div,
+         {
+diff --git a/dist/index.mjs b/dist/index.mjs
+index f9b94f39dfddef678ef3086354f8d7413ae27e52..3f82d1588a3f379f8c68b194bc35802d610478d9 100644
+--- a/dist/index.mjs
++++ b/dist/index.mjs
+@@ -435,7 +435,7 @@ var SelectContentImpl = React.forwardRef(
+         position,
+         isPositioned,
+         searchRef,
+-        children: /* @__PURE__ */ jsx(RemoveScroll, { as: Slot, allowPinchZoom: true, children: /* @__PURE__ */ jsx(
++        children: /* @__PURE__ */ jsx(RemoveScroll, { as: Slot, enabled: false, removeScrollBar: false, allowPinchZoom: true, children: /* @__PURE__ */ jsx(
+           FocusScope,
+           {
+             asChild: true,
+@@ -714,15 +714,7 @@ var SelectViewport = React.forwardRef(
+     const composedRefs = useComposedRefs(forwardedRef, contentContext.onViewportChange);
+     const prevScrollTopRef = React.useRef(0);
+     return /* @__PURE__ */ jsxs(Fragment, { children: [
+-      /* @__PURE__ */ jsx(
+-        "style",
+-        {
+-          dangerouslySetInnerHTML: {
+-            __html: `[data-radix-select-viewport]{scrollbar-width:none;-ms-overflow-style:none;-webkit-overflow-scrolling:touch;}[data-radix-select-viewport]::-webkit-scrollbar{display:none}`
+-          },
+-          nonce
+-        }
+-      ),
++      /* Workbase CSP: viewport rules live in the asset CSS. */ null,
+       /* @__PURE__ */ jsx(Collection.Slot, { scope: __scopeSelect, children: /* @__PURE__ */ jsx(
+         Primitive.div,
+         {

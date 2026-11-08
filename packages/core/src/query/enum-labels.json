@@ -1,0 +1,16 @@
+{
+  "en": {
+    "value_owner": "Owner",
+    "value_dispatcher": "Member",
+    "value_viewer": "Viewer",
+    "value_administrator": "Administrator",
+    "value_unknown": "Unknown"
+  },
+  "cs": {
+    "value_owner": "Vlastník",
+    "value_dispatcher": "Člen",
+    "value_viewer": "Čtenář",
+    "value_administrator": "Správce",
+    "value_unknown": "Neznámá role"
+  }
+}

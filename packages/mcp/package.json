@@ -1,0 +1,48 @@
+{
+  "name": "@workbasehq/mcp",
+  "version": "0.2.11",
+  "type": "module",
+  "scripts": {
+    "start": "bun src/stdio.ts",
+    "test": "cd ../.. && vitest run --config packages/mcp/vitest.config.ts"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "~1.32.0",
+    "@workbasehq/core": "workspace:*",
+    "zod": "4.6.7",
+    "@workbasehq/plugins": "workspace:*",
+    "wrangler": "4.126.0",
+    "tsx": "4.23.15"
+  },
+  "files": [
+    "src",
+    "templates/standalone",
+    "!**/test/**",
+    "!**/tests/**",
+    "!**/__tests__/**",
+    "!**/fixtures/**",
+    "!**/*.test.*",
+    "!**/*.spec.*",
+    "NOTICE",
+    "LICENSE"
+  ],
+  "exports": {
+    ".": "./src/server.ts",
+    "./stdio": "./src/stdio.ts",
+    "./data": "./src/data/index.ts"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "bin": {
+    "workbase-mcp": "src/bin.ts",
+    "workbase": "src/bin.ts"
+  },
+  "license": "Apache-2.0",
+  "description": "Configuration and data Model Context Protocol servers for Workbase applications.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jakubknejzlik/workbase-sdk.git",
+    "directory": "packages/mcp"
+  }
+}

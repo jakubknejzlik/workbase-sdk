@@ -1,0 +1,425 @@
+[
+  {
+    "revision": 3,
+    "date": "2026-11-02T23:06:27.523Z",
+    "config": {
+      "interactive": true,
+      "locale": "en",
+      "timeZone": "UTC",
+      "registration": "open",
+      "organizationOwnerRole": "owner",
+      "displayName": "Workbase test",
+      "id": "workbase_test",
+      "entities": {
+        "zakaznik": {
+          "fields": {
+            "jmeno": {
+              "type": "string",
+              "required": true
+            },
+            "email": {
+              "type": "string",
+              "required": false
+            },
+            "telefon": {
+              "type": "string",
+              "required": false
+            },
+            "adresa": {
+              "type": "string",
+              "required": false
+            },
+            "poznamka": {
+              "type": "text",
+              "required": false
+            }
+          },
+          "relations": {},
+          "checks": []
+        },
+        "sluzba": {
+          "fields": {
+            "nazev": {
+              "type": "string",
+              "required": true
+            },
+            "popis": {
+              "type": "text",
+              "required": false
+            },
+            "cena": {
+              "type": "float",
+              "required": true
+            },
+            "delka_minut": {
+              "type": "int",
+              "required": false
+            },
+            "aktivni": {
+              "type": "bool",
+              "required": false,
+              "default": true
+            }
+          },
+          "relations": {},
+          "checks": []
+        },
+        "uklizecka": {
+          "fields": {
+            "jmeno": {
+              "type": "string",
+              "required": true
+            },
+            "email": {
+              "type": "string",
+              "required": false
+            },
+            "telefon": {
+              "type": "string",
+              "required": false
+            },
+            "aktivni": {
+              "type": "bool",
+              "required": false,
+              "default": true
+            }
+          },
+          "relations": {},
+          "checks": []
+        },
+        "dostupnost": {
+          "fields": {
+            "uklizecka": {
+              "type": "ref",
+              "required": true,
+              "entity": "uklizecka"
+            },
+            "od": {
+              "type": "datetime",
+              "required": true
+            },
+            "do": {
+              "type": "datetime",
+              "required": true
+            },
+            "poznamka": {
+              "type": "string",
+              "required": false
+            }
+          },
+          "relations": {},
+          "checks": []
+        },
+        "rezervace": {
+          "fields": {
+            "zakaznik": {
+              "type": "ref",
+              "required": true,
+              "entity": "zakaznik"
+            },
+            "sluzba": {
+              "type": "ref",
+              "required": true,
+              "entity": "sluzba"
+            },
+            "uklizecka": {
+              "type": "ref",
+              "required": false,
+              "entity": "uklizecka"
+            },
+            "termin": {
+              "type": "datetime",
+              "required": true
+            },
+            "adresa": {
+              "type": "string",
+              "required": false
+            },
+            "cena": {
+              "type": "float",
+              "required": false
+            },
+            "stav": {
+              "type": "enum",
+              "required": true,
+              "values": [
+                "nova",
+                "potvrzena",
+                "hotova",
+                "zrusena"
+              ],
+              "default": "nova"
+            },
+            "poznamka": {
+              "type": "text",
+              "required": false
+            }
+          },
+          "relations": {},
+          "checks": []
+        },
+        "ukol": {
+          "fields": {
+            "rezervace": {
+              "type": "ref",
+              "required": true,
+              "entity": "rezervace"
+            },
+            "nazev": {
+              "type": "string",
+              "required": true
+            },
+            "hotovo": {
+              "type": "bool",
+              "required": false,
+              "default": false
+            },
+            "poradi": {
+              "type": "int",
+              "required": false
+            }
+          },
+          "relations": {},
+          "checks": []
+        },
+        "skoda": {
+          "fields": {
+            "rezervace": {
+              "type": "ref",
+              "required": true,
+              "entity": "rezervace"
+            },
+            "popis": {
+              "type": "text",
+              "required": true
+            },
+            "castka": {
+              "type": "float",
+              "required": false
+            },
+            "zapsano": {
+              "type": "datetime",
+              "required": false
+            }
+          },
+          "relations": {},
+          "checks": []
+        }
+      },
+      "roles": [
+        "owner",
+        "viewer"
+      ],
+      "policies": {
+        "zakaznik": {
+          "owner": "all"
+        },
+        "sluzba": {
+          "owner": "all"
+        },
+        "uklizecka": {
+          "owner": "all"
+        },
+        "dostupnost": {
+          "owner": "all"
+        },
+        "rezervace": {
+          "owner": "all"
+        },
+        "ukol": {
+          "owner": "all"
+        },
+        "skoda": {
+          "owner": "all"
+        }
+      },
+      "permissions": {
+        "owner": {
+          "zakaznik": [
+            "read",
+            "create",
+            "update",
+            "delete"
+          ],
+          "sluzba": [
+            "read",
+            "create",
+            "update",
+            "delete"
+          ],
+          "uklizecka": [
+            "read",
+            "create",
+            "update",
+            "delete"
+          ],
+          "dostupnost": [
+            "read",
+            "create",
+            "update",
+            "delete"
+          ],
+          "rezervace": [
+            "read",
+            "create",
+            "update",
+            "delete"
+          ],
+          "ukol": [
+            "read",
+            "create",
+            "update",
+            "delete"
+          ],
+          "skoda": [
+            "read",
+            "create",
+            "update",
+            "delete"
+          ]
+        },
+        "viewer": {
+          "zakaznik": [],
+          "sluzba": [],
+          "uklizecka": [],
+          "dostupnost": [],
+          "rezervace": [],
+          "ukol": [],
+          "skoda": []
+        }
+      },
+      "commands": [],
+      "organizationPermissions": {
+        "owner": [
+          "organizations.update",
+          "members.read",
+          "members.update",
+          "members.remove",
+          "invitations.create",
+          "invitations.read",
+          "invitations.revoke",
+          "tokens.create",
+          "tokens.read",
+          "tokens.revoke"
+        ],
+        "viewer": []
+      },
+      "plugins": [
+        {
+          "name": "identity",
+          "version": "0.1.0",
+          "provides": {
+            "identity": "1.x"
+          },
+          "configuration": {
+            "trustedIssuers": {}
+          }
+        },
+        {
+          "name": "permissions",
+          "version": "0.1.0",
+          "provides": {
+            "permissions": "1.x"
+          },
+          "configuration": {
+            "roles": [
+              "owner",
+              "viewer"
+            ],
+            "ownerRole": "owner"
+          }
+        },
+        {
+          "name": "members",
+          "version": "0.1.0",
+          "provides": {
+            "members": "1.x"
+          },
+          "requires": {
+            "identity": "^1",
+            "permissions": "^1"
+          },
+          "optionalRequires": {
+            "organizations": "^1",
+            "mail-outbox": "^1",
+            "console": "^1"
+          },
+          "configuration": {}
+        },
+        {
+          "name": "organizations",
+          "version": "0.1.0",
+          "provides": {
+            "organizations": "1.x"
+          },
+          "requires": {
+            "identity": "^1"
+          },
+          "optionalRequires": {
+            "console": "^1"
+          },
+          "configuration": {
+            "allowCreate": true
+          }
+        },
+        {
+          "name": "local-auth",
+          "version": "0.1.0",
+          "provides": {
+            "login": "1.x"
+          },
+          "requires": {
+            "identity": "^1"
+          },
+          "optionalRequires": {
+            "mail-outbox": "^1"
+          },
+          "configuration": {
+            "methods": [
+              "magic-link"
+            ]
+          }
+        },
+        {
+          "name": "machine-credentials",
+          "version": "0.1.0",
+          "provides": {
+            "machine-credentials": "1.x"
+          },
+          "requires": {
+            "identity": "^1",
+            "members": "^1",
+            "permissions": "^1"
+          },
+          "optionalRequires": {
+            "console": "^1"
+          }
+        },
+        {
+          "name": "mail-outbox",
+          "version": "0.1.0",
+          "provides": {
+            "mail-outbox": "1.x"
+          }
+        },
+        {
+          "name": "audit",
+          "version": "0.1.0",
+          "provides": {
+            "audit": "1.x"
+          },
+          "requires": {
+            "console": "^1"
+          }
+        },
+        {
+          "name": "console",
+          "version": "0.1.0",
+          "provides": {
+            "console": "1.x"
+          }
+        }
+      ]
+    }
+  }
+]

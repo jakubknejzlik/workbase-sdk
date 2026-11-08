@@ -1,0 +1,71 @@
+name: SDK release
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Check and rehearse without publishing packages
+        type: boolean
+        default: true
+  push:
+    tags: ['sdk-v*']
+permissions:
+  contents: read
+concurrency:
+  group: sdk-release
+  cancel-in-progress: false
+jobs:
+  release:
+    if: github.event_name != 'pull_request' && github.event_name != 'pull_request_target'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '25.8.0'
+      - name: Install the OIDC-capable npm CLI
+        run: npm install -g npm@11.5.1
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version-file: package.json
+      - name: Install verified gitleaks 8.24.3
+        run: |
+          tools="$(mktemp -d)"
+          curl -fsSL --retry 5 --retry-all-errors https://github.com/gitleaks/gitleaks/releases/download/v8.24.3/gitleaks_8.24.3_linux_x64.tar.gz -o "$tools/gitleaks.tar.gz"
+          echo "9991e0b2903da4c8f6122b5c3186448b927a5da4deef1fe45271c3793f4ee29c  $tools/gitleaks.tar.gz" | sha256sum -c -
+          tar -xzf "$tools/gitleaks.tar.gz" -C "$tools" gitleaks
+          echo "$tools" >> "$GITHUB_PATH"
+      - run: bun install --frozen-lockfile
+      - run: bun run lint
+      - run: bun run typecheck
+      - run: bun run check:ci-invariants
+      - run: bun run test
+      - run: bun run test:mcp
+      - run: bash scripts/sdk-pack.sh
+      - run: bun scripts/check-sdk-boundary.ts
+      - run: bun scripts/scan-sdk-public.ts
+      - run: bun scripts/smoke-mcp-template.ts --directory dist-sdk
+      # npm Trusted Publishing authenticates through GitHub Actions OIDC.
+      - name: Publish the checked archives (dry run by default)
+        env:
+          RELEASE_EVENT: ${{ github.event_name }}
+          RELEASE_REF: ${{ github.ref }}
+          RELEASE_DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          args=(--directory dist-sdk)
+          if [[ "$RELEASE_EVENT" == push ]]; then
+            version="${RELEASE_REF#refs/tags/sdk-v}"
+            [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo 'Invalid SDK release tag' >&2; exit 1; }
+            args+=(--expect-version "$version" --provenance)
+          elif [[ "$RELEASE_DRY_RUN" != false ]]; then
+            args+=(--dry-run)
+          else
+            args+=(--provenance)
+          fi
+          bun scripts/sdk-publish.ts "${args[@]}"

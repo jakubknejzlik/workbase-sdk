@@ -1,0 +1,25 @@
+{
+  "mcpServers": {
+    "workbase_config": {
+      "command": "bun",
+      "args": [
+        "./node_modules/@workbasehq/mcp/src/stdio.ts",
+        "--root",
+        "."
+      ]
+    },
+    "workbase_data": {
+      "command": "bun",
+      "args": [
+        "./node_modules/@workbasehq/mcp/src/bin.ts",
+        "data"
+      ],
+      "env": {
+        "WORKBASE_BASE_URL": "http://127.0.0.1:9290",
+        "WORKBASE_TOKEN": "${WORKBASE_TOKEN}",
+        "WORKBASE_ORG_ID": "${WORKBASE_ORG_ID}",
+        "WORKBASE_READ_ONLY": "true"
+      }
+    }
+  }
+}

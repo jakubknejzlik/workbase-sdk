@@ -1,0 +1,45 @@
+import { expect, it } from 'vitest'
+import { defineInstance } from '../src/config'
+import { LlmConfigProposer, prepareConfigProposal, RuleConfigProposer } from '../src/config-proposals'
+const config = defineInstance({ id: 'demo', revision: 1, roles: ['owner'], permissions: { owner: { interviews: ['read'] } }, entities: { interviews: { fields: { title: { type: 'string' }, notes: { type: 'text' }, starts_at: { type: 'datetime' } } } }, ui: { entities: { interviews: { list: { columns: ['title'] } } } } })
+const proposer = new RuleConfigProposer()
+it('SR-85 proposes enum + filter with default or explicit values, and validates additive SQL', async () => {
+  const patch = await proposer.propose('add a status field with filter', config)
+  expect(patch).toEqual([{ kind: 'add_enum_filter', entity: 'interviews', field: 'status', values: ['new', 'in_progress', 'done'] }])
+  const prepared = prepareConfigProposal(config, patch)
+  expect(prepared.target.ui!.entities.interviews.list!.filter).toEqual({ status: 'enum' })
+  expect(prepared.target.ui!.entities.interviews.list!.columns).toEqual(['title', 'status'])
+  expect(prepared.plan.sql).toContain('ADD COLUMN "status"')
+  expect(prepared.changes).toContainEqual(expect.objectContaining({ kind: 'field', path: 'entities.interviews.fields.status', change: 'added' }))
+  expect(await proposer.propose('add stage field with filter to interviews values: new, hired', config)).toEqual([{ kind: 'add_enum_filter', entity: 'interviews', field: 'stage', values: ['new', 'hired'] }])
+  expect(config.entities.interviews.fields.status).toBeUndefined()
+})
+it('SR-85 enables an interview calendar using the existing date field and adds a list column', async () => {
+  const calendar = prepareConfigProposal(config, await proposer.propose('add an interview calendar', config))
+  expect(calendar.target.ui!.entities.interviews.views).toEqual([{ kind: 'calendar', startField: 'starts_at' }])
+  expect(calendar.plan.sql).not.toContain('ALTER TABLE')
+  const column = prepareConfigProposal(config, await proposer.propose('add notes column to interviews', config))
+  expect(column.target.ui!.entities.interviews.list!.columns).toEqual(['title', 'notes'])
+})
+it.each(['drop interviews', 'remove title field', 'rename title to status', 'change permissions', 'deploy it', 'make a dashboard', ''])('SR-85 refuses unsupported/destructive intent: %s', async prompt => {
+  await expect(proposer.propose(prompt, config)).rejects.toThrow()
+})
+it('SR-85 refuses ambiguous entities/dates, missing dates, existing fields/columns and untyped model patches', async () => {
+  await expect(proposer.propose('add status field with filter', defineInstance({ ...config, entities: { ...config.entities, other: { fields: {} } } }))).rejects.toThrow('Name one entity')
+  const dates = defineInstance({ ...config, entities: { interviews: { fields: { ...config.entities.interviews.fields, ends_at: { type: 'datetime' } } } } })
+  await expect(proposer.propose('enable interview calendar', dates)).rejects.toThrow('Name one datetime')
+  expect(await proposer.propose('enable interview calendar using ends_at', dates)).toEqual([{ kind: 'enable_calendar', entity: 'interviews', startField: 'ends_at' }])
+  await expect(proposer.propose('enable interview calendar using missing', config)).rejects.toThrow('Unknown datetime')
+  const noDates = defineInstance({ ...config, entities: { interviews: { fields: { title: { type: 'string' } } } } })
+  await expect(proposer.propose('enable interview calendar', noDates)).rejects.toThrow('none')
+  expect(() => prepareConfigProposal(config, [{ kind: 'add_enum_filter', entity: 'interviews', field: 'title', values: ['new'] }])).toThrow('exists')
+  expect(() => prepareConfigProposal(config, [{ kind: 'add_list_column', entity: 'interviews', field: 'title' }])).toThrow('already includes')
+  expect(() => prepareConfigProposal(config, [{ kind: 'enable_calendar', entity: 'interviews', startField: 'title' }])).toThrow('datetime')
+  expect(() => prepareConfigProposal(config, [{ kind: 'drop_field', entity: 'interviews', field: 'title' }])).toThrow()
+  expect(() => prepareConfigProposal(config, [{ kind: 'add_list_column', entity: 'missing', field: 'title' }])).toThrow('Unknown entity')
+})
+it('SR-85 validates a pluggable provider response without any network call', async () => {
+  const llm = new LlmConfigProposer({ complete: async input => { expect(input.patchSchema).toBeTruthy(); return [{ kind: 'add_list_column', entity: 'interviews', field: 'notes' }] } })
+  expect(prepareConfigProposal(config, await llm.propose('show notes', config)).target.revision).toBe(2)
+  await expect(new LlmConfigProposer({ complete: async () => [{ kind: 'drop_field' }] }).propose('remove it', config)).rejects.toThrow()
+})

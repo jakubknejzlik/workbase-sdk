@@ -1,0 +1,16 @@
+[
+  {
+    "entity": "rezervace",
+    "name": "rezervace_termin_idx",
+    "fields": [
+      "termin"
+    ]
+  },
+  {
+    "entity": "zakaznik",
+    "name": "zakaznik_jmeno_idx",
+    "fields": [
+      "jmeno"
+    ]
+  }
+]

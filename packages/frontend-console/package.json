@@ -1,0 +1,43 @@
+{
+  "name": "@workbasehq/frontend-console",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "vite build",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@workbasehq/ui": "workspace:*",
+    "@workbasehq/console-generated": "workspace:*",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "@tanstack/react-router": "1.170.41",
+    "@tanstack/react-query": "5.90.21",
+    "i18next": "25.10.10",
+    "react-i18next": "15.7.4",
+    "lucide-react": "0.536.0"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "^4.14.0",
+    "@tailwindcss/vite": "4.2.0",
+    "@tanstack/router-generator": "1.146.2",
+    "@testing-library/dom": "10.4.2",
+    "@testing-library/react": "16.3.3",
+    "@testing-library/user-event": "14.6.7",
+    "@types/react": "19.2.18",
+    "@types/react-dom": "19.2.4",
+    "@vitejs/plugin-react": "5.2.0",
+    "@workbasehq/core": "workspace:*",
+    "jsdom": "30.1.2",
+    "tailwindcss": "4.2.0",
+    "vite": "7.3.1",
+    "zod": "4.6.7"
+  },
+  "version": "0.1.0",
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "registry": "https://registry.invalid/"
+  }
+}

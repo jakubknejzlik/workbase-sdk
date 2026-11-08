@@ -1,0 +1,493 @@
+{
+  "plugins": [
+    {
+      "name": "identity",
+      "version": "0.1.0",
+      "provides": {
+        "identity": "1.x"
+      },
+      "configuration": {
+        "trustedIssuers": {}
+      }
+    },
+    {
+      "name": "permissions",
+      "version": "0.1.0",
+      "provides": {
+        "permissions": "1.x"
+      },
+      "configuration": {
+        "roles": [
+          "owner",
+          "dispatcher",
+          "viewer"
+        ],
+        "ownerRole": "owner"
+      }
+    },
+    {
+      "name": "members",
+      "version": "0.1.0",
+      "provides": {
+        "members": "1.x"
+      },
+      "requires": {
+        "identity": "^1",
+        "permissions": "^1"
+      },
+      "optionalRequires": {
+        "organizations": "^1",
+        "mail-outbox": "^1",
+        "console": "^1"
+      },
+      "configuration": {}
+    },
+    {
+      "name": "organizations",
+      "version": "0.1.0",
+      "provides": {
+        "organizations": "1.x"
+      },
+      "requires": {
+        "identity": "^1"
+      },
+      "optionalRequires": {
+        "console": "^1"
+      },
+      "configuration": {
+        "allowCreate": true
+      }
+    },
+    {
+      "name": "local-auth",
+      "version": "0.1.0",
+      "provides": {
+        "login": "1.x"
+      },
+      "requires": {
+        "identity": "^1"
+      },
+      "optionalRequires": {
+        "mail-outbox": "^1"
+      },
+      "configuration": {
+        "methods": [
+          "magic-link"
+        ]
+      }
+    },
+    {
+      "name": "machine-credentials",
+      "version": "0.1.0",
+      "provides": {
+        "machine-credentials": "1.x"
+      },
+      "requires": {
+        "identity": "^1",
+        "members": "^1",
+        "permissions": "^1"
+      },
+      "optionalRequires": {
+        "console": "^1"
+      }
+    },
+    {
+      "name": "mail-outbox",
+      "version": "0.1.0",
+      "provides": {
+        "mail-outbox": "1.x"
+      }
+    },
+    {
+      "name": "console",
+      "version": "0.1.0",
+      "provides": {
+        "console": "1.x"
+      }
+    },
+    {
+      "name": "audit",
+      "version": "0.1.0",
+      "provides": {
+        "audit": "1.x"
+      },
+      "requires": {
+        "console": "^1"
+      }
+    },
+    {
+      "name": "sample",
+      "version": "0.1.0"
+    }
+  ],
+  "interactive": true,
+  "locale": "en",
+  "timeZone": "UTC",
+  "registration": "open",
+  "organizationOwnerRole": "owner",
+  "displayName": "Sample",
+  "id": "sample",
+  "revision": 3,
+  "entities": {
+    "clients": {
+      "fields": {
+        "name": {
+          "type": "string",
+          "required": true
+        },
+        "email": {
+          "type": "string",
+          "required": false,
+          "sensitive": true
+        }
+      },
+      "relations": {
+        "jobs": {
+          "field": "client_id",
+          "entity": "jobs",
+          "many": true
+        }
+      },
+      "displayField": "name",
+      "checks": []
+    },
+    "workers": {
+      "fields": {
+        "name": {
+          "type": "string",
+          "required": true
+        }
+      },
+      "relations": {
+        "slots": {
+          "field": "worker_id",
+          "entity": "slots",
+          "many": true
+        }
+      },
+      "displayField": "name",
+      "checks": []
+    },
+    "jobs": {
+      "fields": {
+        "title": {
+          "type": "string",
+          "required": true
+        },
+        "client_id": {
+          "type": "ref",
+          "required": true,
+          "entity": "clients"
+        },
+        "priority": {
+          "type": "enum",
+          "required": true,
+          "values": [
+            "low",
+            "normal",
+            "high"
+          ],
+          "default": "normal"
+        },
+        "status": {
+          "type": "enum",
+          "required": true,
+          "values": [
+            "draft",
+            "scheduled",
+            "done"
+          ],
+          "default": "draft",
+          "readOnly": true
+        }
+      },
+      "relations": {
+        "client": {
+          "field": "client_id",
+          "entity": "clients"
+        },
+        "slots": {
+          "field": "job_id",
+          "entity": "slots",
+          "many": true
+        }
+      },
+      "displayField": "title",
+      "checks": []
+    },
+    "slots": {
+      "fields": {
+        "job_id": {
+          "type": "ref",
+          "required": true,
+          "entity": "jobs"
+        },
+        "worker_id": {
+          "type": "ref",
+          "required": false,
+          "entity": "workers"
+        },
+        "starts_at": {
+          "type": "datetime",
+          "required": true
+        },
+        "capacity": {
+          "type": "int",
+          "required": true,
+          "min": 1
+        },
+        "booked": {
+          "type": "int",
+          "required": true,
+          "default": 0,
+          "min": 0,
+          "readOnly": true
+        }
+      },
+      "relations": {
+        "job": {
+          "field": "job_id",
+          "entity": "jobs"
+        },
+        "worker": {
+          "field": "worker_id",
+          "entity": "workers"
+        },
+        "bookings": {
+          "field": "slot_id",
+          "entity": "bookings",
+          "many": true
+        }
+      },
+      "displayField": "starts_at",
+      "checks": [
+        {
+          "left": "booked",
+          "op": "<=",
+          "right": "capacity"
+        }
+      ]
+    },
+    "bookings": {
+      "fields": {
+        "slot_id": {
+          "type": "ref",
+          "required": true,
+          "entity": "slots"
+        },
+        "client_id": {
+          "type": "ref",
+          "required": true,
+          "entity": "clients"
+        },
+        "status": {
+          "type": "enum",
+          "required": true,
+          "values": [
+            "confirmed",
+            "cancelled"
+          ]
+        },
+        "client_snapshot_name": {
+          "type": "string",
+          "required": true,
+          "default": "",
+          "readOnly": true
+        }
+      },
+      "relations": {
+        "slot": {
+          "field": "slot_id",
+          "entity": "slots"
+        },
+        "client": {
+          "field": "client_id",
+          "entity": "clients"
+        }
+      },
+      "commandsOnly": true,
+      "displayField": "client_snapshot_name",
+      "checks": []
+    },
+    "stock_items": {
+      "fields": {
+        "name": {
+          "type": "string",
+          "required": true
+        },
+        "quantity": {
+          "type": "int",
+          "required": true,
+          "min": 0,
+          "readOnly": true
+        }
+      },
+      "relations": {},
+      "commandsOnly": true,
+      "displayField": "name",
+      "checks": []
+    }
+  },
+  "roles": [
+    "owner",
+    "dispatcher",
+    "viewer",
+    "member"
+  ],
+  "policies": {
+    "clients": {
+      "owner": "all",
+      "dispatcher": "all",
+      "viewer": "all"
+    },
+    "workers": {
+      "owner": "all",
+      "dispatcher": "all",
+      "viewer": "all"
+    },
+    "jobs": {
+      "owner": "all",
+      "dispatcher": "all",
+      "viewer": "all"
+    },
+    "slots": {
+      "owner": "all",
+      "dispatcher": "all",
+      "viewer": "all"
+    },
+    "bookings": {
+      "owner": "all",
+      "dispatcher": "all",
+      "viewer": "all"
+    },
+    "stock_items": {
+      "owner": "all",
+      "dispatcher": "all",
+      "viewer": "all"
+    }
+  },
+  "permissions": {
+    "owner": {
+      "clients": [
+        "read",
+        "create",
+        "update",
+        "delete"
+      ],
+      "workers": [
+        "read",
+        "create",
+        "update",
+        "delete"
+      ],
+      "jobs": [
+        "read",
+        "create",
+        "update",
+        "delete"
+      ],
+      "slots": [
+        "read",
+        "create",
+        "update",
+        "delete"
+      ],
+      "bookings": [
+        "read",
+        "create",
+        "update",
+        "delete"
+      ],
+      "stock_items": [
+        "read",
+        "create",
+        "update",
+        "delete"
+      ]
+    },
+    "dispatcher": {
+      "clients": [
+        "read",
+        "create",
+        "update",
+        "delete"
+      ],
+      "workers": [
+        "read",
+        "create",
+        "update",
+        "delete"
+      ],
+      "jobs": [
+        "read",
+        "create",
+        "update",
+        "delete"
+      ],
+      "slots": [
+        "read",
+        "create",
+        "update",
+        "delete"
+      ],
+      "bookings": [
+        "read",
+        "create",
+        "update",
+        "delete"
+      ],
+      "stock_items": [
+        "read",
+        "create",
+        "update",
+        "delete"
+      ]
+    },
+    "viewer": {
+      "clients": [
+        "read"
+      ],
+      "workers": [
+        "read"
+      ],
+      "jobs": [
+        "read"
+      ],
+      "slots": [
+        "read"
+      ],
+      "bookings": [
+        "read"
+      ],
+      "stock_items": [
+        "read"
+      ]
+    }
+  },
+  "commands": [
+    "bookings/create",
+    "bookings/cancel",
+    "bookings/move",
+    "jobs/transition"
+  ],
+  "organizationPermissions": {
+    "owner": [
+      "organizations.update",
+      "members.read",
+      "members.update",
+      "members.remove",
+      "invitations.create",
+      "invitations.read",
+      "invitations.revoke",
+      "tokens.create",
+      "tokens.read",
+      "tokens.revoke"
+    ],
+    "dispatcher": [
+      "invitations.create",
+      "invitations.read",
+      "invitations.revoke"
+    ],
+    "viewer": []
+  }
+}

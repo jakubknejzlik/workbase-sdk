@@ -1,0 +1,92 @@
+{
+  "name": "@workbasehq/core",
+  "version": "0.2.11",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./config": "./src/config.ts",
+    "./execution": "./src/execution/index.ts",
+    "./execution/d1": "./src/execution/d1.ts",
+    "./authorization": "./src/authorization-api.ts",
+    "./migrations/schema": "./src/migrations/schema.ts",
+    "./migrations/planner": "./src/migrations/planner.ts",
+    "./config-shorthand": "./src/config-shorthand.ts",
+    "./plugins": "./src/plugins.ts",
+    "./app": "./src/app.ts",
+    "./kernel/registry": "./src/kernel/registry.ts",
+    "./execution/atomic": "./src/execution/atomic.ts",
+    "./kernel/migrations": "./src/kernel/migrations.ts",
+    "./crypto": "./src/crypto.ts",
+    "./query/compiler": "./src/query/compiler.ts",
+    "./query/schema": "./src/query/schema.ts",
+    "./execution/types": "./src/execution/types.ts",
+    "./kernel/builtin-source": "./src/kernel/builtin-source.ts",
+    "./kernel/schema-check": "./src/kernel/schema-check.ts",
+    "./kernel/plugin": "./src/kernel/plugin.ts",
+    "./worker-fetch": "./src/worker-fetch.ts",
+    "./schema-compatibility": "./src/schema-compatibility.ts",
+    "./migrations/versions": "./src/migrations/versions.ts",
+    "./config-proposals": "./src/config-proposals.ts",
+    "./policies": "./src/policies.ts",
+    "./identity-providers": "./src/identity-providers.ts",
+    "./console-contract": "./src/console-contract.ts",
+    "./organization-permissions": "./src/organization-permissions.ts",
+    "./session-contract": "./src/session-contract.ts",
+    "./infra": "./src/infra/index.ts",
+    "./infra/provision": "./src/infra/provision.ts",
+    "./query/expressions": "./src/query/expressions.ts"
+  },
+  "dependencies": {
+    "hono": "4.13.13",
+    "zod": "4.6.7",
+    "@jakub.knejzlik/ts-query": "0.15.0"
+  },
+  "devDependencies": {
+    "jose": "6.2.13",
+    "@workbasehq/test-support": "workspace:*"
+  },
+  "files": [
+    "src",
+    "!**/test/**",
+    "!**/tests/**",
+    "!**/__tests__/**",
+    "!**/fixtures/**",
+    "!**/*.test.*",
+    "!**/*.spec.*",
+    "NOTICE",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "license": "Apache-2.0",
+  "description": "Configuration, authorization, migrations and runtime primitives for Workbase applications.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jakubknejzlik/workbase-sdk.git",
+    "directory": "packages/core"
+  },
+  "bin": {
+    "workbase-migrate": "src/infra/bin.mjs"
+  },
+  "peerDependencies": {
+    "tsx": "4.23.15",
+    "sst": "4.17.1",
+    "@pulumi/command": "1.2.1",
+    "@pulumi/pulumi": "^3.215.0"
+  },
+  "peerDependenciesMeta": {
+    "tsx": {
+      "optional": true
+    },
+    "sst": {
+      "optional": true
+    },
+    "@pulumi/command": {
+      "optional": true
+    },
+    "@pulumi/pulumi": {
+      "optional": true
+    }
+  }
+}

@@ -1,0 +1,87 @@
+import { test, expect } from '@playwright/test'
+import { createHash } from 'node:crypto'
+import { mkdirSync, readFileSync, readdirSync } from 'node:fs'
+import { resolve } from 'node:path'
+import AxeBuilder from '@axe-core/playwright'
+import { canary } from './runtime/canary'
+import { createCanaryOracle } from './canary'
+import setup, { origin } from './runtime/setup'
+test.describe.configure({ timeout: 30_000 })
+let stop: (() => Promise<void>) | undefined
+test.beforeAll(async () => { stop = await setup() })
+test.afterAll(async () => { await stop?.() })
+const bundle = resolve(import.meta.dirname, '../dist/assets')
+const assetHash = () => createHash('sha256').update(readdirSync(bundle).sort().map(name => readFileSync(resolve(bundle, name))).join('')).digest('hex')
+test('unfamiliar instance CRUD, live entity addition, dashboard, audit and revoked capabilities use the same assets', async ({ browser, request }) => {
+  const hash = assetHash()
+  const context = await browser.newContext({ baseURL: origin, extraHTTPHeaders: { Authorization: 'Bearer w29-owner-session' } })
+  const page = await context.newPage()
+  const check = await createCanaryOracle(page, [canary])
+  const errors: string[] = []
+  page.on('pageerror', error => errors.push(error.message))
+  page.on('console', message => { if (/Content Security Policy|Refused to/.test(message.text())) errors.push(message.text()) })
+  try {
+    await page.goto('/o/org-a/e/specimens')
+    await expect(page.getByRole('heading', { level: 1, name: 'Specimens' })).toBeVisible()
+    await page.getByRole('button', { name: /Add.*specimens/i }).click()
+    const create = page.getByRole('dialog')
+    await expect(create.getByLabel('Secret', { exact: true })).toHaveValue('')
+    await create.getByLabel('Name', { exact: true }).fill('Neutral specimen')
+    await create.getByLabel('Note', { exact: true }).fill('Editable note')
+    await create.getByRole('button', { name: 'Create', exact: true }).click()
+    await expect(create).toBeHidden()
+    await page.getByRole('link', { name: 'Neutral specimen', exact: true }).first().click()
+    await expect(page.getByRole('heading', { level: 1, name: 'Neutral specimen' })).toBeVisible()
+    await page.getByRole('button', { name: 'Check sample', exact: true }).click()
+    const command = page.getByRole('dialog')
+    await command.getByLabel('Count', { exact: true }).fill('2')
+    const executed = page.waitForResponse(response => response.url().endsWith('/commands/specimens/check'))
+    await command.getByRole('button', { name: 'Check sample', exact: true }).click()
+    expect((await executed).status()).toBe(200)
+    await expect(command).toBeHidden()
+    await page.getByRole('button', { name: 'Edit', exact: true }).click()
+    const edit = page.getByRole('dialog')
+    await edit.getByLabel('Name', { exact: true }).fill('Updated specimen')
+    await edit.getByRole('button', { name: 'Save', exact: true }).click()
+    await expect(edit).toBeHidden()
+    await expect(page.getByRole('heading', { level: 1, name: 'Updated specimen' })).toBeVisible()
+    expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([])
+    mkdirSync('/tmp/codex/w29-shots', { recursive: true })
+    await page.screenshot({ path: '/tmp/codex/w29-shots/neutral-console.png', fullPage: true })
+    await check()
+    await page.goto('/o/org-a/summary')
+    await expect(page.getByRole('heading', { level: 1, name: 'Summary' })).toBeVisible()
+    await expect(page.getByText('Updated specimen', { exact: true }).first()).toBeVisible()
+    expect((await request.post(`${origin}/__test/relay`, { headers: { Authorization: 'Bearer w29-local-control' } })).ok()).toBe(true)
+    await page.goto('/o/org-a/settings/activity')
+    await expect(page.getByRole('heading', { level: 1, name: 'Audit log' })).toBeVisible()
+    await expect(page.getByText('Updated', { exact: true }).first()).toBeVisible()
+    await check()
+    // Add a real server entity and table without changing a byte of browser assets.
+    expect((await request.post(`${origin}/__test/add-entity`, { headers: { Authorization: 'Bearer w29-local-control' } })).ok()).toBe(true)
+    await page.reload()
+    await expect(page.getByRole('link', { name: 'Containers', exact: true })).toBeVisible()
+    await page.getByRole('link', { name: 'Containers', exact: true }).click()
+    await expect(page.getByRole('heading', { level: 1, name: 'Containers' })).toBeVisible()
+    expect(assetHash()).toBe(hash)
+    // Change live authority at the same model revision and refresh through window focus.
+    await page.goto('/o/org-a/e/specimens')
+    expect((await request.post(`${origin}/__test/restrict`, { headers: { Authorization: 'Bearer w29-local-control' } })).ok()).toBe(true)
+    await page.evaluate(() => {
+      Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' })
+      window.dispatchEvent(new Event('visibilitychange'))
+      Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' })
+      window.dispatchEvent(new Event('visibilitychange'))
+    })
+    await expect(page.getByRole('button', { name: /Add.*specimens/i })).toHaveCount(0)
+    await expect(page.getByRole('link', { name: 'Containers', exact: true })).toHaveCount(0)
+    await expect(page.getByRole('button', { name: 'Check sample', exact: true })).toHaveCount(0)
+    await page.getByRole('link', { name: 'Updated specimen', exact: true }).first().click()
+    await expect(page.getByRole('button', { name: 'Edit', exact: true })).toHaveCount(0)
+    await expect(page.getByRole('button', { name: 'Check sample', exact: true })).toHaveCount(0)
+    await expect(page.getByText('Editable note', { exact: true })).toHaveCount(0)
+    await check()
+    expect(errors).toEqual([])
+    expect(assetHash()).toBe(hash)
+  } finally { await check.drain(); await context.close() }
+})

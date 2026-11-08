@@ -1,0 +1,30 @@
+diff --git a/wrangler-dist/cli.js b/wrangler-dist/cli.js
+index 62dd1761899288132e13af290f2438e004b15214..50b633b4da1642391095a8282c9a08fa2ad19e36 100644
+--- a/wrangler-dist/cli.js
++++ b/wrangler-dist/cli.js
+@@ -185392,6 +185392,12 @@ var init_dist12 = __esm({
+             this.onPreviewTokenExpired();
+             break;
+           case "error":
++            // ProxyWorker already rejects the disconnected request's response.
++            // A single request disconnect must not terminate the local server.
++            if (message.error?.message === "Network connection lost.") {
++              console.warn("A local preview request disconnected.");
++              break;
++            }
+             this.emitErrorEvent("Error inside ProxyWorker", message.error);
+             break;
+         }
+@@ -326549,6 +326555,12 @@ var init_ProxyController = __esm({
+             this.emitPreviewTokenExpiredEvent(message.proxyData);
+             break;
+           case "error":
++            // ProxyWorker already rejects the disconnected request's response.
++            // A single request disconnect must not terminate the local server.
++            if (message.error?.message === "Network connection lost.") {
++              console.warn("A local preview request disconnected.");
++              break;
++            }
+             this.emitErrorEvent("Error inside ProxyWorker", message.error);
+             break;
+           case "debug-log":

@@ -1,0 +1,49 @@
+{
+  "name": "workbase-sdk",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jakubknejzlik/workbase-sdk.git"
+  },
+  "license": "Apache-2.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "bun@1.4.3",
+  "workspaces": [
+    "packages/core",
+    "packages/plugins",
+    "packages/mcp",
+    "packages/frontend-console",
+    "packages/console-generated",
+    "packages/ui",
+    "packages/test-support"
+  ],
+  "scripts": {
+    "lint": "bun scripts/sdk-lint.ts",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p packages/ui && tsc --noEmit -p packages/frontend-console",
+    "test": "vitest run && vitest run --config vitest.infra.config.ts && vitest run --config vitest.tools.config.ts && bun test scripts/sdk-provenance.test.ts scripts/lib/sdk-workspaces.test.ts",
+    "test:mcp": "vitest run --config packages/mcp/vitest.config.ts",
+    "check:ci-invariants": "bun scripts/sdk-ci-invariants.ts",
+    "console:build": "bun scripts/build-console.ts",
+    "sdk:pack": "bash scripts/sdk-pack.sh"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "0.23.0",
+    "@cloudflare/workers-types": "^5.0.0",
+    "@playwright/test": "1.58.2",
+    "@pulumi/command": "1.2.1",
+    "@types/node": "^25.0.0",
+    "@workbasehq/core": "workspace:*",
+    "@workbasehq/plugins": "workspace:*",
+    "sst": "4.17.1",
+    "typescript": "^6.0.0",
+    "vitest": "^4.1.0",
+    "wrangler": "4.126.0",
+    "playwright": "1.58.2",
+    "tsx": "4.23.15"
+  },
+  "patchedDependencies": {
+    "sonner@2.0.7": "patches/sonner@2.0.7.patch",
+    "@radix-ui/react-select@2.2.6": "patches/@radix-ui%2Freact-select@2.2.6.patch",
+    "wrangler@4.126.0": "patches/wrangler@4.126.0.patch"
+  }
+}

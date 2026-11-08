@@ -1,0 +1,731 @@
+{
+  "components/data-table/DataTableActiveFilters.tsx": {
+    "source": "packages/ui/src/components/data-table/DataTableActiveFilters.tsx",
+    "kind": "host-adapter",
+    "sourceSha256": "fabb51f903577f6f302a501ff8d3ff843f9a271cc21d748f27d3b160b40cad8a",
+    "diff": {
+      "added": 14,
+      "removed": 96
+    }
+  },
+  "components/data-table/DataTableColumn.tsx": {
+    "source": "packages/ui/src/components/data-table/DataTableColumn.tsx",
+    "kind": "host-adapter",
+    "sourceSha256": "3634c94d4341f254106deb748768b1bf9edb73e97ce99b4ed81a8aa4260450b8",
+    "diff": {
+      "added": 11,
+      "removed": 27
+    }
+  },
+  "components/data-table/DataTableContent.tsx": {
+    "source": "packages/ui/src/components/data-table/DataTableContent.tsx",
+    "kind": "host-adapter",
+    "sourceSha256": "441aa5ef8cd21b7b3ef5d501e4486923c71f1cbec2e99f7c32a41ee8fd554732",
+    "diff": {
+      "added": 25,
+      "removed": 71
+    }
+  },
+  "components/data-table/DataTableFilterDropdown.tsx": {
+    "source": "packages/ui/src/components/data-table/DataTableFilterDropdown.tsx",
+    "kind": "host-adapter",
+    "sourceSha256": "ceaf7c2c1f00508af5d4671e012ce4d19a78a4d2397dc565c9ba8666c2a66652",
+    "diff": {
+      "added": 20,
+      "removed": 259
+    }
+  },
+  "components/data-table/DataTableFooter.tsx": {
+    "source": "packages/ui/src/components/data-table/DataTableFooter.tsx",
+    "kind": "host-adapter",
+    "sourceSha256": "17d918d206009aca1834dd7cf1ea66c5207af9f6e3185bfae67baa15782347a1",
+    "diff": {
+      "added": 4,
+      "removed": 2
+    }
+  },
+  "components/data-table/DataTablePageSwitcher.tsx": {
+    "source": "packages/ui/src/components/data-table/DataTablePageSwitcher.tsx",
+    "kind": "host-adapter",
+    "sourceSha256": "85292b79fb1a95e40f01e17a0585d225cc2041801e4f0219f5e58951dad82531",
+    "diff": {
+      "added": 5,
+      "removed": 3
+    }
+  },
+  "components/data-table/DataTablePagination.tsx": {
+    "source": "packages/ui/src/components/data-table/DataTablePagination.tsx",
+    "kind": "host-adapter",
+    "sourceSha256": "327e63c4832b9682aca3f8a77dc92d281335b2c19746b64e2755e93982e2f97f",
+    "diff": {
+      "added": 4,
+      "removed": 0
+    }
+  },
+  "components/data-table/DataTableProvider.tsx": {
+    "source": "packages/ui/src/components/data-table/DataTableProvider.tsx",
+    "kind": "host-adapter",
+    "sourceSha256": "c24e231699a53df88dfd34ec0ef387914cc2ed5c7ed9d69124d1d7bfab89083f",
+    "diff": {
+      "added": 0,
+      "removed": 9
+    }
+  },
+  "components/data-table/DataTableSearch.tsx": {
+    "source": "packages/ui/src/components/data-table/DataTableSearch.tsx",
+    "kind": "host-adapter",
+    "sourceSha256": "dbdd62670a5c8b31566dceb4c72bbdda48e2cf858075a76ed8c28968cec3af3e",
+    "diff": {
+      "added": 46,
+      "removed": 286
+    }
+  },
+  "components/data-table/filters/MultiSelectFilter.tsx": {
+    "source": "packages/ui/src/components/data-table/filters/MultiSelectFilter.tsx",
+    "kind": "host-adapter",
+    "sourceSha256": "dd16472f9e3d3a316ecbc047d3d7fffaf1870c120f15a53db7e34611cd717a88",
+    "diff": {
+      "added": 2,
+      "removed": 229
+    }
+  },
+  "components/data-table/filters/RangeFilter.tsx": {
+    "source": "packages/ui/src/components/data-table/filters/RangeFilter.tsx",
+    "kind": "host-adapter",
+    "sourceSha256": "8657cf2c0dd1e362e93c5a114bbd81735f1c5cf39ebdd6439767324b3f0bb4ef",
+    "diff": {
+      "added": 4,
+      "removed": 193
+    }
+  },
+  "components/data-table/filters/TextFilter.tsx": {
+    "source": "packages/ui/src/components/data-table/filters/TextFilter.tsx",
+    "kind": "host-adapter",
+    "sourceSha256": "62fbd2ea73307c5940ac703567fc4d677297bfab7cb47a38b2009f17e7837835",
+    "diff": {
+      "added": 4,
+      "removed": 255
+    }
+  },
+  "components/data-table/filters/ToggleFilter.tsx": {
+    "source": "packages/ui/src/components/data-table/filters/ToggleFilter.tsx",
+    "kind": "host-adapter",
+    "sourceSha256": "6b2e4e60a5e8ec2975e8ebca401dc392063d36570d5627b51ba916c0afcf8743",
+    "diff": {
+      "added": 5,
+      "removed": 97
+    }
+  },
+  "components/detail-page/DetailPageHeader.tsx": {
+    "source": "packages/ui/src/components/detail-page/DetailPageHeader.tsx",
+    "kind": "host-adapter",
+    "sourceSha256": "2c052de5fbb0e90111c198002775b06356ba91ae1d9fcf0adffee4cc15b95f34",
+    "diff": {
+      "added": 7,
+      "removed": 11
+    }
+  },
+  "components/dialog/ConfirmDialog.tsx": {
+    "source": "packages/ui/src/components/dialog/ConfirmDialog.tsx",
+    "kind": "host-adapter",
+    "sourceSha256": "143507c941105e44c07512633f534654640331ef8410e0792d28872591356c86",
+    "diff": {
+      "added": 11,
+      "removed": 3
+    }
+  },
+  "components/dialog/DeleteDialog.tsx": {
+    "source": "packages/ui/src/components/dialog/DeleteDialog.tsx",
+    "kind": "host-adapter",
+    "sourceSha256": "a2812d6d0e05a489310a77531ef69296951825115e4dd63c88619d4ff0d934bc",
+    "diff": {
+      "added": 19,
+      "removed": 9
+    }
+  },
+  "components/dialog/FormDialog.tsx": {
+    "source": "packages/ui/src/components/dialog/FormDialog.tsx",
+    "kind": "host-adapter",
+    "sourceSha256": "248795bae5dcd0cac60bec1a6be1a6b78971a6e7a15fa45af0bfd9d8fc33dbe1",
+    "diff": {
+      "added": 41,
+      "removed": 20
+    }
+  },
+  "components/dialog/UnsavedChangesPrompt.tsx": {
+    "source": "packages/ui/src/components/dialog/UnsavedChangesPrompt.tsx",
+    "kind": "host-adapter",
+    "sourceSha256": "6cee4e4a7259c61bb1d04da4c0fabc6f9c9ffb69084e4784a5f38df6a0d29571",
+    "diff": {
+      "added": 5,
+      "removed": 6
+    }
+  },
+  "components/form/DatePicker.tsx": {
+    "source": "packages/ui/src/components/form/DatePicker.tsx",
+    "kind": "host-adapter",
+    "sourceSha256": "2af0737e88b6562dc428ed5177f104df65557a5e41a16f14d1f672fe3608ea7d",
+    "diff": {
+      "added": 13,
+      "removed": 6
+    }
+  },
+  "components/form/DateRangePicker.tsx": {
+    "source": "packages/ui/src/components/form/DateRangePicker.tsx",
+    "kind": "host-adapter",
+    "sourceSha256": "712466ba8edc606668274d38cbc7872c77589dd9d4939e7dde0140c31a0ae56a",
+    "diff": {
+      "added": 10,
+      "removed": 1
+    }
+  },
+  "components/form/DateTimePicker.tsx": {
+    "source": "packages/ui/src/components/form/DateTimePicker.tsx",
+    "kind": "host-adapter",
+    "sourceSha256": "89846060cc9e85cfa34abb9ad15b847c1b4932f8a8a2450dc2ca438c522ed433",
+    "diff": {
+      "added": 16,
+      "removed": 6
+    }
+  },
+  "components/form/Form.tsx": {
+    "source": "packages/ui/src/components/form/Form.tsx",
+    "kind": "host-adapter",
+    "sourceSha256": "7a906da5d49eeb84421a6befd0c8c831da65e1e8cce9fb7ff2c417f0b9d44220",
+    "diff": {
+      "added": 8,
+      "removed": 151
+    }
+  },
+  "components/form/FormFieldInput.tsx": {
+    "source": "packages/ui/src/components/form/FormFieldInput.tsx",
+    "kind": "exact-copy",
+    "sourceSha256": "393679032ede9e51d056aaec6ccdc1779cdada2cb0f014dc51be47b8c472b46e",
+    "diff": {
+      "added": 0,
+      "removed": 0
+    }
+  },
+  "components/form/FormFieldWrapper.tsx": {
+    "source": "packages/ui/src/components/form/FormFieldWrapper.tsx",
+    "kind": "host-adapter",
+    "sourceSha256": "7d020bc371713547be4fd2f9e72a9c41c40b70f949f276b97b38e836a60ab881",
+    "diff": {
+      "added": 2,
+      "removed": 2
+    }
+  },
+  "components/form/FormSubmitButton.tsx": {
+    "source": "packages/ui/src/components/form/FormSubmitButton.tsx",
+    "kind": "exact-copy",
+    "sourceSha256": "036eabbaeaa533157361097daac93cb66b283a42b84819893353e2d41b2fcd46",
+    "diff": {
+      "added": 0,
+      "removed": 0
+    }
+  },
+  "components/form/NumberInput.tsx": {
+    "source": "packages/ui/src/components/form/NumberInput.tsx",
+    "kind": "exact-copy",
+    "sourceSha256": "a70a85b83e4b561ecc09ccbfc1ea136f3f48bb1be5b38c47a471993e27847b89",
+    "diff": {
+      "added": 0,
+      "removed": 0
+    }
+  },
+  "components/layout/Breadcrumbs.tsx": {
+    "source": "packages/frontend-app/src/components/layout/Breadcrumbs.tsx",
+    "kind": "host-adapter",
+    "sourceSha256": "5aa59c2f6b99b6a48be60dcd5a3220509bcd528407672701e3abd319e6dc50f2",
+    "diff": {
+      "added": 9,
+      "removed": 98
+    }
+  },
+  "components/layout/CreateWorkspaceModal.tsx": {
+    "source": "packages/modules-user-management/src/frontend/components/user-management/CreateWorkspaceModal.tsx",
+    "kind": "host-adapter",
+    "sourceSha256": "735ae53ad7b4ad190298b3a82a9d9efa95f29e83c7cc7ab141213ad616438c93",
+    "diff": {
+      "added": 9,
+      "removed": 126
+    }
+  },
+  "components/layout/Layout.tsx": {
+    "source": "packages/frontend-app/src/components/layout/Layout.tsx",
+    "kind": "host-adapter",
+    "sourceSha256": "8217a3628243527b8bce998dcfbed8b028ded51bdb150548a3eab6489617da3c",
+    "diff": {
+      "added": 27,
+      "removed": 38
+    }
+  },
+  "components/layout/LayoutContent.tsx": {
+    "source": "packages/frontend-app/src/components/layout/LayoutContent.tsx",
+    "kind": "host-adapter",
+    "sourceSha256": "72a0fadd79771875f6a20bd3a01a71856274129721c879da4ed309aa8b9cb135",
+    "diff": {
+      "added": 5,
+      "removed": 25
+    }
+  },
+  "components/layout/LayoutHeader.tsx": {
+    "source": "packages/frontend-app/src/components/layout/LayoutHeader.tsx",
+    "kind": "host-adapter",
+    "sourceSha256": "94895a63112a7aa7da024113dc8a75c3cea65049e3e5a2962415e598dcdbec57",
+    "diff": {
+      "added": 13,
+      "removed": 19
+    }
+  },
+  "components/layout/LayoutSidebar.tsx": {
+    "source": "packages/frontend-app/src/components/layout/LayoutSidebar.tsx",
+    "kind": "host-adapter",
+    "sourceSha256": "18cf778a023b463d817b75be221b8967b7c06a30f6ef419fb3e0c8ade045c25d",
+    "diff": {
+      "added": 1,
+      "removed": 1
+    }
+  },
+  "components/layout/LayoutSidebarContent.tsx": {
+    "source": "packages/frontend-app/src/components/layout/LayoutSidebarContent.tsx",
+    "kind": "host-adapter",
+    "sourceSha256": "e493b7fe7b61a72f20a835601b1a60e6ef378c86337df15726455a6b5788ee43",
+    "diff": {
+      "added": 20,
+      "removed": 138
+    }
+  },
+  "components/layout/LayoutSidebarFooter.tsx": {
+    "source": "packages/frontend-app/src/components/layout/LayoutSidebarFooter.tsx",
+    "kind": "host-adapter",
+    "sourceSha256": "09ade68f8481a382256a8b7d30da01f794d3d73485359c7c60a5403d7abc0e70",
+    "diff": {
+      "added": 5,
+      "removed": 19
+    }
+  },
+  "components/layout/LayoutSidebarHeader.tsx": {
+    "source": "packages/frontend-app/src/components/layout/LayoutSidebarHeader.tsx",
+    "kind": "host-adapter",
+    "sourceSha256": "11a51b1da63d6acfef7030c68bf1780a377c371edfac511e8e5e8aab8f588a7d",
+    "diff": {
+      "added": 6,
+      "removed": 48
+    }
+  },
+  "components/layout/LayoutUserDropdown.tsx": {
+    "source": "packages/frontend-app/src/components/layout/LayoutUserDropdown.tsx",
+    "kind": "host-adapter",
+    "sourceSha256": "099961a4dab1458585f7cc011b823a299f2f66671b26a251edebf2fcd8e4c0b5",
+    "diff": {
+      "added": 17,
+      "removed": 83
+    }
+  },
+  "components/layout/SettingsLayout.tsx": {
+    "source": "packages/modules-user-management/src/frontend/components/user-management/SettingsLayout.tsx",
+    "kind": "host-adapter",
+    "sourceSha256": "fd111db54ab6ab4cae30d996a145fa051cb972a9e9b2d87f95b9da2192fab41c",
+    "diff": {
+      "added": 9,
+      "removed": 75
+    }
+  },
+  "components/layout/WorkspaceSwitch.tsx": {
+    "source": "packages/modules-user-management/src/frontend/components/user-management/WorkspaceSwitch.tsx",
+    "kind": "host-adapter",
+    "sourceSha256": "a16db6d2f5444d835352a4e52b36bb9b33d10c3bbacda95ee703c104128d0681",
+    "diff": {
+      "added": 40,
+      "removed": 167
+    }
+  },
+  "components/resource-page/ResourcePageLayout.tsx": {
+    "source": "packages/ui/src/components/resource-page/ResourcePageLayout.tsx",
+    "kind": "host-adapter",
+    "sourceSha256": "ae7f4f1a040b8a3090a7855a10effdbf86fbd9e12d2e6776a0a0d8c8f6d7b24d",
+    "diff": {
+      "added": 4,
+      "removed": 4
+    }
+  },
+  "components/ui/MutationErrorAlert.tsx": {
+    "source": "packages/frontend-app/src/components/ui/MutationErrorAlert.tsx",
+    "sourceSha256": "dd4b093f135a614e10933a0709422db2dd0a9ce9dd0d87a89b26b233e06bfde0",
+    "kind": "host-adapter",
+    "diff": {
+      "added": 1,
+      "removed": 8
+    }
+  },
+  "components/ui/alert-dialog.tsx": {
+    "source": "packages/ui/src/components/ui/alert-dialog.tsx",
+    "kind": "host-adapter",
+    "sourceSha256": "fc62ce54605f20b8e10d0fe5215ce485b580294f67f2a1c83b1cc53606f8ae18",
+    "diff": {
+      "added": 2,
+      "removed": 1
+    }
+  },
+  "components/ui/alert.tsx": {
+    "source": "packages/frontend-app/src/components/ui/alert.tsx",
+    "sourceSha256": "49d8311589b810b106aada8ef7b13f70b2b1f68cfce4e1458b7f31a191f420e9",
+    "kind": "host-adapter",
+    "diff": {
+      "added": 2,
+      "removed": 2
+    }
+  },
+  "components/ui/avatar.tsx": {
+    "source": "packages/frontend-app/src/components/ui/avatar.tsx",
+    "kind": "host-adapter",
+    "sourceSha256": "e637ab3522c01631eac2e456588ef301314e2bb7940ebf7cd96e698a868d47bc",
+    "diff": {
+      "added": 1,
+      "removed": 1
+    }
+  },
+  "components/ui/badge.tsx": {
+    "source": "packages/ui/src/components/ui/badge.tsx",
+    "kind": "host-adapter",
+    "sourceSha256": "1f5aed845b037af4340c572aee131a61b3a0f779381a979d8bcb7bceab4391d7",
+    "diff": {
+      "added": 1,
+      "removed": 1
+    }
+  },
+  "components/ui/breadcrumb.tsx": {
+    "source": "packages/frontend-app/src/components/ui/breadcrumb.tsx",
+    "kind": "host-adapter",
+    "sourceSha256": "22f3f4c13ed1085c4131379bfccc6fb173a474f861636bc2736506820153aa08",
+    "diff": {
+      "added": 1,
+      "removed": 1
+    }
+  },
+  "components/ui/button.tsx": {
+    "source": "packages/ui/src/components/ui/button.tsx",
+    "kind": "host-adapter",
+    "sourceSha256": "cdea7cb5d15cb16e64d11f0e9f3effbb020df2c47887869020a20ac1cbe989dc",
+    "diff": {
+      "added": 4,
+      "removed": 2
+    }
+  },
+  "components/ui/calendar.tsx": {
+    "source": "packages/ui/src/components/ui/calendar.tsx",
+    "sourceSha256": "5ac87d75f070139fcc9656985440fc82af1c76f065977750ff4134b7f724bd05",
+    "kind": "host-adapter",
+    "diff": {
+      "added": 1,
+      "removed": 0
+    }
+  },
+  "components/ui/card.tsx": {
+    "source": "packages/frontend-app/src/components/ui/card.tsx",
+    "kind": "host-adapter",
+    "sourceSha256": "78cdb63dff3ec7ef074ada630ff20a5d8004768b6cbe24ed134a8bfba12bafbb",
+    "diff": {
+      "added": 1,
+      "removed": 1
+    }
+  },
+  "components/ui/checkbox.tsx": {
+    "source": "packages/ui/src/components/ui/checkbox.tsx",
+    "kind": "host-adapter",
+    "sourceSha256": "cf8586af37014b2f1e8b4edca14f97ca5853f110272ddd2e5bb97e6f792b8c94",
+    "diff": {
+      "added": 5,
+      "removed": 32
+    }
+  },
+  "components/ui/collapsible.tsx": {
+    "source": "packages/frontend-app/src/components/ui/collapsible.tsx",
+    "kind": "exact-copy",
+    "sourceSha256": "661444318605c90d19e47e4d21289a68b4c5f7f01782be70dafa80d3f7a4cd08",
+    "diff": {
+      "added": 0,
+      "removed": 0
+    }
+  },
+  "components/ui/dialog.tsx": {
+    "source": "packages/ui/src/components/ui/dialog.tsx",
+    "kind": "host-adapter",
+    "sourceSha256": "8f7213930ee3e7ce6b8001fae01bfa4b599047a8a828789002e24d9937ba4ad6",
+    "diff": {
+      "added": 6,
+      "removed": 2
+    }
+  },
+  "components/ui/dropdown-menu.tsx": {
+    "source": "packages/ui/src/components/ui/dropdown-menu.tsx",
+    "kind": "host-adapter",
+    "sourceSha256": "feeb9c40a537a4e38c60e0de04af1cdb05c2fb96b10b234483ebe153899949fa",
+    "diff": {
+      "added": 2,
+      "removed": 2
+    }
+  },
+  "components/ui/form.tsx": {
+    "source": "packages/ui/src/components/ui/form.tsx",
+    "kind": "host-adapter",
+    "sourceSha256": "437dd523885c417290fce19bd67de3bb81ab9c374d493aa9d7c2946e9ef3ea8b",
+    "diff": {
+      "added": 1,
+      "removed": 2
+    }
+  },
+  "components/ui/input.tsx": {
+    "source": "packages/ui/src/components/ui/input.tsx",
+    "kind": "exact-copy",
+    "sourceSha256": "55f1eb96a768729e369fa4b4f08de867bb8bacc802cce538a7444b002c5ba14d",
+    "diff": {
+      "added": 0,
+      "removed": 0
+    }
+  },
+  "components/ui/label.tsx": {
+    "source": "packages/ui/src/components/ui/label.tsx",
+    "kind": "host-adapter",
+    "sourceSha256": "bce76f2ba4feb2deacc73d57f623adc31d495a76e1300b1f605037e147cfb8f1",
+    "diff": {
+      "added": 3,
+      "removed": 22
+    }
+  },
+  "components/ui/native-select.tsx": {
+    "source": "packages/ui/src/components/ui/select.tsx",
+    "kind": "host-adapter",
+    "sourceSha256": "acd63e2f610002c4639e899f8adbadc5dc112b419d7c1c697d6486c3a1fbe3b4",
+    "diff": {
+      "added": 4,
+      "removed": 186
+    }
+  },
+  "components/ui/pagination.tsx": {
+    "source": "packages/ui/src/components/ui/pagination.tsx",
+    "kind": "exact-copy",
+    "sourceSha256": "218afc44dd9619755fa8db893ea3a8535c2651185d542206dd90e23edfb848f5",
+    "diff": {
+      "added": 0,
+      "removed": 0
+    }
+  },
+  "components/ui/popover.tsx": {
+    "source": "packages/ui/src/components/ui/popover.tsx",
+    "sourceSha256": "943993b9b5932a7a111d300a5057446b3a9e6d7384207be943dc7a93b4e6be85",
+    "kind": "host-adapter",
+    "diff": {
+      "added": 1,
+      "removed": 1
+    }
+  },
+  "components/ui/scroll-area.tsx": {
+    "source": "packages/ui/src/components/ui/scroll-area.tsx",
+    "kind": "host-adapter",
+    "sourceSha256": "07441e579d55f2dba78d3a5fefad556e710de9b2980e3892f49eea6d4b91fbb7",
+    "diff": {
+      "added": 5,
+      "removed": 58
+    }
+  },
+  "components/ui/select.tsx": {
+    "source": "packages/ui/src/components/ui/select.tsx",
+    "kind": "host-adapter",
+    "sourceSha256": "acd63e2f610002c4639e899f8adbadc5dc112b419d7c1c697d6486c3a1fbe3b4",
+    "diff": {
+      "added": 1,
+      "removed": 1
+    }
+  },
+  "components/ui/separator.tsx": {
+    "source": "packages/frontend-app/src/components/ui/separator.tsx",
+    "kind": "host-adapter",
+    "sourceSha256": "18e5bf93682eb91864d9a1b8c0a09e46ad15d6ef1ffe97b3ccf9e4697756b6e2",
+    "diff": {
+      "added": 1,
+      "removed": 1
+    }
+  },
+  "components/ui/sheet.tsx": {
+    "source": "packages/frontend-app/src/components/ui/sheet.tsx",
+    "kind": "host-adapter",
+    "sourceSha256": "fbe9b257fd95b9865e1aba651489899c959ed5c16cb8493fe8c2733f83b92ee1",
+    "diff": {
+      "added": 5,
+      "removed": 3
+    }
+  },
+  "components/ui/sidebar.tsx": {
+    "source": "packages/frontend-app/src/components/ui/sidebar.tsx",
+    "kind": "host-adapter",
+    "sourceSha256": "ea01780924b10224692f1df4a595937968028e708f8f9fd5d549475cc491bf87",
+    "diff": {
+      "added": 31,
+      "removed": 44
+    }
+  },
+  "components/ui/skeleton.tsx": {
+    "source": "packages/ui/src/components/ui/skeleton.tsx",
+    "kind": "host-adapter",
+    "sourceSha256": "1421cd78a7250ca7af3d648832c57ca168b4b277c0678dca0b14d2791dfab8cc",
+    "diff": {
+      "added": 3,
+      "removed": 13
+    }
+  },
+  "components/ui/sonner.tsx": {
+    "source": "packages/frontend-app/src/components/ui/sonner.tsx",
+    "sourceSha256": "48b2eea37787bb6fb44ae12fdecba694c190ec28a5e43f3ed5c381a7f6503804",
+    "kind": "host-adapter",
+    "diff": {
+      "added": 1,
+      "removed": 2
+    }
+  },
+  "components/ui/switch.tsx": {
+    "source": "packages/frontend-app/src/components/ui/switch.tsx",
+    "kind": "host-adapter",
+    "sourceSha256": "17f2390d98e8ce4d9e90155eac1918266914d6a9ada7c276b5d1c917cef0e969",
+    "diff": {
+      "added": 1,
+      "removed": 1
+    }
+  },
+  "components/ui/table.tsx": {
+    "source": "packages/ui/src/components/ui/table.tsx",
+    "kind": "host-adapter",
+    "sourceSha256": "e1bec2232cdf43fe4bdf3baded86c73ede5e0b7921b49b773662aa33ba52f5e6",
+    "diff": {
+      "added": 1,
+      "removed": 1
+    }
+  },
+  "components/ui/tabs.tsx": {
+    "source": "packages/frontend-app/src/components/ui/tabs.tsx",
+    "kind": "host-adapter",
+    "sourceSha256": "e8469e599381cf021ce751c27cca3d8cb06440a45665ca9c2ef2efb0acef1fd9",
+    "diff": {
+      "added": 1,
+      "removed": 1
+    }
+  },
+  "components/ui/textarea.tsx": {
+    "source": "packages/frontend-app/src/components/ui/textarea.tsx",
+    "kind": "host-adapter",
+    "sourceSha256": "de4e9fb0fd8e8ed10ea2e475ffe202a922ffe77e3f3edb2c517b0781447ad1b4",
+    "diff": {
+      "added": 1,
+      "removed": 1
+    }
+  },
+  "components/ui/tooltip.tsx": {
+    "source": "packages/ui/src/components/ui/tooltip.tsx",
+    "kind": "host-adapter",
+    "sourceSha256": "a1207e32831336fd7f325e0a8ffdae976e46c0285d76d44abd77fe61d120e0bf",
+    "diff": {
+      "added": 7,
+      "removed": 61
+    }
+  },
+  "components/ui/use-mobile.tsx": {
+    "source": "packages/frontend-app/src/hooks/useIsMobile.ts",
+    "kind": "host-adapter",
+    "sourceSha256": "1b43441b273aa21c1e74fefa774d5a7cb50068e5d4c192a8f63b9c95c5580431",
+    "diff": {
+      "added": 4,
+      "removed": 17
+    }
+  },
+  "lib/form/types.ts": {
+    "source": "packages/ui/src/lib/form/types.ts",
+    "kind": "exact-copy",
+    "sourceSha256": "c634a3b6bc252c23b438a27c1c53d5685794f8d678df84829c425f77b11cc6b1",
+    "diff": {
+      "added": 0,
+      "removed": 0
+    }
+  },
+  "lib/utils.ts": {
+    "source": "packages/ui/src/lib/utils.ts",
+    "kind": "exact-copy",
+    "sourceSha256": "7c8c3dfc0cdd370d44932828eb067ef771c8fe7996693221d5d4b90af6d54f2d",
+    "diff": {
+      "added": 0,
+      "removed": 0
+    }
+  },
+  "components/settings/UserSettings.tsx": {
+    "source": "packages/modules-user-management/src/frontend/components/user-management/UserSettings.tsx",
+    "kind": "host-adapter",
+    "sourceSha256": "bcff2ac6511ec26bf4fe61ba1728c68445de4a9c37555d1ff3f438c1fb04bec7",
+    "diff": {
+      "added": 19,
+      "removed": 109
+    }
+  },
+  "components/settings/WorkspaceSettings.tsx": {
+    "source": "packages/modules-user-management/src/frontend/components/user-management/WorkspaceSettings.tsx",
+    "kind": "host-adapter",
+    "sourceSha256": "501da0a6cf9c51587e0d278ac46ef9de674d5f8baca7d4a741aef27001f50532",
+    "diff": {
+      "added": 13,
+      "removed": 79
+    }
+  },
+  "components/settings/UserOnboarding.tsx": {
+    "source": "packages/modules-user-management/src/frontend/components/user-management/UserOnboarding.tsx",
+    "kind": "host-adapter",
+    "sourceSha256": "4bb9f6febdf205d72c2c13e4e137d2f5550058e58dec90af49b709c57b3a6a4b",
+    "diff": {
+      "added": 15,
+      "removed": 134
+    }
+  },
+  "components/user-management/WorkspaceMembers.tsx": {
+    "source": "packages/modules-user-management/src/frontend/components/user-management/WorkspaceMembers.tsx",
+    "kind": "host-adapter",
+    "sourceSha256": "bb9f53b6f334a31f1ba3aad05563e347c322bbccde82762b882608f5754a7a8e",
+    "diff": {
+      "added": 7,
+      "removed": 38
+    }
+  },
+  "components/user-management/WorkspaceMembersTable.tsx": {
+    "source": "packages/modules-user-management/src/frontend/components/user-management/WorkspaceMembersTable.tsx",
+    "kind": "host-adapter",
+    "sourceSha256": "99205e585acd535424679ff2cdf842272025bf578840dd8cea3d5713d76f0b31",
+    "diff": {
+      "added": 9,
+      "removed": 535
+    }
+  },
+  "components/user-management/InviteUserModal.tsx": {
+    "source": "packages/modules-user-management/src/frontend/components/user-management/InviteUserModal.tsx",
+    "kind": "host-adapter",
+    "sourceSha256": "e5ee0910b83f47bc6d4ec0afea3599ecec80316d1e1e8771f02f55dccce5b4c2",
+    "diff": {
+      "added": 7,
+      "removed": 169
+    }
+  },
+  "components/settings/APITokensSettings.tsx": {
+    "source": "packages/modules-user-management/src/frontend/components/user-management/APITokensSettings.tsx",
+    "kind": "host-adapter",
+    "sourceSha256": "9c3e9a22376b5777e7a985f559bdb0c25c58167be9e912e118310f4a28f925d9",
+    "diff": {
+      "added": 19,
+      "removed": 287
+    }
+  },
+  "components/settings/UserWorkspaceOnboarding.tsx": {
+    "source": "packages/modules-user-management/src/frontend/components/user-management/UserWorkspaceOnboarding.tsx",
+    "kind": "host-adapter",
+    "sourceSha256": "1714fe5b816a8dc125a4e8cfbb8e04d7f874e6f85c7a5a0bf21b1769ce84cc1e",
+    "diff": {
+      "added": 15,
+      "removed": 108
+    }
+  }
+}

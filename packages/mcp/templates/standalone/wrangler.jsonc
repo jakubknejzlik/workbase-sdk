@@ -1,0 +1,46 @@
+{
+  "name": "workbase-{{INSTANCE_SELECTOR}}",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-08-01",
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "workbase-{{INSTANCE_SELECTOR}}",
+      "database_id": "00000000-0000-0000-0000-000000000091",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "kv_namespaces": [
+    {
+      "binding": "AUDIT_KV",
+      "id": "00000000000000000000000000000091"
+    }
+  ],
+  "queues": {
+    "producers": [
+      {
+        "binding": "EVENTS_QUEUE",
+        "queue": "workbase-{{INSTANCE_SELECTOR}}-events"
+      }
+    ],
+    "consumers": [
+      {
+        "queue": "workbase-{{INSTANCE_SELECTOR}}-events",
+        "max_batch_size": 10,
+        "max_batch_timeout": 1,
+        "max_retries": 5,
+        "dead_letter_queue": "workbase-{{INSTANCE_SELECTOR}}-events-dlq"
+      }
+    ]
+  },
+  "assets": {
+    "directory": "node_modules/@workbasehq/plugins/console/assets",
+    "binding": "ASSETS",
+    "html_handling": "none",
+    "not_found_handling": "none",
+    "run_worker_first": true
+  }
+}

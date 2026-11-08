@@ -1,0 +1,12 @@
+{
+  "name": "@workbasehq/test-support",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./helpers": "./src/helpers.ts",
+    "./execution": "./src/execution.ts"
+  },
+  "dependencies": {
+    "@workbasehq/core": "workspace:*"
+  }
+}

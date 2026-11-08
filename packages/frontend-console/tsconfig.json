@@ -1,0 +1,26 @@
+{
+  "extends": "../ui/tsconfig.json",
+  "compilerOptions": {
+    "types": [
+      "node",
+      "react",
+      "react-dom",
+      "vite/client"
+    ],
+    "resolveJsonModule": true
+  },
+  "include": [
+    "src",
+    "test",
+    "e2e",
+    "*.ts"
+  ],
+  "exclude": [
+    "e2e/runtime/config.ts",
+    "e2e/runtime/worker.ts",
+    "e2e/runtime/seed.ts",
+    "e2e/runtime/computed-config.ts",
+    "e2e/runtime/computed-worker.ts",
+    "e2e/runtime/computed-seed.ts"
+  ]
+}

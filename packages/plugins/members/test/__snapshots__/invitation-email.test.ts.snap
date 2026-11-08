@@ -1,0 +1,221 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`synthetic HTML/text snapshot: 'invite' 'cs' 1`] = `
+{
+  "html": "<!DOCTYPE html>
+<html lang="cs">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Alex Example vás zve do organizace Sample Organization ve Workbase</title></head>
+<body style="margin:0;padding:0;background-color:#f8f9fc;font-family:Arial,Helvetica,sans-serif;">
+<div style="display:none;max-height:0;overflow:hidden;opacity:0;mso-hide:all;">Pozvánka od Alex Example do organizace Sample Organization ve Workbase.</div>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#f8f9fc;"><tr><td align="center" style="padding:40px 20px;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;background-color:#ffffff;border:1px solid #e5e7eb;border-radius:8px;">
+<tr><td align="center" style="padding:24px;border-bottom:3px solid #00e6a0;font-size:24px;font-weight:bold;color:#0a0a5e;">Workbase</td></tr>
+<tr><td style="padding:32px;">
+<h1 style="margin:0 0 24px;font-size:22px;line-height:30px;text-align:center;color:#0a0a5e;">Vaše pozvánka do Workbase</h1>
+<p style="margin:0 0 16px;font-size:15px;line-height:24px;color:#1a1a2e;">Dobrý den,</p>
+<p style="margin:0 0 16px;font-size:15px;line-height:24px;color:#1a1a2e;">Alex Example vás zve do organizace Sample Organization ve Workbase.</p>
+<p style="margin:0 0 16px;font-size:15px;line-height:24px;color:#1a1a2e;">Vaše role: Contributor.</p>
+<p style="margin:0 0 16px;font-size:15px;line-height:24px;color:#1a1a2e;">Kliknutím na tlačítko si můžete pozvánku prohlédnout a přijmout:</p>
+<table role="presentation" cellpadding="0" cellspacing="0" align="center" style="margin:12px auto 28px;"><tr><td align="center" bgcolor="#00e6a0" style="background-color:#00e6a0;border-radius:6px;mso-padding-alt:14px 32px;"><a href="https://console.example.test/invitation?token=synthetic&amp;source=email" style="display:inline-block;padding:14px 32px;color:#0a0a5e;font-size:16px;line-height:24px;font-weight:bold;text-decoration:none;">Přijmout pozvánku</a></td></tr></table>
+<p style="margin:0 0 16px;font-size:15px;line-height:24px;color:#1a1a2e;">Nebo použijte tento odkaz:</p>
+<p style="margin:0 0 20px;word-break:break-all;overflow-wrap:anywhere;"><a href="https://console.example.test/invitation?token=synthetic&amp;source=email" style="color:#0a0a5e;font-size:13px;line-height:20px;text-decoration:underline;">https://console.example.test/invitation?token=synthetic&amp;source=email</a></p>
+<p style="margin:0 0 16px;font-size:15px;line-height:24px;color:#1a1a2e;">Tato pozvánka platí sedm dní a vyprší 28. října 2026 v 15:05:06, GMT+01:00 (Europe/Prague).</p>
+<p style="margin:0 0 16px;font-size:15px;line-height:24px;color:#1a1a2e;">Pokud jste tuto pozvánku neočekávali, můžete tento e-mail ignorovat.</p>
+</td></tr>
+<tr><td style="padding:20px 32px;border-top:1px solid #e5e7eb;font-size:12px;line-height:20px;text-align:center;color:#6b7280;">Tento e-mail byl odeslán z aplikace Workbase.</td></tr>
+</table></td></tr></table>
+</body></html>",
+  "preheader": "Pozvánka od Alex Example do organizace Sample Organization ve Workbase.",
+  "subject": "Alex Example vás zve do organizace Sample Organization ve Workbase",
+  "text": "Workbase
+
+Pozvánka od Alex Example do organizace Sample Organization ve Workbase.
+
+Vaše pozvánka do Workbase
+
+Dobrý den,
+
+Alex Example vás zve do organizace Sample Organization ve Workbase.
+
+Vaše role: Contributor.
+
+Kliknutím na tlačítko si můžete pozvánku prohlédnout a přijmout:
+
+Přijmout pozvánku
+
+Nebo použijte tento odkaz:
+
+https://console.example.test/invitation?token=synthetic&source=email
+
+Tato pozvánka platí sedm dní a vyprší 28. října 2026 v 15:05:06, GMT+01:00 (Europe/Prague).
+
+Pokud jste tuto pozvánku neočekávali, můžete tento e-mail ignorovat.
+
+Tento e-mail byl odeslán z aplikace Workbase.",
+}
+`;
+
+exports[`synthetic HTML/text snapshot: 'invite' 'en' 1`] = `
+{
+  "html": "<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Alex Example invites you to the organization Sample Organization on Workbase</title></head>
+<body style="margin:0;padding:0;background-color:#f8f9fc;font-family:Arial,Helvetica,sans-serif;">
+<div style="display:none;max-height:0;overflow:hidden;opacity:0;mso-hide:all;">An invitation from Alex Example to the organization Sample Organization on Workbase.</div>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#f8f9fc;"><tr><td align="center" style="padding:40px 20px;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;background-color:#ffffff;border:1px solid #e5e7eb;border-radius:8px;">
+<tr><td align="center" style="padding:24px;border-bottom:3px solid #00e6a0;font-size:24px;font-weight:bold;color:#0a0a5e;">Workbase</td></tr>
+<tr><td style="padding:32px;">
+<h1 style="margin:0 0 24px;font-size:22px;line-height:30px;text-align:center;color:#0a0a5e;">Your Workbase invitation</h1>
+<p style="margin:0 0 16px;font-size:15px;line-height:24px;color:#1a1a2e;">Hello,</p>
+<p style="margin:0 0 16px;font-size:15px;line-height:24px;color:#1a1a2e;">Alex Example invites you to the organization Sample Organization on Workbase.</p>
+<p style="margin:0 0 16px;font-size:15px;line-height:24px;color:#1a1a2e;">Your role: Contributor.</p>
+<p style="margin:0 0 16px;font-size:15px;line-height:24px;color:#1a1a2e;">Use the button below to review and accept your invitation:</p>
+<table role="presentation" cellpadding="0" cellspacing="0" align="center" style="margin:12px auto 28px;"><tr><td align="center" bgcolor="#00e6a0" style="background-color:#00e6a0;border-radius:6px;mso-padding-alt:14px 32px;"><a href="https://console.example.test/invitation?token=synthetic&amp;source=email" style="display:inline-block;padding:14px 32px;color:#0a0a5e;font-size:16px;line-height:24px;font-weight:bold;text-decoration:none;">Accept invitation</a></td></tr></table>
+<p style="margin:0 0 16px;font-size:15px;line-height:24px;color:#1a1a2e;">Or use this link:</p>
+<p style="margin:0 0 20px;word-break:break-all;overflow-wrap:anywhere;"><a href="https://console.example.test/invitation?token=synthetic&amp;source=email" style="color:#0a0a5e;font-size:13px;line-height:20px;text-decoration:underline;">https://console.example.test/invitation?token=synthetic&amp;source=email</a></p>
+<p style="margin:0 0 16px;font-size:15px;line-height:24px;color:#1a1a2e;">This invitation is valid for seven days and expires on 28 October 2026 at 15:05:06 GMT+01:00 (Europe/Prague).</p>
+<p style="margin:0 0 16px;font-size:15px;line-height:24px;color:#1a1a2e;">If you were not expecting this invitation, you can ignore this email.</p>
+</td></tr>
+<tr><td style="padding:20px 32px;border-top:1px solid #e5e7eb;font-size:12px;line-height:20px;text-align:center;color:#6b7280;">This email was sent by Workbase.</td></tr>
+</table></td></tr></table>
+</body></html>",
+  "preheader": "An invitation from Alex Example to the organization Sample Organization on Workbase.",
+  "subject": "Alex Example invites you to the organization Sample Organization on Workbase",
+  "text": "Workbase
+
+An invitation from Alex Example to the organization Sample Organization on Workbase.
+
+Your Workbase invitation
+
+Hello,
+
+Alex Example invites you to the organization Sample Organization on Workbase.
+
+Your role: Contributor.
+
+Use the button below to review and accept your invitation:
+
+Accept invitation
+
+Or use this link:
+
+https://console.example.test/invitation?token=synthetic&source=email
+
+This invitation is valid for seven days and expires on 28 October 2026 at 15:05:06 GMT+01:00 (Europe/Prague).
+
+If you were not expecting this invitation, you can ignore this email.
+
+This email was sent by Workbase.",
+}
+`;
+
+exports[`synthetic HTML/text snapshot: 'reminder' 'cs' 1`] = `
+{
+  "html": "<!DOCTYPE html>
+<html lang="cs">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Připomenutí: Alex Example vás zve do organizace Sample Organization ve Workbase</title></head>
+<body style="margin:0;padding:0;background-color:#f8f9fc;font-family:Arial,Helvetica,sans-serif;">
+<div style="display:none;max-height:0;overflow:hidden;opacity:0;mso-hide:all;">Připomenutí: Čeká na vás pozvánka od Alex Example do organizace Sample Organization ve Workbase.</div>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#f8f9fc;"><tr><td align="center" style="padding:40px 20px;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;background-color:#ffffff;border:1px solid #e5e7eb;border-radius:8px;">
+<tr><td align="center" style="padding:24px;border-bottom:3px solid #00e6a0;font-size:24px;font-weight:bold;color:#0a0a5e;">Workbase</td></tr>
+<tr><td style="padding:32px;">
+<h1 style="margin:0 0 24px;font-size:22px;line-height:30px;text-align:center;color:#0a0a5e;">Připomenutí: Vaše pozvánka do Workbase</h1>
+<p style="margin:0 0 16px;font-size:15px;line-height:24px;color:#1a1a2e;">Dobrý den,</p>
+<p style="margin:0 0 16px;font-size:15px;line-height:24px;color:#1a1a2e;">Připomínáme, že Alex Example vás zve do organizace Sample Organization ve Workbase.</p>
+<p style="margin:0 0 16px;font-size:15px;line-height:24px;color:#1a1a2e;">Vaše role: Contributor.</p>
+<p style="margin:0 0 16px;font-size:15px;line-height:24px;color:#1a1a2e;">Kliknutím na tlačítko si můžete pozvánku prohlédnout a přijmout:</p>
+<table role="presentation" cellpadding="0" cellspacing="0" align="center" style="margin:12px auto 28px;"><tr><td align="center" bgcolor="#00e6a0" style="background-color:#00e6a0;border-radius:6px;mso-padding-alt:14px 32px;"><a href="https://console.example.test/invitation?token=synthetic&amp;source=email" style="display:inline-block;padding:14px 32px;color:#0a0a5e;font-size:16px;line-height:24px;font-weight:bold;text-decoration:none;">Přijmout pozvánku</a></td></tr></table>
+<p style="margin:0 0 16px;font-size:15px;line-height:24px;color:#1a1a2e;">Nebo použijte tento odkaz:</p>
+<p style="margin:0 0 20px;word-break:break-all;overflow-wrap:anywhere;"><a href="https://console.example.test/invitation?token=synthetic&amp;source=email" style="color:#0a0a5e;font-size:13px;line-height:20px;text-decoration:underline;">https://console.example.test/invitation?token=synthetic&amp;source=email</a></p>
+<p style="margin:0 0 16px;font-size:15px;line-height:24px;color:#1a1a2e;">Tato pozvánka platí sedm dní a vyprší 28. října 2026 v 15:05:06, GMT+01:00 (Europe/Prague).</p>
+<p style="margin:0 0 16px;font-size:15px;line-height:24px;color:#1a1a2e;">Pokud jste tuto pozvánku neočekávali, můžete tento e-mail ignorovat.</p>
+</td></tr>
+<tr><td style="padding:20px 32px;border-top:1px solid #e5e7eb;font-size:12px;line-height:20px;text-align:center;color:#6b7280;">Tento e-mail byl odeslán z aplikace Workbase.</td></tr>
+</table></td></tr></table>
+</body></html>",
+  "preheader": "Připomenutí: Čeká na vás pozvánka od Alex Example do organizace Sample Organization ve Workbase.",
+  "subject": "Připomenutí: Alex Example vás zve do organizace Sample Organization ve Workbase",
+  "text": "Workbase
+
+Připomenutí: Čeká na vás pozvánka od Alex Example do organizace Sample Organization ve Workbase.
+
+Připomenutí: Vaše pozvánka do Workbase
+
+Dobrý den,
+
+Připomínáme, že Alex Example vás zve do organizace Sample Organization ve Workbase.
+
+Vaše role: Contributor.
+
+Kliknutím na tlačítko si můžete pozvánku prohlédnout a přijmout:
+
+Přijmout pozvánku
+
+Nebo použijte tento odkaz:
+
+https://console.example.test/invitation?token=synthetic&source=email
+
+Tato pozvánka platí sedm dní a vyprší 28. října 2026 v 15:05:06, GMT+01:00 (Europe/Prague).
+
+Pokud jste tuto pozvánku neočekávali, můžete tento e-mail ignorovat.
+
+Tento e-mail byl odeslán z aplikace Workbase.",
+}
+`;
+
+exports[`synthetic HTML/text snapshot: 'reminder' 'en' 1`] = `
+{
+  "html": "<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Reminder: Alex Example invites you to the organization Sample Organization on Workbase</title></head>
+<body style="margin:0;padding:0;background-color:#f8f9fc;font-family:Arial,Helvetica,sans-serif;">
+<div style="display:none;max-height:0;overflow:hidden;opacity:0;mso-hide:all;">Reminder: Your invitation from Alex Example to the organization Sample Organization on Workbase is waiting.</div>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#f8f9fc;"><tr><td align="center" style="padding:40px 20px;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;background-color:#ffffff;border:1px solid #e5e7eb;border-radius:8px;">
+<tr><td align="center" style="padding:24px;border-bottom:3px solid #00e6a0;font-size:24px;font-weight:bold;color:#0a0a5e;">Workbase</td></tr>
+<tr><td style="padding:32px;">
+<h1 style="margin:0 0 24px;font-size:22px;line-height:30px;text-align:center;color:#0a0a5e;">Reminder: Your Workbase invitation</h1>
+<p style="margin:0 0 16px;font-size:15px;line-height:24px;color:#1a1a2e;">Hello,</p>
+<p style="margin:0 0 16px;font-size:15px;line-height:24px;color:#1a1a2e;">This is a reminder that Alex Example invites you to the organization Sample Organization on Workbase.</p>
+<p style="margin:0 0 16px;font-size:15px;line-height:24px;color:#1a1a2e;">Your role: Contributor.</p>
+<p style="margin:0 0 16px;font-size:15px;line-height:24px;color:#1a1a2e;">Use the button below to review and accept your invitation:</p>
+<table role="presentation" cellpadding="0" cellspacing="0" align="center" style="margin:12px auto 28px;"><tr><td align="center" bgcolor="#00e6a0" style="background-color:#00e6a0;border-radius:6px;mso-padding-alt:14px 32px;"><a href="https://console.example.test/invitation?token=synthetic&amp;source=email" style="display:inline-block;padding:14px 32px;color:#0a0a5e;font-size:16px;line-height:24px;font-weight:bold;text-decoration:none;">Accept invitation</a></td></tr></table>
+<p style="margin:0 0 16px;font-size:15px;line-height:24px;color:#1a1a2e;">Or use this link:</p>
+<p style="margin:0 0 20px;word-break:break-all;overflow-wrap:anywhere;"><a href="https://console.example.test/invitation?token=synthetic&amp;source=email" style="color:#0a0a5e;font-size:13px;line-height:20px;text-decoration:underline;">https://console.example.test/invitation?token=synthetic&amp;source=email</a></p>
+<p style="margin:0 0 16px;font-size:15px;line-height:24px;color:#1a1a2e;">This invitation is valid for seven days and expires on 28 October 2026 at 15:05:06 GMT+01:00 (Europe/Prague).</p>
+<p style="margin:0 0 16px;font-size:15px;line-height:24px;color:#1a1a2e;">If you were not expecting this invitation, you can ignore this email.</p>
+</td></tr>
+<tr><td style="padding:20px 32px;border-top:1px solid #e5e7eb;font-size:12px;line-height:20px;text-align:center;color:#6b7280;">This email was sent by Workbase.</td></tr>
+</table></td></tr></table>
+</body></html>",
+  "preheader": "Reminder: Your invitation from Alex Example to the organization Sample Organization on Workbase is waiting.",
+  "subject": "Reminder: Alex Example invites you to the organization Sample Organization on Workbase",
+  "text": "Workbase
+
+Reminder: Your invitation from Alex Example to the organization Sample Organization on Workbase is waiting.
+
+Reminder: Your Workbase invitation
+
+Hello,
+
+This is a reminder that Alex Example invites you to the organization Sample Organization on Workbase.
+
+Your role: Contributor.
+
+Use the button below to review and accept your invitation:
+
+Accept invitation
+
+Or use this link:
+
+https://console.example.test/invitation?token=synthetic&source=email
+
+This invitation is valid for seven days and expires on 28 October 2026 at 15:05:06 GMT+01:00 (Europe/Prague).
+
+If you were not expecting this invitation, you can ignore this email.
+
+This email was sent by Workbase.",
+}
+`;
