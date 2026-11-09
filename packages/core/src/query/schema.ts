@@ -29,7 +29,7 @@ function valueSchema(config: InstanceConfig, entity: string, field: string, rest
   return type === 'bool' ? z.boolean() : type === 'int' ? z.number().int().safe()
     : type === 'float' ? z.number().finite() : z.string().max(2_000)
 }
-/** Shared client/policy grammar; only trusted configuration enables actor references. */
+/** Shared client/policy grammar; only trusted configuration enables actor predicates. */
 export function filterSchema(config: InstanceConfig, rest = false, maxDepth = L.relationDepth as number,
   actorValues?: (type: Field['type']) => z.ZodType) {
   const filters = new Map<string, z.ZodType>()
@@ -49,6 +49,9 @@ export function filterSchema(config: InstanceConfig, rest = false, maxDepth = L.
         const child = filter(r.entity, depth + 1)
         shape[relation] = (r.many ? z.union([z.strictObject({ some: child }), z.strictObject({ none: child })]) : child).optional()
       }
+      if (actorValues) shape.actorLinkedIn = z.string().refine(entity =>
+        Object.hasOwn(config.entities, entity) && Object.values(config.entities[entity].fields).some(field => field.userLink),
+      'actorLinkedIn requires an entity with a protected user link').optional()
       shape.and = z.array(schema).min(1).max(L.nodes).optional()
       shape.or = z.array(schema).min(1).max(L.nodes).optional()
       shape.not = schema.optional()

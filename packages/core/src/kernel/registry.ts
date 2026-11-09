@@ -8,7 +8,7 @@ import { ApiError } from '../errors'
 import type { App, ResolvedActor, RuntimeEnv, RuntimeOptions, Scope } from '../types'
 import type { AuditEvent } from '../audit-event'
 import type { AtomicOperation } from '../execution/types'
-import type { KernelCommand, ResourceAction, PluginMigration, TableFilter, WorkbasePlugin } from './plugin'
+import type { KernelCommand, ResourceAction, PluginMigration, Predicate, TableFilter, WorkbasePlugin } from './plugin'
 import { renderPredicate } from './predicate'
 export { renderPredicate } from './predicate'
 import { resolvePlugins } from './composition'
@@ -147,9 +147,13 @@ export class KernelRegistry {
     if (!this.trust && !this.hasAuthorization) return { kind: 'none' }
     const filters = this.plugins.flatMap(plugin => plugin.tableFilter ? [plugin.tableFilter.call(this, entity, scope)] : [])
     if (!filters.length) return { kind: this.trust ? 'all' : 'none' }
-    if (filters.some(filter => filter.kind === 'none')) return { kind: 'none', ...(filters.some(filter => 'deny' in filter && filter.deny === 'forbidden') ? { deny: 'forbidden' as const } : {}) }
+    // A denying provider may erase row selection, but never request authority
+    // needed by an enclosing policy that negates this source's existence.
+    const actorAuthorities = filters.flatMap(filter => filter.actorAuthorities ?? [])
+    const authority = actorAuthorities.length ? { actorAuthorities } : {}
+    if (filters.some(filter => filter.kind === 'none')) return { kind: 'none', ...authority, ...(filters.some(filter => 'deny' in filter && filter.deny === 'forbidden') ? { deny: 'forbidden' as const } : {}) }
     const where = filters.filter((filter): filter is Extract<TableFilter, { kind: 'where' }> => filter.kind === 'where')
-    return where.length ? { kind: 'where', predicate: { all: where.map(filter => filter.predicate) }, ...(where.some(filter => filter.deny === 'forbidden') ? { deny: 'forbidden' as const } : {}) } : { kind: 'all' }
+    return where.length ? { kind: 'where', predicate: { all: where.map(filter => filter.predicate) }, ...authority, ...(where.some(filter => filter.deny === 'forbidden') ? { deny: 'forbidden' as const } : {}) } : { kind: 'all', ...authority }
   }
   fieldMask(entity: string, scope: Scope): string[] {
     let fields = [...baseFields, ...Object.keys(this.config.entities[entity].fields)]
@@ -200,5 +204,9 @@ export function kernelFor(config: InstanceConfig): KernelRegistry {
 /** Preserve the selected ports across immutable execution-context config snapshots. */
 export function bindKernel(source: InstanceConfig, target: InstanceConfig) { registries.set(target, kernelFor(source)) }
 export function filterSql(filter: TableFilter, tableAlias: string): { sql: string; bindings: unknown[] } {
+  if (filter.actorAuthorities?.length) {
+    const row: Predicate = filter.kind === 'where' ? filter.predicate : filter.kind === 'all' ? { all: [] } : { any: [] }
+    return renderPredicate({ all: [...filter.actorAuthorities.map(actorAuthority => ({ actorAuthority })), row] }, tableAlias)
+  }
   return filter.kind === 'where' ? renderPredicate(filter.predicate, tableAlias) : { sql: filter.kind === 'all' ? '1=1' : '0=1', bindings: [] }
 }

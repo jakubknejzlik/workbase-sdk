@@ -14,6 +14,7 @@ Keep all three packages on the same exact version. Start with the
 [getting started guide](docs/sdk/getting-started.md), the
 [console guide](docs/sdk/generic-console.md), and the
 [release guide](docs/sdk/release.md).
+See [row policies](docs/sdk/policies.md) for actor-based access rules.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for local checks and
 [SECURITY.md](SECURITY.md) for private vulnerability reporting.

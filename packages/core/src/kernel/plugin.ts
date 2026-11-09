@@ -20,10 +20,23 @@ export interface PredicateOperators {
 }
 /** Child field correlates to parentField on the current table; identifiers are server-owned. */
 export interface PredicateRelation { entity: string; field: string; parentField: string; predicate: Predicate }
+/** Trusted policy-only probe. Authority comes from the live server projection;
+ * renderers recheck membership/account/token in the same statement as the row. */
+export interface PredicateActorLink {
+  entity: string; organizationId: string; accountId: string; membershipRole: string
+  token?: { id: string; role: string }
+}
 export type Predicate = { all: readonly Predicate[] } | { any: readonly Predicate[] }
   | { not: Predicate } | { exists: PredicateRelation } | { notExists: PredicateRelation }
+  | { actorLinkedIn: PredicateActorLink }
+  /** Mandatory top-level conjunct emitted by the policy compiler. */
+  | { actorAuthority: Omit<PredicateActorLink, 'entity'> }
   | { [field: string]: PredicateOperators }
-export type TableFilter = { kind: 'all' } | { kind: 'none'; deny?: 'empty' | 'forbidden' } | { kind: 'where'; predicate: Predicate; deny?: 'empty' | 'forbidden' }
+export type TableFilter = ({ kind: 'all' } | { kind: 'none'; deny?: 'empty' | 'forbidden' } | { kind: 'where'; predicate: Predicate; deny?: 'empty' | 'forbidden' }) & {
+  /** Mandatory request authority, independent of row selection and constant
+   * folding. The final expanded compiler emits these as root conjuncts. */
+  actorAuthorities?: readonly Omit<PredicateActorLink, 'entity'>[]
+}
 export type GuardResult = { allow: true } | { allow: false; code: string }
 export type ResourceAction = OrganizationAction | 'audit.read' | 'workflows.read' | 'workflows.resume' | 'workflows.cancel'
 /** Metadata only; no planning function, store or execution capability is exposed. */

@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Add policy-only `actorLinkedIn` for protected user links: organization-scoped live account/issuer authority collected across the full related-policy graph and asserted once outside Boolean and relation negation, execution-time token expiry, an indexed EXISTS without target read-policy recursion, and atomic write pre/post-image enforcement. MCP config validation and serialization preserve the predicate. (#172 G1)
+
 ## 0.2.12 — 2026-11-09
 
 - MCP verifies registry SDK package identities and integrity through portable primitives and installs upgrade targets in isolation with a packaged verification bridge. (#218, #220)
