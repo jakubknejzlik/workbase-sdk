@@ -20,8 +20,15 @@ export interface PredicateOperators {
 }
 /** Child field correlates to parentField on the current table; identifiers are server-owned. */
 export interface PredicateRelation { entity: string; field: string; parentField: string; predicate: Predicate }
+/** Trusted policy-only probe. Authority comes from the live server projection;
+ * renderers recheck membership/account/token in the same statement as the row. */
+export interface PredicateActorLink {
+  entity: string; organizationId: string; accountId: string; membershipRole: string
+  token?: { id: string; role: string; now: string }
+}
 export type Predicate = { all: readonly Predicate[] } | { any: readonly Predicate[] }
   | { not: Predicate } | { exists: PredicateRelation } | { notExists: PredicateRelation }
+  | { actorLinkedIn: PredicateActorLink }
   | { [field: string]: PredicateOperators }
 export type TableFilter = { kind: 'all' } | { kind: 'none'; deny?: 'empty' | 'forbidden' } | { kind: 'where'; predicate: Predicate; deny?: 'empty' | 'forbidden' }
 export type GuardResult = { allow: true } | { allow: false; code: string }

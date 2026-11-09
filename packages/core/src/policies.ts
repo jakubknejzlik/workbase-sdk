@@ -2,7 +2,7 @@ import { constantQuantifier } from './config-shorthand'
 import { z } from 'zod'
 import { baseFields, type Field, type InstanceConfig } from './config'
 import { fieldsFor, fieldType, filterSchema, type Filter } from './query/schema'
-import type { Predicate, PredicateOperators, TableFilter } from './kernel/plugin'
+import type { Predicate, PredicateActorLink, PredicateOperators, TableFilter } from './kernel/plugin'
 import type { Scope } from './types'
 import { ApiError } from './errors'
 import { roleNamePrivileges } from './organization-permissions'
@@ -106,19 +106,27 @@ function rolePolicyFilter(config: InstanceConfig, entity: string, scope: Scope, 
     if (typeof value === 'string' && value.startsWith('$actor.')) return actor![value.slice(7)] ?? null
     return Array.isArray(value) ? value.map(substitute) : value && typeof value === 'object' ? Object.fromEntries(Object.entries(value).map(([key, child]) => [key, substitute(child)])) : value
   }
-  const predicate = compilePolicyPredicate(config, entity, policy.where, substitute)
+  const actorLink: Omit<PredicateActorLink, 'entity'> | undefined = actor ? {
+    organizationId: scope.organizationId, accountId: String(actor.id), membershipRole: String(actor.role),
+    ...(scope.actor.type === 'agent' ? { token: { id: scope.actor.tokenId ?? scope.actor.id, role: scope.role, now: new Date().toISOString() } } : {}),
+  } : undefined
+  const predicate = compilePolicyPredicate(config, entity, policy.where, substitute, actorLink)
   if (constantPredicate(predicate) === false) return { kind: 'none', ...(policy.deny === 'forbidden' ? { deny: 'forbidden' as const } : {}) }
   return { kind: 'where', predicate, ...(policy.deny === 'forbidden' ? { deny: 'forbidden' as const } : {}) }
 }
-function compilePolicyPredicate(config: InstanceConfig, name: string, filter: Filter, substitute: (value: unknown) => unknown): Predicate {
+function compilePolicyPredicate(config: InstanceConfig, name: string, filter: Filter, substitute: (value: unknown) => unknown, actorLink?: Omit<PredicateActorLink, 'entity'>): Predicate {
   return { all: Object.entries(filter).map(([key, value]): Predicate => {
-    if (key === 'and' || key === 'or') return { [key === 'and' ? 'all' : 'any']: (value as Filter[]).map(child => compilePolicyPredicate(config, name, child, substitute)) } as Predicate
-    if (key === 'not') return { not: compilePolicyPredicate(config, name, value as Filter, substitute) }
+    if (key === 'and' || key === 'or') return { [key === 'and' ? 'all' : 'any']: (value as Filter[]).map(child => compilePolicyPredicate(config, name, child, substitute, actorLink)) } as Predicate
+    if (key === 'not') return { not: compilePolicyPredicate(config, name, value as Filter, substitute, actorLink) }
+    if (key === 'actorLinkedIn') {
+      if (!actorLink) throw new Error('actorLinkedIn requires a live actor projection')
+      return { actorLinkedIn: { ...actorLink, entity: value as string } }
+    }
     const relation = config.entities[name].relations[key]
     if (relation) {
       const none = relation.many && Object.hasOwn(value as object, 'none')
       return { [none ? 'notExists' : 'exists']: { entity: relation.entity, field: relation.many ? relation.field : 'id', parentField: relation.many ? 'id' : relation.field,
-        predicate: compilePolicyPredicate(config, relation.entity, (relation.many ? (value as Record<string, Filter>)[none ? 'none' : 'some'] : value) as Filter, substitute) } } as Predicate
+        predicate: compilePolicyPredicate(config, relation.entity, (relation.many ? (value as Record<string, Filter>)[none ? 'none' : 'some'] : value) as Filter, substitute, actorLink) } } as Predicate
     }
     const operators = substitute(value) as PredicateOperators
     return { [key]: operators }
