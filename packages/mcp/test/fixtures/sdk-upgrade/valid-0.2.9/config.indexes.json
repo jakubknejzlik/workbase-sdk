@@ -1,0 +1,9 @@
+[
+  {
+    "name": "notes_title_idx",
+    "entity": "notes",
+    "fields": [
+      "title"
+    ]
+  }
+]

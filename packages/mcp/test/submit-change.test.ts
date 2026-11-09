@@ -364,7 +364,7 @@ it('inspects a seeded SDK upgrade without rewriting it and persists discard thro
   expect(await new Workflow(restarted).call('inspect_schema', { instance: 'sample' })).toMatchObject({ ok: true, pendingProposals: [] })
   expect(configure).not.toHaveBeenCalled(); expect(credential).not.toHaveBeenCalled(); expect(calls).toEqual([])
 })
-it.each(['validate', 'preview_migration', 'apply_to_disposable', 'promote', 'submit_change'])('rejects SDK %s before config execution; spies observe a real config control', async action => {
+it.each(['promote', 'submit_change'])('rejects SDK %s before config execution; spies observe a real config control', async action => {
   const original = await proposal()
   const p = await seedUpgrade(), before = await readFile(proposalPath(), 'utf8')
   const plan = vi.spyOn(planning, 'prepare'), guard = vi.spyOn(planning, 'guard')
@@ -373,8 +373,9 @@ it.each(['validate', 'preview_migration', 'apply_to_disposable', 'promote', 'sub
     ...(action === 'submit_change' ? { instance: 'sample', expectedBaseSha: baseSha } : {}) }
   for (const status of ['proposed', 'discarded']) {
     await writeFile(proposalPath(), JSON.stringify({ ...p, status }))
-    expect(await workflow.call(action, input)).toEqual({ ok: false, error: { code: 'sdk_upgrade_not_supported', status: 409,
-      message: 'SDK-upgrade execution requires an upgrade handler; config-change tools cannot execute this proposal' } })
+    expect(await workflow.call(action, input)).toMatchObject({ ok: false, error: {
+      code: action === 'submit_change' ? 'sdk_upgrade_not_supported' : status === 'discarded' ? 'proposal_closed' : 'validation_required', status: 409,
+    } })
     for (const spy of [plan, guard, apply, commit, configure, credential]) expect(spy).not.toHaveBeenCalled()
     expect(calls).toEqual([])
     expect(await readFile(proposalPath(), 'utf8')).toBe(JSON.stringify({ ...p, status }))

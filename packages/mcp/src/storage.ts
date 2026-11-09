@@ -62,6 +62,18 @@ export async function atomic(path: string, data: string | Uint8Array, beforePubl
   }
   finally { await rm(tmp, { force: true }) }
 }
+async function syncDirectory(path: string) {
+  const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW)
+  try { await handle.sync() } finally { await handle.close() }
+}
+/** SDK authorization records must survive process death and filesystem restart. */
+export async function durableAtomic(path: string, data: string) {
+  await atomic(path, data, async temporary => {
+    const handle = await open(temporary, constants.O_RDONLY | constants.O_NOFOLLOW)
+    try { await handle.sync() } finally { await handle.close() }
+  })
+  await syncDirectory(dirname(path))
+}
 const require = createRequire(import.meta.url)
 async function importConfig(path: string, sourceHash: string) {
   if (process.versions.bun) {
@@ -90,11 +102,16 @@ async function importConfig(path: string, sourceHash: string) {
 }
 // Read exact bytes without following symlinks; absence is distinct from an empty file.
 async function fileBytes(path: string) {
+  return (await fileSnapshot(path))?.bytes ?? null
+}
+async function fileSnapshot(path: string) {
   let handle
   try {
     handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW)
-    if (!(await handle.stat()).isFile()) fail('unsafe_path', 'Transaction paths must be regular files', 403)
-    return await handle.readFile()
+    const stat = await handle.stat({ bigint: true })
+    if (!stat.isFile()) fail('unsafe_path', 'Transaction paths must be regular files', 403)
+    const bytes = await handle.readFile()
+    return { bytes, identity: { dev: stat.dev.toString(), ino: stat.ino.toString(), hash: byteHash(bytes) } }
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null
     if ((error as NodeJS.ErrnoException).code === 'ELOOP') fail('unsafe_path', 'Symlinks are forbidden', 403)
@@ -102,6 +119,15 @@ async function fileBytes(path: string) {
   } finally { await handle?.close() }
 }
 const byteHash = (bytes: Uint8Array) => hash(Buffer.from(bytes).toString('base64'))
+// Also fail closed for this process if the filesystem rejects both ways of
+// publishing a revocation marker. A successful retry must not reuse that proof.
+const unknownSdkEvidence = new Set<string>()
+function revokedSdkRecord(record: any) {
+  if (record?.kind !== 'sdk_upgrade') return record
+  if (record.status === 'promoted') return record
+  const { evidence: _evidence, ...proposal } = record
+  return { ...proposal, status: proposal.status === 'discarded' ? 'discarded' : 'proposed' }
+}
 async function dependencyHash(path: string) {
   const bytes = await fileBytes(path)
   return bytes === null ? null : byteHash(bytes)
@@ -109,18 +135,30 @@ async function dependencyHash(path: string) {
 const transactionPath = z.string().regex(/^(package\.json|bun\.lock|config(?:\.v[1-9][0-9]*)?\.ts|config\.(?:indexes|versions)\.json|migrations\/\d{4}_[a-z0-9_]+\.sql|proposals\/[a-f0-9-]+\.json)$/)
 const digest = z.string().regex(/^[a-f0-9]{64}$/)
 const base64 = z.string().refine(value => Buffer.from(value, 'base64').toString('base64') === value)
+const identityPart = z.union([z.string().regex(/^(0|[1-9][0-9]*)$/), z.number().int().nonnegative().transform(String)])
+const identitySchema = z.strictObject({ dev: identityPart, ino: identityPart, hash: digest })
+type FileIdentity = z.infer<typeof identitySchema>
+const ownedJournalSchema = z.strictObject({
+  version: z.literal(3), transactionId: z.uuid(), files: z.array(z.strictObject({
+    path: transactionPath, before: base64.nullable(), stage: z.uuid(), after: identitySchema,
+    capture: z.strictObject({ token: z.uuid(), identity: identitySchema }).optional(),
+  }).refine(file => file.before === null ? file.capture === undefined
+    : file.capture !== undefined && file.capture.identity.hash === byteHash(Buffer.from(file.before, 'base64')))),
+})
+type OwnedJournal = z.infer<typeof ownedJournalSchema>
 const journalSchema = z.union([
-  z.strictObject({ version: z.literal(2), files: z.array(z.strictObject({ path: transactionPath, before: base64.nullable(), afterHash: digest })) }),
+  ownedJournalSchema,
+  z.strictObject({ version: z.literal(2), files: z.array(z.strictObject({ path: transactionPath, before: base64.nullable(), afterHash: digest, capture: z.uuid().optional() })) }),
   z.strictObject({ files: z.array(z.strictObject({ path: transactionPath, before: z.string().nullable(), afterHash: digest.optional() })) }),
 ])
 // Validate all destinations before either publication or recovery can mutate anything.
-async function validatePaths(dir: string, paths: string[]) {
+async function validatePaths(dir: string, paths: string[], inspectFiles = true) {
   dir = resolve(dir)
   const seen = new Set<string>()
   await noLink(dir)
-  const directories = new Map<string, { dev: number; ino: number }>()
+  const directories = new Map<string, { dev: bigint; ino: bigint }>()
   for (const parent of [resolve(dir), join(dir, 'proposals')]) {
-    const stat = await lstat(parent)
+    const stat = await lstat(parent, { bigint: true })
     if (!stat.isDirectory() || stat.isSymbolicLink()) fail('unsafe_path', 'Transaction ancestors must be real directories', 403)
     directories.set(parent, { dev: stat.dev, ino: stat.ino })
   }
@@ -128,9 +166,10 @@ async function validatePaths(dir: string, paths: string[]) {
     if (!transactionPath.safeParse(path).success || seen.has(path)) fail('invalid_journal', 'Invalid promotion journal path', 500)
     seen.add(path)
     const destination = resolve(dir, path)
-    await noLink(dirname(destination)); await noLink(destination, true)
+    await noLink(dirname(destination))
+    if (inspectFiles) await noLink(destination, true)
     for (let parent = dirname(destination); ; parent = dirname(parent)) {
-      const stat = await lstat(parent)
+      const stat = await lstat(parent, { bigint: true })
       if (!stat.isDirectory() || stat.isSymbolicLink()) fail('unsafe_path', 'Transaction ancestors must be real directories', 403)
       const previous = directories.get(parent)
       if (previous && (previous.dev !== stat.dev || previous.ino !== stat.ino)) conflict(path)
@@ -138,7 +177,7 @@ async function validatePaths(dir: string, paths: string[]) {
       if (parent === resolve(dir)) break
     }
     // Reject directories and other special files as well as symlinks.
-    await fileBytes(destination)
+    if (inspectFiles) await fileBytes(destination)
   }
   return async (path: string) => {
     path = resolve(path)
@@ -151,7 +190,10 @@ async function validatePaths(dir: string, paths: string[]) {
     // Node has no openat: the residual window between this full ancestry fence
     // and each syscall is accepted, as in #208; this is not a directory-handle lock.
     for (const parent of chain) {
-      const stat = await lstat(parent).catch(() => conflict(path))
+      const stat = await lstat(parent, { bigint: true }).catch(error => {
+        if (error.code === 'ENOENT') conflict(path)
+        throw error
+      })
       const expected = directories.get(parent)
       if (!expected || !stat.isDirectory() || stat.isSymbolicLink() || stat.dev !== expected.dev || stat.ino !== expected.ino) conflict(path)
     }
@@ -162,8 +204,45 @@ class TransactionConflict extends WorkflowError {
 }
 function conflict(path: string): never { throw new TransactionConflict(path) }
 type Fence = (path: string) => Promise<void>
+const sameFile = (actual: FileIdentity | undefined, expected: FileIdentity) => actual?.dev === expected.dev && actual.ino === expected.ino && actual.hash === expected.hash
+async function assertOwned(path: string, identity: FileIdentity, fence: Fence) {
+  await fence(path)
+  if (!sameFile((await fileSnapshot(path))?.identity, identity)) conflict(path)
+}
+// The destination is reserved by link(), never rename(). Keep the original
+// until the journal has been retired, so rollback can restore its exact inode.
+// Writers cooperate via acquireInstanceLock; noncooperating swaps between checks and syscalls are out of scope.
+async function retain(path: string, temporary: string, identity: FileIdentity, fence: Fence) {
+  await fence(path); await fence(temporary)
+  try { await link(path, temporary) }
+  catch (error) { if ((error as NodeJS.ErrnoException).code === 'EEXIST') conflict(temporary); throw error }
+  await assertOwned(temporary, identity, fence)
+  await syncDirectory(dirname(temporary))
+  await assertOwned(path, identity, fence)
+  await unlink(path)
+}
+async function restoreRetained(temporary: string, path: string, identity: FileIdentity, fence: Fence) {
+  // Validation at discovery is insufficient: the retained name can be replaced
+  // before restoration. Both the source and the resulting canonical bytes matter.
+  await assertOwned(temporary, identity, fence)
+  await fence(path)
+  try { await link(temporary, path) }
+  catch (error) { if ((error as NodeJS.ErrnoException).code === 'EEXIST') conflict(path); throw error }
+  await assertOwned(path, identity, fence)
+  await assertOwned(temporary, identity, fence)
+  await syncDirectory(dirname(path))
+}
+async function removeOwned(path: string, identity: FileIdentity, fence: Fence) {
+  const temporary = `${path}.${crypto.randomUUID()}.tmp`
+  await retain(path, temporary, identity, fence)
+  await assertOwned(temporary, identity, fence)
+  await unlink(temporary)
+}
 // Never overwrite an unchecked destination, including while returning a capture.
-async function install(captured: string, path: string, fence: Fence, published?: () => void) {
+async function install(captured: string, path: string, fence: Fence, published?: () => void, expected?: FileIdentity) {
+  const staged = expected ?? (await fileSnapshot(captured))?.identity
+  if (!staged) conflict(captured)
+  await assertOwned(captured, staged, fence)
   await fence(path)
   try { await link(captured, path) }
   catch (error) {
@@ -171,21 +250,28 @@ async function install(captured: string, path: string, fence: Fence, published?:
     // never matching planned bytes, can prove publication in that case.
     if (published) {
       await fence(path)
-      const staged = await lstat(captured)
-      const installed = await lstat(path).catch(() => undefined)
-      if (installed?.dev === staged.dev && installed.ino === staged.ino) published()
+      if (sameFile((await fileSnapshot(path))?.identity, staged)) published()
     }
     throw error
   }
   published?.()
-  await fence(captured)
+  await assertOwned(path, staged, fence)
+  await assertOwned(captured, staged, fence)
   await unlink(captured)
 }
 async function capture(path: string, expected: string, digestBytes: (bytes: Buffer) => string, fence: Fence, txid: string) {
   const temporary = `${path}.${crypto.randomUUID()}.tmp`
   await fence(path)
-  try { await rename(path, temporary) }
-  catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false; throw error }
+  try { await link(path, temporary) }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false
+    if ((error as NodeJS.ErrnoException).code === 'EEXIST') conflict(temporary)
+    throw error
+  }
+  const identity = (await fileSnapshot(temporary))?.identity
+  if (!identity) conflict(path)
+  await assertOwned(path, identity, fence)
+  await unlink(path)
   await fence(temporary)
   let bytes: Buffer | null
   try { bytes = await fileBytes(temporary) }
@@ -194,13 +280,13 @@ async function capture(path: string, expected: string, digestBytes: (bytes: Buff
     bytes = null
   }
   if (bytes === null || digestBytes(bytes) !== expected) {
-    try { await install(temporary, path, fence) }
+    try { await install(temporary, path, fence, undefined, identity) }
     catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
       // Deterministic conflict artifact; no-replace also protects an earlier artifact.
       for (let suffix = 0; ; suffix++) {
         try {
-          await install(temporary, `${path}.conflict-${txid}${suffix ? `-${suffix}` : ''}`, fence)
+          await install(temporary, `${path}.conflict-${txid}${suffix ? `-${suffix}` : ''}`, fence, undefined, identity)
           break
         } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error }
       }
@@ -208,6 +294,7 @@ async function capture(path: string, expected: string, digestBytes: (bytes: Buff
     conflict(path)
   }
   await fence(temporary)
+  await assertOwned(temporary, identity, fence)
   await unlink(temporary)
   return true
 }
@@ -215,18 +302,21 @@ async function writeAbsent(path: string, bytes: Uint8Array, fence: Fence, before
   const temporary = `${path}.${crypto.randomUUID()}.tmp`
   await fence(temporary)
   const handle = await open(temporary, 'wx', 0o600)
+  let identity: FileIdentity
   try {
     await fence(temporary)
     await handle.writeFile(bytes)
     await fence(temporary)
     await handle.sync()
+    const stat = await handle.stat({ bigint: true })
+    identity = { dev: stat.dev.toString(), ino: stat.ino.toString(), hash: byteHash(bytes) }
   } finally { await handle.close() }
   try {
     await beforeInstall?.(temporary)
-    await install(temporary, path, fence, published)
+    await install(temporary, path, fence, published, identity)
   } catch (error) {
     await fence(temporary)
-    await unlink(temporary).catch(cleanupError => { if ((cleanupError as NodeJS.ErrnoException).code !== 'ENOENT') throw cleanupError })
+    if (sameFile((await fileSnapshot(temporary))?.identity, identity)) await unlink(temporary)
     if ((error as NodeJS.ErrnoException).code === 'EEXIST') conflict(path)
     throw error
   }
@@ -239,16 +329,17 @@ export async function dependencySnapshot(directory: string) {
 export class Store {
   private lockContext = new AsyncLocalStorage<{ dir: string; active: boolean }>()
   private owns(dir: string) { const held = this.lockContext.getStore(); return held?.active && held.dir === dir }
-  private async withLock<T>(dir: string, fn: () => Promise<T>): Promise<T> {
+  private async withLock<T>(dir: string, fn: () => Promise<T>, recover = true): Promise<T> {
     if (this.owns(dir)) return fn()
     const release = await acquireInstanceLock(dir)
     const held = { dir, active: true }
     try {
-      await this.rollback(dir)
+      if (recover) await this.rollback(dir)
       return await this.lockContext.run(held, fn)
     } finally { held.active = false; await release() }
   }
   private configCache = new Map<string, { sourceHash: string; config: InstanceConfig }>()
+  private instanceDirectories = new Map<string, string>()
   private standalone = false
   public allowed: Set<string>
   constructor(public root: string, private requestedAllowed?: Set<string>) {
@@ -257,6 +348,7 @@ export class Store {
   async init(allowEmpty = false) {
     this.allowed = this.requestedAllowed ?? new Set(devFixtures?.allowed ?? [])
     this.standalone = false
+    this.instanceDirectories.clear()
     const selectedRoot = resolve(this.root)
     await noLink(selectedRoot)
     const entry = join(selectedRoot, 'config.ts')
@@ -329,6 +421,21 @@ export class Store {
     await noLink(join(dir, 'migrations'))
     await noLink(join(dir, 'proposals'), true)
     await mkdir(join(dir, 'proposals'), { recursive: true, mode: 0o700 })
+    this.instanceDirectories.set(instance, dir)
+    return dir
+  }
+  /** Proposal access uses the canonical directory established at initialization,
+   * independently of application files that may now be missing or unsafe. */
+  async proposalDirectory(instance: string) {
+    if (!this.allowed.has(instance)) fail('instance_not_allowed', 'Instance is not in the server allowlist', 403)
+    const dir = this.standalone ? this.root : this.instanceDirectories.get(instance)
+    if (!dir) return this.directory(instance)
+    await noLink(this.root)
+    if (dir !== this.root) await noLink(dirname(dir))
+    await noLink(dir)
+    if (!(await lstat(dir)).isDirectory()) fail('invalid_instance_directory', 'Expected one configuration directory for the allowed instance')
+    await noLink(join(dir, 'proposals'), true)
+    await mkdir(join(dir, 'proposals'), { recursive: true, mode: 0o700 })
     return dir
   }
   async dependencyDigest(instance: string): Promise<string | undefined> {
@@ -364,9 +471,17 @@ export class Store {
   }
   async find(id: string) {
     for (const instance of this.allowed) {
-      const path = join(await this.directory(instance), 'proposals', `${id}.json`)
+      const path = join(await this.proposalDirectory(instance), 'proposals', `${id}.json`)
       await noLink(path, true)
-      try { return { instance, path, proposal: JSON.parse(await readFile(path, 'utf8')) } }
+      try {
+        const revoked = `${path}.sdk-revoked`
+        await noLink(revoked, true)
+        const pending = await readFile(revoked, 'utf8').catch(error => { if (error.code === 'ENOENT') return undefined; throw error })
+        const proposal = JSON.parse(pending || await readFile(path, 'utf8'))
+        const accepted = proposal?.kind !== 'sdk_upgrade' || proposal.evidence?.binding
+          && await this.sdkAttemptMatches(instance, id, proposal.evidence.binding.attemptId)
+        return { instance, path, proposal: pending !== undefined || unknownSdkEvidence.has(path) || !accepted ? revokedSdkRecord(proposal) : proposal }
+      }
       catch (e) { if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e }
     }
     return fail('proposal_not_found', 'Proposal not found in the allowlist', 404)
@@ -375,9 +490,237 @@ export class Store {
     const dir = await this.directory(instance)
     return this.withLock(dir, fn)
   }
+  /** SDK revalidation must revoke evidence under the lock before recovery can
+   * inspect application paths; the caller then recovers before any import. */
+  async lockedProposal<T>(instance: string, fn: (recover: () => Promise<void>) => Promise<T>) {
+    const dir = await this.proposalDirectory(instance)
+    return this.withLock(dir, () => fn(() => this.rollback(dir)), false)
+  }
+  /** Only standalone servers execute SDK proposals and own exactly one Instance.
+   * Open operations journal intent before discovery, acquisition, parsing, audit
+   * or input reads, using the REQUEST id even for unreadable/forged metadata.
+   * One append per start preserves ordering between competing MCP processes. */
+  async startSdkAttempt(id: string, action?: string) {
+    if (!this.standalone) return undefined
+    await noLink(this.root); await noLink(join(this.root, 'proposals'))
+    // Closed operations do not consume evidence. Peek only at canonical
+    // metadata; unreadable/invalid records must still journal intent before
+    // discovery fails. Workflow rechecks lifecycle under the Instance lock.
+    if (action) {
+      const proposal = await fileBytes(join(this.root, 'proposals', `${id}.json`))
+        .then(bytes => bytes && JSON.parse(bytes.toString())).catch(() => undefined)
+      if (proposal?.kind === 'sdk_upgrade' && (proposal.status === 'promoted' || proposal.status === 'discarded' && action !== 'discard')) return undefined
+    }
+    const attemptId = crypto.randomUUID()
+    const handle = await open(join(this.root, 'proposals', `${id}.sdk-attempts.jsonl`),
+      constants.O_WRONLY | constants.O_APPEND | constants.O_CREAT | constants.O_NOFOLLOW, 0o600)
+    try {
+      if (!(await handle.stat()).isFile()) fail('unsafe_path', 'SDK attempt journal must be a regular file', 403)
+      await handle.writeFile(JSON.stringify({ event: 'attempt-started', proposalId: id, attemptId }) + '\n')
+      await handle.sync()
+    } finally { await handle.close() }
+    await syncDirectory(join(this.root, 'proposals'))
+    return attemptId
+  }
+  /** Intent must precede discovery even for an unknown proposal kind. Once it
+   * is known to be a config proposal, retain its existing storage contract. */
+  async clearNonSdkAttempt(id: string) {
+    for (const instance of this.allowed) {
+      await rm(join(await this.proposalDirectory(instance), 'proposals', `${id}.sdk-attempts.jsonl`), { force: true })
+    }
+  }
+  /** A pending/unknown attempt never authorizes a proof. During revalidation,
+   * compare the prior proof to the start immediately preceding OUR start; a
+   * competing start also prevents publication from becoming consumable. */
+  async sdkAttemptMatches(instance: string, id: string, accepted: string, current?: string) {
+    try {
+      const path = join(await this.proposalDirectory(instance), 'proposals', `${id}.sdk-attempts.jsonl`)
+      const bytes = await fileBytes(path)
+      if (!bytes || bytes.length > 4 * 1024 * 1024 || !bytes.toString().endsWith('\n')) return false
+      // Older interrupted lines do not authorize anything. A later completed
+      // verification can recover; only the latest start (and its predecessor
+      // when consuming a prior proof during revalidation) matters.
+      const entries = bytes.toString().trimEnd().split('\n').slice(current ? -2 : -1).map(line => JSON.parse(line))
+      if (entries.some(entry => entry.event !== 'attempt-started' || entry.proposalId !== id || !z.uuid().safeParse(entry.attemptId).success)) return false
+      if (current && entries.pop()?.attemptId !== current) return false
+      return entries.at(-1)?.attemptId === accepted
+    } catch { return false }
+  }
+  async sdkProposalSource(id: string) {
+    const held = this.lockContext.getStore()
+    if (!held?.active) fail('internal_error', 'SDK consumption requires the Instance lock', 500)
+    const path = join(held.dir, 'proposals', `${id}.json`)
+    if (unknownSdkEvidence.has(path) || await fileBytes(`${path}.sdk-revoked`) !== null) fail('validation_required', 'SDK evidence is revoked', 409)
+    const bytes = await fileBytes(path)
+    if (!bytes) fail('invalid_proposal', 'SDK proposal is unreadable', 409)
+    return bytes
+  }
+  /** First fallible step under the canonical lock: publish revocation before
+   * reading/parsing the proposal, audit, recovery or application inputs. The
+   * hard link retains metadata across an interrupted rewrite, within proposals.
+   * An existing marker means the previous proof's acceptance is unknown. */
+  async revokeSdkProposal(id: string) {
+    const held = this.lockContext.getStore()
+    if (!held?.active) fail('internal_error', 'SDK revocation requires the Instance lock', 500)
+    const path = join(held.dir, 'proposals', `${id}.json`), marker = `${path}.sdk-revoked`
+    let previousAccepted = !unknownSdkEvidence.has(path)
+    unknownSdkEvidence.add(path)
+    try {
+      try { await link(path, marker) }
+      catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
+        previousAccepted = false
+      }
+      await noLink(marker)
+      await syncDirectory(dirname(marker))
+    } catch (error) {
+      // A failed link must not leave a consumable canonical record. Even an
+      // empty marker revokes it, without needing to read untrusted bytes.
+      const marked = await writeFile(marker, '', { flag: 'wx', mode: 0o600 }).then(() => true, () => false)
+      // The directory may reject BOTH marker publications while the existing
+      // canonical file is writable. Invalidate that inode durably under the
+      // lock; process-local revocation cannot protect a fresh MCP process.
+      let tombstone = json({ kind: 'sdk_upgrade', proposalId: id, status: 'proposed' })
+      try { tombstone = json(revokedSdkRecord(JSON.parse((await fileBytes(path))!.toString()))) }
+      catch { /* Unreadable/invalid metadata cannot prevent durable invalidation. */ }
+      const handle = await open(path, constants.O_WRONLY | constants.O_NOFOLLOW)
+      try {
+        if (!(await handle.stat()).isFile()) fail('unsafe_path', 'SDK proposal must be a regular file', 403)
+        await handle.truncate(0)
+        await handle.sync()
+        await handle.writeFile(tombstone)
+        await handle.sync()
+      } finally { await handle.close() }
+      if (marked) {
+        const markerHandle = await open(marker, constants.O_WRONLY | constants.O_NOFOLLOW)
+        try { await markerHandle.sync() } finally { await markerHandle.close() }
+        await syncDirectory(dirname(marker))
+      }
+      throw error
+    }
+    const marked = await readFile(marker)
+    const source = marked.length ? marked : await readFile(path)
+    const proposal = JSON.parse(source.toString('utf8'))
+    // Clear evidence before schema/identity validation can reject the record.
+    await durableAtomic(path, json(revokedSdkRecord(proposal)))
+    await unlink(marker)
+    await syncDirectory(dirname(marker))
+    unknownSdkEvidence.delete(path)
+    return { proposal, source, previousAccepted }
+  }
   // Startup and configuration operations call recovery while exclusively locked.
   async recover(dir: string) { await this.withLock(dir, async () => {}) }
-  private async rollback(dir: string, conflictPath?: string, publicationFence?: Fence, published?: Set<string>, captured?: Set<string>) {
+  private async rollbackOwned(dir: string, journal: OwnedJournal, source: string, publicationFence?: Fence, expectedJournal?: FileIdentity) {
+    const journalPath = join(dir, 'proposals/.promotion.json')
+    const validated = await validatePaths(dir, journal.files.map(file => file.path), false)
+    const fence = publicationFence ?? validated
+    const marker = `${journalPath}.conflict-${hash(source).slice(0, 16)}`
+    let journalFile: Awaited<ReturnType<typeof fileSnapshot>> = null
+    let conflicted = false
+    let failure: unknown
+    const attempt = async (path: string, undo: () => Promise<void>) => {
+      for (let retry = 0; retry < 2; retry++) {
+        try { await undo(); return }
+        catch (error) {
+          // An ancestry change still stops recovery before touching another path.
+          await fence(path)
+          if (error instanceof TransactionConflict || (error as { code?: string }).code === 'unsafe_path') { conflicted = true; return }
+          // Retry once, then leave the durable journal for a later recovery.
+          if (retry === 1) failure ??= error
+        }
+      }
+    }
+    await attempt(journalPath, async () => {
+      await fence(journalPath)
+      journalFile = await fileSnapshot(journalPath)
+      if (!journalFile || !journalFile.bytes.equals(Buffer.from(source)) || expectedJournal !== undefined && !sameFile(journalFile.identity, expectedJournal)) conflicted = true
+    })
+    await attempt(marker, async () => {
+      await fence(marker)
+      if (await lstat(marker).then(() => true, error => {
+        if (error.code === 'ENOENT') return false
+        throw error
+      })) conflicted = true
+    })
+    // Inspect and undo each publication independently. One bad retained capture
+    // must never strand earlier manifest, lock, SQL or proposal publications.
+    for (const file of journal.files) {
+      const path = resolve(dir, file.path)
+      await attempt(path, async () => {
+        await fence(path)
+        const temporary = file.capture && `${path}.${file.capture.token}.tmp`
+        const saved = temporary ? await fileSnapshot(temporary) : null
+        const validCapture = file.capture && sameFile(saved?.identity, file.capture.identity)
+        if (saved && !validCapture) conflicted = true
+        let current = await fileSnapshot(path)
+        if (file.capture && sameFile(current?.identity, file.capture.identity) || file.before === null && current === null) return
+        if (current !== null) {
+          if (!sameFile(current.identity, file.after)) { conflicted = true; return }
+          await removeOwned(path, file.after, fence)
+          current = null
+        }
+        if (file.before !== null && current === null) {
+          if (validCapture && temporary && file.capture) {
+            await restoreRetained(temporary, path, file.capture.identity, fence)
+          } else {
+            // The durable original bytes still let us undo our publication if
+            // its retained inode was lost. Preserve all evidence of that loss.
+            conflicted = true
+            await writeAbsent(path, Buffer.from(file.before, 'base64'), fence)
+            if ((await fileSnapshot(path))?.identity.hash !== byteHash(Buffer.from(file.before, 'base64'))) conflict(path)
+          }
+        }
+      })
+    }
+    for (const file of journal.files) {
+      const stage = join(dir, 'proposals', `.promotion-${file.stage}.tmp`)
+      await attempt(stage, async () => {
+        await fence(stage)
+        const staged = await fileSnapshot(stage)
+        if (staged) {
+          if (sameFile(staged.identity, file.after)) await unlink(stage)
+          else conflicted = true
+        }
+      })
+    }
+    // An owned publication left by an I/O fault is pending rollback, not a
+    // proven foreign identity. Finish it on retry before recording conflicts.
+    if (failure) throw failure
+    // Recheck every canonical result before disposing of any original. A later
+    // restore may have raced an earlier file or its retained source.
+    for (const file of journal.files) {
+      const path = resolve(dir, file.path)
+      await attempt(path, async () => {
+        await fence(path)
+        const current = await fileSnapshot(path)
+        if (file.capture ? !sameFile(current?.identity, file.capture.identity) : current !== null) conflicted = true
+        if (file.capture) {
+          const saved = await fileSnapshot(`${path}.${file.capture.token}.tmp`)
+          if (saved && !sameFile(saved.identity, file.capture.identity)) conflicted = true
+        }
+      })
+    }
+    if (failure) throw failure
+    if (conflicted) {
+      await fence(marker)
+      try { await writeAbsent(marker, Buffer.from(source), fence) }
+      catch (error) { if (!(error instanceof TransactionConflict)) throw error }
+      await syncDirectory(dirname(marker))
+      conflict(journalPath)
+    }
+    // Cleanup begins only after every canonical original has been verified.
+    for (const directory of new Set(journal.files.map(file => dirname(resolve(dir, file.path))))) await syncDirectory(directory)
+    for (const file of journal.files) if (file.capture) {
+      const temporary = `${resolve(dir, file.path)}.${file.capture.token}.tmp`
+      if (await fileSnapshot(temporary)) {
+        await assertOwned(temporary, file.capture.identity, fence)
+        await unlink(temporary)
+      }
+    }
+    await removeOwned(journalPath, journalFile!.identity, fence)
+    await syncDirectory(dirname(journalPath))
+  }
+  private async rollback(dir: string, publicationFence?: Fence) {
     const journalPath = join(dir, 'proposals', '.promotion.json')
     await publicationFence?.(journalPath)
     await noLink(dir); await noLink(dirname(journalPath)); await noLink(journalPath, true)
@@ -389,74 +732,48 @@ export class Store {
     const result = journalSchema.safeParse(parsed)
     if (!result.success) fail('invalid_journal', 'Invalid promotion journal', 500)
     const journal = result.data
+    if ('version' in journal && journal.version === 3) return this.rollbackOwned(dir, journal, source, publicationFence)
     const validated = await validatePaths(dir, journal.files.map(file => file.path))
     const fence = publicationFence ?? validated
+    // Compatibility for pre-identity journals. Their retained names cannot be
+    // authenticated, even when their bytes match, and must remain untouched.
+    for (const file of journal.files) if ('capture' in file && file.capture) {
+      const temporary = `${resolve(dir, file.path)}.${file.capture}.tmp`
+      await fence(temporary)
+      if (await fileBytes(temporary) !== null) conflict(file.path)
+    }
     const txid = hash(source).slice(0, 16)
     const marker = `${journalPath}.conflict-${txid}`
     await fence(marker)
     if (await fileBytes(marker) !== null) conflict(journalPath)
-    const retainConflict = async () => {
-      // Persist known conflicts: a later retry must not mistake an external
-      // creator's identical bytes for our publication and delete them.
-      await fence(marker)
-      try { await link(journalPath, marker) }
-      catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error }
-    }
-    // For unpublished captures, the no-replace restore below decides whether
-    // an external occupant still exists, even if publication failed with EEXIST.
-    if (conflictPath !== undefined && captured?.has(conflictPath) && !published?.has(conflictPath)) conflictPath = undefined
-    if (conflictPath !== undefined) await retainConflict()
-    let conflicted = conflictPath !== undefined
+    let conflicted = false
     for (const file of journal.files) {
       const path = resolve(dir, file.path)
-      // A failed no-replace install/capture is known to be external even when
-      // its bytes happen to equal our before/after snapshot.
-      const unpublishedCapture = captured?.has(path) && !published?.has(path)
-      if (path === conflictPath && !unpublishedCapture) continue
       await fence(path)
       const before = file.before === null ? null : Buffer.from(file.before, 'version' in journal ? 'base64' : 'utf8')
       const digestBytes = 'version' in journal ? byteHash : (bytes: Buffer) => hash(bytes.toString('utf8'))
       const current = await fileBytes(path)
-      if (unpublishedCapture && before !== null) {
-        // Capture removed our original, but no replacement was published. Return
-        // its exact journal bytes without claiming any new occupant of the path.
-        try { await writeAbsent(path, before, fence) }
-        catch (error) {
-          await fence(path)
-          if ((error as { code?: string }).code !== 'concurrent_modification') throw error
-          for (let suffix = 0; ; suffix++) {
-            try {
-              await writeAbsent(`${path}.conflict-${txid}${suffix ? `-${suffix}` : ''}`, before, fence)
-              break
-            } catch (artifactError) {
-              if ((artifactError as { code?: string }).code !== 'concurrent_modification') throw artifactError
-            }
-          }
-          conflicted = true
-        }
-        continue
-      }
-      // Already restored entries are safe to retry. Other bytes are a conflict.
       if (current === null && before === null || current !== null && before !== null && current.equals(before)) continue
-      // Forward rollback owns only completed publications. Startup recovery has no
-      // progress record and remains hash-based: identical external bytes after a
-      // crash are indistinguishable from transaction bytes.
-      if (published && !published.has(path)) { conflicted = true; continue }
       if (current !== null && file.afterHash !== undefined && digestBytes(current) !== file.afterHash) { conflicted = true; continue }
       try {
-        // Even legacy UTF-8 ownership hashes must capture the exact bytes just observed.
         if (current !== null) await capture(path, byteHash(current), byteHash, fence, txid)
         if (before !== null) await writeAbsent(path, before, fence)
       } catch (error) {
-        // An ancestry change must stop immediately, including before any cleanup.
         await fence(path)
-        if ((error as { code?: string }).code !== 'concurrent_modification') throw error
+        if (!(error instanceof TransactionConflict)) throw error
         conflicted = true
       }
     }
-    if (conflicted) { await retainConflict(); conflict(journalPath) }
+    if (conflicted) {
+      await fence(marker)
+      try { await link(journalPath, marker) }
+      catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error }
+      await syncDirectory(dirname(marker))
+      conflict(journalPath)
+    }
     await capture(journalPath, byteHash(Buffer.from(source)), byteHash, fence, txid)
   }
+
   private async contentHash(path: string) {
     await noLink(path, true)
     try { return hash(await readFile(path, 'utf8')) }
@@ -466,22 +783,50 @@ export class Store {
     return ['package.json', 'bun.lock'].includes(path) ? byteHash(bytes) : hash(bytes.toString('utf8'))
   }
   // Caller holds the instance lock across loading guards, staging, publication and rollback.
-  async commit(instance: string, files: { path: string; data: string; create?: boolean }[], guards: Bundle['guards']): Promise<void> {
+  async commit(instance: string, files: { path: string; data: string | Uint8Array; create?: boolean }[], guards: Bundle['guards'], verify?: () => Promise<void>): Promise<void> {
     const dir = await this.directory(instance)
-    if (!this.owns(dir)) return this.withLock(dir, () => this.commit(instance, files, guards))
+    if (!this.owns(dir)) return this.withLock(dir, () => this.commit(instance, files, guards, verify))
     const expected: Record<string, string | null> = { ...guards }
     const expectedBytes = new Map<string, string | null>()
-    const journal: { version: 2; files: { path: string; before: string | null; afterHash: string }[] } = { version: 2, files: [] }
+    const journal: OwnedJournal = { version: 3, transactionId: crypto.randomUUID(), files: [] }
+    let source: string
+    const staged = new Map<string, { path: string; identity: FileIdentity }>()
     const fence = await validatePaths(dir, files.map(file => file.path))
-    for (const f of files) {
-      const path = join(dir, f.path)
-      await noLink(path, true)
-      const before = await fileBytes(path)
-      if (f.create && before !== null) fail('migration_exists', 'Migration file already exists', 409)
-      if (!Object.hasOwn(expected, f.path)) expected[f.path] = before === null ? null : this.publicationHash(f.path, before)
-      expectedBytes.set(f.path, before === null ? null : byteHash(before))
-      journal.files.push({ path: f.path, before: before?.toString('base64') ?? null, afterHash: byteHash(Buffer.from(f.data)) })
+    const cleanupStaged = async () => {
+      for (const file of staged.values()) {
+        if (sameFile((await fileSnapshot(file.path))?.identity, file.identity)) {
+          await fence(file.path); await unlink(file.path)
+        }
+      }
     }
+    try {
+      for (const f of files) {
+        const path = join(dir, f.path)
+        const before = await fileSnapshot(path)
+        if (f.create && before !== null) fail('migration_exists', 'Migration file already exists', 409)
+        if (!Object.hasOwn(expected, f.path)) expected[f.path] = before === null ? null : this.publicationHash(f.path, before.bytes)
+        expectedBytes.set(f.path, before?.identity.hash ?? null)
+        const stage = crypto.randomUUID(), temporary = join(dir, 'proposals', `.promotion-${stage}.tmp`)
+        await fence(temporary)
+        const handle = await open(temporary, 'wx', 0o600)
+        let identity: FileIdentity
+        try {
+          await handle.writeFile(f.data)
+          await handle.sync()
+          const stat = await handle.stat({ bigint: true })
+          identity = { dev: stat.dev.toString(), ino: stat.ino.toString(), hash: byteHash(Buffer.from(f.data)) }
+        } finally { await handle.close() }
+        staged.set(f.path, { path: temporary, identity })
+        journal.files.push({ path: f.path, before: before?.bytes.toString('base64') ?? null, stage, after: identity,
+          ...(before ? { capture: { token: crypto.randomUUID(), identity: before.identity } } : {}) })
+      }
+      source = json(journal)
+      if (!journalSchema.safeParse(JSON.parse(source)).success) fail('invalid_journal', 'Invalid promotion journal', 500)
+    } catch (error) { await cleanupStaged(); throw error }
+    const internalPaths = new Set([
+      ...[...staged.values()].map(file => file.path),
+      ...journal.files.flatMap(file => file.capture ? [`${join(dir, file.path)}.${file.capture.token}.tmp`] : []),
+    ])
     const check = async (temporary?: string, publishing?: string) => {
       const paths = new Set([
         ...Object.keys(expected),
@@ -491,7 +836,7 @@ export class Store {
       // Read the destination last, immediately before capturing it for publication.
       if (publishing) { paths.delete(publishing); paths.add(publishing) }
       for (const path of paths) {
-        if (join(dir, path) === temporary) continue
+        if (join(dir, path) === temporary || internalPaths.has(join(dir, path))) continue
         if ((['package.json', 'bun.lock'].includes(path)
           ? await dependencyHash(join(dir, path)) : await this.contentHash(join(dir, path))) !== (expected[path] ?? null)
           || (expectedBytes.has(path) && await dependencyHash(join(dir, path)) !== expectedBytes.get(path))) {
@@ -499,29 +844,51 @@ export class Store {
         }
       }
     }
-    const published = new Set<string>()
-    const captured = new Set<string>()
-    await check()
+    const journalPath = join(dir, 'proposals/.promotion.json')
+    let journalIdentity: FileIdentity | undefined
     try {
-      await writeAbsent(join(dir, 'proposals', '.promotion.json'), Buffer.from(json(journal)), fence)
+      await check()
+      await writeAbsent(journalPath, Buffer.from(source), fence, async temporary => {
+        journalIdentity = (await fileSnapshot(temporary))!.identity
+      })
+      // The immutable durable journal records original and staged inode identities
+      // before capture or publication. Restart never infers ownership from bytes.
+      await syncDirectory(dirname(journalPath))
       for (const f of files) {
-        const path = join(dir, f.path)
-        await writeAbsent(path, Buffer.from(f.data), fence, async temporary => {
-          await check(temporary, f.path)
-          const owned = expectedBytes.get(f.path)
-          if (owned != null && await capture(path, owned, byteHash, fence, hash(json(journal)).slice(0, 16))) captured.add(path)
-        }, () => { published.add(path) })
+        const path = join(dir, f.path), stage = staged.get(f.path)!
+        await check(stage.path, f.path)
+        const file = journal.files.find(file => file.path === f.path)!
+        if (file.capture) await retain(path, `${path}.${file.capture.token}.tmp`, file.capture.identity, fence)
+        await assertOwned(stage.path, stage.identity, fence)
+        try { await install(stage.path, path, fence, undefined, stage.identity) }
+        catch (error) { if ((error as NodeJS.ErrnoException).code === 'EEXIST') conflict(path); throw error }
+        await assertOwned(path, stage.identity, fence)
         expected[f.path] = this.publicationHash(f.path, Buffer.from(f.data))
         expectedBytes.set(f.path, byteHash(Buffer.from(f.data)))
       }
       await check()
-      await capture(join(dir, 'proposals', '.promotion.json'), byteHash(Buffer.from(json(journal))), byteHash, fence, hash(json(journal)).slice(0, 16))
-    } catch (e) {
-      // Keep the original ancestry identities across forward rollback too.
-      for (const f of files) await fence(join(dir, f.path))
-      if (e instanceof TransactionConflict && e.path === join(dir, 'proposals', '.promotion.json')) throw e
-      await this.rollback(dir, e instanceof TransactionConflict ? e.path : undefined, fence, published, captured)
-      throw e
+      await verify?.()
+      await check()
+      for (const file of journal.files) if (file.capture) {
+        await assertOwned(`${join(dir, file.path)}.${file.capture.token}.tmp`, file.capture.identity, fence)
+      }
+      for (const directory of new Set(files.map(file => dirname(join(dir, file.path))))) await syncDirectory(directory)
+      await removeOwned(journalPath, journalIdentity!, fence)
+      await syncDirectory(dirname(journalPath))
+    } catch (error) {
+      // Only recover a journal this attempt actually installed. An occupied
+      // journal destination belongs to somebody else even if its bytes match.
+      if (journalIdentity) await this.rollbackOwned(dir, journal, source, fence, journalIdentity)
+      throw error
+    } finally { await cleanupStaged() }
+    // Journal retirement is the durable commit point. Failed disposal can leave
+    // harmless retained originals, but cannot revoke a completed publication.
+    for (const file of journal.files) if (file.capture) {
+      const temporary = `${join(dir, file.path)}.${file.capture.token}.tmp`
+      try {
+        await assertOwned(temporary, file.capture.identity, fence)
+        await unlink(temporary)
+      } catch { /* Leave an unverified or undisposable retained file untouched. */ }
     }
   }
 }

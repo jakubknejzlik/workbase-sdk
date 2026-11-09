@@ -9,6 +9,10 @@ import { acquireInstanceLock } from '../src/instance-lock.ts'
 import { dependencySnapshot, Store } from '../src/storage.ts'
 import { hash } from '../src/planning.ts'
 import { copyHistoricalInstances } from './fixtures.ts'
+import { Workflow } from '../src/workflow.ts'
+import { captureSdkInputs } from '../src/sdk-target.ts'
+import { targetProof } from './fixtures/sdk-upgrade-evidence.ts'
+import { digestBytes } from '../src/sdk-upgrade-protocol.ts'
 
 let scratch: string, root: string, before: Buffer
 const children: ChildProcess[] = []
@@ -55,6 +59,27 @@ it('recovers partial config before evaluation on standalone restart (base-red)',
   expect(result.error, 'init must recover before executable config is imported').toBeNull()
   await restored(result.store!)
 })
+it('recovers before config import, then revokes old SDK evidence on cancelled revalidation', async () => {
+  await fs.writeFile(join(root, 'package.json'), '{"type":"module"}')
+  await fs.writeFile(join(root, 'bun.lock'), 'fixture lock')
+  const store = await restart(), latest = await store.load('sample'), inputs = await captureSdkInputs(root)
+  const proposalId = crypto.randomUUID()
+  const proof = await targetProof({ instanceRoot: root, checkoutRoot: resolve('.'), inputs, targetVersion: '0.2.12',
+    base: { instanceId: 'sample', baseRevision: latest.config.revision, baseFingerprint: latest.fingerprint, baseDependencyDigest: latest.dependencyDigest! },
+    readBase: async () => ({ baseFingerprint: latest.fingerprint, baseDependencyDigest: latest.dependencyDigest! }) })
+  const proposal = { kind: 'sdk_upgrade', proposalId, instance: 'sample', baseRevision: latest.config.revision, targetVersion: '0.2.12',
+    baseFingerprint: latest.fingerprint, baseDependencyDigest: latest.dependencyDigest, status: 'verified', createdAt: new Date().toISOString(),
+    evidence: { ...proof, state: 'verified', proposalId, baseInputHashes: Object.fromEntries(Object.entries(inputs).map(([path, bytes]) => [path, digestBytes(bytes)])),
+      artifacts: Object.fromEntries(Object.entries(proof.artifacts).map(([path, file]) => [path, { data: file.bytes.toString('base64'), sha256: file.sha256 }])) } }
+  await fs.writeFile(join(root, 'proposals', `${proposalId}.json`), JSON.stringify(proposal))
+  await interrupted()
+  const recovered = await restart()
+  expect(await bytes('config.ts')).toEqual(before)
+  expect(await new Workflow(recovered).call('validate', { proposalId }, AbortSignal.abort())).toMatchObject({ error: { code: 'sdk_upgrade_cancelled' } })
+  const saved = JSON.parse((await bytes(`proposals/${proposalId}.json`))!.toString())
+  expect(saved.status).toBe('proposed'); expect(saved.evidence).toBeUndefined()
+  expect(await captureSdkInputs(root)).toEqual(inputs)
+})
 it('discovers an absent config from its journal instead of entering bootstrap', async () => {
   await interrupted(true)
   const store = await restart(true)
@@ -70,6 +95,24 @@ it.each([false, true])('restores manifest and lock exact bytes / original absenc
   expect(await bytes('package.json')).toEqual(absent ? null : manifest)
   expect(await bytes('bun.lock')).toEqual(absent ? null : lock)
   expect((await store.load('sample')).dependencyDigest).toBe((await dependencySnapshot(root)).digest)
+  expect(await bytes('proposals/.promotion.json')).toBeNull()
+})
+it.each([1, 2, 3, 4])('recovers an interrupted SDK publication after %s writes, including its proposal transition', async count => {
+  const proposalId = crypto.randomUUID(), proposalPath = `proposals/${proposalId}.json`
+  const original = Buffer.from('{"kind":"sdk_upgrade","status":"verified"}\r\n')
+  const files = [
+    { path: 'package.json', before: Buffer.from('{"type":"module"}\r\n'), after: Buffer.from('{"type":"module","target":true}') },
+    { path: 'bun.lock', before: Buffer.from([0xff, 0, 0x80]), after: Buffer.from([0xfe, 13, 10]) },
+    { path: 'migrations/0002_sdk_upgrade.sql', before: null, after: Buffer.from('-- exact marker\r\nSELECT 1;\n') },
+    { path: proposalPath, before: original, after: Buffer.from('{"kind":"sdk_upgrade","status":"promoted"}\n') },
+  ]
+  for (const file of files) if (file.before) await fs.writeFile(join(root, file.path), file.before)
+  const base = await captureSdkInputs(root)
+  await journal(files.map(file => entry(file.path, file.before, file.after)))
+  for (const file of files.slice(0, count)) await fs.writeFile(join(root, file.path), file.after)
+  await restart()
+  expect(await captureSdkInputs(root)).toEqual(base)
+  expect(await bytes(proposalPath)).toEqual(original)
   expect(await bytes('proposals/.promotion.json')).toBeNull()
 })
 

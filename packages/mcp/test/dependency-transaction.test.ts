@@ -137,6 +137,55 @@ it('recovers legacy UTF-8 journals unchanged, including ownership hashes', async
   expect(await bytes('config.versions.json')).toEqual(Buffer.from('original ž'))
   expect(await bytes('proposals/abcd.json')).toEqual(Buffer.from('legacy'))
 })
+it('review-3: recovers existing number-form version 3 identities', async () => {
+  const before = await snapshot(), entries = []
+  for (const file of files) {
+    const path = join(root, file.path), original = await bytes(file.path), token = crypto.randomUUID()
+    let capture
+    if (original !== null) {
+      const stat = await fs.lstat(path)
+      capture = { token, identity: { dev: stat.dev, ino: stat.ino, hash: rawHash(original) } }
+      await fs.rename(path, `${path}.${token}.tmp`)
+    }
+    await fs.writeFile(path, file.data)
+    const stat = await fs.lstat(path)
+    entries.push({ path: file.path, before: original?.toString('base64') ?? null, stage: crypto.randomUUID(),
+      after: { dev: stat.dev, ino: stat.ino, hash: rawHash(file.data) }, ...(capture ? { capture } : {}) })
+  }
+  await saveJournal({ version: 3, transactionId: crypto.randomUUID(), files: entries })
+  await expect(new Store(root).init()).resolves.toBeUndefined()
+  expect(await snapshot()).toEqual(before)
+  expect(await bytes('proposals/.promotion.json')).toBeNull()
+})
+it('review-3: validates serialized identities before publishing a journal or canonical file', async () => {
+  const before = await snapshot(), open = fs.open, link = fs.link
+  let published = false, injected = false
+  vi.spyOn(fs, 'open').mockImplementation(async (...args: Parameters<typeof fs.open>) => {
+    const handle = await open(...args)
+    if (String(args[0]).startsWith(join(root, 'proposals/.promotion-'))) {
+      const stat = handle.stat.bind(handle)
+      handle.stat = (async (options?: { bigint?: boolean }) => {
+        injected = true
+        const info = options?.bigint ? await stat({ bigint: true }) : await stat()
+        return Object.assign(info, { ino: options?.bigint ? -1n : -1 })
+      }) as typeof handle.stat
+    }
+    return handle
+  })
+  vi.spyOn(fs, 'link').mockImplementation(async (from, to) => {
+    if (String(to) === journalPath() || files.some(file => String(to) === join(root, file.path))) published = true
+    return link(from, to)
+  })
+  syncBuiltinESMExports()
+  try {
+    await expect(commit()).rejects.toMatchObject({ code: 'invalid_journal' })
+    expect(injected).toBe(true)
+    expect(published).toBe(false)
+    expect(await snapshot()).toEqual(before)
+    expect(await bytes('proposals/.promotion.json')).toBeNull()
+    expect((await fs.readdir(join(root, 'proposals'))).filter(name => name.startsWith('.promotion-'))).toEqual([])
+  } finally { vi.restoreAllMocks(); syncBuiltinESMExports() }
+})
 const invalid = [
   null, {}, { files: 'bad' }, { version: 3, files: [] },
   { version: 2, files: [entry(), entry()] },
@@ -211,9 +260,11 @@ it.each(['bun.lock', 'package.json'])('preserves an external creator after captu
   }, async () => { await expect(commit()).rejects.toMatchObject({ code: 'concurrent_modification' }) })
   expect(injected).toBe(true)
   expect(await snapshot()).toEqual(before.map((value, i) => files[i].path === target ? external : value))
-  const artifacts = (await fs.readdir(root)).filter(name => name.startsWith(`${target}.conflict-`))
-  expect(artifacts).toHaveLength(1)
-  expect(await bytes(artifacts[0])).toEqual(before[files.findIndex(file => file.path === target)])
+  const saved = JSON.parse((await bytes('proposals/.promotion.json'))!.toString()).files.find((file: { path: string }) => file.path === target)
+  const retained = `${target}.${saved.capture.token}.tmp`
+  expect(await bytes(retained)).toEqual(before[files.findIndex(file => file.path === target)])
+  const stat = await fs.lstat(join(root, retained), { bigint: true })
+  expect({ dev: stat.dev.toString(), ino: stat.ino.toString() }).toEqual({ dev: saved.capture.identity.dev, ino: saved.capture.identity.ino })
   expect(await bytes('proposals/.promotion.json')).not.toBeNull()
   await expect(store.recover(root)).rejects.toMatchObject({ code: 'concurrent_modification' })
   expect(await bytes(target)).toEqual(external)
@@ -248,7 +299,8 @@ for (const format of ['v2', 'legacy', 'legacy-unhashed']) {
     await saveJournal(recoveryJournal([{ path: 'bun.lock', before }]))
     let injected = false
     // Hook both historical rm/overwrite and the new capture syscall for a behavioral red run.
-    const rename = fs.rename, rm = fs.rm
+    const rename = fs.rename, link = fs.link, rm = fs.rm
+    let retained = ''
     const stub = vi.spyOn(fs, 'rename').mockImplementation(async (from, to) => {
       if (!injected && [String(from), String(to)].includes(join(root, 'bun.lock'))) {
         injected = true
@@ -264,15 +316,26 @@ for (const format of ['v2', 'legacy', 'legacy-unhashed']) {
       }
       await rm(path, options)
     })
+    const linked = vi.spyOn(fs, 'link').mockImplementation(async (from, to) => {
+      if (!injected && String(from) === join(root, 'bun.lock')) {
+        injected = true; retained = String(to)
+        await fs.writeFile(from, 'external replacement')
+        await link(from, to)
+        if (occupied) { await fs.unlink(from); await fs.writeFile(from, 'external creator') }
+      } else await link(from, to)
+    })
     syncBuiltinESMExports()
     let error: unknown
     try { await store.recover(root) } catch (caught) { error = caught }
-    finally { stub.mockRestore(); removed.mockRestore(); syncBuiltinESMExports() }
+    finally { stub.mockRestore(); removed.mockRestore(); linked.mockRestore(); syncBuiltinESMExports() }
     expect(injected).toBe(true)
     expect(await bytes('bun.lock')).toEqual(Buffer.from(occupied ? 'external creator' : 'external replacement'))
-    const artifacts = (await fs.readdir(root)).filter(name => name.startsWith('bun.lock.conflict-'))
-    expect(artifacts).toHaveLength(occupied ? 1 : 0)
-    if (occupied) expect(await bytes(artifacts[0])).toEqual(Buffer.from('external replacement'))
+    if (occupied && retained) expect(await fs.readFile(retained)).toEqual(Buffer.from('external replacement'))
+    else {
+      const artifacts = (await fs.readdir(root)).filter(name => name.startsWith('bun.lock.conflict-'))
+      expect(artifacts).toHaveLength(occupied ? 1 : 0)
+      if (occupied) expect(await bytes(artifacts[0])).toEqual(Buffer.from('external replacement'))
+    }
     expect(error).toMatchObject({ code: 'concurrent_modification' })
     expect(await bytes('proposals/.promotion.json')).not.toBeNull()
   })
@@ -294,7 +357,7 @@ for (const format of ['v2', 'legacy', 'legacy-unhashed']) {
 }
 it('preserves an external replacement captured during forward publication', async () => {
   let injected = false
-  await beforeSyscall('rename', async (from) => {
+  await beforeSyscall('link', async (from) => {
     if (!injected && from === join(root, 'bun.lock')) { injected = true; await fs.writeFile(from, 'external replacement') }
   }, async () => { await expect(commit()).rejects.toMatchObject({ code: 'concurrent_modification' }) })
   expect(injected).toBe(true)

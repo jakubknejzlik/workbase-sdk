@@ -1,0 +1,15 @@
+{
+  "name": "sdk-upgrade-valid-029",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@workbasehq/core": "0.2.9",
+    "@workbasehq/plugins": "0.2.9",
+    "@workbasehq/mcp": "0.2.9"
+  },
+  "overrides": {
+    "@workbasehq/core": "0.2.9",
+    "@workbasehq/plugins": "0.2.9",
+    "@workbasehq/mcp": "0.2.9"
+  }
+}

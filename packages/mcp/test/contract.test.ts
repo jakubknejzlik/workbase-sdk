@@ -18,7 +18,7 @@ import { verifyAgent } from './fixtures/verify-agent.ts'
 let root: string
 let client: Client
 let application: Awaited<ReturnType<typeof createServer>>
-const tools = ['bootstrap_instance', 'list_versions', 'rollback', 'inspect_schema', 'propose_change', 'validate', 'preview_migration', 'apply_to_disposable', 'promote', 'submit_change', 'discard']
+const tools = ['bootstrap_instance', 'list_versions', 'rollback', 'inspect_schema', 'upgrade_sdk', 'propose_change', 'validate', 'preview_migration', 'apply_to_disposable', 'promote', 'submit_change', 'discard']
 const addition = { kind: 'add_field', entity: 'jobs', field: 'notes', definition: { type: 'text' } }
 async function call(name: string, args: Record<string, unknown>) {
   const response = await client.callTool({ name, arguments: args }, undefined, { timeout: 120000 })
@@ -170,7 +170,17 @@ describe('MCP SDK in-memory contract', () => {
       const journal = await readFile(join(dir, 'proposals/.promotion.json'), 'utf8')
       const marker = `.promotion.json.conflict-${createHash('sha256').update(journal).digest('hex').slice(0, 16)}`
       expect(await readFile(join(dir, 'proposals', marker), 'utf8')).toBe(journal)
-      expect((await readdir(join(dir, 'proposals'))).sort()).toEqual([`${id}.json`, 'log.jsonl', '.promotion.json', marker].sort())
+      const entries = await readdir(join(dir, 'proposals'))
+      const retained = JSON.parse(journal).files.flatMap((file: { path: string; stage: string; before: string | null; capture?: { token: string } }) => [
+        `.promotion-${file.stage}.tmp`,
+        ...(file.capture && file.path.startsWith('proposals/') ? [`${file.path.slice('proposals/'.length)}.${file.capture.token}.tmp`] : []),
+      ]).filter((name: string) => entries.includes(name))
+      expect(entries.sort()).toEqual([`${id}.json`, 'log.jsonl', '.promotion.json', marker, ...retained].sort())
+      for (const file of JSON.parse(journal).files) if (file.capture && file.path.startsWith('proposals/')) {
+        const temporary = join(dir, `${file.path}.${file.capture.token}.tmp`)
+        const captured = await readFile(temporary).catch(error => { if (error.code === 'ENOENT') return null; throw error })
+        if (captured) expect(captured).toEqual(Buffer.from(file.before, 'base64'))
+      }
       await expect(application.store.recover(dir)).rejects.toMatchObject({ code: 'concurrent_modification' })
     }
     expect(await readdir(dir)).not.toContain('config.indexes.json')

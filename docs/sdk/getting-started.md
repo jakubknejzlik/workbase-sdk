@@ -106,6 +106,20 @@ applied or promoted. Original migrations and history are preserved; a historical
 config with invalid display fields is visible in `list_versions` with rollback
 blocked. Repair it in a new version rather than rewriting archived source.
 
+## Upgrade the standalone SDK
+
+Call `upgrade_sdk` with `instance`, its current `baseRevision`, and an exact,
+newer same-major `targetVersion`. Use the returned `proposalId` with `validate`,
+`preview_migration`, then `apply_to_disposable` to verify the installed target in
+an isolated consumer. Call `promote` with that ID and the original revision as
+`expectedRevision` to publish exactly the verified `package.json`, `bun.lock`
+and next SDK marker SQL locally. Configuration, history, indexes and revision
+are preserved. Changed inputs or revoked evidence require fresh verification.
+
+Review these files through your normal PR and PR preview workflow before merging.
+Promotion does not deploy or apply SQL to a running database. SDK proposals are
+not yet supported by `submit_change` (409 `sdk_upgrade_not_supported`).
+
 ## Submit a promoted change for review
 
 After verification and `promote`, call `submit_change` with `instance`, `proposalId`

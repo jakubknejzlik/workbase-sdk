@@ -77,7 +77,7 @@ it('serves all config tools over a real stdio subprocess and shuts down', async 
   try {
     await client.connect(transport)
     const listed = (await client.listTools()).tools
-    expect(listed).toHaveLength(11)
+    expect(listed).toHaveLength(12)
     expect(listed.map(tool => tool.name)).toContain('submit_change')
   } finally { await client.close(); await transport.close() }
 })
