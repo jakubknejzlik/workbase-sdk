@@ -85,6 +85,36 @@ export async function loadActorProjection(config: InstanceConfig, scope: Scope, 
 }
 export function actorAccountId(scope: Scope): string { return String(projections.get(scope)?.id ?? scope.actor.id) }
 export function copyActorProjection(source: Scope, target: Scope) { const row = projections.get(source); if (row) projections.set(target, row) }
+function actorLinkProjection(scope: Scope): Omit<PredicateActorLink, 'entity'> | undefined {
+  const actor = projections.get(scope)
+  return actor ? {
+    organizationId: scope.organizationId, accountId: String(actor.id), membershipRole: String(actor.role),
+    ...(scope.actor.type === 'agent' ? { token: { id: scope.actor.tokenId ?? scope.actor.id, role: scope.role } } : {}),
+  } : undefined
+}
+/** Constant folding and missing operands must not erase authority reachable via
+ * a related policy: that FALSE source can itself be used beneath none/not. */
+function policyGraphUsesActorLinks(config: InstanceConfig, entity: string, roles: string[]): boolean {
+  const visited = new Set<string>()
+  function policy(name: string): boolean {
+    if (visited.has(name)) return false
+    visited.add(name)
+    return roles.some(role => {
+      const entry = config.policies[name]?.[role]
+      return typeof entry === 'object' && filter(name, entry.where)
+    })
+  }
+  function filter(name: string, where: Filter): boolean {
+    return Object.entries(where).some(([key, value]) => {
+      if (key === 'actorLinkedIn') return true
+      if (key === 'and' || key === 'or') return (value as Filter[]).some(child => filter(name, child))
+      if (key === 'not') return filter(name, value as Filter)
+      const relation = config.entities[name].relations[key]
+      return !!relation && (policy(relation.entity) || filter(relation.entity, (relation.many ? Object.values(value as Record<string, Filter>)[0] : value) as Filter))
+    })
+  }
+  return policy(entity)
+}
 function rolePolicyFilter(config: InstanceConfig, entity: string, scope: Scope, role: string): TableFilter {
   if (scope.actor.type === 'service' && scope.role === 'SYSTEM') return { kind: 'all' }
   const actor = projections.get(scope)
@@ -106,23 +136,17 @@ function rolePolicyFilter(config: InstanceConfig, entity: string, scope: Scope, 
     if (typeof value === 'string' && value.startsWith('$actor.')) return actor![value.slice(7)] ?? null
     return Array.isArray(value) ? value.map(substitute) : value && typeof value === 'object' ? Object.fromEntries(Object.entries(value).map(([key, child]) => [key, substitute(child)])) : value
   }
-  const actorLink: Omit<PredicateActorLink, 'entity'> | undefined = actor ? {
-    organizationId: scope.organizationId, accountId: String(actor.id), membershipRole: String(actor.role),
-    ...(scope.actor.type === 'agent' ? { token: { id: scope.actor.tokenId ?? scope.actor.id, role: scope.role } } : {}),
-  } : undefined
-  const predicate = compilePolicyPredicate(config, entity, policy.where, substitute, actorLink)
+  const predicate = compilePolicyPredicate(config, entity, policy.where, substitute, actorLinkProjection(scope))
   if (constantPredicate(predicate) === false) return { kind: 'none', ...(policy.deny === 'forbidden' ? { deny: 'forbidden' as const } : {}) }
   return { kind: 'where', predicate, ...(policy.deny === 'forbidden' ? { deny: 'forbidden' as const } : {}) }
 }
 function compilePolicyPredicate(config: InstanceConfig, name: string, filter: Filter, substitute: (value: unknown) => unknown, actorLink?: Omit<PredicateActorLink, 'entity'>): Predicate {
-  let linked = false
   function compile(name: string, filter: Filter): Predicate {
     return { all: Object.entries(filter).map(([key, value]): Predicate => {
       if (key === 'and' || key === 'or') return { [key === 'and' ? 'all' : 'any']: (value as Filter[]).map(child => compile(name, child)) } as Predicate
       if (key === 'not') return { not: compile(name, value as Filter) }
       if (key === 'actorLinkedIn') {
         if (!actorLink) throw new Error('actorLinkedIn requires a live actor projection')
-        linked = true
         return { actorLinkedIn: { ...actorLink, entity: value as string } }
       }
       const relation = config.entities[name].relations[key]
@@ -135,11 +159,7 @@ function compilePolicyPredicate(config: InstanceConfig, name: string, filter: Fi
       return { [key]: operators }
     }) }
   }
-  const predicate = compile(name, filter)
-  // Authority is mandatory for the complete policy, including empty relations,
-  // OR branches and none/not/every (none + not) nesting. Never place it inside
-  // the relation or Boolean tree, where failure could turn into permission.
-  return linked ? { all: [{ actorAuthority: actorLink! }, predicate] } : predicate
+  return compile(name, filter)
 }
 /** Fold only Boolean constants; no database state is inferred by capability metadata. */
 function constantPredicate(node: Predicate): boolean | undefined {
@@ -170,10 +190,18 @@ export function hasOwnerRole(scope: Scope): boolean {
   return (scope.actor.type !== 'agent' || projections.has(scope)) && rbacRoles(scope).every(role => roleNamePrivileges(role).has('audit.read'))
 }
 export function policyFilter(config: InstanceConfig, entity: string, scope: Scope): TableFilter {
-  const filters = rbacRoles(scope).map(role => rolePolicyFilter(config, entity, scope, role))
-  if (filters.some(filter => filter.kind === 'none')) return { kind: 'none', ...(filters.some(filter => 'deny' in filter && filter.deny === 'forbidden') ? { deny: 'forbidden' as const } : {}) }
+  const roles = rbacRoles(scope)
+  const filters = roles.map(role => rolePolicyFilter(config, entity, scope, role))
   const where = filters.filter((filter): filter is Extract<TableFilter, { kind: 'where' }> => filter.kind === 'where')
-  return where.length ? { kind: 'where', predicate: { all: where.map(filter => filter.predicate) }, ...(where.some(filter => filter.deny === 'forbidden') ? { deny: 'forbidden' as const } : {}) } : { kind: 'all' }
+  const result: TableFilter = filters.some(filter => filter.kind === 'none')
+    ? { kind: 'none', ...(filters.some(filter => 'deny' in filter && filter.deny === 'forbidden') ? { deny: 'forbidden' as const } : {}) }
+    : where.length ? { kind: 'where', predicate: { all: where.map(filter => filter.predicate) }, ...(where.some(filter => filter.deny === 'forbidden') ? { deny: 'forbidden' as const } : {}) } : { kind: 'all' }
+  const authority = actorLinkProjection(scope)
+  // Collect from the complete configured graph before Boolean folding, operand
+  // denial or the role intersection can erase a related source. All requirements
+  // use this request's organization and principal, so hoisting is row-independent
+  // even beneath none/not/every and across different effective roles.
+  return authority && policyGraphUsesActorLinks(config, entity, roles) ? { ...result, actorAuthorities: [authority] } : result
 }
 export function readableFields(config: InstanceConfig, entity: string, scope: Scope): string[] {
   return [...baseFields, ...Object.keys(config.entities[entity].fields)].filter(field => rbacRoles(scope).every(role => {

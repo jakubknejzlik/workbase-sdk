@@ -1,5 +1,48 @@
 import { quote } from '../migrations/schema'
-import type { Predicate, PredicateActorLink, PredicateRelation, PredicateValue } from './plugin'
+import type { Predicate, PredicateActorLink, PredicateRelation, PredicateValue, TableFilter } from './plugin'
+
+export class PolicyExpansionLimit extends Error {}
+
+/** Expand every related source before separating mandatory request authority from
+ * row selection. Both read and pre/post-image compilers consume this same tree;
+ * renderers must not introduce another table policy inside a quantifier. */
+export function expandPolicyFilter(entity: string, tableFilter: (entity: string) => TableFilter, maxReferences = 64): TableFilter {
+  let references = 0
+  const authorities = new Map<string, Omit<PredicateActorLink, 'entity'>>()
+  function authority(link: Omit<PredicateActorLink, 'entity'>) {
+    const key = JSON.stringify([link.organizationId, link.accountId, link.membershipRole, link.token?.id, link.token?.role])
+    authorities.set(key, link)
+  }
+  function visit(node: Predicate): Predicate {
+    if ('actorAuthority' in node) {
+      authority(node.actorAuthority as Omit<PredicateActorLink, 'entity'>)
+      return { all: [] }
+    }
+    if ('actorLinkedIn' in node) {
+      const { entity: _entity, ...link } = node.actorLinkedIn as PredicateActorLink
+      authority(link)
+      return node
+    }
+    if ('all' in node && Array.isArray(node.all)) return { all: (node.all as Predicate[]).map(visit) }
+    if ('any' in node && Array.isArray(node.any)) return { any: (node.any as Predicate[]).map(visit) }
+    if ('not' in node) return { not: visit(node.not as Predicate) }
+    const key = 'exists' in node ? 'exists' : 'notExists' in node ? 'notExists' : undefined
+    if (!key) return node
+    const relation = (node as Record<string, PredicateRelation>)[key]
+    const scoped = expand(relation.entity)
+    const expanded = { ...relation, predicate: { all: [scoped, visit(relation.predicate)] } }
+    return key === 'exists' ? { exists: expanded } : { notExists: expanded }
+  }
+  function expand(entity: string, filter = tableFilter(entity)): Predicate {
+    if (++references > maxReferences) throw new PolicyExpansionLimit('Expanded policy graph exceeds table reference budget')
+    filter.actorAuthorities?.forEach(authority)
+    return filter.kind === 'where' ? visit(filter.predicate) : filter.kind === 'all' ? { all: [] } : { any: [] }
+  }
+  const root = tableFilter(entity)
+  const expanded = expand(entity, root)
+  if (root.kind !== 'where' && !authorities.size) return root
+  return { ...root, kind: 'where', predicate: authorities.size ? { all: [...authorities.values()].map(link => ({ actorAuthority: link } as Predicate)).concat(expanded) } : expanded }
+}
 
 /** Structured predicates only. The query compiler supplies the active library value/EXISTS renderers. */
 export function renderPredicate(predicate: Predicate, tableAlias: string,

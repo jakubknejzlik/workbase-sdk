@@ -32,7 +32,11 @@ export type Predicate = { all: readonly Predicate[] } | { any: readonly Predicat
   /** Mandatory top-level conjunct emitted by the policy compiler. */
   | { actorAuthority: Omit<PredicateActorLink, 'entity'> }
   | { [field: string]: PredicateOperators }
-export type TableFilter = { kind: 'all' } | { kind: 'none'; deny?: 'empty' | 'forbidden' } | { kind: 'where'; predicate: Predicate; deny?: 'empty' | 'forbidden' }
+export type TableFilter = ({ kind: 'all' } | { kind: 'none'; deny?: 'empty' | 'forbidden' } | { kind: 'where'; predicate: Predicate; deny?: 'empty' | 'forbidden' }) & {
+  /** Mandatory request authority, independent of row selection and constant
+   * folding. The final expanded compiler emits these as root conjuncts. */
+  actorAuthorities?: readonly Omit<PredicateActorLink, 'entity'>[]
+}
 export type GuardResult = { allow: true } | { allow: false; code: string }
 export type ResourceAction = OrganizationAction | 'audit.read' | 'workflows.read' | 'workflows.resume' | 'workflows.cancel'
 /** Metadata only; no planning function, store or execution capability is exposed. */

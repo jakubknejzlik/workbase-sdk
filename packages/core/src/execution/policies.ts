@@ -1,5 +1,6 @@
 import { ApiError } from '../errors'
 import { renderPredicate, type KernelRegistry } from '../kernel/registry'
+import { expandPolicyFilter } from '../kernel/predicate'
 import type { Predicate, PredicateRelation, TableFilter } from '../kernel/plugin'
 import { actorAccountId, canManageAccountAssignments, protectedActorFields } from '../policies'
 import { quote } from '../migrations/schema'
@@ -20,16 +21,18 @@ export function writeFilter(kernel: KernelRegistry, scope: Scope, entity: string
   }
   function relation(node: PredicateRelation, parent: string, negated: boolean): string {
     const child = `write_policy_${references}`
-    const scoped = render(kernel.tableFilter(node.entity, scope), child)
     const explicit = render({ kind: 'where', predicate: node.predicate }, child)
     // Put policy expressions inside the derived source, as the read compiler does.
     // SQLite's expression-depth cap then does not accumulate the complete target
     // policy tree at every correlation along a four-relation path.
     const visible = `${child}_visible`
-    return `${negated ? 'NOT ' : ''}EXISTS(SELECT 1 FROM (SELECT ${quote(child)}.${quote(node.field)} AS ${quote('policy_key')} FROM ${quote(node.entity)} AS ${quote(child)} WHERE ${scoped} AND ${explicit}) AS ${quote(visible)} WHERE ${quote(visible)}.${quote('policy_key')}=${quote(parent)}.${quote(node.parentField)})`
+    return `${negated ? 'NOT ' : ''}EXISTS(SELECT 1 FROM (SELECT ${quote(child)}.${quote(node.field)} AS ${quote('policy_key')} FROM ${quote(node.entity)} AS ${quote(child)} WHERE ${explicit}) AS ${quote(visible)} WHERE ${quote(visible)}.${quote('policy_key')}=${quote(parent)}.${quote(node.parentField)})`
   }
-  const sql = render(kernel.tableFilter(entity, scope), alias)
-  if (bindings.length > 100) throw new ApiError(403, 'policy_violation')
+  let filter: TableFilter
+  try { filter = expandPolicyFilter(entity, child => kernel.tableFilter(child, scope), 128) }
+  catch { throw new ApiError(403, 'policy_violation') }
+  const sql = render(filter, alias)
+  if (bindings.length > 100 || sql.length > 64_000) throw new ApiError(403, 'policy_violation')
   return { sql, bindings }
 }
 

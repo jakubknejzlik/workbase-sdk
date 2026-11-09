@@ -14,6 +14,8 @@ import { defineInstance, serializableInstanceConfig } from '../src/config'
 import { createApp } from '../src/app'
 import { initialSchema } from '../src/migrations/schema'
 import { KernelRegistry } from '../src/kernel/registry'
+import { expandPolicyFilter } from '../src/kernel/predicate'
+import type { Predicate, PredicateActorLink, PredicateRelation } from '../src/kernel/plugin'
 import { requireScope, resolveActor } from '../src/authorization'
 import { sha256 } from '../src/crypto'
 import { compileRoot } from '../src/query/compiler'
@@ -353,5 +355,207 @@ it.each(nestedPolicies)('$name SQL keeps one link EXISTS and one authority check
     expect(sql.match(/FROM memberships AS __actor_link_member/g)).toHaveLength(1)
     expect(sql.match(/FROM "people" AS __actor_link/g)).toHaveLength(1)
     expect(sql.indexOf('FROM memberships AS __actor_link_member')).toBeLessThan(sql.indexOf('FROM "people" AS __actor_link'))
+  }
+})
+
+// Review-2 probes: actorLinkedIn belongs to the related policy, rather than the
+// parent's explicit relation filter. Every is the supported none(not(P)) form.
+const relatedPolicies: { name: string; where: Filter }[] = [
+  { name: 'none', where: { teams: { none: { name: { eq: 'A' } } } } },
+  { name: 'not some', where: { not: { teams: { some: { name: { eq: 'A' } } } } } },
+  { name: 'every', where: { teams: { none: { not: { name: { eq: 'A' } } } } } },
+  { name: 'or', where: { or: [{ title: { eq: 'A' } }, { teams: { some: { name: { eq: 'A' } } } }] } },
+]
+const relatedLosses = [
+  ...revokedAuthorities,
+  { name: 'expiry', sql: "UPDATE access_tokens SET expires_at='2000-01-01T00:00:00.000Z' WHERE id='agent'" },
+]
+function relatedPolicyConfig(where: Filter, transitive = false, targetWhere: Filter = { actorLinkedIn: 'people' }) {
+  const base = relationConfig(where)
+  return defineInstance({ ...base,
+    entities: { ...base.entities,
+      people: { ...base.entities.people, fields: { ...base.entities.people.fields, team_id: { type: 'ref', entity: 'teams' } } },
+      teams: { ...base.entities.teams, relations: { ...base.entities.teams.relations, people: { entity: 'people', field: 'team_id', many: true } } },
+    },
+    policies: { ...base.policies,
+      teams: { owner: 'all', viewer: { where: transitive ? { people: { some: { name: { eq: 'A' } } } } : targetWhere } },
+      people: { owner: 'all', viewer: transitive ? { where: targetWhere } : 'none' },
+    },
+  })
+}
+async function relatedRows() {
+  await env.DB.exec("ALTER TABLE teams ADD COLUMN job_id TEXT REFERENCES jobs(id); UPDATE teams SET job_id='job-a' WHERE id='team-a'; ALTER TABLE people ADD COLUMN team_id TEXT REFERENCES teams(id); UPDATE people SET team_id='team-a' WHERE id='person-a';")
+}
+async function relatedAtomic(c: ReturnType<typeof relatedPolicyConfig>, store: AtomicStore, credential?: string) {
+  const op = operation([update]); c.commands.push(op.name)
+  const kernel = new KernelRegistry(c, { commands: createCommandRegistry([op]) })
+  return executeAtomic(op, {}, coreExecutionContext(kernel.config, await live(kernel, credential), store, new D1AtomicReader(env.DB), 'related-race'))
+}
+const relatedRaces = relatedPolicies.flatMap(policy => relatedLosses.flatMap(loss => [false, true].map(trigger => ({
+  ...policy, authority: loss.name, sql: loss.sql, trigger,
+}))))
+it.each(relatedRaces)('REVIEW2 related-policy $name denies $authority (post-image=$trigger) without write/audit/receipt', async ({ where, name, authority, sql, trigger }) => {
+  await relatedRows()
+  // none/not some must allow the pre-image to exercise the post-image guard.
+  if (trigger && (name === 'none' || name === 'not some')) await env.DB.exec("UPDATE teams SET name='B' WHERE id='team-a';")
+  const credential = authority === 'membership' ? undefined : await token()
+  if (trigger) await env.DB.exec(`CREATE TRIGGER lose_related_authority AFTER UPDATE ON jobs BEGIN ${sql}; END;`)
+  const store: AtomicStore = { async run(plan) { if (!trigger) await env.DB.exec(sql); return new D1AtomicStore(env.DB).run(plan) } }
+  await expect(relatedAtomic(relatedPolicyConfig(where), store, credential)).rejects.toMatchObject({ status: 403, code: 'policy_violation' })
+  await rolledBack()
+  if (trigger) {
+    expect(await env.DB.prepare("SELECT role FROM memberships WHERE user_id='alice' AND organization_id='org-a'").first('role')).toBe('viewer')
+    if (credential) {
+      expect(await env.DB.prepare("SELECT revoked_at FROM access_tokens WHERE id='agent'").first('revoked_at')).toBeNull()
+      expect(await env.DB.prepare("SELECT expires_at FROM access_tokens WHERE id='agent'").first('expires_at')).toBe('2099-01-01T00:00:00.000Z')
+    }
+  }
+})
+it.each(relatedPolicies.flatMap(policy => relatedLosses.flatMap(loss => [false, true].map(empty => ({ ...policy, sql: loss.sql, authority: loss.name, empty })))))
+  ('REVIEW2 prepared read with related-policy $name denies $authority (empty=$empty)', async ({ where, authority, sql, empty }) => {
+    await relatedRows()
+    if (empty) await env.DB.exec("UPDATE people SET team_id=NULL; DELETE FROM teams WHERE id='team-a';")
+    const kernel = new KernelRegistry(relatedPolicyConfig(where))
+    const scope = await live(kernel, authority === 'membership' ? undefined : await token())
+    const read = compileRoot(kernel, scope, validateQuery(kernel, scope, query).query)
+    const prepared = env.DB.prepare(read.sql).bind(...read.bindings)
+    expect((await prepared.all()).results.length).toBeGreaterThan(0)
+    await env.DB.exec(sql)
+    expect((await prepared.all()).results).toEqual([])
+  })
+it.each(relatedPolicies.filter(policy => policy.name === 'none' || policy.name === 'every'))
+  ('REVIEW2 related-policy $name denies token expiring between preparation and batch', async ({ where }) => {
+    await relatedRows()
+    const credential = await token()
+    await env.DB.prepare("UPDATE access_tokens SET expires_at=? WHERE id='agent'").bind(new Date(Date.now() + 500).toISOString()).run()
+    let executed = false
+    const store: AtomicStore = { async run(plan) {
+      await new Promise(resolve => setTimeout(resolve, 1000)); executed = true
+      return new D1AtomicStore(env.DB).run(plan)
+    } }
+    await expect(relatedAtomic(relatedPolicyConfig(where), store, credential)).rejects.toMatchObject({ status: 403, code: 'policy_violation' })
+    expect(executed).toBe(true)
+    await rolledBack()
+  })
+it.each(relatedLosses.flatMap(loss => [false, true].map(trigger => ({ ...loss, trigger }))))
+  ('REVIEW2 transitive related-policy every denies $name (post-image=$trigger)', async ({ name, sql, trigger }) => {
+    await relatedRows()
+    const credential = name === 'membership' ? undefined : await token()
+    if (trigger) await env.DB.exec(`CREATE TRIGGER lose_transitive_authority AFTER UPDATE ON jobs BEGIN ${sql}; END;`)
+    const store: AtomicStore = { async run(plan) { if (!trigger) await env.DB.exec(sql); return new D1AtomicStore(env.DB).run(plan) } }
+    await expect(relatedAtomic(relatedPolicyConfig(relatedPolicies[2].where, true), store, credential)).rejects.toMatchObject({ status: 403, code: 'policy_violation' })
+    await rolledBack()
+  })
+const earlyDeniedPolicies = [
+  { name: 'constant FALSE', where: { and: [{ actorLinkedIn: 'people' }, { id: { in: [] } }] } },
+  { name: 'missing actor operand', where: { and: [{ actorLinkedIn: 'people' }, { name: { eq: '$actor.name' } }] } },
+  { name: 'transitively constant FALSE', where: { and: [{ people: { some: {} } }, { id: { in: [] } }] }, transitive: true },
+]
+function earlyDeniedConfig({ where, transitive }: { where: Filter; transitive?: boolean }) {
+  const c = relatedPolicyConfig(relatedPolicies[0].where, false, where)
+  return transitive ? defineInstance({ ...c, policies: { ...c.policies, people: { owner: 'all', viewer: { where: { actorLinkedIn: 'people' } } } } }) : c
+}
+it.each(earlyDeniedPolicies)('REVIEW2 related-policy $name retains authority after early denial', async fixture => {
+  await relatedRows()
+  if (fixture.name === 'missing actor operand') await env.DB.exec("UPDATE users SET name=NULL WHERE id='alice';")
+  const c = earlyDeniedConfig(fixture)
+  const op = operation([update]); c.commands.push(op.name)
+  const credential = await token(); const kernel = new KernelRegistry(c, { commands: createCommandRegistry([op]) }); const scope = await live(kernel, credential)
+  const read = compileRoot(kernel, scope, validateQuery(kernel, scope, query).query)
+  const prepared = env.DB.prepare(read.sql).bind(...read.bindings)
+  expect((await prepared.all()).results).toHaveLength(2)
+  const store: AtomicStore = { async run(plan) {
+    await env.DB.exec("UPDATE access_tokens SET revoked_at='now' WHERE id='agent';")
+    return new D1AtomicStore(env.DB).run(plan)
+  } }
+  await expect(executeAtomic(op, {}, coreExecutionContext(kernel.config, scope, store, new D1AtomicReader(env.DB), 'early-denial')))
+    .rejects.toMatchObject({ status: 403, code: 'policy_violation' })
+  expect((await prepared.all()).results).toEqual([])
+  await rolledBack()
+})
+it.each(['role intersection', 'provider denial'])('REVIEW2 authority survives related-source %s', async denial => {
+  await relatedRows()
+  let c = relatedPolicyConfig(relatedPolicies[0].where)
+  if (denial === 'role intersection') {
+    c = defineInstance({ ...c, policies: { ...c.policies, teams: { ...c.policies.teams, owner: 'none' } } })
+    await env.DB.exec("UPDATE memberships SET role='owner' WHERE user_id='alice';")
+  } else c = defineInstance({ ...c, plugins: [...(c.plugins ?? []), {
+    name: 'deny_related_source', version: '1', tableFilter: (entity: string) => ({ kind: entity === 'teams' ? 'none' as const : 'all' as const }),
+  }] })
+  const credential = await token()
+  const store: AtomicStore = { async run(plan) {
+    await env.DB.exec("UPDATE access_tokens SET revoked_at='now' WHERE id='agent';")
+    return new D1AtomicStore(env.DB).run(plan)
+  } }
+  await expect(relatedAtomic(c, store, credential)).rejects.toMatchObject({ status: 403, code: 'policy_violation' })
+  await rolledBack()
+})
+it.each([false, true])('positive some through related actor-linked policies permits linked jobs (transitive=%s)', async transitive => {
+  await relatedRows()
+  const c = relatedPolicyConfig({ teams: { some: { name: { eq: 'A' } } } }, transitive)
+  expect(await ids(await ask(c))).toEqual(['job-a'])
+  expect((await relatedAtomic(c, new D1AtomicStore(env.DB))).status).toBe(200)
+  expect(await env.DB.prepare('SELECT count(*) n FROM audit_outbox').first('n')).toBe(1)
+  await env.DB.exec("UPDATE people SET user=NULL WHERE id='person-a';")
+  expect(await ids(await ask(c))).toEqual([])
+})
+it('expanded actor-linked policy cycles fail closed within the SQL budget', async () => {
+  const base = relatedPolicyConfig(relatedPolicies[2].where, true)
+  const c = defineInstance({ ...base,
+    entities: { ...base.entities, people: { ...base.entities.people, relations: { ...base.entities.people.relations, team: { entity: 'teams', field: 'team_id' } } } },
+    policies: { ...base.policies, people: { owner: 'all', viewer: { where: { and: [{ actorLinkedIn: 'people' }, { team: { name: { eq: 'A' } } }] } } } },
+  })
+  const kernel = new KernelRegistry(c); const scope = await live(kernel)
+  expect(() => compileRoot(kernel, scope, validateQuery(kernel, scope, query).query)).toThrow('query_too_expensive')
+  expect(() => writeFilter(kernel, scope, 'jobs')).toThrow('policy_violation')
+  await rolledBack()
+})
+
+it('all actor-linked fixtures compile authority exactly once as a top-level conjunct', async () => {
+  const direct: Filter[] = [
+    { actorLinkedIn: 'people' }, { actorLinkedIn: 'teams' },
+    { and: [{ actorLinkedIn: 'people' }, { actorLinkedIn: 'teams' }] },
+    { and: [{ actorLinkedIn: 'people' }, { id: { in: [] } }] },
+    { or: [{ actorLinkedIn: 'people' }, { actorLinkedIn: 'teams' }] },
+    { or: [{ actorLinkedIn: 'people' }, { title: { eq: 'A' } }] },
+    { not: { actorLinkedIn: 'people' } },
+    { not: { or: [{ actorLinkedIn: 'people' }, { title: { eq: 'Denied' } }] } },
+    { not: { not: { actorLinkedIn: 'people' } } },
+  ]
+  const fixtures = [
+    ...direct.map(where => config(where)), ...nestedPolicies.map(({ where }) => relationConfig(where)),
+    ...relatedPolicies.flatMap(({ where }) => [relatedPolicyConfig(where), relatedPolicyConfig(where, true)]),
+    ...[false, true].map(transitive => relatedPolicyConfig({ teams: { some: { name: { eq: 'A' } } } }, transitive)),
+    relatedPolicyConfig({ and: [{ actorLinkedIn: 'teams' }, relatedPolicies[2].where] }, true),
+    ...earlyDeniedPolicies.map(earlyDeniedConfig),
+  ]
+  await env.DB.exec("UPDATE users SET name=NULL WHERE id='alice';")
+  const credential = await token()
+  for (const c of fixtures) for (const actor of ['user', 'token']) {
+    const kernel = new KernelRegistry(c); const scope = await live(kernel, actor === 'token' ? credential : undefined)
+    const expanded = expandPolicyFilter('jobs', entity => kernel.tableFilter(entity, scope))
+    expect(expanded.kind).toBe('where')
+    if (expanded.kind !== 'where') throw new Error('Expected compiled policy')
+    const authorities: Omit<PredicateActorLink, 'entity'>[] = []; const links: PredicateActorLink[] = []
+    function walk(node: Predicate, conjunct = true) {
+      for (const [key, value] of Object.entries(node)) {
+        if (key === 'actorAuthority') { expect(conjunct).toBe(true); authorities.push(value) }
+        else if (key === 'actorLinkedIn') links.push(value)
+        else if (key === 'all' || key === 'any') (value as Predicate[]).forEach(child => walk(child, conjunct && key === 'all'))
+        else if (key === 'not') walk(value, false)
+        else if (key === 'exists' || key === 'notExists') walk((value as PredicateRelation).predicate, false)
+      }
+    }
+    walk(expanded.predicate)
+    expect(authorities).toHaveLength(1)
+    for (const { entity: _entity, ...link } of links) expect(link).toEqual(authorities[0])
+    const read = compileRoot(kernel, scope, validateQuery(kernel, scope, query).query)
+    const write = writeFilter(kernel, scope, 'jobs')
+    for (const [statement, alias] of [[read, 'scope_row_1'], [write, 'jobs']] as const) {
+      expect(statement.sql.match(/FROM memberships AS __actor_link_member/g)).toHaveLength(1)
+      expect(statement.sql).toContain(`__actor_link_member.organization_id="${alias}".organization_id`)
+      expect(statement.sql.length).toBeLessThan(64_000)
+      expect(statement.bindings!.length).toBeLessThanOrEqual(100)
+    }
   }
 })

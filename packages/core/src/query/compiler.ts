@@ -3,6 +3,7 @@ import { expressionInfo, readableComputed, rebindExpression, type ExpressionInfo
 import { ApiError } from '../errors'
 import { Q, Fn, Cond, Condition, toSQLWithBindings, type ISQLFlavor, type SelectQuery, type ISequelizable } from '@jakub.knejzlik/ts-query'
 import { renderPredicate, type KernelRegistry } from '../kernel/registry'
+import { expandPolicyFilter, PolicyExpansionLimit } from '../kernel/predicate'
 import type { TableFilter, PredicateRelation } from '../kernel/plugin'
 import type { Scope } from '../types'
 import { quote } from '../migrations/schema'
@@ -362,22 +363,25 @@ export function renderStatement(kernel: KernelRegistry, scope: Scope, ast: Selec
       } else query = query.field(col(alias, field))
     }
     if (!fields.length) query = query.field(Q.raw('1'), '__policy_row')
-    query = query.where(new ScopedCondition(kernel.tableFilter(entity, scope), alias, relation))
+    query = query.where(new ScopedCondition(expandPolicyFilter(entity, child => kernel.tableFilter(child, scope), L.tableReferences), alias, relation))
     return extra ? query.where(extra(alias)) : query
   }
   function relation(node: PredicateRelation, parent: string, negated: boolean, flavor: ISQLFlavor): string {
-    const sub = Q.select().from(node.entity, 'policy_target').field(Q.raw('1'))
-    // Correlation and policy-only fields stay inside the scoped source, even if those
-    // fields are unreadable. The derived table still exposes readable columns only.
-    const condition = negated ? Cond.notExists(sub) : Cond.exists(sub)
-    return condition.toSQL(flavor, { transformTable: entity => scopedTable(entity, alias => Cond.and([
-      Cond.columnEqual(col(alias, node.field), col(parent, node.parentField)),
-      new ScopedCondition({ kind: 'where', predicate: node.predicate }, alias, relation),
-    ]), false) })
+    if (++references > L.tableReferences) throw new QueryError('query_too_expensive', [], cost)
+    const child = `scope_row_${references}`; const visible = `${child}_visible`
+    // The shared expansion already scoped this source and moved all authority to
+    // the root. Expose only the stored correlation key; no field projection or
+    // policy expansion may add authority back beneath this quantifier.
+    const explicit = new ScopedCondition({ kind: 'where', predicate: node.predicate }, child, relation).toSQL(flavor)
+    return `${negated ? 'NOT ' : ''}EXISTS(SELECT 1 FROM (SELECT ${quote(child)}.${quote(node.field)} AS ${quote('policy_key')} FROM ${quote(node.entity)} AS ${quote(child)} WHERE ${explicit}) AS ${quote(visible)} WHERE ${quote(visible)}.${quote('policy_key')}=${quote(parent)}.${quote(node.parentField)})`
   }
   try {
     return assertStatement(compactBindings(toSQLWithBindings(ast, numberedSQLite, { transformTable: entity => scopedTable(entity) })), cost)
-  } catch (error) { if (error instanceof ApiError) throw error; throw new QueryError('query_invalid') }
+  } catch (error) {
+    if (error instanceof PolicyExpansionLimit) throw new QueryError('query_too_expensive', [], cost)
+    if (error instanceof ApiError) throw error
+    throw new QueryError('query_invalid')
+  }
 }
 
 /** Expression demand follows all user-visible uses, including unprojected filters.
