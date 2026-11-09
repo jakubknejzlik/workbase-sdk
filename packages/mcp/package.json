@@ -1,6 +1,6 @@
 {
   "name": "@workbasehq/mcp",
-  "version": "0.2.12",
+  "version": "0.2.13",
   "type": "module",
   "scripts": {
     "start": "bun src/stdio.ts",

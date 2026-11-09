@@ -35,7 +35,7 @@
     },
     "packages/core": {
       "name": "@workbasehq/core",
-      "version": "0.2.12",
+      "version": "0.2.13",
       "bin": {
         "workbase-migrate": "src/infra/bin.mjs"
       },
@@ -94,7 +94,7 @@
     },
     "packages/mcp": {
       "name": "@workbasehq/mcp",
-      "version": "0.2.12",
+      "version": "0.2.13",
       "bin": {
         "workbase-mcp": "src/bin.ts",
         "workbase": "src/bin.ts"
@@ -110,7 +110,7 @@
     },
     "packages/plugins": {
       "name": "@workbasehq/plugins",
-      "version": "0.2.12",
+      "version": "0.2.13",
       "dependencies": {
         "zod": "4.6.7",
         "better-auth": "1.7.1"
@@ -120,7 +120,7 @@
         "@workbasehq/core": "workspace:*"
       },
       "peerDependencies": {
-        "@workbasehq/core": "0.2.12"
+        "@workbasehq/core": "0.2.13"
       }
     },
     "packages/test-support": {
@@ -5049,6 +5049,12 @@
     ],
     "@workbasehq/core": [
       "@workbasehq/core@workspace:packages/core"
+    ],
+    "@workbasehq/frontend-console": [
+      "@workbasehq/frontend-console@workspace:packages/frontend-console"
+    ],
+    "@workbasehq/mcp": [
+      "@workbasehq/mcp@workspace:packages/mcp"
     ],
     "@workbasehq/plugins": [
       "@workbasehq/plugins@workspace:packages/plugins"
