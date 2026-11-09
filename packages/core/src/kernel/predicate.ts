@@ -27,23 +27,25 @@ export function renderPredicate(predicate: Predicate, tableAlias: string,
       if (entries.length !== 1) throw new Error('Invalid predicate combinator')
       return render((node as { not: Predicate }).not, !negated)
     }
-    if (Object.hasOwn(node, 'actorLinkedIn')) {
-      if (entries.length !== 1) throw new Error('Invalid actorLinkedIn predicate')
-      const link = (node as { actorLinkedIn: PredicateActorLink }).actorLinkedIn
-      // Deliberately bypass table transforms/target read policies. This authority
-      // probe has one EXISTS and indexed organization/user, membership and PK joins.
-      // Pin both roles and the token issuer so a prepare/batch race fails closed.
-      // Push Boolean negation down to link presence, keeping live authority
-      // mandatory even under NOT. Absence is checked by an indexed LEFT JOIN.
-      // Underscore-prefixed aliases cannot collide with configured entity names.
+    if (Object.hasOwn(node, 'actorAuthority')) {
+      if (entries.length !== 1 || negated) throw new Error('Invalid actor authority predicate')
+      const link = (node as { actorAuthority: Omit<PredicateActorLink, 'entity'> }).actorAuthority
+      // The policy compiler hoists this mandatory conjunct outside all Boolean
+      // operators and relation quantifiers. Pin roles and issuer at execution.
       return `(EXISTS(SELECT 1 FROM memberships AS __actor_link_member
         JOIN users AS __actor_link_account ON __actor_link_account.id=__actor_link_member.user_id AND __actor_link_account.organization_id=__actor_link_member.organization_id
         ${link.token ? 'JOIN access_tokens AS __actor_link_token ON __actor_link_token.issuer_id=__actor_link_member.user_id AND __actor_link_token.organization_id=__actor_link_member.organization_id' : ''}
-        ${negated ? 'LEFT ' : ''}JOIN ${quote(link.entity)} AS __actor_link ON __actor_link.user=__actor_link_member.user_id AND __actor_link.organization_id=__actor_link_member.organization_id
         WHERE __actor_link_member.organization_id=${alias}.organization_id AND __actor_link_member.organization_id=${bind(link.organizationId)}
         AND __actor_link_member.user_id=${bind(link.accountId)} AND __actor_link_member.role=${bind(link.membershipRole)}
-        ${link.token ? `AND __actor_link_token.id=${bind(link.token.id)} AND __actor_link_token.role=${bind(link.token.role)} AND __actor_link_token.revoked_at IS NULL AND __actor_link_token.expires_at>${bind(link.token.now)}` : ''}
-        ${negated ? 'AND __actor_link.user IS NULL' : ''}))`
+        ${link.token ? `AND __actor_link_token.id=${bind(link.token.id)} AND __actor_link_token.role=${bind(link.token.role)} AND __actor_link_token.revoked_at IS NULL AND __actor_link_token.expires_at>strftime('%Y-%m-%dT%H:%M:%fZ','now')` : ''}))`
+    }
+    if (Object.hasOwn(node, 'actorLinkedIn')) {
+      if (entries.length !== 1) throw new Error('Invalid actorLinkedIn predicate')
+      const link = (node as { actorLinkedIn: PredicateActorLink }).actorLinkedIn
+      // Only link presence is negatable. Bypass target read policies/transforms
+      // with one indexed lookup per predicate, without per-row policy recursion.
+      return `(${negated ? 'NOT ' : ''}EXISTS(SELECT 1 FROM ${quote(link.entity)} AS __actor_link
+        WHERE __actor_link.organization_id=${alias}.organization_id AND __actor_link.organization_id=${bind(link.organizationId)} AND __actor_link.user=${bind(link.accountId)}))`
     }
     const relationKey = Object.hasOwn(node, 'exists') ? 'exists' : Object.hasOwn(node, 'notExists') ? 'notExists' : undefined
     if (relationKey) {

@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Add policy-only `actorLinkedIn` for protected user links: organization-scoped live account/issuer authority, an indexed EXISTS without target read-policy recursion, and atomic write pre/post-image enforcement. MCP config validation and serialization preserve the predicate. (#172 G1)
+- Add policy-only `actorLinkedIn` for protected user links: organization-scoped live account/issuer authority enforced outside Boolean and relation negation, execution-time token expiry, an indexed EXISTS without target read-policy recursion, and atomic write pre/post-image enforcement. MCP config validation and serialization preserve the predicate. (#172 G1)
 
 ## 0.2.12 — 2026-11-09
 

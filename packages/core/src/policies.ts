@@ -108,29 +108,38 @@ function rolePolicyFilter(config: InstanceConfig, entity: string, scope: Scope, 
   }
   const actorLink: Omit<PredicateActorLink, 'entity'> | undefined = actor ? {
     organizationId: scope.organizationId, accountId: String(actor.id), membershipRole: String(actor.role),
-    ...(scope.actor.type === 'agent' ? { token: { id: scope.actor.tokenId ?? scope.actor.id, role: scope.role, now: new Date().toISOString() } } : {}),
+    ...(scope.actor.type === 'agent' ? { token: { id: scope.actor.tokenId ?? scope.actor.id, role: scope.role } } : {}),
   } : undefined
   const predicate = compilePolicyPredicate(config, entity, policy.where, substitute, actorLink)
   if (constantPredicate(predicate) === false) return { kind: 'none', ...(policy.deny === 'forbidden' ? { deny: 'forbidden' as const } : {}) }
   return { kind: 'where', predicate, ...(policy.deny === 'forbidden' ? { deny: 'forbidden' as const } : {}) }
 }
 function compilePolicyPredicate(config: InstanceConfig, name: string, filter: Filter, substitute: (value: unknown) => unknown, actorLink?: Omit<PredicateActorLink, 'entity'>): Predicate {
-  return { all: Object.entries(filter).map(([key, value]): Predicate => {
-    if (key === 'and' || key === 'or') return { [key === 'and' ? 'all' : 'any']: (value as Filter[]).map(child => compilePolicyPredicate(config, name, child, substitute, actorLink)) } as Predicate
-    if (key === 'not') return { not: compilePolicyPredicate(config, name, value as Filter, substitute, actorLink) }
-    if (key === 'actorLinkedIn') {
-      if (!actorLink) throw new Error('actorLinkedIn requires a live actor projection')
-      return { actorLinkedIn: { ...actorLink, entity: value as string } }
-    }
-    const relation = config.entities[name].relations[key]
-    if (relation) {
-      const none = relation.many && Object.hasOwn(value as object, 'none')
-      return { [none ? 'notExists' : 'exists']: { entity: relation.entity, field: relation.many ? relation.field : 'id', parentField: relation.many ? 'id' : relation.field,
-        predicate: compilePolicyPredicate(config, relation.entity, (relation.many ? (value as Record<string, Filter>)[none ? 'none' : 'some'] : value) as Filter, substitute, actorLink) } } as Predicate
-    }
-    const operators = substitute(value) as PredicateOperators
-    return { [key]: operators }
-  }) }
+  let linked = false
+  function compile(name: string, filter: Filter): Predicate {
+    return { all: Object.entries(filter).map(([key, value]): Predicate => {
+      if (key === 'and' || key === 'or') return { [key === 'and' ? 'all' : 'any']: (value as Filter[]).map(child => compile(name, child)) } as Predicate
+      if (key === 'not') return { not: compile(name, value as Filter) }
+      if (key === 'actorLinkedIn') {
+        if (!actorLink) throw new Error('actorLinkedIn requires a live actor projection')
+        linked = true
+        return { actorLinkedIn: { ...actorLink, entity: value as string } }
+      }
+      const relation = config.entities[name].relations[key]
+      if (relation) {
+        const none = relation.many && Object.hasOwn(value as object, 'none')
+        return { [none ? 'notExists' : 'exists']: { entity: relation.entity, field: relation.many ? relation.field : 'id', parentField: relation.many ? 'id' : relation.field,
+          predicate: compile(relation.entity, (relation.many ? (value as Record<string, Filter>)[none ? 'none' : 'some'] : value) as Filter) } } as Predicate
+      }
+      const operators = substitute(value) as PredicateOperators
+      return { [key]: operators }
+    }) }
+  }
+  const predicate = compile(name, filter)
+  // Authority is mandatory for the complete policy, including empty relations,
+  // OR branches and none/not/every (none + not) nesting. Never place it inside
+  // the relation or Boolean tree, where failure could turn into permission.
+  return linked ? { all: [{ actorAuthority: actorLink! }, predicate] } : predicate
 }
 /** Fold only Boolean constants; no database state is inferred by capability metadata. */
 function constantPredicate(node: Predicate): boolean | undefined {

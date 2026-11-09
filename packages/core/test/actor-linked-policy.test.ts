@@ -206,17 +206,152 @@ it('config validation and serialization preserve actorLinkedIn', () => {
   const c = config({ or: [{ actorLinkedIn: 'people' }, { actorLinkedIn: 'teams' }] })
   expect(defineInstance({ ...JSON.parse(JSON.stringify(serializableInstanceConfig(c))), plugins: c.plugins }).policies).toEqual(c.policies)
 })
-it.each(['user', 'token'])('SQL plan stays a single bounded indexed EXISTS for %s authority', async actor => {
+it.each(['user', 'token'])('SQL plan stays one indexed EXISTS per link plus one live %s authority check', async actor => {
   const kernel = new KernelRegistry(config()); const scope = await live(kernel, actor === 'token' ? await token() : undefined)
   const read = compileRoot(kernel, scope, validateQuery(kernel, scope, query).query)
   const write = writeFilter(kernel, scope, 'jobs')
   for (const statement of [read, { sql: `SELECT id FROM jobs WHERE ${write.sql}`, bindings: write.bindings ?? [] }]) {
-    expect(statement.sql.match(/\bEXISTS\s*\(/gi)).toHaveLength(1)
+    expect(statement.sql.match(/\bEXISTS\s*\(/gi)).toHaveLength(2)
+    expect(statement.sql.match(/FROM memberships AS __actor_link_member/g)).toHaveLength(1)
     expect(statement.sql.match(/\bJOIN "people"|\bFROM "people"/gi)).toHaveLength(1)
     expect(statement.bindings).toContain('alice')
     const plan = await env.DB.prepare(`EXPLAIN QUERY PLAN ${statement.sql}`).bind(...statement.bindings).all<{ detail: string }>()
     const details = plan.results.map(row => row.detail).join('\n')
     expect(details).toMatch(/SEARCH .* USING (?:COVERING )?INDEX people_user_idx \(organization_id=\? AND user=\?\)/)
     expect(details).not.toMatch(/SCAN __actor_link/)
+  }
+})
+
+function relationConfig(where: Filter) {
+  const base = baseConfig()
+  return defineInstance({ ...base,
+    entities: { ...base.entities,
+      teams: { ...base.entities.teams, fields: { ...base.entities.teams.fields, job_id: { type: 'ref', entity: 'jobs' } } },
+      jobs: { ...base.entities.jobs, relations: { teams: { entity: 'teams', field: 'job_id', many: true } } },
+    },
+    policies: { ...base.policies, teams: { owner: 'all', viewer: 'all' }, jobs: { owner: 'all', viewer: { where } } },
+  })
+}
+async function relationAtomic(where: Filter, raceSql: string, credential?: string, trigger = false) {
+  await env.DB.exec("ALTER TABLE teams ADD COLUMN job_id TEXT REFERENCES jobs(id); UPDATE teams SET job_id='job-a' WHERE id='team-a';")
+  const c = relationConfig(where)
+  const op = operation([update]); c.commands.push(op.name)
+  const kernel = new KernelRegistry(c, { commands: createCommandRegistry([op]) })
+  if (trigger) await env.DB.exec(`CREATE TRIGGER lose_authority AFTER UPDATE ON jobs BEGIN ${raceSql}; END;`)
+  const store: AtomicStore = { async run(plan) { if (!trigger) await env.DB.exec(raceSql); return new D1AtomicStore(env.DB).run(plan) } }
+  return executeAtomic(op, {}, coreExecutionContext(kernel.config, await live(kernel, credential), store, new D1AtomicReader(env.DB), 'relation-race'))
+}
+
+// Review-1 unexpected-commit probes, retained as regressions.
+it('PROBE relation none denies a removed member at atomic execution', async () => {
+  await expect(relationAtomic({ teams: { none: { actorLinkedIn: 'people' } } }, "DELETE FROM memberships WHERE user_id='alice' AND organization_id='org-a'"))
+    .rejects.toMatchObject({ status: 403, code: 'policy_violation' })
+  await rolledBack()
+})
+it('PROBE negated relation denies a revoked token at atomic execution', async () => {
+  const credential = await token()
+  await expect(relationAtomic({ not: { teams: { some: { actorLinkedIn: 'people' } } } }, "UPDATE access_tokens SET revoked_at='now' WHERE id='agent'", credential))
+    .rejects.toMatchObject({ status: 403, code: 'policy_violation' })
+  await rolledBack()
+})
+it('PROBE relation none post-image denies removed member', async () => {
+  await expect(relationAtomic({ teams: { none: { not: { actorLinkedIn: 'people' } } } }, "DELETE FROM memberships WHERE user_id='alice' AND organization_id='org-a'", undefined, true))
+    .rejects.toMatchObject({ status: 403, code: 'policy_violation' })
+  await rolledBack()
+  expect(await env.DB.prepare("SELECT role FROM memberships WHERE user_id='alice' AND organization_id='org-a'").first('role')).toBe('viewer')
+})
+it('PROBE direct actorLinkedIn denies token expiring between prepare and batch', async () => {
+  const credential = await token()
+  await env.DB.prepare("UPDATE access_tokens SET expires_at=? WHERE id='agent'").bind(new Date(Date.now() + 500).toISOString()).run()
+  let executed = false
+  const store: AtomicStore = { async run(plan) {
+    await new Promise(resolve => setTimeout(resolve, 1000))
+    executed = true
+    return new D1AtomicStore(env.DB).run(plan)
+  } }
+  await expect(atomic([update], store, credential)).rejects.toMatchObject({ status: 403, code: 'policy_violation' })
+  expect(executed).toBe(true)
+  await rolledBack()
+})
+
+const nestedPolicies: { name: string; where: Filter; unlink?: boolean }[] = [
+  { name: 'none', where: { teams: { none: { actorLinkedIn: 'people' } } }, unlink: true },
+  { name: 'not some', where: { not: { teams: { some: { actorLinkedIn: 'people' } } } }, unlink: true },
+  // The supported grammar expresses every(P) as none(not(P)).
+  { name: 'every (none + not)', where: { teams: { none: { not: { actorLinkedIn: 'people' } } } } },
+  { name: 'or with nested none/not', where: { or: [{ title: { eq: 'A' } }, { teams: { none: { not: { not: { actorLinkedIn: 'people' } } } } }] }, unlink: true },
+]
+const revokedAuthorities = [
+  { name: 'membership', sql: "DELETE FROM memberships WHERE user_id='alice' AND organization_id='org-a'" },
+  { name: 'token', sql: "UPDATE access_tokens SET revoked_at='now' WHERE id='agent'" },
+]
+const nestedRaces = nestedPolicies.flatMap(policy => revokedAuthorities.flatMap(authority => [false, true].flatMap(empty => [false, true].map(trigger => ({
+  ...policy, authority: authority.name, sql: authority.sql, empty, trigger,
+})))))
+it.each(nestedRaces)('$name denies revoked $authority (empty=$empty, post-image=$trigger)', async ({ where, unlink, authority, sql, empty, trigger }) => {
+  if (unlink) await env.DB.exec("UPDATE people SET user=NULL WHERE id='person-a';")
+  if (empty) await env.DB.exec("DELETE FROM teams WHERE id='team-a';")
+  const credential = authority === 'token' ? await token() : undefined
+  await expect(relationAtomic(where, sql, credential, trigger)).rejects.toMatchObject({ status: 403, code: 'policy_violation' })
+  await rolledBack()
+  if (trigger) {
+    expect(await env.DB.prepare("SELECT role FROM memberships WHERE user_id='alice' AND organization_id='org-a'").first('role')).toBe('viewer')
+    if (credential) expect(await env.DB.prepare("SELECT revoked_at FROM access_tokens WHERE id='agent'").first('revoked_at')).toBeNull()
+  }
+})
+const nestedReadRaces = nestedPolicies.flatMap(policy => revokedAuthorities.flatMap(authority => [false, true].map(empty => ({ ...policy, authority: authority.name, sql: authority.sql, empty }))))
+it.each(nestedReadRaces)('prepared read with $name denies revoked $authority (empty=$empty)', async ({ where, unlink, authority, sql, empty }) => {
+  await env.DB.exec("ALTER TABLE teams ADD COLUMN job_id TEXT REFERENCES jobs(id); UPDATE teams SET job_id='job-a' WHERE id='team-a';")
+  if (unlink) await env.DB.exec("UPDATE people SET user=NULL WHERE id='person-a';")
+  if (empty) await env.DB.exec("DELETE FROM teams WHERE id='team-a';")
+  const kernel = new KernelRegistry(relationConfig(where))
+  const scope = await live(kernel, authority === 'token' ? await token() : undefined)
+  const read = compileRoot(kernel, scope, validateQuery(kernel, scope, query).query)
+  const prepared = env.DB.prepare(read.sql).bind(...read.bindings)
+  expect((await prepared.all<{ id: string }>()).results.map(row => row.id)).toContain('job-a')
+  await env.DB.exec(sql)
+  expect((await prepared.all()).results).toEqual([])
+})
+it('prepared read denies a token expiring before database execution', async () => {
+  const credential = await token()
+  const kernel = new KernelRegistry(config())
+  const scope = await live(kernel, credential)
+  const read = compileRoot(kernel, scope, validateQuery(kernel, scope, query).query)
+  const prepared = env.DB.prepare(read.sql).bind(...read.bindings)
+  await env.DB.prepare("UPDATE access_tokens SET expires_at=? WHERE id='agent'").bind(new Date(Date.now() + 500).toISOString()).run()
+  expect((await prepared.all()).results).toHaveLength(2)
+  await new Promise(resolve => setTimeout(resolve, 1000))
+  expect((await prepared.all()).results).toEqual([])
+})
+it('post-image database-time token expiry rolls back the write and audit', async () => {
+  const credential = await token()
+  await env.DB.exec("CREATE TRIGGER expire_token AFTER UPDATE ON jobs BEGIN UPDATE access_tokens SET expires_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id='agent'; END;")
+  await expect(atomic([update], undefined, credential)).rejects.toMatchObject({ status: 403, code: 'policy_violation' })
+  await rolledBack()
+  expect(await env.DB.prepare("SELECT expires_at FROM access_tokens WHERE id='agent'").first('expires_at')).toBe('2099-01-01T00:00:00.000Z')
+})
+it('multiple link predicates share a single top-level authority check', async () => {
+  const kernel = new KernelRegistry(config({ and: [{ actorLinkedIn: 'people' }, { actorLinkedIn: 'teams' }] }))
+  const scope = await live(kernel, await token())
+  const read = compileRoot(kernel, scope, validateQuery(kernel, scope, query).query)
+  const write = writeFilter(kernel, scope, 'jobs')
+  for (const sql of [read.sql, write.sql]) {
+    expect(sql.match(/\bEXISTS\s*\(/gi)).toHaveLength(3)
+    expect(sql.match(/FROM memberships AS __actor_link_member/g)).toHaveLength(1)
+    expect(sql.match(/FROM "people" AS __actor_link/g)).toHaveLength(1)
+    expect(sql.match(/FROM "teams" AS __actor_link/g)).toHaveLength(1)
+    expect(sql).toContain("strftime('%Y-%m-%dT%H:%M:%fZ','now')")
+  }
+})
+it.each(nestedPolicies)('$name SQL keeps one link EXISTS and one authority check outside the relation', async ({ where }) => {
+  const kernel = new KernelRegistry(relationConfig(where))
+  const scope = await live(kernel, await token())
+  const read = compileRoot(kernel, scope, validateQuery(kernel, scope, query).query)
+  const write = writeFilter(kernel, scope, 'jobs')
+  for (const sql of [read.sql, write.sql]) {
+    expect(sql.match(/\bEXISTS\s*\(/gi)).toHaveLength(3) // Relation, link, authority.
+    expect(sql.match(/FROM memberships AS __actor_link_member/g)).toHaveLength(1)
+    expect(sql.match(/FROM "people" AS __actor_link/g)).toHaveLength(1)
+    expect(sql.indexOf('FROM memberships AS __actor_link_member')).toBeLessThan(sql.indexOf('FROM "people" AS __actor_link'))
   }
 })

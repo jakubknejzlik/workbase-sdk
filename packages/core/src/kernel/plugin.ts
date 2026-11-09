@@ -24,11 +24,13 @@ export interface PredicateRelation { entity: string; field: string; parentField:
  * renderers recheck membership/account/token in the same statement as the row. */
 export interface PredicateActorLink {
   entity: string; organizationId: string; accountId: string; membershipRole: string
-  token?: { id: string; role: string; now: string }
+  token?: { id: string; role: string }
 }
 export type Predicate = { all: readonly Predicate[] } | { any: readonly Predicate[] }
   | { not: Predicate } | { exists: PredicateRelation } | { notExists: PredicateRelation }
   | { actorLinkedIn: PredicateActorLink }
+  /** Mandatory top-level conjunct emitted by the policy compiler. */
+  | { actorAuthority: Omit<PredicateActorLink, 'entity'> }
   | { [field: string]: PredicateOperators }
 export type TableFilter = { kind: 'all' } | { kind: 'none'; deny?: 'empty' | 'forbidden' } | { kind: 'where'; predicate: Predicate; deny?: 'empty' | 'forbidden' }
 export type GuardResult = { allow: true } | { allow: false; code: string }
