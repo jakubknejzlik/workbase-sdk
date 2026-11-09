@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.12 — 2026-11-09
+
+- MCP verifies registry SDK package identities and integrity through portable primitives and installs upgrade targets in isolation with a packaged verification bridge. (#218, #220)
+- Public `upgrade_sdk` proposals support target-bound validation, migration preview and disposable verification with durable evidence; promotion writes the exact verified artifacts and SDK metadata transition while preserving the Instance revision and application bytes. (#222, #224)
+- SDK-upgrade submission through `submit_change` and the automatic PR-to-Production flow remain unfinished; this release does not complete the end-to-end SDK upgrade workflow.
+
 ## 0.2.11 — 2026-11-08
 
 - Prepare the first public SDK release from `jakubknejzlik/workbase-sdk`: GitHub Actions OIDC Trusted Publishing with npm provenance for core, plugins and mcp.

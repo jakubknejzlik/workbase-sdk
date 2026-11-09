@@ -3,7 +3,6 @@ import { execFileSync } from 'node:child_process'
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, mkdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { createHash } from 'node:crypto'
 
 type Step = { uses?: string; run?: string; if?: string; with?: Record<string, unknown>; env?: Record<string, string> }
 type Job = { 'runs-on': string; if?: string; permissions?: Record<string, string>; steps: Step[]; needs?: unknown }
@@ -133,8 +132,7 @@ describe('exported public bootstrap workflow policy', () => {
       expect(readFileSync(capture, 'utf8').trim().split('\n')).toEqual(['scripts/sdk-publish.ts', ...expected])
     } finally { rmSync(directory, { recursive: true, force: true }) }
   })
-  it.skipIf(!existsSync(join(process.cwd(), 'scripts/export-sdk.ts')))('preserves the private release workflow bytes from d6a72be7', () => {
-    const source = readFileSync(join(process.cwd(), '.github/workflows/release.yml'))
-    expect(createHash('sha256').update(source).digest('hex')).toBe('ef9848af98935524bc064f31278ad2c672e0b107990180096db45357d668bf21')
+  it.skipIf(!existsSync(join(process.cwd(), 'scripts/export-sdk.ts')))('keeps the private SDK release workflow absent', () => {
+    expect(existsSync(join(process.cwd(), '.github/workflows/release.yml'))).toBe(false)
   })
 })

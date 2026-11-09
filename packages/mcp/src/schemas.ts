@@ -1,4 +1,6 @@
 import { z } from 'zod'
+// Shared exact SemVer contract; keep CLI init schema dependencies self-contained.
+export const exactVersion = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$/
 
 export const identifier = z.string().min(1).max(63).regex(/^[a-z][a-z0-9_]*$/)
   .refine(s => !['__proto__', 'prototype', 'constructor'].includes(s), 'Reserved identifier')
@@ -77,6 +79,7 @@ export const schemas = {
   list_versions: z.strictObject({ instance }),
   rollback: z.strictObject({ instance, to: z.string().regex(/^v[1-9][0-9]*$/), expectedRevision: revision, allowDestructive: z.boolean().optional(), preview: z.boolean().optional() }),
   inspect_schema: z.strictObject({ instance }),
+  upgrade_sdk: z.strictObject({ instance, baseRevision: revision, targetVersion: z.string().regex(exactVersion).refine(value => !/\s/.test(value)) }),
   propose_change: z.strictObject({ instance, baseRevision: revision, changes: z.array(changeSchema).min(1).max(50) }),
   validate: z.strictObject({ proposalId: proposalId.optional(), instance: instance.optional() })
     .refine(input => !!input.proposalId !== !!input.instance, 'Provide exactly one of instance or proposalId'),

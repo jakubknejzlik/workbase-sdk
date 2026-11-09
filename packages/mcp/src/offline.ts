@@ -28,15 +28,16 @@ export function snapshot(db: DatabaseSync) {
     } : { columns: db.prepare(`PRAGMA index_info(${q(String(row.name))})`).all().map(({ cid: _cid, ...c }) => c) }),
   }))
 }
-export function instanceMeta(bundle: Bundle) {
+export function instanceMeta(bundle: Bundle, supportedVersion: string | null = CORE_VERSION) {
   return replay(bundle.migrations, db => {
     const meta = db.prepare('SELECT revision, core_version FROM instance_meta ORDER BY revision DESC LIMIT 1').get()
     const version = String(meta?.core_version ?? '').match(/^(\d+)\.(\d+)\.(\d+)$/)?.slice(1).map(Number)
-    const current = CORE_VERSION.split('.').map(Number)
-    // Allow an older SDK baseline so a normal planned revision can upgrade it.
-    // Future/foreign versions and revision drift still fail closed.
+    const current = (supportedVersion ?? CORE_VERSION).split('.').map(Number)
+    // Normal config operations accept older SDK baselines, never future stamps.
+    // SDK execution passes null and checks its own forward, same-major target;
+    // publication passes the verified target ceiling and also checks equality.
     const supported = version && version[0] === current[0] &&
-      (version[1] < current[1] || (version[1] === current[1] && version[2] <= current[2]))
+      (supportedVersion === null || version[1] < current[1] || (version[1] === current[1] && version[2] <= current[2]))
     if (!meta || meta.revision !== bundle.config.revision || !supported) fail('revision_mismatch', 'Config and committed migrations disagree', 409)
     return { revision: Number(meta.revision), core_version: String(meta.core_version), source: 'offline replay of committed migrations; no live database read' }
   })

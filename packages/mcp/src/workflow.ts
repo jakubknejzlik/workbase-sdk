@@ -15,6 +15,7 @@ import { readVersions, rollback, versionFiles } from './versions'
 import { versionHistory } from '@workbasehq/core/migrations/versions'
 import { inspectInstance, isDisplayFieldError } from '@workbasehq/core/config'
 import { parseProposal, proposalRecord, type Proposal, type ConfigChangeProposal, type LegacyConfigProposal } from './proposals.ts'
+import { executeSdkUpgrade, proposeSdkUpgrade, sdkWorkflowError } from './sdk-upgrade.ts'
 
 function requireConfigChange(proposal: Proposal): asserts proposal is ConfigChangeProposal {
   if (proposal.kind === 'sdk_upgrade') fail('sdk_upgrade_not_supported', 'SDK-upgrade execution requires an upgrade handler; config-change tools cannot execute this proposal', 409)
@@ -30,27 +31,60 @@ export class Workflow {
   constructor(public store: Store, private github?: GitHubConfiguration) {}
   async call(name: string, raw: unknown, signal?: AbortSignal): Promise<ToolResult> {
     const callId = crypto.randomUUID()
-    let proposalId: string | undefined = name === 'propose_change' ? crypto.randomUUID() : undefined
+    let proposalId: string | undefined = ['propose_change', 'upgrade_sdk'].includes(name) ? crypto.randomUUID() : undefined
     const args = raw && typeof raw === 'object' ? raw as Record<string, unknown> : {}
     let instance = this.store.allowed.values().next().value as string | undefined
+    let sdk = name === 'upgrade_sdk' || Object.hasOwn(args, 'proposalId') && ['validate', 'preview_migration', 'apply_to_disposable', 'discard', 'promote', 'submit_change'].includes(name)
     try {
       // Bootstrap validates before any write, then audits accepted calls at the server root.
       if (name === 'bootstrap_instance') return await bootstrapInstance(this.store.root, raw)
+      // Persist intent using only the request id and initialized canonical
+      // directories. Closed proposals are rechecked under the lock without
+      // starting an attempt that would revoke their promotion authorization.
+      let attemptId = z.uuid().safeParse(args.proposalId).success && ['validate', 'preview_migration', 'apply_to_disposable', 'discard'].includes(name)
+        ? await this.store.startSdkAttempt(String(args.proposalId), name) : undefined
       if (!this.store.allowed.size) {
         if (!Object.hasOwn(schemas, name)) fail('unknown_tool', 'Unknown tool', 404)
         await this.store.init()
       }
       // Resolve audit destination only within the allowlist; never log arguments or field/default values.
       if (typeof args.instance === 'string' && this.store.allowed.has(args.instance)) instance = args.instance
+      let found: Awaited<ReturnType<Store['find']>> | undefined
       if (z.uuid().safeParse(args.proposalId).success) {
         proposalId = String(args.proposalId)
-        try { instance = (await this.store.find(proposalId)).instance } catch { /* log missing proposal against the first allowed instance */ }
+        // Discovery reads proposal metadata only, before taking its canonical lock.
+        // Unknown proposal reads use the same conservative public SDK boundary.
+        found = await this.store.find(proposalId)
+        instance = found.instance
+        sdk = name === 'upgrade_sdk' || found.proposal?.kind === 'sdk_upgrade'
+        if (attemptId && !sdk) await this.store.clearNonSdkAttempt(proposalId)
       }
       if (!instance) fail('invalid_allowlist', 'Server has no allowed instances', 500)
-      const log = join(await this.store.directory(instance), 'proposals', 'log.jsonl')
-      await noLink(log, true)
-      await appendFile(log, JSON.stringify({ timestamp: new Date().toISOString(), callId,
-        tool: Object.hasOwn(schemas, name) ? name : 'unknown_tool', ...(proposalId ? { proposalId } : {}) }) + '\n', { mode: 0o600 })
+      const audit = async () => {
+        const log = join(await this.store.proposalDirectory(instance!), 'proposals', 'log.jsonl')
+        await noLink(log, true)
+        await appendFile(log, JSON.stringify({ timestamp: new Date().toISOString(), callId,
+          tool: Object.hasOwn(schemas, name) ? name : 'unknown_tool', ...(proposalId ? { proposalId } : {}) }) + '\n', { mode: 0o600 })
+        return log
+      }
+      if (sdk && found && ['validate', 'preview_migration', 'apply_to_disposable', 'discard'].includes(name)) {
+        const targetInstance = found.instance
+        return await this.store.lockedProposal(targetInstance, async recover => {
+          if (found.proposal?.status === 'promoted' || found.proposal?.status === 'discarded' && name !== 'discard') {
+            await recover()
+            const status = (await this.store.find(proposalId!)).proposal?.status
+            if (status === 'promoted' || status === 'discarded' && name !== 'discard') fail('proposal_closed', `Proposal is ${status}`, 409)
+            attemptId ??= await this.store.startSdkAttempt(proposalId!, name)
+          }
+          const revoked = await this.store.revokeSdkProposal(proposalId!)
+          await audit()
+          const input = schemas[name as ToolName].parse(raw) as Record<string, any>
+          const p = parseProposal(revoked.proposal)
+          if (p.kind !== 'sdk_upgrade' || p.instance !== targetInstance || p.proposalId !== input.proposalId) fail('invalid_proposal', 'Proposal identity mismatch', 409)
+          return executeSdkUpgrade(this.store, p, name, recover, signal, revoked.previousAccepted, attemptId, revoked.source)
+        })
+      }
+      const log = await audit()
       if (!Object.hasOwn(schemas, name)) fail('unknown_tool', 'Unknown tool', 404)
       const input = schemas[name as ToolName].parse(raw) as Record<string, any>
       const targetInstance = input.instance ?? (await this.store.find(input.proposalId)).instance
@@ -64,7 +98,18 @@ export class Workflow {
         }
         return result
       }
+      // Discover SDK proposals without inspecting application inputs, then reread
+      // under the same canonical Instance lock used by configuration operations.
+      if (input.proposalId && (await this.store.find(input.proposalId)).proposal?.kind === 'sdk_upgrade') {
+        return await this.store.lockedProposal(targetInstance, async recover => {
+          const p = parseProposal((await this.store.find(input.proposalId)).proposal)
+          if (p.kind !== 'sdk_upgrade' || p.instance !== targetInstance || p.proposalId !== input.proposalId) fail('invalid_proposal', 'Proposal identity mismatch', 409)
+          return executeSdkUpgrade(this.store, p, name, recover, signal, false, undefined,
+            name === 'promote' ? await this.store.sdkProposalSource(input.proposalId) : undefined, input.expectedRevision)
+        })
+      }
       return await this.store.locked(targetInstance, async () => {
+        if (name === 'upgrade_sdk') return proposeSdkUpgrade(this.store, targetInstance, input.baseRevision, input.targetVersion, proposalId!)
         if (name === 'submit_change') {
           const p = parseProposal((await this.store.find(input.proposalId)).proposal)
           if (p.instance !== targetInstance || p.proposalId !== input.proposalId) fail('invalid_proposal', 'Proposal identity mismatch', 409)
@@ -178,7 +223,7 @@ export class Workflow {
         }
         return fail('unknown_tool', 'Unknown tool', 404)
       })
-    } catch (error) { return errorResult(error) }
+    } catch (error) { return errorResult(sdk ? sdkWorkflowError(error) : error) }
   }
   private revision(bundle: Bundle, revision: number) {
     if (bundle.config.revision !== revision) fail('stale_revision', 'Revision changed; inspect and propose against the current revision', 409)

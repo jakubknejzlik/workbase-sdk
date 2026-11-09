@@ -1,0 +1,86 @@
+[
+  {
+    "revision": 1,
+    "date": "2026-11-09T00:00:00.000Z",
+    "config": {
+      "interactive": false,
+      "locale": "en",
+      "timeZone": "UTC",
+      "registration": "open",
+      "organizationOwnerRole": "owner",
+      "displayName": "SDK upgrade fixture",
+      "id": "sdk_upgrade_fixture",
+      "entities": {
+        "notes": {
+          "fields": {
+            "title": {
+              "type": "string",
+              "required": true
+            }
+          },
+          "relations": {},
+          "displayField": "title",
+          "checks": []
+        }
+      },
+      "roles": [
+        "owner",
+        "viewer",
+        "member"
+      ],
+      "policies": {
+        "notes": {
+          "owner": "all",
+          "viewer": "all"
+        }
+      },
+      "permissions": {
+        "owner": {
+          "notes": [
+            "read",
+            "create",
+            "update",
+            "delete"
+          ]
+        },
+        "viewer": {
+          "notes": [
+            "read"
+          ]
+        }
+      },
+      "commands": [],
+      "organizationPermissions": {
+        "owner": [
+          "organizations.update",
+          "members.read",
+          "members.update",
+          "members.remove",
+          "invitations.create",
+          "invitations.read",
+          "invitations.revoke",
+          "tokens.create",
+          "tokens.read",
+          "tokens.revoke"
+        ],
+        "viewer": []
+      },
+      "plugins": [
+        {
+          "name": "permissions",
+          "version": "0.1.0",
+          "provides": {
+            "permissions": "1.x"
+          },
+          "configuration": {
+            "roles": [
+              "owner",
+              "viewer"
+            ],
+            "ownerRole": "owner"
+          }
+        }
+      ]
+    }
+  }
+]
