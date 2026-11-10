@@ -1,5 +1,5 @@
-import { consolePrivateTerms as forbidden } from './lib/public-vocabulary'
-import { lstatSync, readdirSync, readFileSync } from 'node:fs'
+import { consolePrivateTerms } from './lib/public-vocabulary'
+import { existsSync, lstatSync, readdirSync, readFileSync } from 'node:fs'
 import { resolve, relative } from 'node:path'
 const repo = resolve(import.meta.dirname, '..')
 const componentNotice = readFileSync(resolve(repo, 'packages/plugins/console/NOTICE'), 'utf8')
@@ -11,8 +11,13 @@ const json = (path: string) => JSON.parse(readFileSync(resolve(repo, path), 'utf
 const publicKeys = new Set(['en', 'cs'].flatMap(locale => Object.keys(json(`packages/frontend-console/src/locales/${locale}.json`))))
 for (const catalog of Object.values(json('packages/core/src/query/enum-labels.json'))) for (const key of Object.keys(catalog as object)) publicKeys.add(key)
 export function privateLocaleKeys(root: string, publicKeys: ReadonlySet<string>): Set<string> {
-  return new Set(['en', 'cs', 'tiketo-en', 'tiketo-cs'].flatMap(locale => {
-    const path = `packages/frontend-console/fixtures/private/locales/${locale}.json`
+  const directory = 'packages/frontend-console/fixtures/private/locales'
+  const locales = new Set(['en.json', 'cs.json'])
+  if (existsSync(resolve(root, directory))) for (const name of readdirSync(resolve(root, directory))) {
+    if (name.endsWith('.json') && /(?:^|[-_])(?:en|cs)\.json$/.test(name)) locales.add(name)
+  }
+  return new Set([...locales].flatMap(locale => {
+    const path = `${directory}/${locale}`
     let content: string
     try { content = readFileSync(resolve(root, path), 'utf8') }
     catch (error) {
@@ -27,7 +32,7 @@ const privateKeys = privateLocaleKeys(repo, publicKeys)
 const escape = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 const domainKey = privateKeys.size ? new RegExp(`(?<![\\w])(?:${[...privateKeys].map(escape).join('|')})(?![\\w])`) : null
 const files = (directory: string): string[] => readdirSync(directory, { withFileTypes: true }).flatMap(entry => entry.isDirectory() ? files(resolve(directory, entry.name)) : [resolve(directory, entry.name)])
-export function checkConsolePublic(directory = resolve(repo, 'packages/frontend-console/dist')) {
+export function checkConsolePublic(directory = resolve(repo, 'packages/frontend-console/dist'), forbidden: RegExp = consolePrivateTerms) {
   const root = resolve(directory), entries = files(root)
   if (!entries.some(path => path.endsWith('.js'))) throw new Error('Public console scan requires a built JavaScript bundle')
   const failures = entries.flatMap(path => {

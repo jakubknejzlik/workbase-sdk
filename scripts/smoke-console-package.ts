@@ -76,6 +76,7 @@ try {
   // This check is plain Node, with no TS loader or build tool in the consumer.
   const check = join(consumer, 'check.mjs')
   writeFileSync(check, `import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
 import { existsSync, readFileSync, realpathSync } from 'node:fs'
 import { isAbsolute, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -94,7 +95,7 @@ assert(references.some(path => path.endsWith('.css')))
 for (const path of references) assert(existsSync(resolve(assets, '.' + path)), 'Missing browser asset: ' + path)
 for (const legal of ['LICENSE', 'NOTICE']) assert(readFileSync(join(assets, legal), 'utf8').length > 0)
 for (const locale of ['en', 'cs']) assert(Object.keys(JSON.parse(readFileSync(join(assets, 'locales', locale + '.json'), 'utf8'))).length > 0)
-assert(readFileSync(join(assets, 'NOTICE'), 'utf8').includes('tiketocz/tiketo-cms'))
+assert.equal(createHash('sha256').update(readFileSync(join(assets, 'NOTICE'))).digest('hex'), 'ae8536f05792991f988c900ba25351606d0a8a8ad67ed511c31c18dac19a4a87')
 console.log('Node consumer: resolver, HTML, JS/CSS, version and legal notices passed')
 `)
   console.log(execFileSync('node', [check], { cwd: consumer, env, encoding: 'utf8' }).trim())

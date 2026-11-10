@@ -45,12 +45,24 @@ jobs:
       - run: bun run lint
       - run: bun run typecheck
       - run: bun run check:ci-invariants
+        env:
+          WORKBASE_PRIVATE_TERMS: ${{ secrets.WORKBASE_PRIVATE_TERMS }}
       - run: bun run test
+        env:
+          WORKBASE_PRIVATE_TERMS: ${{ secrets.WORKBASE_PRIVATE_TERMS }}
       - run: bun run test:mcp
       - run: bash scripts/sdk-pack.sh
+        env:
+          WORKBASE_PRIVATE_TERMS: ${{ secrets.WORKBASE_PRIVATE_TERMS }}
       - run: bun scripts/check-sdk-boundary.ts
+        env:
+          WORKBASE_PRIVATE_TERMS: ${{ secrets.WORKBASE_PRIVATE_TERMS }}
       - run: bun scripts/scan-sdk-public.ts
+        env:
+          WORKBASE_PRIVATE_TERMS: ${{ secrets.WORKBASE_PRIVATE_TERMS }}
       - run: bun scripts/smoke-mcp-template.ts --directory dist-sdk
+        env:
+          WORKBASE_PRIVATE_TERMS: ${{ secrets.WORKBASE_PRIVATE_TERMS }}
       # npm Trusted Publishing authenticates through GitHub Actions OIDC.
       - name: Publish the checked archives (dry run by default)
         env:

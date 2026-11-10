@@ -6,7 +6,13 @@ import { execFileSync } from 'node:child_process'
 import catalog from '../packages/core/src/query/enum-labels.json'
 import { assertCoreEnumLabels } from './check-core-enum-labels'
 import { sdkPackageNames } from './sdk-provenance'
-import { checkSdkBoundary, forbiddenInstanceTerms, instanceNames } from './check-sdk-boundary'
+import { checkSdkBoundary as checkBoundary } from './check-sdk-boundary'
+import { instanceNames as baseInstanceNames } from './lib/public-vocabulary'
+import { assertGeneratedMcpContent } from './lib/check-generated-mcp'
+
+const syntheticTerms = ['quartzbeacon', 'cobalt-gateway', 'Žlutý signál']
+const instanceNames = new RegExp([baseInstanceNames.source, `(?<![\\p{L}\\p{N}_])(?:${syntheticTerms.join('|')})(?![\\p{L}\\p{N}_])`].join('|'), 'iu')
+const checkSdkBoundary = (root: string) => checkBoundary(root, false, instanceNames)
 
 let scratch: string | undefined
 afterEach(() => { if (scratch) rmSync(scratch, { recursive: true, force: true }); vi.restoreAllMocks() })
@@ -17,25 +23,15 @@ it('ships labels only for core-declared enum values', () => {
   expect(() => assertCoreEnumLabels({ en: { ...catalog.en, value_custom: 'Custom' } })).toThrow('Non-core enum label: en.value_custom')
 })
 
-// Deliberately hand-written: missing vocabulary in the implementation must make
-// these packed regressions fail. Each snippet isolates one known-bad term.
 const knownBadSnippets = [
-  "doctor: 'Doctor'", "doctor: 'Lékař'", "label: 'Lékař'",
-  "reception: 'Reception'", "label: 'Recepce'",
-  "technician: 'Technician'", "label: 'Technik'",
-  "surgery_user: 'User'", "saddler: 'Supplier'", "lab_choice: 'Choice'",
-  "stump: 'Part'", "implant: 'Part'", "per_doctor: 'Each'", "per_surgery: 'Each'",
-  "label: 'Ordinace'", "label: 'Sedlář'", "label: 'Pahýl'",
-  "label: 'Implantát'", "label: 'Za lékaře'",
-  "instance: 'tiketo'", "instance: 'infodental'", "instance: 'controldental'",
-  "instance: 'cleaning'", "instance: 'dentist'", "instance: 'service-requests'",
-  "instance: 'service_requests'", "instance: 'servicerequests'", "instance: 'surgery'",
+  "label: 'quartzbeacon'", "label: 'QUARTZBEACON'", "label: 'cobalt-gateway'",
+  "const label = 'cobalt-gateway'", "label: 'Žlutý signál'",
+  "label: 'quArtzbeacon'", "label: 'cobalt-gateway\u0301'",
 ]
 
 it.each([
-  'const doctorId = 1', 'const reception_id = 1', 'const technicianName = "value"',
-  'const technical = "receptionist"', 'const implantable = true',
-  'const cleaningUp = () => {}', 'const lékařský = true',
+  'const fieldId = 1', 'const member_name = "value"', 'const quartzbeaconish = true',
+  'const unrelated = true', 'const cobaltGateway = true', "label: 'cobalt/gateway'", "label: 'cobalt_gateway'", 'const quartzbeaconId = 1', 'const getQuartzbeacon = true',
 ])('does not flag generic code or partial words: %s', source => {
   expect(instanceNames.test(source)).toBe(false)
 })
@@ -60,7 +56,7 @@ it('rejects independent known-bad snippets and every forbidden term in packed ar
   const archive = join(scratch, 'dist-sdk/core.tgz'), original = join(scratch, 'original.tgz')
   cpSync(archive, original)
   expect(checkSdkBoundary(scratch)).toBe(0)
-  for (const term of forbiddenInstanceTerms) {
+  for (const term of syntheticTerms) {
     // Start each injection with the same clean packed archive, then restore it.
     execFileSync('tar', ['-xzf', original, '-C', stage])
     for (const spelling of [term, term.toUpperCase()]) {
@@ -170,7 +166,7 @@ it.each([false, true])('keeps workspace and tarball guards strict with private g
   }
   pack('mcp.tgz', '@workbasehq/mcp')
   for (const name of ['core', 'plugins', 'mcp']) {
-    for (const content of ['// infodental', '// ../../instances/neutral/config.ts', '// ../../examples/neutral/config.ts', '// ../../apps/neutral/config.ts']) {
+    for (const content of ['// quartzbeacon', '// ../../instances/neutral/config.ts', '// ../../examples/neutral/config.ts', '// ../../apps/neutral/config.ts']) {
       writeFileSync(join(pkg, 'src/probe.ts'), content + '\n')
       pack(`${name}.tgz`, `@workbasehq/${name}`)
       expect(checkSdkBoundary(scratch), `${name}: ${content}`).toBe(1)
@@ -191,4 +187,14 @@ it.each([false, true])('keeps workspace and tarball guards strict with private g
     expect(checkSdkBoundary(scratch)).toBe(1)
     expect(errors.mock.calls.flat().join('\n')).toContain('non-SDK workspace must be private: instances/neutral/package.json')
   }
+})
+
+it('scans generated MCP template content and paths with ordinary regexes', () => {
+  const path = 'generated/scripts/typecheck.ts'
+  expect(() => assertGeneratedMcpContent(path, 'export const label = "field_name"', instanceNames)).not.toThrow()
+  for (const term of syntheticTerms) {
+    expect(() => assertGeneratedMcpContent(path, `export const label = ${JSON.stringify(term)}`, instanceNames)).toThrow('Forbidden generated content')
+    expect(() => assertGeneratedMcpContent(`generated/${term}.ts`, '// Clean content', instanceNames)).not.toThrow()
+  }
+  expect(() => assertGeneratedMcpContent(path, '{{SDK_VERSION}}', instanceNames)).toThrow('Unresolved placeholder')
 })

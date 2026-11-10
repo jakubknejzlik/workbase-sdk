@@ -112,7 +112,7 @@ describe('SDK release validation and publishing', () => {
     ['outside Actions', { ...oidc, GITHUB_ACTIONS: 'false' }],
     ['missing OIDC', { ...oidc, ACTIONS_ID_TOKEN_REQUEST_URL: undefined }],
     ['missing repository', { ...oidc, GITHUB_REPOSITORY: undefined }],
-    ['different repository', { ...oidc, GITHUB_REPOSITORY: 'jakubknejzlik/workbase' }],
+    ['different repository', { ...oidc, GITHUB_REPOSITORY: 'another-owner/another-repository' }],
     ['local override', { SDK_PUBLISH_ALLOW_LOCAL: '1' }],
   ] as [string, NodeJS.ProcessEnv][])('rejects provenance with %s before calling npm, even for dry runs', async (_label, env) => {
     for (const extra of [[], ['--dry-run']]) {

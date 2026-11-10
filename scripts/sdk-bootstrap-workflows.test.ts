@@ -1,3 +1,4 @@
+import { customerTerms, reviewDigest } from './lib/public-vocabulary'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, mkdirSync, writeFileSync } from 'node:fs'
@@ -47,20 +48,31 @@ describe('exported public bootstrap workflow policy', () => {
   it('contains exactly the two public workflows and SDK root documentation', () => {
     expect(readdirSync(join(root, '.github'))).toEqual(['workflows'])
     expect(readdirSync(join(root, '.github/workflows')).sort()).toEqual(['ci.yml', 'release.yml'])
-    for (const name of ['README.md', 'CONTRIBUTING.md', 'SECURITY.md']) expect(readFileSync(join(root, name), 'utf8')).not.toMatch(/knejzlik\.cz|github\.com\/jakubknejzlik\/workbase(?:[/.#\s]|$)/)
+    for (const name of ['README.md', 'CONTRIBUTING.md', 'SECURITY.md']) {
+      const content = readFileSync(join(root, name), 'utf8')
+      expect(customerTerms.test(content)).toBe(false)
+      // Keep the retired source-repository check without publishing its identity.
+      for (const [link] of content.matchAll(/github\.com\/[\w.-]+\/workbase(?=[/.#\s]|$)/g)) {
+        expect(reviewDigest(link)).not.toBe('a915f740a2e57859628b44665cc483debddb0bd06df5ecddcab473db1b778734')
+      }
+    }
     expect(JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).repository.url).toBe('git+https://github.com/jakubknejzlik/workbase-sdk.git')
   })
   it.each(['ci', 'release'])('%s uses hosted runners, immutable actions and credential-free checks', name => {
     const { source, parsed } = workflow(name)
     expect(parsed.permissions).toEqual({ contents: 'read' })
     expect(Object.keys(parsed.on)).not.toContain('pull_request_target')
-    expect(source).not.toMatch(/secrets\s*[.\[]|self-hosted|CLOUDFLARE_|git clone|instances\/|upload-artifact|download-artifact/)
+    expect(source.replaceAll('${{ secrets.WORKBASE_PRIVATE_TERMS }}', '')).not.toMatch(/secrets\s*[.\[]|self-hosted|CLOUDFLARE_|git clone|instances\/|upload-artifact|download-artifact/)
     for (const job of Object.values(parsed.jobs)) {
       expect(job['runs-on']).toBe('ubuntu-latest')
       expect(job.needs).toBeUndefined()
       for (const step of job.steps) {
         if (step.uses) expect(step.uses).toMatch(/^[\w-]+\/[\w-]+@[a-f0-9]{40}$/)
         expect(step.with?.repository).toBeUndefined()
+        if (['bun run check:ci-invariants', 'bun run test', 'bash scripts/sdk-pack.sh', 'bun scripts/check-sdk-boundary.ts', 'bun scripts/scan-sdk-public.ts', 'bun scripts/smoke-mcp-template.ts --directory dist-sdk'].includes(step.run ?? '')) {
+          expect(step.env).toEqual({ WORKBASE_PRIVATE_TERMS: '${{ secrets.WORKBASE_PRIVATE_TERMS }}' })
+          expect(step.if).toBeUndefined()
+        }
         for (const curl of step.run?.match(/curl[^\n]+/g) ?? []) {
           expect(curl).toMatch(/curl -fsSL --retry 5 --retry-all-errors /)
           expect(curl).toContain('/v8.24.3/')
@@ -104,7 +116,7 @@ describe('exported public bootstrap workflow policy', () => {
     expect(commands[publish]).toContain('--dry-run')
     expect(commands[publish]).toContain('--expect-version')
     expect(job.steps[publish].env).toEqual({ RELEASE_EVENT: '${{ github.event_name }}', RELEASE_REF: '${{ github.ref }}', RELEASE_DRY_RUN: '${{ inputs.dry_run }}' })
-    expect(source).not.toMatch(/PR 6|secrets\s*[.\[]|(?:NPM|NODE_AUTH)_TOKEN/)
+    expect(source.replaceAll('${{ secrets.WORKBASE_PRIVATE_TERMS }}', '')).not.toMatch(/PR 6|secrets\s*[.\[]|(?:NPM|NODE_AUTH)_TOKEN/)
   })
   it('pins an OIDC-capable npm CLI before publishing', () => {
     const steps = workflow('release').parsed.jobs.release.steps

@@ -1,4 +1,4 @@
-import { privateBrand as brand } from './lib/public-vocabulary'
+import { privateBrand as brand, reviewDigest } from './lib/public-vocabulary'
 import { createHash } from 'node:crypto'
 import { existsSync, lstatSync, readFileSync, readdirSync } from 'node:fs'
 import { relative, resolve } from 'node:path'
@@ -195,7 +195,7 @@ export function checkTerminology(root = resolve(fileURLToPath(new URL('..', impo
     if (entry.isDirectory()) { for (const child of readdirSync(path)) walk(resolve(path, child), built); return }
     const file = relative(root, path)
     // Development tests and truthful provenance/license records never ship as UI.
-    if (file === 'packages/ui/src/vendor/tiketo/files.json') return // exact source-blob mapping; reviewed provenance
+    if (reviewDigest(file) === '75f444149ee659bdde224a38b91814a1b1ffc636b430418ae2b63375e5c2e2e4') return // exact source-blob mapping; reviewed provenance
     if (!built && (/\.(?:test|spec)\.[^.]+$/.test(file) || /\.(?:md|d\.ts)$/.test(file))) return
     files++
     const bytes = readFileSync(path)
