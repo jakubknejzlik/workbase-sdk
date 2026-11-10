@@ -94,12 +94,16 @@ export const cases: [string, (f: Fixture) => Promise<void>][] = [
   }],
   ['D5 concurrent idempotent create commits exactly one row and outbox event; mismatches reject', async f => {
     const client = await f.connect()
-    const args = { entity: 'clients', data: { name: 'Idempotent MCP client' }, idempotencyKey: 'concurrent-create' }
-    const results = await Promise.all(Array.from({ length: 5 }, () => f.tool(client, 'create_record', args)))
-    assert.ok(results.every(result => result.ok === true)); assert.ok(results.every(result => result.data.id === results[0].data.id))
-    assert.equal(await f.db.prepare('SELECT count(*) AS n FROM clients WHERE name=?').bind(args.data.name).first('n'), 1)
-    assert.equal(await f.db.prepare("SELECT count(*) AS n FROM audit_outbox WHERE json_extract(payload,'$.entity_id')=?").bind(results[0].data.id).first('n'), 1)
-    assert.deepEqual(await f.tool(client, 'create_record', { ...args, data: { name: 'mismatch' } }), { ok: false, code: 'idempotency_payload_mismatch', status: 422 })
+    for (let batch = 0; batch < 100; batch++) {
+      const args = { entity: 'clients', data: { name: `Idempotent MCP client ${batch}` }, idempotencyKey: `concurrent-create-${batch}` }
+      const results = await Promise.all(Array.from({ length: 5 }, () => f.tool(client, 'create_record', args)))
+      assert.ok(results.every(result => result.ok === true), JSON.stringify({ batch, results })); assert.ok(results.every(result => result.data.id === results[0].data.id))
+      assert.equal(await f.db.prepare('SELECT count(*) AS n FROM clients WHERE name=?').bind(args.data.name).first('n'), 1)
+      assert.equal(await f.db.prepare('SELECT count(*) AS n FROM idempotency_keys WHERE organization_id=? AND key=?').bind(f.org, args.idempotencyKey).first('n'), 1)
+      assert.equal(await f.db.prepare("SELECT count(*) AS n FROM audit_outbox WHERE json_extract(payload,'$.entity_id')=?").bind(results[0].data.id).first('n'), 1)
+      assert.deepEqual(await f.tool(client, 'create_record', { ...args, data: { name: 'mismatch' } }), { ok: false, code: 'idempotency_payload_mismatch', status: 422 })
+    }
+    console.log('D5_COUNTS', JSON.stringify({ batches: 100, concurrentCreates: 500, rows: 100, receipts: 100, outboxEvents: 100, mismatches: 100 }))
   }],
   ['D6 create replay rechecks role allowlist revocation and organization boundaries', async f => {
     const token = await f.issue('dispatcher', ['clients.create', 'clients.read'])
