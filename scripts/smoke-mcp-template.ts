@@ -14,7 +14,7 @@ const root = resolve(import.meta.dirname, '..')
 const args = process.argv.slice(2)
 if (args.length && (args.length !== 2 || args[0] !== '--directory' || !args[1])) throw new Error('Usage: bun scripts/smoke-mcp-template.ts [--directory dist-sdk]')
 const releaseDirectory = args.length ? resolve(args[1]) : undefined
-const scratch = registerTempDir(realpathSync(mkdtempSync('/tmp/workbase-mcp-packed-')))
+const rawScratch = registerTempDir(mkdtempSync('/tmp/workbase-mcp-packed-')), scratch = realpathSync(rawScratch)
 const consumer = join(scratch, 'instance')
 const env = { ...process.env, NODE_PATH: '', NODE_OPTIONS: '', npm_config_cache: join(scratch, 'npm-cache'), npm_config_userconfig: join(scratch, 'npmrc'),
   CLOUDFLARE_API_TOKEN: '', CLOUDFLARE_DEFAULT_ACCOUNT_ID: 'a'.repeat(32),
@@ -259,5 +259,5 @@ console.log('Bundled SST config imported; packaged assets/migration tool and bin
   if (error && typeof error === 'object' && 'stderr' in error) console.error(String(error.stderr))
   throw error
 } finally {
-  cleanupTempDir(scratch)
+  cleanupTempDir(rawScratch)
 }

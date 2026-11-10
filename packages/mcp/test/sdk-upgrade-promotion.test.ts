@@ -19,14 +19,15 @@ import { copyHistoricalInstances } from './fixtures.ts'
 vi.mock('../src/sdk-target.ts', async original => ({ ...await original<typeof import('../src/sdk-target.ts')>(), runSdkTarget: vi.fn() }))
 const targetVersion = CORE_VERSION.replace(/\d+$/, patch => String(Number(patch) + 1))
 const subsequentVersion = CORE_VERSION.replace(/\d+$/, patch => String(Number(patch) + 2))
-let scratch: string, root: string, store: Store, workflow: Workflow, proposalId: string
+let rawScratch: string, scratch: string, root: string, store: Store, workflow: Workflow, proposalId: string
 const children: ChildProcess[] = []
 const path = () => join(root, 'proposals', `${proposalId}.json`)
 const record = async () => JSON.parse(await fs.readFile(path(), 'utf8'))
 const promote = (expectedRevision = 2, signal?: AbortSignal) => workflow.call('promote', { proposalId, expectedRevision }, signal)
 const restart = async () => { store = new Store(root); await store.init(); workflow = new Workflow(store) }
 beforeEach(async () => {
-  scratch = registerTempDir(await fs.realpath(await fs.mkdtemp(join(tmpdir(), 'wb-sdk-promotion-'))))
+  rawScratch = registerTempDir(await fs.mkdtemp(join(tmpdir(), 'wb-sdk-promotion-')))
+  scratch = await fs.realpath(rawScratch)
   await fs.writeFile(join(scratch, 'package.json'), '{"type":"module"}')
   await copyHistoricalInstances(scratch)
   root = join(scratch, 'examples/sample')
@@ -58,7 +59,7 @@ afterEach(async () => {
   for (const child of children.splice(0)) if (child.exitCode === null && child.signalCode === null) {
     const closed = once(child, 'close'); child.kill('SIGKILL'); await closed
   }
-  cleanupTempDir(scratch)
+  cleanupTempDir(rawScratch)
 })
 
 it('publishes exactly verified artifacts and transition, preserving revision and all application bytes', async () => {

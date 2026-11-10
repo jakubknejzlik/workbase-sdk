@@ -168,3 +168,57 @@ it.each([
   })
   expect(existsSync(directory), `${directory} remains`).toBe(false)
 }, 25000)
+
+it('retains the referenced worker log after startup failure and process exit', () => {
+  const { env } = fixture()
+  const run = spawnSync(process.execPath, ['--import', 'tsx', 'scripts/test/fixtures/runtime-startup-probe.mjs'], {
+    encoding: 'utf8', timeout: 10000, env: { ...env, WORKBASE_TMP_PROBE_FAIL: '1', W29_PORT: '0' },
+  })
+  expect(run.error).toBeUndefined()
+  expect(run.status, run.stderr).toBe(1)
+  const { log, existsAfterThrow } = JSON.parse(run.stdout.trim())
+  expect(log).toBeTruthy()
+  expect(run.stderr).toContain(`Neutral Worker exited; ${log}`)
+  expect(existsAfterThrow, 'diagnostics must survive the throw').toBe(true)
+  expect(existsSync(log), 'diagnostics must survive process exit').toBe(true)
+  expect(readFileSync(log, 'utf8')).toBe('worker startup diagnostic\n')
+})
+
+it('cleans the runtime directory after successful startup and teardown', () => {
+  const { root, env } = fixture()
+  const run = spawnSync(process.execPath, ['--import', 'tsx', 'scripts/test/fixtures/runtime-startup-probe.mjs'], {
+    encoding: 'utf8', timeout: 10000, env: { ...env, W29_PORT: '0' },
+  })
+  expect(run.error).toBeUndefined()
+  expect(run.status, run.stderr).toBe(0)
+  const directory = run.stdout.match(/Neutral Worker ready: (.+)/)?.[1]
+  expect(directory).toContain(root)
+  expect(existsSync(directory!)).toBe(false)
+})
+
+it.each([
+  ['scripts/smoke-mcp-template.ts', 'workbase-mcp-packed-', ''],
+  ['scripts/smoke-mcp-upgrade-target.ts', 'workbase-mcp-upgrade-smoke-', ''],
+  ['packages/mcp/test/bootstrap.test.ts', 'mcp-bootstrap-', '^creates registry-only files'],
+  ['packages/mcp/test/restart-recovery.test.ts', 'wb-restart-', '^recovers partial config'],
+  ['packages/mcp/test/sdk-upgrade-promotion.test.ts', 'wb-sdk-promotion-', '^publishes exactly verified'],
+  ['packages/mcp/test/sdk-upgrade-worker.test.ts', 'sdk-worker-test-', '^verifies local target migrations'],
+  ['packages/mcp/test/standalone.test.ts', 'mcp-standalone-', '^derives the standalone allowlist'],
+])('removes %s allocation after injected realpath EACCES and process exit', (entry, prefix, pattern) => {
+  const { root, record, env } = fixture()
+  const preload = pathToFileURL(resolve('scripts/test/fixtures/realpath-failure-probe.mjs')).href
+  const args = pattern ? ['node_modules/vitest/vitest.mjs', 'run', '--config', 'packages/mcp/vitest.config.ts', entry, '-t', pattern]
+    : ['--import', 'tsx', entry]
+  const run = spawnSync(process.execPath, args, { encoding: 'utf8', timeout: 25000, env: {
+    ...env, NODE_OPTIONS: `${env.NODE_OPTIONS ?? ''} --import=${preload}`, WORKBASE_TMP_PROBE_RECORD: record, WORKBASE_TMP_PROBE_PREFIX: prefix,
+  } })
+  expect(run.error).toBeUndefined()
+  expect(run.status, run.stdout + run.stderr).toBe(1)
+  expect(run.stdout + run.stderr).toContain('injected realpath EACCES')
+  const directories: string[] = readFileSync(record, 'utf8').trim().split('\n').map(line => JSON.parse(line))
+  expect(directories.length).toBeGreaterThan(0)
+  for (const directory of directories) {
+    expect(directory).toContain(root)
+    expect(existsSync(directory), `${directory} remains after exit`).toBe(false)
+  }
+}, 30000)

@@ -12,7 +12,8 @@ import { digestBytes, inside } from '../packages/mcp/src/sdk-upgrade-protocol.ts
 
 // One real registry installation, from the frozen historical 0.2.9 inputs to
 // published 0.2.10. The candidate bridge cannot satisfy this with producer 0.2.11.
-const scratch = registerTempDir(await realpath(await mkdtemp(join(tmpdir(), 'workbase-mcp-upgrade-smoke-\uFFFD-'))))
+const rawScratch = registerTempDir(await mkdtemp(join(tmpdir(), 'workbase-mcp-upgrade-smoke-\uFFFD-')))
+const scratch = await realpath(rawScratch)
 const checkout = await realpath(resolve(import.meta.dirname, '..'))
 assert(!inside(checkout, scratch))
 const root = join(scratch, 'instance'), shutdown = new AbortController()
@@ -105,6 +106,6 @@ try {
 } finally {
   shutdown.abort()
   await client.close(); await application?.server.close(); await application?.idle()
-  cleanupTempDir(scratch)
+  cleanupTempDir(rawScratch)
   clearTimeout(timer); process.removeListener('SIGINT', stop); process.removeListener('SIGTERM', stop)
 }

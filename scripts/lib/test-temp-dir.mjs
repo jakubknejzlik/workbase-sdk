@@ -30,6 +30,11 @@ export function registerTempDir(directory) {
   return directory
 }
 
+// Preserve failure diagnostics even when the owning process exits.
+export function retainTempDir(directory) {
+  owned.delete(directory)
+}
+
 export function cleanupTempDir(directory) {
   if (!owned.has(directory)) return
   const keep = owned.get(directory)

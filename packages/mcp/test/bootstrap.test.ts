@@ -11,8 +11,9 @@ import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 const roots: string[] = []
 afterEach(async () => { for (const root of roots.splice(0)) cleanupTempDir(root) })
 async function empty() {
-  const root = registerTempDir(await realpath(await mkdtemp(join(tmpdir(), 'mcp-bootstrap-'))))
-  roots.push(root)
+  const directory = registerTempDir(await mkdtemp(join(tmpdir(), 'mcp-bootstrap-')))
+  roots.push(directory)
+  const root = await realpath(directory)
   return root
 }
 const input = { id: 'demo_sandbox', target: 'cloudflare-github' as const }

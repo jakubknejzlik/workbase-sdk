@@ -15,7 +15,7 @@ import { captureSdkInputs } from '../src/sdk-target.ts'
 import { targetProof } from './fixtures/sdk-upgrade-evidence.ts'
 import { digestBytes } from '../src/sdk-upgrade-protocol.ts'
 
-let scratch: string, root: string, before: Buffer
+let rawScratch: string, scratch: string, root: string, before: Buffer
 const children: ChildProcess[] = []
 const rawHash = (value: Buffer | string) => hash(Buffer.from(value).toString('base64'))
 const partial = "throw new Error('PARTIAL_CONFIG_EVALUATED_BEFORE_RECOVERY')\nexport default {}\n"
@@ -29,7 +29,8 @@ async function interrupted(missing = false) {
   else await fs.writeFile(join(root, 'config.ts'), partial)
 }
 beforeEach(async () => {
-  scratch = registerTempDir(await fs.realpath(await fs.mkdtemp(join(tmpdir(), 'wb-restart-'))))
+  rawScratch = registerTempDir(await fs.mkdtemp(join(tmpdir(), 'wb-restart-')))
+  scratch = await fs.realpath(rawScratch)
   await fs.writeFile(join(scratch, 'package.json'), '{"type":"module"}')
   await copyHistoricalInstances(scratch)
   root = join(scratch, 'examples/sample')
@@ -43,7 +44,7 @@ afterEach(async () => {
       const closed = once(child, 'close'); child.kill('SIGKILL'); await closed
     }
   }
-  cleanupTempDir(scratch)
+  cleanupTempDir(rawScratch)
 })
 async function restored(store: Store) {
   expect(await bytes('config.ts')).toEqual(before)

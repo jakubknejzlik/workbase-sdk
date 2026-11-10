@@ -9,8 +9,9 @@ import { Store } from '../src/storage'
 const roots: string[] = []
 afterEach(async () => { for (const root of roots.splice(0)) cleanupTempDir(root) })
 async function fixture(id = 'asset_evidence') {
-  const root = registerTempDir(await realpath(await mkdtemp(join(tmpdir(), 'mcp-standalone-'))))
-  roots.push(root)
+  const directory = registerTempDir(await mkdtemp(join(tmpdir(), 'mcp-standalone-')))
+  roots.push(directory)
+  const root = await realpath(directory)
   await mkdir(join(root, 'migrations'))
   await writeFile(join(root, 'package.json'), '{"type":"module"}')
   await writeFile(join(root, 'tsconfig.json'), JSON.stringify({ compilerOptions: { jsx: 'react-jsx', jsxImportSource: 'hono/jsx' } }))

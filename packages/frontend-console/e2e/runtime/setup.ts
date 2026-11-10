@@ -1,4 +1,4 @@
-import { registerTempDir, cleanupTempDir } from '../../../../scripts/lib/test-temp-dir.mjs'
+import { registerTempDir, retainTempDir, cleanupTempDir } from '../../../../scripts/lib/test-temp-dir.mjs'
 import { spawn, execFileSync, type ChildProcess } from 'node:child_process'
 import { mkdtempSync, openSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
@@ -34,6 +34,6 @@ export default async function setup() {
         await new Promise(done => setTimeout(done, 100))
       }
       throw new Error(`Neutral Worker not ready; ${directory}/worker.log`)
-    } catch (error) { await stop(); throw error }
+    } catch (error) { retainTempDir(directory); await stop(); throw error }
   } catch (error) { cleanupTempDir(directory); throw error }
 }
