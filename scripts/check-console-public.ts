@@ -1,4 +1,4 @@
-import { consolePrivateTerms, type TermMatcher } from './lib/public-vocabulary'
+import { consolePrivateTerms } from './lib/public-vocabulary'
 import { existsSync, lstatSync, readdirSync, readFileSync } from 'node:fs'
 import { resolve, relative } from 'node:path'
 const repo = resolve(import.meta.dirname, '..')
@@ -32,7 +32,7 @@ const privateKeys = privateLocaleKeys(repo, publicKeys)
 const escape = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 const domainKey = privateKeys.size ? new RegExp(`(?<![\\w])(?:${[...privateKeys].map(escape).join('|')})(?![\\w])`) : null
 const files = (directory: string): string[] => readdirSync(directory, { withFileTypes: true }).flatMap(entry => entry.isDirectory() ? files(resolve(directory, entry.name)) : [resolve(directory, entry.name)])
-export function checkConsolePublic(directory = resolve(repo, 'packages/frontend-console/dist'), forbidden: TermMatcher = consolePrivateTerms) {
+export function checkConsolePublic(directory = resolve(repo, 'packages/frontend-console/dist'), forbidden: RegExp = consolePrivateTerms) {
   const root = resolve(directory), entries = files(root)
   if (!entries.some(path => path.endsWith('.js'))) throw new Error('Public console scan requires a built JavaScript bundle')
   const failures = entries.flatMap(path => {

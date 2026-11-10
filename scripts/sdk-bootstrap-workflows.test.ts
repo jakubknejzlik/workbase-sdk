@@ -62,13 +62,17 @@ describe('exported public bootstrap workflow policy', () => {
     const { source, parsed } = workflow(name)
     expect(parsed.permissions).toEqual({ contents: 'read' })
     expect(Object.keys(parsed.on)).not.toContain('pull_request_target')
-    expect(source).not.toMatch(/secrets\s*[.\[]|self-hosted|CLOUDFLARE_|git clone|instances\/|upload-artifact|download-artifact/)
+    expect(source.replaceAll('${{ secrets.WORKBASE_PRIVATE_TERMS }}', '')).not.toMatch(/secrets\s*[.\[]|self-hosted|CLOUDFLARE_|git clone|instances\/|upload-artifact|download-artifact/)
     for (const job of Object.values(parsed.jobs)) {
       expect(job['runs-on']).toBe('ubuntu-latest')
       expect(job.needs).toBeUndefined()
       for (const step of job.steps) {
         if (step.uses) expect(step.uses).toMatch(/^[\w-]+\/[\w-]+@[a-f0-9]{40}$/)
         expect(step.with?.repository).toBeUndefined()
+        if (['bun run check:ci-invariants', 'bun run test', 'bash scripts/sdk-pack.sh', 'bun scripts/check-sdk-boundary.ts', 'bun scripts/scan-sdk-public.ts', 'bun scripts/smoke-mcp-template.ts --directory dist-sdk'].includes(step.run ?? '')) {
+          expect(step.env).toEqual({ WORKBASE_PRIVATE_TERMS: '${{ secrets.WORKBASE_PRIVATE_TERMS }}' })
+          expect(step.if).toBeUndefined()
+        }
         for (const curl of step.run?.match(/curl[^\n]+/g) ?? []) {
           expect(curl).toMatch(/curl -fsSL --retry 5 --retry-all-errors /)
           expect(curl).toContain('/v8.24.3/')
@@ -112,7 +116,7 @@ describe('exported public bootstrap workflow policy', () => {
     expect(commands[publish]).toContain('--dry-run')
     expect(commands[publish]).toContain('--expect-version')
     expect(job.steps[publish].env).toEqual({ RELEASE_EVENT: '${{ github.event_name }}', RELEASE_REF: '${{ github.ref }}', RELEASE_DRY_RUN: '${{ inputs.dry_run }}' })
-    expect(source).not.toMatch(/PR 6|secrets\s*[.\[]|(?:NPM|NODE_AUTH)_TOKEN/)
+    expect(source.replaceAll('${{ secrets.WORKBASE_PRIVATE_TERMS }}', '')).not.toMatch(/PR 6|secrets\s*[.\[]|(?:NPM|NODE_AUTH)_TOKEN/)
   })
   it('pins an OIDC-capable npm CLI before publishing', () => {
     const steps = workflow('release').parsed.jobs.release.steps

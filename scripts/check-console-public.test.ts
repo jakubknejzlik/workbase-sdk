@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os'
 import { resolve } from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
-import { consoleVocabulary, createTermMatcher, digestTerm, foldCase, instanceNames, mergeVocabularies, reviewDigest, termDigest } from './lib/public-vocabulary'
+import { consolePrivateTerms, reviewDigest } from './lib/public-vocabulary'
 import { checkConsolePublic, privateLocaleKeys } from './check-console-public'
 import { execFileSync } from 'node:child_process'
 import policy from './sdk-scan-policy.json'
@@ -10,7 +10,7 @@ import { assertBytes, withPolicyDataReviews } from './lib/sdk-export-scan'
 
 afterEach(() => vi.unstubAllEnvs())
 const syntheticTerms = ['quartzbeacon', 'cobalt-gateway', 'Žlutý signál']
-const vocabulary = createTermMatcher(mergeVocabularies(consoleVocabulary, { terms: [...syntheticTerms.map(value => digestTerm(value)), digestTerm('secret_')] }))
+const vocabulary = new RegExp([consolePrivateTerms.source, ...syntheticTerms, 'secret_'].join('|'), 'iu')
 const scan = (directory: string) => checkConsolePublic(directory, vocabulary)
 it.each([
   ['substring in JSON', 'index.js', JSON.stringify({ label: 'xquartzbeaconx' })],
@@ -102,70 +102,10 @@ it('rejects a private asset filename even when its content is clean', () => {
   } finally { rmSync(directory, { recursive: true }) }
 })
 
-it('matches an offline built-in digest without exposing its preimage', () => {
-  expect(instanceNames.matchesDigest('02c71eed543467e720c52f6654abf80b28449badbd924271e0a1b71d001c34ce')).toBe(true)
-  expect(instanceNames.matchesDigest(termDigest('unlisted-neutral-value'))).toBe(false)
-})
-
-it('merges optional comma-separated runtime terms and prefixes with offline digests', () => {
-  vi.stubEnv('WORKBASE_PRIVATE_TERMS', '  amberbeacon , hidden_, silver blue green, , ')
-  const matcher = createTermMatcher({ terms: [digestTerm('quartzbeacon')] })
-  for (const content of ['AMBERBEACON', 'hidden_value', 'silver blue green', 'quartzbeacon']) expect(matcher.test(content), content).toBe(true)
-  expect(matcher.test('generic field_name')).toBe(false)
-  vi.stubEnv('WORKBASE_PRIVATE_TERMS', '')
-  expect(createTermMatcher({ terms: [digestTerm('quartzbeacon')] }).test('amberbeacon')).toBe(false)
-})
-
-it('normalizes Unicode and keeps literal separators while matching embedded terms and prefixes', () => {
-  expect(vocabulary.test('Žlutý signál'.normalize('NFD'))).toBe(true)
+it('preserves the base behavior for decomposed Unicode and literal separators', () => {
+  expect(vocabulary.test('Žlutý signál'.normalize('NFD'))).toBe(false)
   for (const content of ['secret', 'secretive', 'unrelated field_name', 'secret-value', 'secret/value', 'getSecretValue', 'cobaltGateway', 'cobalt/gateway']) expect(vocabulary.test(content), content).toBe(false)
   for (const content of ['secret_', 'QUARTZBEACON', 'xquArtzbeaconx', 'xseCret_value']) expect(vocabulary.test(content), content).toBe(true)
-})
-
-it.each([
-  ['ſ', 's'], ['K', 'k'], ['ς', 'σ'], ['ẞ', 'ß'], ['µ', 'μ'],
-  ['\u1fd3', '\u0390'], ['\u1fe3', '\u03b0'], ['\ufb05', '\ufb06'], ['\u{10400}', '\u{10428}'],
-])('uses the same simple case equivalence as /iu for %s and %s', (left, right) => {
-  expect(new RegExp(`^${left}$`, 'iu').test(right)).toBe(true)
-  expect(foldCase(left)).toBe(foldCase(right))
-  expect(termDigest(left)).toBe(termDigest(right))
-  expect(createTermMatcher({ terms: [digestTerm(`quartz${left}beam`)] }).test(`xquartz${right}beamx`)).toBe(true)
-})
-
-it('does not apply expanding or locale-specific case folding', () => {
-  for (const [left, right] of [['İ', 'i'], ['ı', 'i'], ['ß', 'ss']]) {
-    expect(new RegExp(`^${left}$`, 'iu').test(right)).toBe(false)
-    expect(foldCase(left)).not.toBe(foldCase(right))
-    expect(termDigest(left)).not.toBe(termDigest(right))
-  }
-})
-
-it('preserves Unicode, ASCII and substring boundary classes', () => {
-  const unicode = createTermMatcher({ terms: [digestTerm('quartzbeam', 'unicode')] })
-  const ascii = createTermMatcher({ terms: [digestTerm('quartzbeam', 'ascii')] })
-  const substring = createTermMatcher({ terms: [digestTerm('quartzbeam')] })
-  for (const content of ['quartzbeam', 'x-quartzbeam-value', 'quartzbeam\u0301']) {
-    expect(unicode.test(content), content).toBe(true)
-    expect(ascii.test(content), content).toBe(true)
-  }
-  for (const content of ['xquartzbeamx', '_quartzbeam', 'quartzbeam2']) {
-    expect(unicode.test(content), content).toBe(false)
-    expect(ascii.test(content), content).toBe(false)
-    expect(substring.test(content), content).toBe(true)
-  }
-  for (const content of ['équartzbeam', '\u{10428}quartzbeam', 'ſquartzbeam']) {
-    expect(unicode.test(content), content).toBe(false)
-    expect(ascii.test(content), content).toBe(true)
-  }
-})
-
-it('confirms fingerprint candidates with SHA-256 and supports short terms', () => {
-  const [length, head, full] = digestTerm('quartzbeam')
-  const collision = createTermMatcher({ terms: [[length, head, full, termDigest('cobaltbeam')]] })
-  expect(collision.test('xquartzbeamx')).toBe(false)
-  const short = createTermMatcher({ terms: [digestTerm('q'), digestTerm('zx'), digestTerm('jkl')] })
-  for (const content of ['xqx', 'azxb', 'ajklb']) expect(short.test(content), content).toBe(true)
-  expect(short.test('neutral')).toBe(false)
 })
 
 it('preserves exact legal notice, vendor filename and re-export reviews', () => {

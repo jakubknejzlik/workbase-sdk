@@ -11,8 +11,8 @@ import { assertSdkPackageNames, sdkPackageNames } from './sdk-provenance'
 import { consolePublicContent, checkConsolePublic } from './check-console-public'
 
 export { instanceNames } from './lib/public-vocabulary'
-import { instanceNames, type TermMatcher } from './lib/public-vocabulary'
-export function checkSdkBoundary(root: string, sourceOnly = false, vocabulary: TermMatcher = instanceNames) {
+import { instanceNames } from './lib/public-vocabulary'
+export function checkSdkBoundary(root: string, sourceOnly = false, vocabulary: RegExp = instanceNames) {
   const files = (directory: string): string[] => readdirSync(directory, { withFileTypes: true }).flatMap(entry =>
     entry.isDirectory() ? files(join(directory, entry.name)) : [join(directory, entry.name)])
   const failures: string[] = []

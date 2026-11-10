@@ -1,108 +1,96 @@
 import { afterEach, expect, it, vi } from 'vitest'
-import { createGuardMatcher, createTermMatcher, digestTerm, type DigestVocabulary, type Guard, type VocabularyClass } from './public-vocabulary'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { spawnSync } from 'node:child_process'
+import { buildGuardRegexes } from './public-vocabulary'
+import { loadPrivateTerms, termDigest } from './private-terms'
 
-// Independent old-style expressions: never derive the oracle from guardSemantics.
-// All values are synthetic; /i classes intentionally contain only ASCII literals,
-// exactly like their old counterparts. Separators and prefix underscores are literal.
-const terms: Record<VocabularyClass, string[]> = {
-  instance: ['quartzbeam', 'amber-gateway', 'amber_gateway', 'glow beam', 'éclat', 'quartz\u1f71beam', 'ſtonebeam', '\u{10428}beam'],
-  consoleSubstring: ['cobaltbeam', 'azure-link', 'azure_link'],
-  consolePrefix: ['silver_', 'secret_'],
-  consoleWord: ['neonbeam', 'stonebeam'],
-  brand: ['opalbeam', 'opalbeamcz'],
-  exportSubstring: ['zincbeam'],
-  mcpSubstring: ['cobaltbeam', 'neonbeam', 'marblebeam', 'opalbeam'],
+// Synthetic replacement of the base's 36 literals. The oracle below retains the
+// base expressions independently of the production builder and digest manifest.
+const terms = [
+  'quartz01beam', 'quartz02beam', 'quartz03beam', 'quartz04beam', 'éclat',
+  'silver-bridge', 'silver_bridge', 'silverbridge', 'quartz09beam', 'quartz10beam',
+  'quartz11beam', 'quartz12beam', 'quartz13beam', 'quartz14beam', 'quartz15beam',
+  'quartz16beam', 'quartz17beam', 'glow beam', 'quartz19beam', 'quartz20beam',
+  'quartz21beam', 'quartz22beam', 'quartz23beam', 'quartz24beam', 'quartz25beam',
+  'quartz26beam', 'quartz27beam', 'cloud_', 'secret_', 'river_', 'neon_',
+  'stonebeam', 'amberbeam', 'opalbeam', 'quartz01beamcz', 'zincbeam',
+]
+function baseRegexes() {
+  const escapedTerms = terms.slice(0, 27).map(term => term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+  const instanceNames = new RegExp(`(?<![\\p{L}\\p{N}_])(?:${escapedTerms.join('|')})(?![\\p{L}\\p{N}_])`, 'iu')
+  const consolePrivateTerms = /quartz01beam|quartz02beam|quartz04beam|silver[-_]bridge|cloud_|secret_|river_|neon_|\b(?:quartz03beam|stonebeam|amberbeam|opalbeam)\b/i
+  const privateBrand = /quartz01beam(?:cz)?/iu
+  const customerTerms = new RegExp([consolePrivateTerms.source, instanceNames.source, privateBrand.source, 'zincbeam'].join('|'), 'iu')
+  const mcpTerms = /workspace:|file:|overrides|tarball|public-console|BOOTSTRAP GAP|stonebeam|quartz03beam|quartz01beam|quartz02beam|packages\/core\/src/i
+  return { instanceNames, consolePrivateTerms, privateBrand, customerTerms, mcpTerms }
 }
-const digest = (values: string[]): DigestVocabulary => ({ terms: values.map(value => digestTerm(value)) })
-const classes: Record<VocabularyClass, DigestVocabulary> = {
-  instance: digest(terms.instance),
-  consoleSubstring: digest(terms.consoleSubstring),
-  consolePrefix: digest(terms.consolePrefix),
-  consoleWord: digest(terms.consoleWord),
-  brand: digest(terms.brand),
-  exportSubstring: digest(terms.exportSubstring),
-  mcpSubstring: digest(terms.mcpSubstring),
-}
-const escape = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-const alternatives = (values: string[], nfcAliases = false) => `(?:${values.map(value => nfcAliases ? escape(value).replace(/[kK]/g, '[kK]') : escape(value)).join('|')})`
-function regexes(canonicalSpellings = false): Record<Guard, RegExp> {
-  const literals = (values: string[]) => alternatives(values.flatMap(value => canonicalSpellings ? [value, value.normalize('NFC'), value.normalize('NFD')] : [value]), canonicalSpellings)
-  const instanceSource = `(?<![\\p{L}\\p{N}_])${literals(terms.instance)}(?![\\p{L}\\p{N}_])`
-  const consoleSource = `${literals([...terms.consoleSubstring, ...terms.consolePrefix])}|\\b${literals(terms.consoleWord)}\\b`
-  return {
-    console: new RegExp(consoleSource, 'i'),
-    boundary: new RegExp(instanceSource, 'iu'),
-    export: new RegExp([consoleSource, instanceSource, literals(terms.brand), literals(terms.exportSubstring)].join('|'), 'iu'),
-    mcp: new RegExp(literals(terms.mcpSubstring), 'i'),
-  }
-}
-// Kelvin is the canonical non-ASCII alias of ASCII K; long s is not an NFC alias.
-const old = regexes(), nfcOracle = regexes(true)
-const guards: Guard[] = ['console', 'export', 'boundary', 'mcp']
+const before = baseRegexes()
+const after = buildGuardRegexes(terms)
 afterEach(() => vi.unstubAllEnvs())
 
-it.each(guards)('%s has exact synthetic differential parity apart from explicit NFC tightening', guard => {
-  vi.stubEnv('WORKBASE_PRIVATE_TERMS', '')
-  const matcher = createGuardMatcher(guard, classes), corpus = new Set<string>(['generic field_name', ''])
-  for (const term of Object.values(terms).flat()) {
-    const variants = [term, term.toUpperCase(), term.normalize('NFD'),
-      term.replaceAll('-', '_'), term.replaceAll('_', '-'), term.replace(/[-_ ]/g, '/'),
-      term.replace(/[-_ ]/g, '  '), term.replace(/[-_ ]+(.)/g, (_, point: string) => point.toUpperCase()),
-      term.replace(/s/gi, 'ſ'), term.replace(/k/gi, 'K'),
-      'get' + term[0].toUpperCase() + term.slice(1), term + 'Id', term + 'Name',
-      'quartz\u1fbbbeam',
-    ]
-    for (const variant of variants) {
-      for (const before of ['', 'x', '_', '2', '-', '/', ' ', 'é', 'ſ', 'K', '\u{10428}', 'e\u0301', '\u0301', '\u0345']) {
-        for (const after of ['', 'x', 'Id', 'Name', '_', '2', '-', '/', ' ', 'é', 'ſ', 'K', '\u{10428}', '\u0301', '\u0323', '\u0345']) corpus.add(before + variant + after)
-      }
+it.each(Object.keys(before) as (keyof typeof before)[])('%s has identical base regex source, flags and corpus results', guard => {
+  expect(after[guard].source).toBe(before[guard].source)
+  expect(after[guard].flags).toBe(before[guard].flags)
+  const corpus = new Set(['', 'generic field_name', 'fieldName member_id', 'workspace:', 'packages/core/src'])
+  const contexts = ['', 'a', '_', '2', '-', '/', ' ', 'é', 'ſ', 'K', '\u{10428}', 'e\u0301', '\u0301', '\u0345', 'a\udc00', 'é\udfff', '_\udc01', '2\udc00', 'a\ud800\udc00', '\udc00', 'a\ud800']
+  for (const term of terms) {
+    for (const variant of [term, term.toUpperCase(), term.normalize('NFD'), term.replaceAll('-', '_'), term.replaceAll('_', '-'), term.replace(/[-_ ]/g, '/'), term.replace(/[-_ ]+(.)/g, (_, point: string) => point.toUpperCase()), term.replace(/s/gi, 'ſ'), term.replace(/k/gi, 'K'), 'get' + term, term + 'Id', term + 'Name']) {
+      for (const left of contexts) for (const right of contexts) corpus.add(left + variant + right)
       corpus.add(JSON.stringify({ label: variant }))
-      corpus.add(`const x${variant}Value=1`)
       corpus.add(`assets/x${variant}x.js`)
     }
   }
-  let misses = 0, tightenings = 0, unexpectedRejects = 0
-  for (const content of corpus) {
-    const before = old[guard].test(content), after = matcher.test(content)
-    if (before && !after) misses++
-    if (!before && after) {
-      // Deliberate tightening: NFC-equivalent spellings are scanned alike.
-      // The old regex did no normalization. No other difference is permitted.
-      if (nfcOracle[guard].test(content) || old[guard].test(content.normalize('NFC'))) tightenings++
-      else unexpectedRejects++
-    }
-    if (before !== after && !(after && !before && (nfcOracle[guard].test(content) || old[guard].test(content.normalize('NFC'))))) {
-      throw new Error(`${guard} differential: ${JSON.stringify(content)}; old=${before}; hashed=${after}`)
-    }
+  for (const input of corpus) {
+    expect(after[guard].test(input), `${guard}: ${JSON.stringify(input)}`).toBe(before[guard].test(input))
   }
-  expect({ misses, unexpectedRejects }).toEqual({ misses: 0, unexpectedRejects: 0 })
-  console.log(`${guard} synthetic differential: checks=${corpus.size}; old-reject/new-accept=${misses}; unapproved new-reject/old-accept=${unexpectedRejects}; NFC tightenings=${tightenings}`)
+  console.log(`${guard}: source+flags identical; corpus=${corpus.size}; differences=0`)
 })
 
-it.each(['unicode', 'ascii', 'ascii-iu'] as const)('uses original characters for %s boundaries after NFC and folding', boundary => {
-  const matcher = createTermMatcher({ terms: [digestTerm('quartzbeam', boundary)] })
-  for (const content of ['quartzbeamId', 'getQuartzbeam', 'é--quartzbeamName', 'e\u0301--quartzbeamId', '\u1fbb--getQuartzbeam']) expect(matcher.test(content), content).toBe(false)
-  for (const content of ['quartzbeam', 'quartzbeam\u0301', 'e\u0301--quartzbeam', '\u1fbb--quartzbeam', 'e\u0301quartzbeam']) expect(matcher.test(content), content).toBe(true)
-  expect(matcher.exec('e\u0301--QUARTZBEAM')).toEqual(['QUARTZBEAM'])
-  expect(matcher.test('ſquartzbeam')).toBe(boundary === 'ascii')
-  expect(matcher.test('\u0345quartzbeam')).toBe(boundary !== 'unicode')
-})
-
-it('maps composition, expansion, Hangul and reordered marks back to original spans', () => {
-  for (const term of ['éclat', '\u0344beam', '\uac00beam', 'q\u0323\u0307beam']) {
-    const matcher = createTermMatcher({ terms: [digestTerm(term, 'unicode')] })
-    const input = term.normalize('NFD')
-    expect(matcher.exec('!'+input+'!')).toEqual([input])
-    expect(matcher.test('x'+input+'Id')).toBe(false)
+it('enforces extra terms literally in every guard without normalizing scanned content', () => {
+  const guards = buildGuardRegexes([...terms, 'cobalt.beam', 'Žlutý signál'])
+  for (const regex of Object.values(guards)) {
+    expect(regex.test('xCOBALT.BEAMx')).toBe(true)
+    expect(regex.test('cobaltXbeam')).toBe(false)
+    expect(regex.test('Žlutý signál')).toBe(true)
+    expect(regex.test('Žlutý signál'.normalize('NFD'))).toBe(false)
   }
-  const reordered = createTermMatcher({ terms: [digestTerm('q\u0323\u0307', 'unicode')] })
-  expect(reordered.test('q\u0307\u0323x')).toBe(false)
-  expect(reordered.exec('!q\u0307\u0323!')).toEqual(['q\u0307\u0323'])
 })
 
-it.each(guards)('%s merges runtime terms as NFC /iu literal substrings', guard => {
-  vi.stubEnv('WORKBASE_PRIVATE_TERMS', ' quartz\u1f71beam, secret_ ')
-  const matcher = createGuardMatcher(guard, classes)
-  for (const content of ['xquartz\u1fbbbeamx', 'xsecret_value', 'ſecret_value']) expect(matcher.test(content), content).toBe(true)
-  expect(matcher.test('secretValue')).toBe(false)
+const requiredTerms = ['quartzbeam', 'éclat', 'secret_']
+const required = requiredTerms.map(termDigest)
+const message = 'private terms not provided / incomplete; set WORKBASE_PRIVATE_TERMS'
+it('fails closed when the production guard module is started without either env input', () => {
+  const env = { ...process.env }
+  delete env.WORKBASE_PRIVATE_TERMS
+  delete env.WORKBASE_PRIVATE_TERMS_FILE
+  const result = spawnSync('bun', [join(import.meta.dirname, 'public-vocabulary.ts')], { env, encoding: 'utf8' })
+  expect(result.status).toBe(1)
+  expect(result.stderr).toContain(message)
+})
+it.each([{}, { WORKBASE_PRIVATE_TERMS: '' }, { WORKBASE_PRIVATE_TERMS: 'quartzbeam\nsecret_' }, { WORKBASE_PRIVATE_TERMS: 'quartzbeam\neclat\nsecret_' }, { WORKBASE_PRIVATE_TERMS: requiredTerms.join(',') }, { WORKBASE_PRIVATE_TERMS_FILE: '/does-not-exist/private-terms.txt' }])('fails closed for missing or incomplete terms: %#', env => {
+  expect(() => loadPrivateTerms(env, required)).toThrow(message)
+})
+it('accepts complete newline input, CRLF and extra terms, preserving literal spellings', () => {
+  const supplied = [...requiredTerms, 'extra.beam']
+  expect(loadPrivateTerms({ WORKBASE_PRIVATE_TERMS: supplied.join('\r\n') + '\n' }, required)).toEqual(supplied)
+})
+it('uses the existing NFC and simple-fold digest canonicalisation only for completeness', () => {
+  const supplied = ['QUARTZBEAM', 'éclat'.normalize('NFD'), 'ſecret_']
+  expect(loadPrivateTerms({ WORKBASE_PRIVATE_TERMS: supplied.join('\n') }, required)).toEqual(supplied)
+  expect(termDigest('İ')).not.toBe(termDigest('i'))
+  expect(termDigest('ß')).not.toBe(termDigest('ss'))
+})
+it('fails closed when the complete manifest is reordered', () => {
+  expect(() => loadPrivateTerms({ WORKBASE_PRIVATE_TERMS: [...requiredTerms].reverse().join('\n') }, required)).toThrow('preserve term #N order')
+})
+it('reads an explicit file and gives a nonempty inline env value priority', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'private-terms-test-'))
+  const path = join(directory, 'terms.txt')
+  try {
+    writeFileSync(path, requiredTerms.join('\n'), { mode: 0o600 })
+    expect(loadPrivateTerms({ WORKBASE_PRIVATE_TERMS_FILE: path }, required)).toEqual(requiredTerms)
+    expect(() => loadPrivateTerms({ WORKBASE_PRIVATE_TERMS: 'incomplete', WORKBASE_PRIVATE_TERMS_FILE: path }, required)).toThrow(message)
+  } finally { rmSync(directory, { recursive: true }) }
 })
