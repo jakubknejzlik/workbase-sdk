@@ -7,11 +7,11 @@ import catalog from '../packages/core/src/query/enum-labels.json'
 import { assertCoreEnumLabels } from './check-core-enum-labels'
 import { sdkPackageNames } from './sdk-provenance'
 import { checkSdkBoundary as checkBoundary } from './check-sdk-boundary'
-import { createTermMatcher, instanceVocabulary, mergeVocabularies, termDigest } from './lib/public-vocabulary'
+import { createTermMatcher, digestTerm, instanceVocabulary, mergeVocabularies } from './lib/public-vocabulary'
 import { assertGeneratedMcpContent } from './lib/check-generated-mcp'
 
 const syntheticTerms = ['quartzbeacon', 'cobalt-gateway', 'Žlutý signál']
-const instanceNames = createTermMatcher(mergeVocabularies(instanceVocabulary, { terms: syntheticTerms.map(termDigest) }))
+const instanceNames = createTermMatcher(mergeVocabularies(instanceVocabulary, { terms: syntheticTerms.map(value => digestTerm(value, 'unicode')) }))
 const checkSdkBoundary = (root: string) => checkBoundary(root, false, instanceNames)
 
 let scratch: string | undefined
@@ -26,6 +26,7 @@ it('ships labels only for core-declared enum values', () => {
 const knownBadSnippets = [
   "label: 'quartzbeacon'", "label: 'QUARTZBEACON'", "label: 'cobalt_gateway'",
   "label: 'cobalt/gateway'", "const cobaltGateway = true", "label: 'Žlutý signál'",
+  "label: 'quArtzbeacon'", "label: 'cobalt-gateway\u0301'",
 ]
 
 it.each([

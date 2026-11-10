@@ -768,7 +768,7 @@
       "payload": "%ZZ",
       "reason": "Exact malformed-URI acceptance fixture; no decodable bytes.",
       "line": "    writeFileSync(resolve(directory, 'index.js'), `const assets = [${JSON.stringify(uri)}, \"data:text/plain,%ZZ\"]`)",
-      "lineNumber": 24
+      "lineNumber": 36
     }
   ],
   "hosts": [
