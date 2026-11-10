@@ -1,6 +1,7 @@
+import { registerTempDir, cleanupTempDir } from './test-temp-dir.mjs'
 import ts from 'typescript'
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, lstatSync, readdirSync, readFileSync, rmSync } from 'node:fs'
+import { mkdtempSync, lstatSync, readdirSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { isIP } from 'node:net'
 import { join, relative } from 'node:path'
@@ -241,7 +242,7 @@ export function scanArchives(directory: string, policy: ScanPolicy): void {
   const names = new Set<string>()
   for (const archive of archives) {
     assertBytes(archive, Buffer.alloc(0), policy)
-    const stage = mkdtempSync(join(tmpdir(), 'sdk-export-archive-'))
+    const stage = registerTempDir(mkdtempSync(join(tmpdir(), 'sdk-export-archive-')))
     try {
       const file = join(directory, archive)
       const paths = execFileSync('tar', ['-tzf', file], { encoding: 'utf8' }).trim().split('\n')
@@ -263,7 +264,7 @@ export function scanArchives(directory: string, policy: ScanPolicy): void {
         assertBytes(canonical, readFileSync(join(pkg, rel)), policy)
       }
       scanGitleaks(stage, false)
-    } finally { rmSync(stage, { recursive: true, force: true }) }
+    } finally { cleanupTempDir(stage) }
   }
   console.log('Export archive scan: exactly 3 packages; customer/owner, email, IDs, URLs, encoded assets and secrets passed')
 }

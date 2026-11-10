@@ -1,5 +1,6 @@
+import { registerTempDir, cleanupTempDir } from '../../../scripts/lib/test-temp-dir.mjs'
 import { DatabaseSync } from 'node:sqlite'
-import { cp, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises'
+import { cp, lstat, mkdir, mkdtemp, readFile, readdir, realpath, writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
@@ -13,10 +14,10 @@ import { acceptUpgradeResult, BRIDGE_VERSION, bridgeDigest, bridgeFiles, consume
 const fixture = resolve('packages/mcp/test/fixtures/sdk-upgrade/valid-0.2.9')
 const source = resolve('packages/mcp/src'), checkout = resolve('.')
 const roots: string[] = []
-afterEach(async () => { for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true }) })
+afterEach(async () => { for (const root of roots.splice(0)) cleanupTempDir(root) })
 const hashes = (inputs: Record<string, Buffer>) => Object.fromEntries(Object.entries(inputs).map(([path, bytes]) => [path, digestBytes(bytes)]))
 const base = { instanceId: 'sdk_upgrade_fixture', baseRevision: 1, baseFingerprint: 'a'.repeat(64), baseDependencyDigest: 'b'.repeat(64) }
-async function scratch() { const root = await realpath(await mkdtemp(join(tmpdir(), 'sdk-worker-test-'))); roots.push(root); return root }
+async function scratch() { const root = registerTempDir(await realpath(await mkdtemp(join(tmpdir(), 'sdk-worker-test-')))); roots.push(root); return root }
 async function legacyHistory(root: string) {
   const path = join(root, 'config.versions.json'), history = JSON.parse(await readFile(path, 'utf8'))
   history[0].config.plugins = [

@@ -1,3 +1,4 @@
+import { registerTempDir, cleanupTempDir } from '../../../scripts/lib/test-temp-dir.mjs'
 import { mkdtemp, mkdir, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -5,9 +6,9 @@ import { afterEach, expect, it } from 'vitest'
 import { Store } from '../src/storage'
 
 const roots: string[] = []
-afterEach(async () => { for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true }) })
+afterEach(async () => { for (const root of roots.splice(0)) cleanupTempDir(root) })
 async function fixture() {
-  const root = await mkdtemp(join(tmpdir(), 'mcp-storage-paths-'))
+  const root = registerTempDir(await mkdtemp(join(tmpdir(), 'mcp-storage-paths-')))
   roots.push(root)
   return await realpath(root)
 }

@@ -1,3 +1,4 @@
+import { registerTempDir, cleanupTempDir } from './test-temp-dir.mjs'
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
@@ -6,7 +7,7 @@ import { join } from 'node:path'
 import { sdkWorkspaceDirectories } from './sdk-workspaces'
 
 test('logs absent private groups, enumerates all groups when present, and keeps filesystem errors strict', () => {
-  const root = mkdtempSync(join(tmpdir(), 'sdk-workspaces-'))
+  const root = registerTempDir(mkdtempSync(join(tmpdir(), 'sdk-workspaces-')))
   const messages: string[] = []
   const log = console.log
   console.log = message => { messages.push(message) }
@@ -24,6 +25,6 @@ test('logs absent private groups, enumerates all groups when present, and keeps 
     assert.throws(() => sdkWorkspaceDirectories(root), { code: 'ENOTDIR' })
   } finally {
     console.log = log
-    rmSync(root, { recursive: true, force: true })
+    cleanupTempDir(root)
   }
 })

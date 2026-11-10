@@ -1,3 +1,4 @@
+import { registerTempDir, cleanupTempDir } from '../../../scripts/lib/test-temp-dir.mjs'
 import fs from 'node:fs/promises'
 import { spawn, type ChildProcess } from 'node:child_process'
 import { once } from 'node:events'
@@ -25,7 +26,7 @@ const record = async () => JSON.parse(await fs.readFile(path(), 'utf8'))
 const promote = (expectedRevision = 2, signal?: AbortSignal) => workflow.call('promote', { proposalId, expectedRevision }, signal)
 const restart = async () => { store = new Store(root); await store.init(); workflow = new Workflow(store) }
 beforeEach(async () => {
-  scratch = await fs.realpath(await fs.mkdtemp(join(tmpdir(), 'wb-sdk-promotion-')))
+  scratch = registerTempDir(await fs.realpath(await fs.mkdtemp(join(tmpdir(), 'wb-sdk-promotion-'))))
   await fs.writeFile(join(scratch, 'package.json'), '{"type":"module"}')
   await copyHistoricalInstances(scratch)
   root = join(scratch, 'examples/sample')
@@ -57,7 +58,7 @@ afterEach(async () => {
   for (const child of children.splice(0)) if (child.exitCode === null && child.signalCode === null) {
     const closed = once(child, 'close'); child.kill('SIGKILL'); await closed
   }
-  await fs.rm(scratch, { recursive: true, force: true })
+  cleanupTempDir(scratch)
 })
 
 it('publishes exactly verified artifacts and transition, preserving revision and all application bytes', async () => {

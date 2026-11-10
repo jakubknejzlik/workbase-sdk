@@ -1,6 +1,7 @@
+import { registerTempDir, cleanupTempDir } from '../../../../scripts/lib/test-temp-dir.mjs'
 import { usePreparedConsumerDependencies } from '../../../../scripts/lib/packed-consumer-dependencies'
 import { execFileSync, spawnSync } from 'node:child_process'
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -8,7 +9,7 @@ import { expect, it } from 'vitest'
 
 it('regression: packed config and plugin imports load inside an SST bundle with ts-node ESM hooks active', () => {
   const root = resolve(dirname(fileURLToPath(import.meta.url)), '../../../..')
-  const scratch = mkdtempSync(join(tmpdir(), 'workbase-provision-loader-'))
+  const scratch = registerTempDir(mkdtempSync(join(tmpdir(), 'workbase-provision-loader-')))
   const consumer = join(scratch, 'consumer')
   mkdirSync(consumer)
   const env = { ...process.env, NODE_OPTIONS: '', NODE_PATH: '', TS_NODE_TRANSPILE_ONLY: 'true',
@@ -87,5 +88,5 @@ await build({ entryPoints: ['plan.ts'], outfile: '.sst/platform/plan.mjs', bundl
     expect(result.stdout).toContain('packed config loaded with ts-node hooks active')
     expect(result.stdout).not.toContain('config log')
     console.log('Packed provision: schema prepared successfully inside SST bundle with inherited ts-node ESM loader; no cloud access')
-  } finally { rmSync(scratch, { recursive: true, force: true }) }
+  } finally { cleanupTempDir(scratch) }
 }, 180000)

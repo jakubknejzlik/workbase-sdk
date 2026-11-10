@@ -1,3 +1,4 @@
+import { registerTempDir, cleanupTempDir } from '../../../scripts/lib/test-temp-dir.mjs'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createServer } from 'node:http'
 import { createHash } from 'node:crypto'
@@ -33,7 +34,7 @@ async function changeProposal(edit: (p: any) => void) { const p = await proposal
 function submit(extra = {}) { return workflow.call('submit_change', { instance: 'sample', proposalId: id, expectedBaseSha: baseSha, ...extra }) }
 
 beforeAll(async () => {
-  fixture = await mkdtemp(join(tmpdir(), 'wb-submit-fixture-'))
+  fixture = registerTempDir(await mkdtemp(join(tmpdir(), 'wb-submit-fixture-')))
   await symlink(resolve('node_modules'), join(fixture, 'node_modules'))
   await writeFile(join(fixture, 'package.json'), '{"type":"module"}')
   await copyHistoricalInstances(fixture)
@@ -48,9 +49,9 @@ beforeAll(async () => {
   expect((await w.call('apply_to_disposable', { proposalId: id })).verified).toBe(true)
   expect((await w.call('promote', { proposalId: id, expectedRevision: 2 })).ok).toBe(true)
 })
-afterAll(async () => { await rm(fixture, { recursive: true, force: true }) })
+afterAll(async () => { cleanupTempDir(fixture) })
 beforeEach(async () => {
-  root = await mkdtemp(join(tmpdir(), 'wb-submit-'))
+  root = registerTempDir(await mkdtemp(join(tmpdir(), 'wb-submit-')))
   await cp(fixture, root, { recursive: true, verbatimSymlinks: true })
   store = new Store(dir(), new Set(['sample'])); await store.init()
   calls = []; forbidden = []; bodies = []; prs = []; checks = []; onRequest = undefined; onCredential = undefined
@@ -106,7 +107,7 @@ afterEach(async () => {
   expect(forbidden).toEqual([])
   expect(JSON.stringify(await proposal())).not.toContain(secret)
   expect(await readFile(join(dir(), 'proposals/log.jsonl'), 'utf8')).not.toContain(secret)
-  await rm(root, { recursive: true, force: true })
+  cleanupTempDir(root)
 })
 
 describe('submit_change', () => {

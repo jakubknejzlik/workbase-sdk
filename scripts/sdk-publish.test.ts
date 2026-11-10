@@ -1,6 +1,7 @@
+import { registerTempDir, cleanupTempDir } from './lib/test-temp-dir.mjs'
 import { sdkWorkspaceDirectories } from './lib/sdk-workspaces'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { execFileSync, spawnSync } from 'node:child_process'
@@ -39,8 +40,8 @@ function fakeNpm(options: { existing?: boolean; placeholder?: boolean; failure?:
   }
   return { runner, calls, published }
 }
-beforeEach(() => { directory = mkdtempSync(join(tmpdir(), 'sdk-publish-test-')); vi.spyOn(console, 'log').mockImplementation(() => {}); vi.spyOn(console, 'error').mockImplementation(() => {}) })
-afterEach(() => { rmSync(directory, { recursive: true, force: true }); vi.restoreAllMocks() })
+beforeEach(() => { directory = registerTempDir(mkdtempSync(join(tmpdir(), 'sdk-publish-test-'))); vi.spyOn(console, 'log').mockImplementation(() => {}); vi.spyOn(console, 'error').mockImplementation(() => {}) })
+afterEach(() => { cleanupTempDir(directory); vi.restoreAllMocks() })
 describe('SDK release validation and publishing', () => {
   it('publishes exactly core, plugins and mcp across workspace manifests', () => {
     expect(sdkPackageNames).toEqual(['core', 'plugins', 'mcp'])

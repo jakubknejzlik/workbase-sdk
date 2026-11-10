@@ -1,12 +1,14 @@
+import { registerTempDir, cleanupTempDir } from './test-temp-dir.mjs'
 import { execFileSync } from 'node:child_process'
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { dirname, resolve } from 'node:path'
+import { resolve } from 'node:path'
 import { createHash } from 'node:crypto'
 
 const migration = { tsx: '4.23.15', typescript: '5.7.2', '@types/node': '25.9.9', '@cloudflare/workers-types': '5.20261022.1' }
 const deployment = { ...migration, sst: '4.17.1', '@pulumi/command': '1.2.1', '@pulumi/pulumi': '3.215.0', esbuild: '0.21.5' }
 export type ConsumerProfile = 'migration' | 'deployment' | 'loader'
+const preparedConsumers = new Map<string, string>()
 
 /** Registry preparation happens before creating the isolated proof stage. No SDK workspace is installed here. */
 export function prepareConsumerDependencies(root: string): string {
@@ -18,10 +20,10 @@ export function prepareConsumerDependencies(root: string): string {
     loader: { ...core, ...dependencies('plugins'), tsx: '4.23.15', 'ts-node': '10.9.2', typescript: '5.7.2', esbuild: '0.21.5' },
   }
   const key = createHash('sha256').update(JSON.stringify(profiles)).update(process.platform + process.arch).digest('hex')
-  const cache = resolve(tmpdir(), 'workbase-proof-consumers', key)
-  if (existsSync(resolve(cache, 'ready'))) return realpathSync(cache)
-  mkdirSync(dirname(cache), { recursive: true })
-  const preparing = mkdtempSync(resolve(dirname(cache), 'preparing-'))
+  const cached = preparedConsumers.get(key)
+  if (cached && existsSync(resolve(cached, 'ready'))) return cached
+  // Reuse within this proof process; concurrent runs must never share owned state.
+  const preparing = registerTempDir(mkdtempSync(resolve(tmpdir(), 'workbase-proof-consumers-')))
   try {
     for (const [profile, deps] of Object.entries(profiles)) {
       const cwd = resolve(preparing, profile)
@@ -31,9 +33,10 @@ export function prepareConsumerDependencies(root: string): string {
       execFileSync('npm', ['install', '--ignore-scripts', '--no-audit', '--no-fund', '--registry=https://registry.npmjs.org'], { cwd, stdio: 'inherit', timeout: 180000 })
     }
     writeFileSync(resolve(preparing, 'ready'), key)
-    renameSync(preparing, cache)
-    return realpathSync(cache)
-  } finally { rmSync(preparing, { recursive: true, force: true }) }
+    const prepared = realpathSync(preparing)
+    preparedConsumers.set(key, prepared)
+    return prepared
+  } catch (error) { cleanupTempDir(preparing); throw error }
 }
 
 /** Copy registry bytes, then extract the candidate tarballs produced by this test. */

@@ -1,6 +1,7 @@
+import { registerTempDir, cleanupTempDir } from '../../../scripts/lib/test-temp-dir.mjs'
 import { quaternary } from './fixtures/model'
 import { afterEach, beforeEach, expect, it } from 'vitest'
-import { mkdtemp, mkdir, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readdir, readFile, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { defineInstance } from '@workbasehq/core/config'
@@ -12,7 +13,7 @@ let root: string; let directory: string; let workflow: Workflow
 const historical = defineInstance({ id: 'demo', revision: 1, roles: ['owner'], entities: { items: { fields: { title: { type: 'string' }, notes: { type: 'text' } } } }, permissions: { owner: { items: ['read'] } } })
 const current = defineInstance({ ...historical, revision: 2, entities: { items: { fields: { title: { type: 'string' } } } } })
 beforeEach(async () => {
-  root = await mkdtemp(join(tmpdir(), 'config-versions-'))
+  root = registerTempDir(await mkdtemp(join(tmpdir(), 'config-versions-')))
   await symlink(resolve('node_modules'), join(root, 'node_modules'))
   await writeFile(join(root, 'package.json'), '{"type":"module"}\n')
   directory = join(root, 'examples/demo')
@@ -22,7 +23,7 @@ beforeEach(async () => {
   await writeFile(join(directory, 'config.versions.json'), JSON.stringify([{ revision: 1, config: versionData(historical) }]) + '\n')
   const store = new Store(root, new Set(['demo'])); await store.init(); workflow = new Workflow(store)
 })
-afterEach(async () => { await rm(root, { recursive: true, force: true }) })
+afterEach(async () => { cleanupTempDir(root) })
 const call = (input: object) => workflow.call('rollback', { instance: 'demo', to: 'v1', expectedRevision: 2, ...input })
 it('correlates a persisted rollback outcome only with the call that wrote files', async () => {
   expect(await call({ preview: true })).toMatchObject({ written: false })

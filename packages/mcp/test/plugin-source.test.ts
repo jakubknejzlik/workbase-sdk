@@ -1,4 +1,5 @@
-import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { registerTempDir, cleanupTempDir } from '../../../scripts/lib/test-temp-dir.mjs'
+import { cp, mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -18,12 +19,12 @@ import { createAgentInstance } from '../src/template'
 import { configSource } from '../src/storage'
 
 async function roundTrip(config: typeof sample) {
-  const dir = await mkdtemp(join(process.cwd(), '.plugin-source-'))
+  const dir = registerTempDir(await mkdtemp(join(process.cwd(), '.plugin-source-')))
   try {
     const path = join(dir, 'config.ts')
     await writeFile(path, configSource(config))
     return (await tsImport(pathToFileURL(path).href, import.meta.url)).default as typeof sample
-  } finally { await rm(dir, { recursive: true, force: true }) }
+  } finally { cleanupTempDir(dir) }
 }
 it('F2 preserves canonical source provenance across isolated source round trips', async () => {
   const result = await roundTrip(sample)
@@ -43,7 +44,7 @@ it.each([
 })
 
 it('F2 refuses a template descriptor missing its canonical permissions contract', async () => {
-  const dir = await mkdtemp(join(process.cwd(), '.plugin-source-'))
+  const dir = registerTempDir(await mkdtemp(join(process.cwd(), '.plugin-source-')))
   try {
     await mkdir(join(dir, 'instances'))
     await mkdir(join(dir, 'packages/mcp/templates'), { recursive: true })
@@ -53,7 +54,7 @@ it('F2 refuses a template descriptor missing its canonical permissions contract'
     delete template.plugins.find((plugin: { name: string }) => plugin.name === 'permissions').provides
     await writeFile(path, JSON.stringify(template))
     await expect(createAgentInstance(dir)).rejects.toMatchObject({ code: 'invalid_template' })
-  } finally { await rm(dir, { recursive: true, force: true }) }
+  } finally { cleanupTempDir(dir) }
 })
 
 it.each([
@@ -83,7 +84,7 @@ it('rejects a copied domain descriptor and freezes canonical domain model data',
   expect(() => configSource({ ...sample, plugins: sample.plugins!.map(plugin => plugin === domain ? { ...plugin } : plugin) })).toThrow(/noncanonical/)
 })
 it('refuses a template that changes a factory configuration without changing its canonical descriptor', async () => {
-  const dir = await mkdtemp(join(process.cwd(), '.plugin-source-'))
+  const dir = registerTempDir(await mkdtemp(join(process.cwd(), '.plugin-source-')))
   try {
     await mkdir(join(dir, 'instances'))
     await mkdir(join(dir, 'packages/mcp/templates'), { recursive: true })
@@ -93,7 +94,7 @@ it('refuses a template that changes a factory configuration without changing its
     template.plugins.find((plugin: { name: string }) => plugin.name === 'local-auth').configuration = { methods: ['password'] }
     await writeFile(path, JSON.stringify(template))
     await expect(createAgentInstance(dir)).rejects.toThrow()
-  } finally { await rm(dir, { recursive: true, force: true }) }
+  } finally { cleanupTempDir(dir) }
 })
 
 it('preserves configured Identity trust and Organizations options through source materialization', async () => {

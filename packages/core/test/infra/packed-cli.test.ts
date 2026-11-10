@@ -1,6 +1,7 @@
+import { registerTempDir, cleanupTempDir } from '../../../../scripts/lib/test-temp-dir.mjs'
 import { usePreparedConsumerDependencies } from '../../../../scripts/lib/packed-consumer-dependencies'
 import { execFileSync, spawnSync } from 'node:child_process'
-import { cpSync, existsSync, mkdtempSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdtempSync, mkdirSync, readFileSync, realpathSync, renameSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -10,7 +11,7 @@ import { expect, it } from 'vitest'
 it('regression: packed migration-only consumer typechecks before deployment peers; CLI, provision types and SST bundle still work', () => {
   const root = resolve(dirname(fileURLToPath(import.meta.url)), '../../../..')
   const coreVersion = JSON.parse(readFileSync(join(root, 'packages/core/package.json'), 'utf8')).version as string
-  const scratch = mkdtempSync(join(tmpdir(), 'workbase-migrate-packed-'))
+  const scratch = registerTempDir(mkdtempSync(join(tmpdir(), 'workbase-migrate-packed-')))
   const consumer = join(scratch, 'consumer')
   mkdirSync(consumer)
   const env = { ...process.env, NODE_PATH: '', NODE_OPTIONS: '', npm_config_cache: join(scratch, 'cache') }
@@ -253,5 +254,5 @@ console.log('SST-style consumer bundle built; loader external')
     expect(bundledCheck.stderr).not.toContain('usage: workbase-migrate')
     console.log('Packed core CLI: fresh=1; reapply=0; tampered SQL/plugin rejected; SQL-only passed; infra exports imported; optional loader checked; config/plugin/transport credentials hidden; branded details redacted; all dependencies inside temp consumer')
     console.log('Packed core provision: migration-only consumer typechecked before installing deployment peers; no SST/Pulumi needed for import/dry plan; emitted migration command passed; consumer provision() call typechecked; SST-style bundle executed with package-resolved tools; no cloud access')
-  } finally { rmSync(scratch, { recursive: true, force: true }) }
+  } finally { cleanupTempDir(scratch) }
 }, 180000)

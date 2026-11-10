@@ -1,3 +1,4 @@
+import { registerTempDir, cleanupTempDir } from '../../../scripts/lib/test-temp-dir.mjs'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import fs from 'node:fs/promises'
 import { syncBuiltinESMExports } from 'node:module'
@@ -31,7 +32,7 @@ async function interceptRename(fn: (destination: string) => Promise<void>, run: 
   try { await run() } finally { stub.mockRestore(); linked.mockRestore(); syncBuiltinESMExports() }
 }
 beforeEach(async () => {
-  scratch = await fs.mkdtemp(join(tmpdir(), 'wb-dependency-tx-'))
+  scratch = registerTempDir(await fs.mkdtemp(join(tmpdir(), 'wb-dependency-tx-')))
   await copyHistoricalInstances(scratch)
   root = join(scratch, 'examples/sample')
   await fs.writeFile(join(root, 'package.json'), '{"type":"module"}')
@@ -39,7 +40,7 @@ beforeEach(async () => {
   store = new Store(root); await store.init(); root = store.root
   guards = (await store.load('sample')).guards
 })
-afterEach(async () => { await fs.rm(scratch, { recursive: true, force: true }) })
+afterEach(async () => { cleanupTempDir(scratch) })
 
 it('publishes manifest + lock + migration + history + proposal as one guarded snapshot', async () => {
   await expect(commit()).resolves.toBeUndefined()

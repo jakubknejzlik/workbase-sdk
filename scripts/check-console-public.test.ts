@@ -1,4 +1,5 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { registerTempDir, cleanupTempDir } from './lib/test-temp-dir.mjs'
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { resolve } from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
@@ -18,32 +19,32 @@ it.each([
   ['private asset filename', 'xquartzbeaconx.js', 'const label = "field_name"'],
   ['Unicode simple case fold', 'index.js', JSON.stringify({ label: 'ſecret_value' })],
 ])('rejects regression: %s', (_kind, name, content) => {
-  const directory = mkdtempSync(resolve(tmpdir(), 'console-scan-'))
+  const directory = registerTempDir(mkdtempSync(resolve(tmpdir(), 'console-scan-')))
   try {
     writeFileSync(resolve(directory, name), content)
     expect(() => scan(directory)).toThrow(/forbidden public/)
-  } finally { rmSync(directory, { recursive: true }) }
+  } finally { cleanupTempDir(directory) }
 })
 it.each([...syntheticTerms, 'QUARTZBEACON', 'getQuartzbeacon', 'secret_value'])('public bundle scan rejects %s', content => {
-  const directory = mkdtempSync(resolve(tmpdir(), 'console-scan-'))
+  const directory = registerTempDir(mkdtempSync(resolve(tmpdir(), 'console-scan-')))
   try { writeFileSync(resolve(directory, 'index.js'), `const label = ${JSON.stringify(content)}`); expect(() => scan(directory)).toThrow('forbidden public content') }
-  finally { rmSync(directory, { recursive: true }) }
+  finally { cleanupTempDir(directory) }
 })
 it('public bundle scan accepts generic and malformed data URIs', () => {
-  const directory = mkdtempSync(resolve(tmpdir(), 'console-scan-'))
+  const directory = registerTempDir(mkdtempSync(resolve(tmpdir(), 'console-scan-')))
   try {
     const uri = `data:application/json;base64,${Buffer.from('{"label":"field_name"}').toString('base64')}`
     writeFileSync(resolve(directory, 'index.js'), `const assets = [${JSON.stringify(uri)}, "data:text/plain,%ZZ"]`)
     expect(scan(directory)).toContain('0 private model IDs')
-  } finally { rmSync(directory, { recursive: true }) }
+  } finally { cleanupTempDir(directory) }
 })
 it('public bundle scan accepts generic labels and scans nested assets', () => {
-  const directory = mkdtempSync(resolve(tmpdir(), 'console-scan-'))
+  const directory = registerTempDir(mkdtempSync(resolve(tmpdir(), 'console-scan-')))
   try { writeFileSync(resolve(directory, 'index.js'), 'const label = "field_name"'); expect(scan(directory)).toContain('0 private model IDs') }
-  finally { rmSync(directory, { recursive: true }) }
+  finally { cleanupTempDir(directory) }
 })
 it.each(['base64', 'percent'])('public bundle scan rejects %s data URI private content', encoding => {
-  const directory = mkdtempSync(resolve(tmpdir(), 'console-scan-'))
+  const directory = registerTempDir(mkdtempSync(resolve(tmpdir(), 'console-scan-')))
   const content = JSON.stringify({ privateMarker: syntheticTerms[0] })
   const uri = encoding === 'base64'
     ? `data:application/json;base64,${Buffer.from(content).toString('base64')}`
@@ -51,10 +52,10 @@ it.each(['base64', 'percent'])('public bundle scan rejects %s data URI private c
   try {
     writeFileSync(resolve(directory, 'index.js'), `const asset = ${JSON.stringify(uri)}`)
     expect(() => scan(directory)).toThrow('forbidden public content')
-  } finally { rmSync(directory, { recursive: true }) }
+  } finally { cleanupTempDir(directory) }
 })
 it('allows only the exact component provenance notice', () => {
-  const directory = mkdtempSync(resolve(tmpdir(), 'console-scan-'))
+  const directory = registerTempDir(mkdtempSync(resolve(tmpdir(), 'console-scan-')))
   const notice = readFileSync(resolve(import.meta.dirname, '../packages/plugins/console/NOTICE'), 'utf8')
   try {
     writeFileSync(resolve(directory, 'index.js'), 'const label = "field_name"')
@@ -65,19 +66,19 @@ it('allows only the exact component provenance notice', () => {
     writeFileSync(resolve(directory, 'NOTICE'), '')
     writeFileSync(resolve(directory, 'index.js'), JSON.stringify(notice))
     expect(() => scan(directory)).toThrow('forbidden public content')
-  } finally { rmSync(directory, { recursive: true }) }
+  } finally { cleanupTempDir(directory) }
 })
 it.each(['bundle.js.map', 'sourceMappingURL=data:application/json;base64,e30='])('rejects source map payload %s', value => {
-  const directory = mkdtempSync(resolve(tmpdir(), 'console-scan-'))
+  const directory = registerTempDir(mkdtempSync(resolve(tmpdir(), 'console-scan-')))
   try {
     writeFileSync(resolve(directory, 'index.js'), value.includes('=') ? `//# ${value}` : '')
     if (value.endsWith('.map')) writeFileSync(resolve(directory, value), '{"sources":["/private/checkout.ts"]}')
     expect(() => scan(directory)).toThrow(/source map/)
-  } finally { rmSync(directory, { recursive: true }) }
+  } finally { cleanupTempDir(directory) }
 })
 
 it('skips missing private catalogs, retains present keys and rejects malformed catalogs', () => {
-  const root = mkdtempSync(resolve(tmpdir(), 'console-catalogs-'))
+  const root = registerTempDir(mkdtempSync(resolve(tmpdir(), 'console-catalogs-')))
   const log = vi.spyOn(console, 'log').mockImplementation(() => {})
   try {
     expect([...privateLocaleKeys(root, new Set())]).toEqual([])
@@ -91,15 +92,15 @@ it('skips missing private catalogs, retains present keys and rejects malformed c
     expect([...privateLocaleKeys(root, new Set(['generic']))]).toEqual(['privateKey', 'extraPrivateKey'])
     writeFileSync(resolve(directory, 'en.json'), '{broken')
     expect(() => privateLocaleKeys(root, new Set())).toThrow()
-  } finally { log.mockRestore(); rmSync(root, { recursive: true }) }
+  } finally { log.mockRestore(); cleanupTempDir(root) }
 })
 
 it('rejects a private asset filename even when its content is clean', () => {
-  const directory = mkdtempSync(resolve(tmpdir(), 'console-scan-'))
+  const directory = registerTempDir(mkdtempSync(resolve(tmpdir(), 'console-scan-')))
   try {
     writeFileSync(resolve(directory, `${syntheticTerms[0]}.js`), 'const label = "field_name"')
     expect(() => scan(directory)).toThrow('forbidden public asset path')
-  } finally { rmSync(directory, { recursive: true }) }
+  } finally { cleanupTempDir(directory) }
 })
 
 it('preserves the base behavior for decomposed Unicode and literal separators', () => {

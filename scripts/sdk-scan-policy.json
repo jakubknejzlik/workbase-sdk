@@ -683,7 +683,7 @@
     {
       "pathDigest": "4a615c97f42e7fc1cb1ab756e9de5b504d4cbde1ba755ba21c777f51be90c560",
       "lineDigest": "bc3d623c649857cd625cf90be2bff9bcb22edb1ac975c18bc91a666aa102027b",
-      "lineNumber": 58,
+      "lineNumber": 59,
       "reason": "Required public npm dependency/import; exact package identity, not an owner deployment."
     },
     {
@@ -719,7 +719,7 @@
     {
       "pathDigest": "ef647dfc74b46dd7092f0a52c97d52d8e7b3fbb9bd7d41b41f33c20a3ef52139",
       "lineDigest": "f5b88636a5e5a9b7d63a335662b5f5f4ad9cc2e939bfb1b0189ddb76fa4072a2",
-      "lineNumber": 95,
+      "lineNumber": 96,
       "reason": "Public npm dependency used to copy the existing SDK runtime into offline bridge fixtures; dependency attribution, not private owner content."
     }
   ],
@@ -728,15 +728,15 @@
       "path": "packages/frontend-console/e2e/runtime/computed-setup.ts",
       "value": "00000000000000000000000000000029",
       "reason": "Synthetic local-only database identifier in neutral runtime/template fixtures; not an account ID.",
-      "line": "    kv_namespaces: [{ binding: 'AUDIT_KV', id: '00000000000000000000000000000029' }],",
-      "lineNumber": 16
+      "line": "      kv_namespaces: [{ binding: 'AUDIT_KV', id: '00000000000000000000000000000029' }],",
+      "lineNumber": 18
     },
     {
       "path": "packages/frontend-console/e2e/runtime/setup.ts",
       "value": "00000000000000000000000000000029",
       "reason": "Synthetic local-only database identifier in neutral runtime/template fixtures; not an account ID.",
-      "line": "    kv_namespaces: [{ binding: 'AUDIT_KV', id: '00000000000000000000000000000029' }],",
-      "lineNumber": 14
+      "line": "      kv_namespaces: [{ binding: 'AUDIT_KV', id: '00000000000000000000000000000029' }],",
+      "lineNumber": 16
     },
     {
       "path": "packages/mcp/templates/standalone/wrangler.jsonc",
@@ -749,8 +749,8 @@
       "path": "packages/mcp/test/data/fixture.ts",
       "value": "00000000000000000000000000000001",
       "reason": "Synthetic local-only database identifier in neutral runtime/template fixtures; not an account ID.",
-      "line": "      kv_namespaces: [{ binding: 'AUDIT_KV', id: '00000000000000000000000000000001' }],",
-      "lineNumber": 65
+      "line": "        kv_namespaces: [{ binding: 'AUDIT_KV', id: '00000000000000000000000000000001' }],",
+      "lineNumber": 70
     }
   ],
   "emails": [
@@ -768,7 +768,7 @@
       "payload": "%ZZ",
       "reason": "Exact malformed-URI acceptance fixture; no decodable bytes.",
       "line": "    writeFileSync(resolve(directory, 'index.js'), `const assets = [${JSON.stringify(uri)}, \"data:text/plain,%ZZ\"]`)",
-      "lineNumber": 36
+      "lineNumber": 37
     }
   ],
   "hosts": [
@@ -854,14 +854,14 @@
       "line": "assert.equal(config.app({ stage: 'production' }).protect, true)",
       "value": "config.app",
       "reason": "Dotted SST config method in an embedded smoke script; not a network host.",
-      "lineNumber": 242
+      "lineNumber": 243
     },
     {
       "path": "scripts/smoke-mcp-template.ts",
       "line": "assert.equal(config.app({ stage: 'trial' }).removal, 'remove')",
       "value": "config.app",
       "reason": "Dotted SST config method in an embedded smoke script; not a network host.",
-      "lineNumber": 243
+      "lineNumber": 244
     }
   ]
 }

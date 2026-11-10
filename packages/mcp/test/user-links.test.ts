@@ -1,7 +1,8 @@
+import { registerTempDir, cleanupTempDir } from '../../../scripts/lib/test-temp-dir.mjs'
 import { afterEach, expect, it } from 'vitest'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
-import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, readdir, symlink, writeFile } from 'node:fs/promises'
 import { DatabaseSync } from 'node:sqlite'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -14,9 +15,9 @@ import { instanceMeta } from '../src/offline'
 import { configSource } from '../src/storage'
 
 const roots: string[] = []
-afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))) })
+afterEach(async () => { await Promise.all(roots.splice(0).map(root => cleanupTempDir(root))) })
 it('add_user_link protects an optional user relation to populated domain rows through MCP validation, D1 verification and promotion', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'workbase-nullable-ref-')); roots.push(root)
+  const root = registerTempDir(await mkdtemp(join(tmpdir(), 'workbase-nullable-ref-'))); roots.push(root)
   const config = defineInstance({ id: 'nullable_user_link', revision: 1, roles: ['owner'], account: { entity: 'users' },
     permissions: { owner: { users: ['read'], people: ['read', 'create', 'update'] } },
     policies: { users: { owner: 'all' }, people: { owner: 'all' } },

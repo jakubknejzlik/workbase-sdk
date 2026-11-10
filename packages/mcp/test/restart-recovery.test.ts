@@ -1,3 +1,4 @@
+import { registerTempDir, cleanupTempDir } from '../../../scripts/lib/test-temp-dir.mjs'
 import fs from 'node:fs/promises'
 import { spawn, type ChildProcess } from 'node:child_process'
 import { once } from 'node:events'
@@ -28,7 +29,7 @@ async function interrupted(missing = false) {
   else await fs.writeFile(join(root, 'config.ts'), partial)
 }
 beforeEach(async () => {
-  scratch = await fs.realpath(await fs.mkdtemp(join(tmpdir(), 'wb-restart-')))
+  scratch = registerTempDir(await fs.realpath(await fs.mkdtemp(join(tmpdir(), 'wb-restart-'))))
   await fs.writeFile(join(scratch, 'package.json'), '{"type":"module"}')
   await copyHistoricalInstances(scratch)
   root = join(scratch, 'examples/sample')
@@ -42,7 +43,7 @@ afterEach(async () => {
       const closed = once(child, 'close'); child.kill('SIGKILL'); await closed
     }
   }
-  await fs.rm(scratch, { recursive: true, force: true })
+  cleanupTempDir(scratch)
 })
 async function restored(store: Store) {
   expect(await bytes('config.ts')).toEqual(before)

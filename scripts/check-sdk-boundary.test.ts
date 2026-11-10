@@ -1,3 +1,4 @@
+import { registerTempDir, cleanupTempDir } from './lib/test-temp-dir.mjs'
 import { afterEach, expect, it, vi } from 'vitest'
 import { cpSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -15,7 +16,7 @@ const instanceNames = new RegExp([baseInstanceNames.source, `(?<![\\p{L}\\p{N}_]
 const checkSdkBoundary = (root: string) => checkBoundary(root, false, instanceNames)
 
 let scratch: string | undefined
-afterEach(() => { if (scratch) rmSync(scratch, { recursive: true, force: true }); vi.restoreAllMocks() })
+afterEach(() => { if (scratch) cleanupTempDir(scratch); vi.restoreAllMocks() })
 
 it('ships labels only for core-declared enum values', () => {
   expect(() => assertCoreEnumLabels(catalog)).not.toThrow()
@@ -37,7 +38,7 @@ it.each([
 })
 
 it('rejects independent known-bad snippets and every forbidden term in packed archives', () => {
-  scratch = mkdtempSync(join(tmpdir(), 'sdk-boundary-test-'))
+  scratch = registerTempDir(mkdtempSync(join(tmpdir(), 'sdk-boundary-test-')))
   vi.spyOn(console, 'log').mockImplementation(() => {})
   const errors = vi.spyOn(console, 'error').mockImplementation(() => {})
   for (const group of ['packages/core/src', 'examples', 'instances', 'apps', 'dist-sdk']) mkdirSync(join(scratch, group), { recursive: true })
@@ -99,7 +100,7 @@ it('rejects independent known-bad snippets and every forbidden term in packed ar
 
 
 it('checks template tooling against its own manifest without allowing undeclared SDK runtime imports', () => {
-  scratch = mkdtempSync(join(tmpdir(), 'sdk-template-boundary-'))
+  scratch = registerTempDir(mkdtempSync(join(tmpdir(), 'sdk-template-boundary-')))
   vi.spyOn(console, 'log').mockImplementation(() => {})
   const errors = vi.spyOn(console, 'error').mockImplementation(() => {})
   for (const group of ['packages/core/src', 'examples', 'instances', 'apps', 'dist-sdk']) mkdirSync(join(scratch, group), { recursive: true })
@@ -136,7 +137,7 @@ it('checks template tooling against its own manifest without allowing undeclared
 
 // Exercise the complete boundary in both checkout layouts, including archive identity.
 it.each([false, true])('keeps workspace and tarball guards strict with private groups present=%s', privateGroups => {
-  scratch = mkdtempSync(join(tmpdir(), 'sdk-boundary-layout-'))
+  scratch = registerTempDir(mkdtempSync(join(tmpdir(), 'sdk-boundary-layout-')))
   const logs = vi.spyOn(console, 'log').mockImplementation(() => {})
   const errors = vi.spyOn(console, 'error').mockImplementation(() => {})
   for (const path of ['packages/core/src', 'dist-sdk', 'stage/package/src/query']) mkdirSync(join(scratch, path), { recursive: true })

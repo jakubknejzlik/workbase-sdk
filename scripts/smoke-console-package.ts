@@ -1,14 +1,15 @@
+import { registerTempDir, cleanupTempDir } from './lib/test-temp-dir.mjs'
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, writeFileSync } from 'node:fs'
 import { dirname, join, relative, resolve } from 'node:path'
 import { checkConsolePublic } from './check-console-public'
 import { stageConsoleAssets } from './stage-console-assets'
 import { stageConsolePackage } from './lib/stage-console-package'
 
 const root = resolve(import.meta.dirname, '..')
-const scratch = mkdtempSync('/tmp/workbase-console-packed-')
+const scratch = registerTempDir(mkdtempSync('/tmp/workbase-console-packed-'))
 const env = { ...process.env, NODE_PATH: '', NODE_OPTIONS: '', npm_config_cache: join(scratch, 'npm-cache'), npm_config_userconfig: join(scratch, 'npmrc') }
 const npm = (args: string[], cwd: string) => execFileSync('npm', args, { cwd, env, encoding: 'utf8', timeout: 180000, stdio: 'pipe' })
 const digest = (path: string) => createHash('sha256').update(readFileSync(path)).digest('hex')
@@ -106,5 +107,5 @@ console.log('Node consumer: resolver, HTML, JS/CSS, version and legal notices pa
   console.log('SST-style bundle:', execFileSync('node', [bundled], { cwd: consumer, env, encoding: 'utf8' }).trim())
   console.log(`Packed consumer smoke passed; isolated npm cache; only core/plugins requested; lockfile sha256=${digest(join(consumer, 'package-lock.json'))}`)
 } finally {
-  rmSync(scratch, { recursive: true, force: true })
+  cleanupTempDir(scratch)
 }

@@ -1,6 +1,7 @@
+import { registerTempDir, cleanupTempDir } from './lib/test-temp-dir.mjs'
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { copyFileSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync, mkdirSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdtempSync, readFileSync, readdirSync, writeFileSync, mkdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -8,7 +9,7 @@ import { fileURLToPath } from 'node:url'
 // A real Pulumi monitor is essential here: constructor mocks and dry plans miss
 // protobuf serialization failures caused by loading a second SDK into SST.
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
-const scratch = mkdtempSync(join(tmpdir(), 'workbase-sdk-sst-'))
+const scratch = registerTempDir(mkdtempSync(join(tmpdir(), 'workbase-sdk-sst-')))
 const env: NodeJS.ProcessEnv = { ...process.env, NODE_OPTIONS: '', NODE_PATH: '', SST_TELEMETRY_DISABLED: '1' }
 for (const key of Object.keys(env)) if (key.startsWith('CLOUDFLARE_') || key.startsWith('AWS_') || key.startsWith('SST_SECRET_')) delete env[key]
 Object.assign(env, { CLOUDFLARE_API_TOKEN: 'synthetic-token', CLOUDFLARE_DEFAULT_ACCOUNT_ID: 'a'.repeat(32),
@@ -89,4 +90,4 @@ export default { id: 'packed', revision, interactive: false, roles: ['owner'], e
   // Pulumi/protobuf copy. None of these consumer modules may enter SST's process.
   run('bun', ['add', '--dev', '@pulumi/command@1.2.1', '@pulumi/pulumi@3.215.0'])
   preview('conflicting consumer Pulumi/command installed')
-} finally { rmSync(scratch, { recursive: true, force: true }) }
+} finally { cleanupTempDir(scratch) }
