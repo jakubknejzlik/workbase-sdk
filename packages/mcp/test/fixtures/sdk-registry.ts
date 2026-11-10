@@ -1,13 +1,14 @@
+import { registerTempDir, cleanupTempDir } from '../../../../scripts/lib/test-temp-dir.mjs'
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { cp, mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 /** A closed registry and byte-identical installed tree; no package-manager/network dependency. */
 export async function registryFixture() {
-  const base = await mkdtemp(join(tmpdir(), 'sdk-registry-'))
+  const base = registerTempDir(await mkdtemp(join(tmpdir(), 'sdk-registry-')))
   const root = join(base, 'consumer'), archives = join(base, 'archives'), version = '0.2.9'
   const names = ['core', 'plugins', 'mcp'].map(name => `@workbasehq/${name}`)
   const payloads = new Map<string, Buffer>()
@@ -25,7 +26,7 @@ export async function registryFixture() {
   const close = async () => {
     server.closeAllConnections()
     await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()))
-    await rm(base, { recursive: true, force: true })
+    cleanupTempDir(base)
   }
   try {
     await mkdir(archives)
@@ -56,5 +57,5 @@ export async function registryFixture() {
         execFileSync('tar', ['-czf', join(archives, 'core.tgz'), 'package'], { cwd: source })
         await writeFile(join(root, 'node_modules/@workbasehq/core/binary.dat'), 'substituted')
       } }
-  } catch (error) { server.closeAllConnections(); server.close(); await rm(base, { recursive: true, force: true }); throw error }
+  } catch (error) { server.closeAllConnections(); server.close(); cleanupTempDir(base); throw error }
 }

@@ -1,4 +1,5 @@
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
+import { registerTempDir, cleanupTempDir } from '../../../../scripts/lib/test-temp-dir.mjs'
+import { mkdtemp, mkdir, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { isSecret, output, secret, type Output } from '@pulumi/pulumi'
@@ -16,7 +17,7 @@ const authSecret = 'synthetic-stable-auth-secret-at-least-32-characters'
 const outputValue = <T>(value: Output<T>) => (value as unknown as { promise(): Promise<T> }).promise()
 
 beforeEach(async () => {
-  root = await mkdtemp(join(tmpdir(), 'workbase-provision-'))
+  root = registerTempDir(await mkdtemp(join(tmpdir(), 'workbase-provision-')))
   await mkdir(join(root, 'application inputs'))
   await mkdir(join(root, 'sql'))
   await mkdir(join(root, 'console assets'))
@@ -27,7 +28,7 @@ beforeEach(async () => {
   options = { projectRoot: root, configPath: 'application inputs/config.ts', handler: 'worker.ts', migrationsDir: 'sql',
     resourcePrefix: 'neutral-app', stage: 'preview', authSecret, authBaseUrl: 'https://neutral.example.test', accountId: 'a'.repeat(32) }
 })
-afterEach(async () => { records.length = 0; vi.unstubAllGlobals(); vi.unstubAllEnvs(); await rm(root, { recursive: true, force: true }) })
+afterEach(async () => { records.length = 0; vi.unstubAllGlobals(); vi.unstubAllEnvs(); cleanupTempDir(root) })
 
 function mockSst() {
   class D1 {

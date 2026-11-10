@@ -1,5 +1,6 @@
+import { registerTempDir, cleanupTempDir } from './lib/test-temp-dir.mjs'
 import { fileURLToPath } from 'node:url'
-import { mkdtempSync, readdirSync, readFileSync, rmSync, existsSync, statSync } from 'node:fs'
+import { mkdtempSync, readdirSync, readFileSync, existsSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve, dirname, relative } from 'node:path'
 import { execFileSync } from 'node:child_process'
@@ -60,7 +61,7 @@ export function checkSdkBoundary(root: string, sourceOnly = false, vocabulary: R
   if (!sourceOnly || archives.length) {
     if (archives.length !== sdkPackageNames.length) failures.push(`expected exactly ${sdkPackageNames.length} SDK tarballs, found ${archives.length}`)
     const packedNames: string[] = []
-    const scratch = mkdtempSync(join(tmpdir(), 'workbase-boundary-'))
+    const scratch = registerTempDir(mkdtempSync(join(tmpdir(), 'workbase-boundary-')))
     try {
       for (const archive of archives) {
         const destination = join(scratch, archive)
@@ -96,7 +97,7 @@ export function checkSdkBoundary(root: string, sourceOnly = false, vocabulary: R
       }
       try { assertSdkPackageNames(packedNames) }
       catch (error) { failures.push(error instanceof Error ? error.message : String(error)) }
-    } finally { rmSync(scratch, { recursive: true, force: true }) }
+    } finally { cleanupTempDir(scratch) }
   }
   if (failures.length) {
     console.error(`SDK boundary failed:\n${failures.map(failure => `- ${failure}`).join('\n')}`)

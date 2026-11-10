@@ -1,3 +1,4 @@
+import { registerTempDir, cleanupTempDir } from '../../../scripts/lib/test-temp-dir.mjs'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { mkdir, mkdtemp, readdir, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -24,7 +25,7 @@ const config = defineInstance({ id: 'role_workflow', revision: 1, interactive: f
   permissions: { owner: { assets: ['read'] } }, organizationPermissions: { owner: ['members.update'] },
 })
 beforeEach(async () => {
-  root = await mkdtemp(join(tmpdir(), 'mcp-roles-'))
+  root = registerTempDir(await mkdtemp(join(tmpdir(), 'mcp-roles-')))
   await mkdir(join(root, 'migrations'))
   await symlink(resolve('node_modules'), join(root, 'node_modules'))
   await writeFile(join(root, 'package.json'), '{"type":"module"}\n')
@@ -34,7 +35,7 @@ beforeEach(async () => {
 })
 afterEach(async () => {
   vi.unstubAllEnvs()
-  await rm(root, { recursive: true, force: true })
+  cleanupTempDir(root)
   if (targetDirectory) await rm(targetDirectory, { recursive: true, force: true })
   targetDirectory = undefined
 })

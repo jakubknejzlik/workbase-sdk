@@ -1,3 +1,4 @@
+import { registerTempDir, cleanupTempDir } from '../../../scripts/lib/test-temp-dir.mjs'
 import { mkdtemp, mkdir, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -6,10 +7,11 @@ import { createServer } from '../src/server'
 import { Store } from '../src/storage'
 
 const roots: string[] = []
-afterEach(async () => { for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true }) })
+afterEach(async () => { for (const root of roots.splice(0)) cleanupTempDir(root) })
 async function fixture(id = 'asset_evidence') {
-  const root = await realpath(await mkdtemp(join(tmpdir(), 'mcp-standalone-')))
-  roots.push(root)
+  const directory = registerTempDir(await mkdtemp(join(tmpdir(), 'mcp-standalone-')))
+  roots.push(directory)
+  const root = await realpath(directory)
   await mkdir(join(root, 'migrations'))
   await writeFile(join(root, 'package.json'), '{"type":"module"}')
   await writeFile(join(root, 'tsconfig.json'), JSON.stringify({ compilerOptions: { jsx: 'react-jsx', jsxImportSource: 'hono/jsx' } }))

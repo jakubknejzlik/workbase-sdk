@@ -1,3 +1,4 @@
+import { registerTempDir, cleanupTempDir } from './lib/test-temp-dir.mjs'
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { execFileSync } from 'node:child_process'
@@ -15,7 +16,7 @@ test('requires exactly the three SDK manifest identities, regardless of order', 
 })
 
 test('packer archive assertion reads manifest identities and rejects extra, missing or substituted archives', () => {
-  const root = mkdtempSync(join(tmpdir(), 'sdk-archives-'))
+  const root = registerTempDir(mkdtempSync(join(tmpdir(), 'sdk-archives-')))
   const directory = join(root, 'dist-sdk')
   try {
     mkdirSync(directory)
@@ -35,5 +36,5 @@ test('packer archive assertion reads manifest identities and rejects extra, miss
     assert.throws(() => assertSdkArchives(directory), /expected exactly SDK packages/)
     pack('2.tgz', '@workbasehq/ui')
     assert.throws(() => assertSdkArchives(directory), /expected exactly SDK packages/)
-  } finally { rmSync(root, { recursive: true, force: true }) }
+  } finally { cleanupTempDir(root) }
 })

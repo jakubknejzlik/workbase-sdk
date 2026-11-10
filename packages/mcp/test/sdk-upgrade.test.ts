@@ -1,3 +1,4 @@
+import { registerTempDir, cleanupTempDir } from '../../../scripts/lib/test-temp-dir.mjs'
 import { mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -38,7 +39,7 @@ const seed = async () => {
     baseFingerprint: bundle.fingerprint, baseDependencyDigest: bundle.dependencyDigest }))
 }
 beforeEach(async () => {
-  scratch = await mkdtemp(join(tmpdir(), 'wb-sdk-upgrade-'))
+  scratch = registerTempDir(await mkdtemp(join(tmpdir(), 'wb-sdk-upgrade-')))
   await writeFile(join(scratch, 'package.json'), '{"type":"module"}\n')
   await copyHistoricalInstances(scratch)
   root = await realpath(join(scratch, 'examples/sample'))
@@ -50,7 +51,7 @@ beforeEach(async () => {
   vi.mocked(runSdkTarget).mockReset().mockImplementation(targetProof)
   await seed()
 })
-afterEach(async () => { vi.restoreAllMocks(); syncBuiltinESMExports(); await rm(scratch, { recursive: true, force: true }) })
+afterEach(async () => { vi.restoreAllMocks(); syncBuiltinESMExports(); cleanupTempDir(scratch) })
 
 it('exposes the exact target public contract (D3 main-base red)', () => {
   expect((schemas as Record<string, any>).upgrade_sdk?.safeParse({ instance: 'sample', baseRevision: 2, targetVersion: '0.2.10' }).success).toBe(true)

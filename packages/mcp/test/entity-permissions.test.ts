@@ -1,5 +1,6 @@
+import { registerTempDir, cleanupTempDir } from '../../../scripts/lib/test-temp-dir.mjs'
 import { afterEach, beforeEach, expect, it } from 'vitest'
-import { mkdir, mkdtemp, readdir, rm, symlink, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readdir, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
@@ -21,7 +22,7 @@ let root: string
 let application: Awaited<ReturnType<typeof createServer>>
 let client: Client
 beforeEach(async () => {
-  root = await mkdtemp(join(tmpdir(), 'mcp-entity-permissions-'))
+  root = registerTempDir(await mkdtemp(join(tmpdir(), 'mcp-entity-permissions-')))
   await mkdir(join(root, 'migrations'))
   await symlink(resolve('node_modules'), join(root, 'node_modules'))
   await writeFile(join(root, 'package.json'), '{"type":"module"}\n')
@@ -35,7 +36,7 @@ beforeEach(async () => {
 })
 afterEach(async () => {
   await client?.close(); await application?.server.close()
-  await rm(root, { recursive: true, force: true })
+  cleanupTempDir(root)
 })
 async function call(name: string, args: Record<string, unknown>) {
   const response = await client.callTool({ name, arguments: args }, undefined, { timeout: 120000 })

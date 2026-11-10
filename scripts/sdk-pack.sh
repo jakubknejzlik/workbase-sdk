@@ -10,18 +10,19 @@ elif [[ "$#" != 0 ]]; then
 fi
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 bun "$root/scripts/stage-console-assets.ts"
-stage="$(mktemp -d "${TMPDIR:-/tmp}/workbase-sdk-pack.XXXXXX")"
-trap 'rm -rf "$stage"' EXIT
 mkdir -p "$root/dist-sdk"
 
 # Pack staged manifests: Bun otherwise resolves even development-only workspace
 # dependencies, including unversioned example packages. Never edit the workspaces.
-bun - "$root" "$stage" <<'JS'
-import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+bun - "$root" <<'JS'
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { tmpdir } from 'node:os'
 import { spawnSync } from 'node:child_process'
 import { pathToFileURL } from 'node:url'
-const [root, stage] = process.argv.slice(2)
+const [root] = process.argv.slice(2)
+const { registerTempDir } = await import(pathToFileURL(join(root, 'scripts/lib/test-temp-dir.mjs')).href)
+const stage = registerTempDir(mkdtempSync(join(tmpdir(), 'workbase-sdk-pack-')))
 const { assertSdkArchives, sdkPackageNames, sdkSource, writeSdkProvenance } = await import(pathToFileURL(join(root, 'scripts/sdk-provenance.ts')).href)
 const { sdkWorkspaceDirectories } = await import(pathToFileURL(join(root, 'scripts/lib/sdk-workspaces.ts')).href)
 const { stageConsolePackage } = await import(pathToFileURL(join(root, 'scripts/lib/stage-console-package.ts')).href)

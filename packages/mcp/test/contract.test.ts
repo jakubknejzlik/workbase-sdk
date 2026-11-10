@@ -1,3 +1,4 @@
+import { registerTempDir, cleanupTempDir } from '../../../scripts/lib/test-temp-dir.mjs'
 import { cloneInstanceConfig } from '@workbasehq/core/config'
 import { copyHistoricalInstances } from './fixtures'
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest'
@@ -47,13 +48,13 @@ async function connect(allowed?: string[]) {
 }
 beforeEach(async () => {
   await mkdir(stateRoot, { recursive: true })
-  root = await mkdtemp(join(stateRoot, 'contract-'))
+  root = registerTempDir(await mkdtemp(join(stateRoot, 'contract-')))
   await symlink(resolve('node_modules'), join(root, 'node_modules'))
   await writeFile(join(root, 'package.json'), '{"type":"module"}')
   await copyHistoricalInstances(root)
   await connect()
 })
-afterEach(async () => { await client?.close(); await application?.server.close(); await rm(root, { recursive: true, force: true }) })
+afterEach(async () => { await client?.close(); await application?.server.close(); cleanupTempDir(root) })
 
 describe('MCP SDK in-memory contract', () => {
   it('inspects the third tertiary instance offline without changing its configuration', async () => {

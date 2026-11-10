@@ -1,9 +1,10 @@
+import { registerTempDir, cleanupTempDir } from '../../../scripts/lib/test-temp-dir.mjs'
 import { copyHistoricalInstances } from './fixtures'
 import { expect, it } from 'vitest'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { join, resolve } from 'node:path'
-import { cp, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises'
+import { cp, mkdir, mkdtemp, readFile, readdir, symlink, writeFile } from 'node:fs/promises'
 import { spawn } from 'node:child_process'
 import { once } from 'node:events'
 import { createInterface } from 'node:readline'
@@ -25,7 +26,7 @@ it.each([
   ['relative traversal', ['--root', '../..'], 'invalid_instance_directory', 'Expected one configuration directory for the allowed instance'],
   ['invalid arguments', ['--root'], 'invalid_arguments', 'Supported arguments: --root <dir> and --agent-test'],
 ] as const)('reports %s as one typed stderr line from the bin', async (_name, args, code, message) => {
-  const root = await mkdtemp(join(tmpdir(), 'mcp-startup-'))
+  const root = registerTempDir(await mkdtemp(join(tmpdir(), 'mcp-startup-')))
   try {
     const cwd = join(root, 'a/b')
     await mkdir(cwd, { recursive: true })
@@ -34,22 +35,22 @@ it.each([
     const result = await runBin(cwd, [...args])
     expect(result).toEqual({ code: 1, signal: null, stdout: '', stderr: `error ${code}: ${message}\n` })
     expect(result.stderr).not.toContain('    at ')
-  } finally { await rm(root, { recursive: true, force: true }) }
+  } finally { cleanupTempDir(root) }
 })
 
 it('keeps startup stack traces when WORKBASE_DEBUG=1', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'mcp-startup-debug-'))
+  const root = registerTempDir(await mkdtemp(join(tmpdir(), 'mcp-startup-debug-')))
   try {
     await mkdir(join(root, 'migrations'))
     const result = await runBin(root, [], '1')
     expect(result.code).toBe(1)
     expect(result.stderr).toContain('invalid_instance_directory')
     expect(result.stderr).toContain('    at ')
-  } finally { await rm(root, { recursive: true, force: true }) }
+  } finally { cleanupTempDir(root) }
 })
 
 it.each(['validation', 'unexpected'])('formats %s config startup failures from the bin', async kind => {
-  const root = await mkdtemp(join(tmpdir(), 'mcp-startup-config-'))
+  const root = registerTempDir(await mkdtemp(join(tmpdir(), 'mcp-startup-config-')))
   try {
     await mkdir(join(root, 'migrations'))
     await writeFile(join(root, 'config.ts'), kind === 'validation'
@@ -65,7 +66,7 @@ it.each(['validation', 'unexpected'])('formats %s config startup failures from t
       expect(result.stderr).toContain('    at ')
       expect(result.stderr).not.toContain('internal_error')
     }
-  } finally { await rm(root, { recursive: true, force: true }) }
+  } finally { cleanupTempDir(root) }
 })
 
 it('serves all config tools over a real stdio subprocess and shuts down', async () => {
@@ -84,7 +85,7 @@ it('serves all config tools over a real stdio subprocess and shuts down', async 
 
 it('stdin EOF cancels a blocked Wrangler group, releases its lock and exits zero within two seconds', async () => {
   await mkdir(stateRoot, { recursive: true })
-  const root = await mkdtemp(join(stateRoot, 'stdio-eof-'))
+  const root = registerTempDir(await mkdtemp(join(stateRoot, 'stdio-eof-')))
   const marker = join(root, 'child.json'), terminated = join(root, 'sigterm')
   const dir = join(root, 'examples/sample')
   let server: ReturnType<typeof spawn> | undefined
@@ -178,6 +179,6 @@ it('stdin EOF cancels a blocked Wrangler group, releases its lock and exits zero
       process.kill(-server.pid!, 'SIGKILL')
       await exited
     }
-    await rm(root, { recursive: true, force: true })
+    cleanupTempDir(root)
   }
 })

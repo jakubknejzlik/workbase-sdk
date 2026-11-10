@@ -1,5 +1,6 @@
+import { registerTempDir, cleanupTempDir } from '../../../scripts/lib/test-temp-dir.mjs'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { mkdtemp, mkdir, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readdir, readFile, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { defineInstance } from '@workbasehq/core/config'
@@ -13,7 +14,7 @@ import { rollback } from '../src/versions'
 let root: string; let directory: string; let drafts: ConfigDrafts; let store: Store
 const config = defineInstance({ id: 'demo', revision: 1, roles: ['owner'], permissions: { owner: { interviews: ['read'] } }, entities: { interviews: { fields: { title: { type: 'string' }, notes: { type: 'text' }, starts_at: { type: 'datetime' } } } }, ui: { entities: { interviews: { list: { columns: ['title'] } } } } })
 beforeEach(async () => {
-  root = await mkdtemp(join(tmpdir(), 'config-drafts-'))
+  root = registerTempDir(await mkdtemp(join(tmpdir(), 'config-drafts-')))
   await symlink(resolve('node_modules'), join(root, 'node_modules'))
   await writeFile(join(root, 'package.json'), '{"type":"module"}\n')
   directory = join(root, 'examples/demo'); await mkdir(join(directory, 'migrations'), { recursive: true })
@@ -21,7 +22,7 @@ beforeEach(async () => {
   await writeFile(join(directory, 'migrations/0001_initial.sql'), initialSchema(config))
   store = new Store(root, new Set(['demo'])); await store.init(); drafts = new ConfigDrafts(store)
 })
-afterEach(async () => { await rm(root, { recursive: true, force: true }); vi.restoreAllMocks() })
+afterEach(async () => { cleanupTempDir(root); vi.restoreAllMocks() })
 it('SR-85 previews without publication; Apply creates immutable history and local migration, retries once, and supports CLI/MCP rollback', async () => {
   const preview = await drafts.propose('demo', 'add notes column to interviews')
   expect(preview).toMatchObject({ baseRevision: 1, revision: 2, appliesToDatabase: false })

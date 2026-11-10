@@ -1,8 +1,9 @@
+import { registerTempDir, cleanupTempDir } from '../../../scripts/lib/test-temp-dir.mjs'
 import { afterEach, expect, it } from 'vitest'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
-import { cp, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises'
+import { cp, mkdir, mkdtemp, readFile, readdir, symlink, writeFile } from 'node:fs/promises'
 import { DatabaseSync } from 'node:sqlite'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -16,9 +17,9 @@ import { configSource } from '../src/storage'
 import { checkMcpUpgrade } from '../../../scripts/lib/mcp-upgrade-check'
 
 const roots: string[] = []
-afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))) })
+afterEach(async () => { await Promise.all(roots.splice(0).map(root => cleanupTempDir(root))) })
 async function fixture() {
-  const root = await mkdtemp(join(tmpdir(), 'workbase-upgrade-'))
+  const root = registerTempDir(await mkdtemp(join(tmpdir(), 'workbase-upgrade-')))
   roots.push(root)
   await cp(resolve('scripts/test/fixtures/sdk-0.2.1-revision-3'), root, { recursive: true })
   await symlink(resolve('node_modules'), join(root, 'node_modules'))
@@ -64,7 +65,7 @@ it.each(['parent_id', 'secret', 'missing'])('W42 set_display_field rejects a ref
 })
 
 async function exemptEntityFixture() {
-  const root = await mkdtemp(join(tmpdir(), 'workbase-exempt-display-'))
+  const root = registerTempDir(await mkdtemp(join(tmpdir(), 'workbase-exempt-display-')))
   roots.push(root)
   const config = defineInstance({ id: 'exempt', revision: 1, roles: ['owner'], permissions: {}, entities: {
     notes: { fields: { message: { type: 'text' }, secret: { type: 'string', sensitive: true }, parent_id: { type: 'ref', entity: 'parents' } } },
@@ -168,7 +169,7 @@ it('W42 real 0.2.1 fixture upgrades through stdio MCP: validate → repair → p
 })
 
 it('adds an optional user relation to populated domain rows through MCP validation, D1 verification and promotion', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'workbase-nullable-ref-')); roots.push(root)
+  const root = registerTempDir(await mkdtemp(join(tmpdir(), 'workbase-nullable-ref-'))); roots.push(root)
   const config = defineInstance({ id: 'nullable_user_link', revision: 1, roles: ['owner'], account: { entity: 'users' },
     permissions: { owner: { users: ['read'], people: ['read', 'create', 'update'] } },
     policies: { users: { owner: 'all' }, people: { owner: 'all' } },

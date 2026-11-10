@@ -1,7 +1,8 @@
+import { registerTempDir, cleanupTempDir } from '../../../scripts/lib/test-temp-dir.mjs'
 import { afterEach, expect, it } from 'vitest'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
-import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { defineInstance, cloneInstanceConfig, Fn, Q } from '@workbasehq/core/config'
@@ -107,9 +108,9 @@ it.each([{ kind: 'set_locale' }, { kind: 'set_locale', locale: 'de' }, { kind: '
 })
 
 const roots: string[] = []
-afterEach(async () => { for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true }) })
+afterEach(async () => { for (const root of roots.splice(0)) cleanupTempDir(root) })
 it('Sample captions and Czech locale complete propose validate preview disposable verify promote and reload', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'workbase-labels-')); roots.push(root)
+  const root = registerTempDir(await mkdtemp(join(tmpdir(), 'workbase-labels-'))); roots.push(root)
   await symlink(resolve('node_modules'), join(root, 'node_modules')); await writeFile(join(root, 'package.json'), '{"type":"module"}')
   await mkdir(join(root, 'migrations')); await writeFile(join(root, 'config.ts'), configSource(fixture()))
   await writeFile(join(root, 'migrations/0001_initial.sql'), initialSchema(fixture()))

@@ -1,7 +1,8 @@
+import { registerTempDir, cleanupTempDir } from '../../../scripts/lib/test-temp-dir.mjs'
 import { spawn, type ChildProcess } from 'node:child_process'
 import { createInterface } from 'node:readline'
 import { once } from 'node:events'
-import { cp, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
+import { cp, mkdtemp, readFile, symlink, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { afterEach, beforeEach, expect, it } from 'vitest'
@@ -49,7 +50,7 @@ class Peer {
 }
 let scratch: string, root: string, entry: string, peers: Peer[]
 beforeEach(async () => {
-  scratch = await mkdtemp(join(tmpdir(), 'wb-sdk-mcp-process-'))
+  scratch = registerTempDir(await mkdtemp(join(tmpdir(), 'wb-sdk-mcp-process-')))
   await writeFile(join(scratch, 'package.json'), '{"type":"module"}\n')
   await symlink(resolve('node_modules'), join(scratch, 'node_modules'))
   await copyHistoricalInstances(scratch)
@@ -75,7 +76,7 @@ afterEach(async () => {
     }
     await peer.closed
   }
-  await rm(scratch, { recursive: true, force: true })
+  cleanupTempDir(scratch)
 })
 it.each([['request cancellation', 'verify'], ['stdin EOF', 'verify'], ['SIGTERM', 'verify'], ['request cancellation', 'install']] as const)('keeps a second actual MCP process busy across install, verification and group cleanup on %s at %s', async (cancellation, phase) => {
   const owner = new Peer(entry, root); peers.push(owner); await owner.init()

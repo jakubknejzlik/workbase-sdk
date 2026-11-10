@@ -1,7 +1,8 @@
+import { registerTempDir, cleanupTempDir } from './lib/test-temp-dir.mjs'
 import { customerTerms, reviewDigest } from './lib/public-vocabulary'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, mkdirSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, readdirSync, mkdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 
@@ -16,7 +17,7 @@ beforeAll(() => {
   const sha = process.env.SDK_BOOTSTRAP_SOURCE ?? execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()
   if (process.env.SDK_BOOTSTRAP_SOURCE) {
     execFileSync('git', ['merge-base', '--is-ancestor', sha, 'origin/main'])
-    temporary = mkdtempSync(join(tmpdir(), 'sdk-bootstrap-policy-'))
+    temporary = registerTempDir(mkdtempSync(join(tmpdir(), 'sdk-bootstrap-policy-')))
     root = temporary
     // Project the baseline allowlist directly: main may contain newly unclassified
     // SDK files, but those cannot introduce workflows into the exported tree.
@@ -34,10 +35,11 @@ beforeAll(() => {
     cwd: process.cwd(), encoding: 'utf8', maxBuffer: 5 * 1024 * 1024,
   })
   root = /Export directory: (.+)/.exec(output)![1]
+  if (!process.env.SDK_BOOTSTRAP_EXPORT) registerTempDir(root)
 }, 30000)
 afterAll(() => {
-  if (root !== process.cwd() && !process.env.SDK_BOOTSTRAP_EXPORT) rmSync(root, { recursive: true, force: true })
-  if (temporary) rmSync(temporary, { recursive: true, force: true })
+  if (root !== process.cwd() && !process.env.SDK_BOOTSTRAP_EXPORT) cleanupTempDir(root)
+  if (temporary) cleanupTempDir(temporary)
 })
 function workflow(name: string): { source: string; parsed: Workflow } {
   const source = readFileSync(join(root, `.github/workflows/${name}.yml`), 'utf8')
@@ -135,14 +137,14 @@ describe('exported public bootstrap workflow policy', () => {
     ['real dispatch', 'workflow_dispatch', 'refs/heads/main', 'false', ['--directory', 'dist-sdk', '--provenance']],
   ])('passes the correct publisher arguments for %s', (_label, event, ref, dryRun, expected) => {
     const command = workflow('release').parsed.jobs.release.steps.find(step => step.run?.includes('bun scripts/sdk-publish.ts'))!.run!
-    const directory = mkdtempSync(join(tmpdir(), 'sdk-release-step-'))
+    const directory = registerTempDir(mkdtempSync(join(tmpdir(), 'sdk-release-step-')))
     try {
       const capture = join(directory, 'args')
       writeFileSync(join(directory, 'bun'), '#!/bin/sh\nprintf \'%s\\n\' "$@" > "$SDK_PUBLISH_CAPTURE"\n', { mode: 0o755 })
       execFileSync('bash', ['-euo', 'pipefail', '-c', command], { env: { ...process.env, PATH: `${directory}:${process.env.PATH}`,
         SDK_PUBLISH_CAPTURE: capture, RELEASE_EVENT: event as string, RELEASE_REF: ref as string, RELEASE_DRY_RUN: dryRun as string } })
       expect(readFileSync(capture, 'utf8').trim().split('\n')).toEqual(['scripts/sdk-publish.ts', ...expected])
-    } finally { rmSync(directory, { recursive: true, force: true }) }
+    } finally { cleanupTempDir(directory) }
   })
   it.skipIf(!existsSync(join(process.cwd(), 'scripts/export-sdk.ts')))('keeps the private SDK release workflow absent', () => {
     expect(existsSync(join(process.cwd(), '.github/workflows/release.yml'))).toBe(false)

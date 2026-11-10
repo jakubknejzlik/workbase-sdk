@@ -1,7 +1,8 @@
+import { registerTempDir, cleanupTempDir } from '../../../scripts/lib/test-temp-dir.mjs'
 import { afterEach, expect, it } from 'vitest'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
-import { mkdtemp, mkdir, writeFile, symlink, rm } from 'node:fs/promises'
+import { mkdtemp, mkdir, writeFile, symlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { defineInstance, Fn, Q } from '@workbasehq/core/config'
@@ -12,14 +13,14 @@ import { prepare } from '../src/planning'
 import { changeSchema } from '../src/schemas'
 import { createServer } from '../src/server'
 const roots: string[] = []
-afterEach(async () => { for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true }) })
+afterEach(async () => { for (const root of roots.splice(0)) cleanupTempDir(root) })
 const fixture = () => defineInstance({ id: 'computed_fixture', revision: 1, roles: ['owner'], permissions: { owner: { rezervace: ['read'], zakaznik: ['read'], sluzba: ['read'] } }, entities: {
   zakaznik: { displayField: 'jmeno', fields: { jmeno: { type: 'string' } } }, sluzba: { displayField: 'nazev', fields: { nazev: { type: 'string' } } },
   rezervace: { displayField: 'title', fields: { title: { type: 'string' }, termin: { type: 'datetime' }, zakaznik: { type: 'ref', entity: 'zakaznik' }, sluzba: { type: 'ref', entity: 'sluzba' } } },
 } })
 const label = () => Fn.concat(Fn.strftime('%d. %m. %Y %H:%M', 'termin'), Q.value(' · '), 'zakaznik', Q.value(' · '), 'sluzba').serialize()
 it('W44 Sample flow sets a serialized composite displayField, validates and previews only metadata SQL', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'workbase-computed-')); roots.push(root)
+  const root = registerTempDir(await mkdtemp(join(tmpdir(), 'workbase-computed-'))); roots.push(root)
   await symlink(resolve('node_modules'), join(root, 'node_modules')); await writeFile(join(root, 'package.json'), '{"type":"module"}')
   await mkdir(join(root, 'migrations')); await writeFile(join(root, 'config.ts'), configSource(fixture()))
   await writeFile(join(root, 'migrations/0001_initial.sql'), initialSchema(fixture()))

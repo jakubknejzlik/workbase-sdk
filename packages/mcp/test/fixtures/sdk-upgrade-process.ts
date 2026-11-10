@@ -1,5 +1,6 @@
+import { registerTempDir, cleanupTempDir } from '../../../../scripts/lib/test-temp-dir.mjs'
 import { createServer, type Socket } from 'node:net'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { execute } from '../../src/sdk-process.ts'
@@ -10,7 +11,7 @@ import { targetProof } from './sdk-upgrade-evidence.ts'
 // process-group runner are real. D2's install/bridge contract has its own tests.
 export { captureSdkInputs }
 export async function runSdkTarget(options: TargetOptions) {
-  const scratch = await mkdtemp(join(tmpdir(), 'wb-sdk-ipc-'))
+  const scratch = registerTempDir(await mkdtemp(join(tmpdir(), 'wb-sdk-ipc-')))
   const socketPath = join(scratch, 'barrier.sock')
   const sockets = new Set<Socket>()
   const server = createServer(socket => {
@@ -52,7 +53,7 @@ export async function runSdkTarget(options: TargetOptions) {
     process.removeListener('message', command)
     for (const socket of sockets) socket.destroy()
     await new Promise<void>(resolve => server.close(() => resolve()))
-    await rm(scratch, { recursive: true, force: true })
+    cleanupTempDir(scratch)
     process.send?.({ event: 'cleaned', scratch })
   }
 }

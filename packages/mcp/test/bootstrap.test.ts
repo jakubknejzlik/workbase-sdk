@@ -1,4 +1,5 @@
-import { chmod, cp, mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises'
+import { registerTempDir, cleanupTempDir } from '../../../scripts/lib/test-temp-dir.mjs'
+import { chmod, cp, mkdir, mkdtemp, readFile, readdir, realpath, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { spawnSync } from 'node:child_process'
@@ -8,10 +9,11 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 
 const roots: string[] = []
-afterEach(async () => { for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true }) })
+afterEach(async () => { for (const root of roots.splice(0)) cleanupTempDir(root) })
 async function empty() {
-  const root = await realpath(await mkdtemp(join(tmpdir(), 'mcp-bootstrap-')))
-  roots.push(root)
+  const directory = registerTempDir(await mkdtemp(join(tmpdir(), 'mcp-bootstrap-')))
+  roots.push(directory)
+  const root = await realpath(directory)
   return root
 }
 const input = { id: 'demo_sandbox', target: 'cloudflare-github' as const }

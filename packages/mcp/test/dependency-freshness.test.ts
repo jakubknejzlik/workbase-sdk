@@ -1,3 +1,4 @@
+import { registerTempDir, cleanupTempDir } from '../../../scripts/lib/test-temp-dir.mjs'
 import { afterAll, afterEach, beforeAll, beforeEach, expect, it, vi } from 'vitest'
 import fs from 'node:fs/promises'
 import { syncBuiltinESMExports } from 'node:module'
@@ -10,7 +11,7 @@ import { copyHistoricalInstances } from './fixtures.ts'
 let fixture: string, root: string, id: string, store: Store, workflow: Workflow
 const proposal = () => join(root, 'proposals', `${id}.json`)
 beforeAll(async () => {
-  fixture = await fs.mkdtemp(join(tmpdir(), 'wb-dependencies-fixture-'))
+  fixture = registerTempDir(await fs.mkdtemp(join(tmpdir(), 'wb-dependencies-fixture-')))
   await copyHistoricalInstances(fixture)
   const dir = join(fixture, 'examples/sample')
   await fs.writeFile(join(dir, 'package.json'), '{"type":"module"}')
@@ -22,13 +23,13 @@ beforeAll(async () => {
   expect((await w.call('validate', { proposalId: id })).ok).toBe(true)
   expect((await w.call('apply_to_disposable', { proposalId: id })).verified).toBe(true)
 })
-afterAll(async () => { await fs.rm(fixture, { recursive: true, force: true }) })
+afterAll(async () => { cleanupTempDir(fixture) })
 beforeEach(async () => {
-  root = await fs.mkdtemp(join(tmpdir(), 'wb-dependencies-'))
+  root = registerTempDir(await fs.mkdtemp(join(tmpdir(), 'wb-dependencies-')))
   await fs.cp(join(fixture, 'examples/sample'), root, { recursive: true, verbatimSymlinks: true })
   store = new Store(root); await store.init(); workflow = new Workflow(store)
 })
-afterEach(async () => { await fs.rm(root, { recursive: true, force: true }) })
+afterEach(async () => { cleanupTempDir(root) })
 const promote = () => workflow.call('promote', { proposalId: id, expectedRevision: 2 })
 it.each(['package.json', 'bun.lock'])('rejects promotion after only %s changes', async name => {
   await fs.appendFile(join(root, name), '\n')

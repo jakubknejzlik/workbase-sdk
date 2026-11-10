@@ -1,5 +1,6 @@
+import { registerTempDir, cleanupTempDir } from './lib/test-temp-dir.mjs'
 import assert from 'node:assert/strict'
-import { cp, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises'
+import { cp, mkdtemp, readFile, realpath, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { Client } from '../packages/mcp/node_modules/@modelcontextprotocol/sdk/dist/esm/client/index.js'
@@ -11,7 +12,8 @@ import { digestBytes, inside } from '../packages/mcp/src/sdk-upgrade-protocol.ts
 
 // One real registry installation, from the frozen historical 0.2.9 inputs to
 // published 0.2.10. The candidate bridge cannot satisfy this with producer 0.2.11.
-const scratch = await realpath(await mkdtemp(join(tmpdir(), 'workbase-mcp-upgrade-smoke-\uFFFD-')))
+const rawScratch = registerTempDir(await mkdtemp(join(tmpdir(), 'workbase-mcp-upgrade-smoke-\uFFFD-')))
+const scratch = await realpath(rawScratch)
 const checkout = await realpath(resolve(import.meta.dirname, '..'))
 assert(!inside(checkout, scratch))
 const root = join(scratch, 'instance'), shutdown = new AbortController()
@@ -104,6 +106,6 @@ try {
 } finally {
   shutdown.abort()
   await client.close(); await application?.server.close(); await application?.idle()
-  await rm(scratch, { recursive: true, force: true })
+  cleanupTempDir(rawScratch)
   clearTimeout(timer); process.removeListener('SIGINT', stop); process.removeListener('SIGTERM', stop)
 }

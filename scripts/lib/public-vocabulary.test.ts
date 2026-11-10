@@ -1,5 +1,6 @@
+import { registerTempDir, cleanupTempDir } from './test-temp-dir.mjs'
 import { afterEach, expect, it, vi } from 'vitest'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { spawnSync } from 'node:child_process'
@@ -84,7 +85,7 @@ const changedSpellings = [
   { variant: 'Unicode simple fold', slot: 2, value: 'ſecret_' },
 ]
 it.each((['env', 'file'] as const).flatMap(input => changedSpellings.map(change => ({ input, ...change }))))('rejects $variant required spelling from $input input', ({ input, slot, value }) => {
-  const directory = mkdtempSync(join(tmpdir(), 'private-terms-test-'))
+  const directory = registerTempDir(mkdtempSync(join(tmpdir(), 'private-terms-test-')))
   const path = join(directory, 'terms.txt')
   try {
     const supplied = [...requiredTerms]
@@ -93,7 +94,7 @@ it.each((['env', 'file'] as const).flatMap(input => changedSpellings.map(change 
     writeFileSync(path, text, { mode: 0o600 })
     const env = input === 'env' ? { WORKBASE_PRIVATE_TERMS: text } : { WORKBASE_PRIVATE_TERMS_FILE: path }
     expect(() => loadPrivateTerms(env, required)).toThrow(message)
-  } finally { rmSync(directory, { recursive: true }) }
+  } finally { cleanupTempDir(directory) }
 })
 it('hashes exact UTF-8 spellings without canonicalization', () => {
   for (const term of [...requiredTerms, ...changedSpellings.map(change => change.value), ' padded ']) {
@@ -104,11 +105,11 @@ it('fails closed when the complete manifest is reordered', () => {
   expect(() => loadPrivateTerms({ WORKBASE_PRIVATE_TERMS: [...requiredTerms].reverse().join('\n') }, required)).toThrow('preserve term #N order')
 })
 it('reads an explicit file and gives a nonempty inline env value priority', () => {
-  const directory = mkdtempSync(join(tmpdir(), 'private-terms-test-'))
+  const directory = registerTempDir(mkdtempSync(join(tmpdir(), 'private-terms-test-')))
   const path = join(directory, 'terms.txt')
   try {
     writeFileSync(path, requiredTerms.join('\n'), { mode: 0o600 })
     expect(loadPrivateTerms({ WORKBASE_PRIVATE_TERMS_FILE: path }, required)).toEqual(requiredTerms)
     expect(() => loadPrivateTerms({ WORKBASE_PRIVATE_TERMS: 'incomplete', WORKBASE_PRIVATE_TERMS_FILE: path }, required)).toThrow(message)
-  } finally { rmSync(directory, { recursive: true }) }
+  } finally { cleanupTempDir(directory) }
 })
