@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { spawnSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { buildGuardRegexes } from './public-vocabulary'
 import { loadPrivateTerms, termDigest } from './private-terms'
 
@@ -59,7 +60,8 @@ it('enforces extra terms literally in every guard without normalizing scanned co
 })
 
 const requiredTerms = ['quartzbeam', 'éclat', 'secret_']
-const required = requiredTerms.map(termDigest)
+const exactDigest = (term: string) => createHash('sha256').update('61344a8704e93d59-dd38a3ed8094ec1c' + '\0' + term).digest('hex')
+const required = requiredTerms.map(exactDigest)
 const message = 'private terms not provided / incomplete; set WORKBASE_PRIVATE_TERMS'
 it('fails closed when the production guard module is started without either env input', () => {
   const env = { ...process.env }
@@ -76,11 +78,27 @@ it('accepts complete newline input, CRLF and extra terms, preserving literal spe
   const supplied = [...requiredTerms, 'extra.beam']
   expect(loadPrivateTerms({ WORKBASE_PRIVATE_TERMS: supplied.join('\r\n') + '\n' }, required)).toEqual(supplied)
 })
-it('uses the existing NFC and simple-fold digest canonicalisation only for completeness', () => {
-  const supplied = ['QUARTZBEAM', 'éclat'.normalize('NFD'), 'ſecret_']
-  expect(loadPrivateTerms({ WORKBASE_PRIVATE_TERMS: supplied.join('\n') }, required)).toEqual(supplied)
-  expect(termDigest('İ')).not.toBe(termDigest('i'))
-  expect(termDigest('ß')).not.toBe(termDigest('ss'))
+const changedSpellings = [
+  { variant: 'ASCII case', slot: 0, value: 'QUARTZBEAM' },
+  { variant: 'NFD', slot: 1, value: requiredTerms[1].normalize('NFD') },
+  { variant: 'Unicode simple fold', slot: 2, value: 'ſecret_' },
+]
+it.each((['env', 'file'] as const).flatMap(input => changedSpellings.map(change => ({ input, ...change }))))('rejects $variant required spelling from $input input', ({ input, slot, value }) => {
+  const directory = mkdtempSync(join(tmpdir(), 'private-terms-test-'))
+  const path = join(directory, 'terms.txt')
+  try {
+    const supplied = [...requiredTerms]
+    supplied[slot] = value
+    const text = supplied.join('\n')
+    writeFileSync(path, text, { mode: 0o600 })
+    const env = input === 'env' ? { WORKBASE_PRIVATE_TERMS: text } : { WORKBASE_PRIVATE_TERMS_FILE: path }
+    expect(() => loadPrivateTerms(env, required)).toThrow(message)
+  } finally { rmSync(directory, { recursive: true }) }
+})
+it('hashes exact UTF-8 spellings without canonicalization', () => {
+  for (const term of [...requiredTerms, ...changedSpellings.map(change => change.value), ' padded ']) {
+    expect(termDigest(term)).toBe(exactDigest(term))
+  }
 })
 it('fails closed when the complete manifest is reordered', () => {
   expect(() => loadPrivateTerms({ WORKBASE_PRIVATE_TERMS: [...requiredTerms].reverse().join('\n') }, required)).toThrow('preserve term #N order')
