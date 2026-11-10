@@ -1,868 +1,724 @@
 {
-  "names": [
-    "packages/ui/src/vendor/tiketo/DEVIATIONS.md",
-    "packages/ui/src/vendor/tiketo/SOURCE.md",
-    "packages/ui/src/vendor/tiketo/components/data-table/DataTableActiveFilters.tsx",
-    "packages/ui/src/vendor/tiketo/components/data-table/DataTableColumn.tsx",
-    "packages/ui/src/vendor/tiketo/components/data-table/DataTableContent.tsx",
-    "packages/ui/src/vendor/tiketo/components/data-table/DataTableFilterDropdown.tsx",
-    "packages/ui/src/vendor/tiketo/components/data-table/DataTableFooter.tsx",
-    "packages/ui/src/vendor/tiketo/components/data-table/DataTablePageSwitcher.tsx",
-    "packages/ui/src/vendor/tiketo/components/data-table/DataTablePagination.tsx",
-    "packages/ui/src/vendor/tiketo/components/data-table/DataTableProvider.tsx",
-    "packages/ui/src/vendor/tiketo/components/data-table/DataTableSearch.tsx",
-    "packages/ui/src/vendor/tiketo/components/data-table/filters/MultiSelectFilter.tsx",
-    "packages/ui/src/vendor/tiketo/components/data-table/filters/RangeFilter.tsx",
-    "packages/ui/src/vendor/tiketo/components/data-table/filters/TextFilter.tsx",
-    "packages/ui/src/vendor/tiketo/components/data-table/filters/ToggleFilter.tsx",
-    "packages/ui/src/vendor/tiketo/components/detail-page/DetailPageHeader.tsx",
-    "packages/ui/src/vendor/tiketo/components/dialog/ConfirmDialog.tsx",
-    "packages/ui/src/vendor/tiketo/components/dialog/DeleteDialog.tsx",
-    "packages/ui/src/vendor/tiketo/components/dialog/FormDialog.tsx",
-    "packages/ui/src/vendor/tiketo/components/dialog/UnsavedChangesPrompt.tsx",
-    "packages/ui/src/vendor/tiketo/components/form/DatePicker.tsx",
-    "packages/ui/src/vendor/tiketo/components/form/DateRangePicker.tsx",
-    "packages/ui/src/vendor/tiketo/components/form/DateTimePicker.tsx",
-    "packages/ui/src/vendor/tiketo/components/form/Form.tsx",
-    "packages/ui/src/vendor/tiketo/components/form/FormFieldInput.tsx",
-    "packages/ui/src/vendor/tiketo/components/form/FormFieldWrapper.tsx",
-    "packages/ui/src/vendor/tiketo/components/form/FormSubmitButton.tsx",
-    "packages/ui/src/vendor/tiketo/components/form/NumberInput.tsx",
-    "packages/ui/src/vendor/tiketo/components/layout/Breadcrumbs.tsx",
-    "packages/ui/src/vendor/tiketo/components/layout/CreateWorkspaceModal.tsx",
-    "packages/ui/src/vendor/tiketo/components/layout/Layout.tsx",
-    "packages/ui/src/vendor/tiketo/components/layout/LayoutContent.tsx",
-    "packages/ui/src/vendor/tiketo/components/layout/LayoutHeader.tsx",
-    "packages/ui/src/vendor/tiketo/components/layout/LayoutSidebar.tsx",
-    "packages/ui/src/vendor/tiketo/components/layout/LayoutSidebarContent.tsx",
-    "packages/ui/src/vendor/tiketo/components/layout/LayoutSidebarFooter.tsx",
-    "packages/ui/src/vendor/tiketo/components/layout/LayoutSidebarHeader.tsx",
-    "packages/ui/src/vendor/tiketo/components/layout/LayoutUserDropdown.tsx",
-    "packages/ui/src/vendor/tiketo/components/layout/SettingsLayout.tsx",
-    "packages/ui/src/vendor/tiketo/components/layout/WorkspaceSwitch.tsx",
-    "packages/ui/src/vendor/tiketo/components/resource-page/ResourcePageLayout.tsx",
-    "packages/ui/src/vendor/tiketo/components/settings/APITokensSettings.tsx",
-    "packages/ui/src/vendor/tiketo/components/settings/UserOnboarding.tsx",
-    "packages/ui/src/vendor/tiketo/components/settings/UserSettings.tsx",
-    "packages/ui/src/vendor/tiketo/components/settings/UserWorkspaceOnboarding.tsx",
-    "packages/ui/src/vendor/tiketo/components/settings/WorkspaceSettings.tsx",
-    "packages/ui/src/vendor/tiketo/components/ui/MutationErrorAlert.tsx",
-    "packages/ui/src/vendor/tiketo/components/ui/alert-dialog.tsx",
-    "packages/ui/src/vendor/tiketo/components/ui/alert.tsx",
-    "packages/ui/src/vendor/tiketo/components/ui/avatar.tsx",
-    "packages/ui/src/vendor/tiketo/components/ui/badge.tsx",
-    "packages/ui/src/vendor/tiketo/components/ui/breadcrumb.tsx",
-    "packages/ui/src/vendor/tiketo/components/ui/button.tsx",
-    "packages/ui/src/vendor/tiketo/components/ui/calendar.tsx",
-    "packages/ui/src/vendor/tiketo/components/ui/card.tsx",
-    "packages/ui/src/vendor/tiketo/components/ui/checkbox.tsx",
-    "packages/ui/src/vendor/tiketo/components/ui/collapsible.tsx",
-    "packages/ui/src/vendor/tiketo/components/ui/dialog.tsx",
-    "packages/ui/src/vendor/tiketo/components/ui/dropdown-menu.tsx",
-    "packages/ui/src/vendor/tiketo/components/ui/form.tsx",
-    "packages/ui/src/vendor/tiketo/components/ui/input.tsx",
-    "packages/ui/src/vendor/tiketo/components/ui/label.tsx",
-    "packages/ui/src/vendor/tiketo/components/ui/native-select.tsx",
-    "packages/ui/src/vendor/tiketo/components/ui/pagination.tsx",
-    "packages/ui/src/vendor/tiketo/components/ui/popover.tsx",
-    "packages/ui/src/vendor/tiketo/components/ui/scroll-area.tsx",
-    "packages/ui/src/vendor/tiketo/components/ui/select.tsx",
-    "packages/ui/src/vendor/tiketo/components/ui/separator.tsx",
-    "packages/ui/src/vendor/tiketo/components/ui/sheet.tsx",
-    "packages/ui/src/vendor/tiketo/components/ui/sidebar.tsx",
-    "packages/ui/src/vendor/tiketo/components/ui/skeleton.tsx",
-    "packages/ui/src/vendor/tiketo/components/ui/sonner.tsx",
-    "packages/ui/src/vendor/tiketo/components/ui/switch.tsx",
-    "packages/ui/src/vendor/tiketo/components/ui/table.tsx",
-    "packages/ui/src/vendor/tiketo/components/ui/tabs.tsx",
-    "packages/ui/src/vendor/tiketo/components/ui/textarea.tsx",
-    "packages/ui/src/vendor/tiketo/components/ui/tooltip.tsx",
-    "packages/ui/src/vendor/tiketo/components/ui/use-mobile.tsx",
-    "packages/ui/src/vendor/tiketo/components/user-management/InviteUserModal.tsx",
-    "packages/ui/src/vendor/tiketo/components/user-management/WorkspaceMembers.tsx",
-    "packages/ui/src/vendor/tiketo/components/user-management/WorkspaceMembersTable.tsx",
-    "packages/ui/src/vendor/tiketo/files.json",
-    "packages/ui/src/vendor/tiketo/lib/form/types.ts",
-    "packages/ui/src/vendor/tiketo/lib/utils.ts"
+  "nameDigests": [
+    "67d2ac92fffa265ebbdf7d564fc41968664d44bf42f77efb624f4af5bba54f75",
+    "14b548c06e6359e5244e671d53c826e52172d708602f73c11f81ad0a652f226b",
+    "8bbea8850842fbf91eddd5a65204de9211d729d78a3859682b396ade3caef8a6",
+    "1392fd9a7d526af5e7fbd2e6b5adfaa788cc2e7bf6064b23f29d4e68287e1912",
+    "f6518b1b66e67b08794972a19e77c1345627312cacdeaa585fb68a2a961c5c1c",
+    "f5283c3b92a2d6c8aaa5964e9717e55fc85dcbccbbde190afe2babaa50d6ef5e",
+    "53b6c5e738668bd92792558e8897a281d288e6d65f1efa7c38e4387d0dd78c22",
+    "a4623f654bd875e39e740a722a3a3184e645fac4ae7e84a92631f2262680de4e",
+    "9797b0f26202a6e6d551880ff5b6619e4ac9a8eaefa9a39acd6ea390ecac4179",
+    "5c99f1e635c2cb32a597c64c309c3404f9c470be93dd96c5649e771b6fe3e808",
+    "d618aca4fe77a96377b66a547966abeaae2fe6185687515a87d05bb972aaa274",
+    "54123681419fabd17b7ec70616fccd36268476d660c47274c26de6c821c61d49",
+    "64a97bbe6b61d16b0a64f125c1ddb1191b2ee64531972c600b9d8c95dd96a2c5",
+    "6a26d48d0dba12a84b0d7c2f49d0d366cdbd2d003696faabb745a9860a671c9f",
+    "eee1e03d409e96498cbb65c5861db49d021b80e3756ad7787a0ea93bba8eb383",
+    "bcdc157b0cfcde58b28f14979d80e5cad1300950752f22d634f8a09f872eb3e3",
+    "cf9d6e75e957ed84294b78965c016e4679927420c42e44e04d65cbc83c92e637",
+    "07994e1be35ce58bc573732c45fcdf02f70dbff81e1a5d3cac924d1a5f3f05bb",
+    "3b8b2128ce8ffd7535b362794e46e84b6e5f0cf646784763470b5a2a3c3ab7e2",
+    "0656f1ed7e14363911985e135ac431aa3a92de56aae6378476c53a97b8b1ef7e",
+    "8912752b6595f0e040a210942ab17437b8571a94493b9c9f677dfd22c81ff0d6",
+    "a1796bf8489f1e69dc81f64888b686e03a6ffa8bf25d616195fed9d0b8cee9b1",
+    "79e9d392d562931fd7aa8366b98cdd9a3eeaa28b61dc32a6cd722d0c5421be2f",
+    "1148b0b0ad062aa4a6efc9cfb50c0089628cbf4a23276224a41914d3791eb0b6",
+    "13d03943077c42a62954cfbb1ce0cf2788d06f79464aa16db7862a329e0b932e",
+    "79edd4895c68081d8fa4c30ed26bb87c48998a0a000752ecdeba609e10c62ccf",
+    "8594b4f1c02f1923c338000dd47ca207582435344ab48469f87740924cc99e8d",
+    "fbaaecc1755f0ffd761158d0a1da1b36be805bc6b7c60832765bae5050f184cb",
+    "94a8d7f9e02e7d43a3445707b4c5fa2ffba5c64b99b2a2b79a61466e3f119b80",
+    "ed1f5be8d3312f4b4b5266112bacfa0f0b90b2cf60a2529eae0b1e670672e718",
+    "a6e80b71408407b4bc40d2d79e11278ec8d3d42a5f61ca4946a3d48007282467",
+    "116fed54a022f11695ebde13f26e2840cbd4d7781b23c7ebbe28ebc4141e3b3d",
+    "79705db255c1b566169e24216196721040ccef3d38149f2684302d70c3bf85c6",
+    "15c81651fb77a31466d13146d7a04e3f2618b041100715a4f61b0be49fc261bd",
+    "c1b8670f62b8c24bd76e337cdf1f097bde3698e544be871dff4a9da2f3d285f0",
+    "31b80adda5deac290760fc38491234bbf92bdf77843f25f58da285980f13a7ef",
+    "3a37f172466ebb232d642dc0aa47edd949f9a78e8d51ca342bed21c635e0bc1a",
+    "c914b92167b5b4dce43f98e52ca7a32be7918a1e5ceae3a876767948440cd214",
+    "b64f76399ff0e20dc4a1688ee0389473fd1b47451b900c23feaa7d204dc5671e",
+    "b556d18506d84b7ff5477c34d551b284876604dbe290b018e9156cda15e78616",
+    "d0776e47f276346a7131c9f3ae2c20063d6ac44949f2d30ebfb42ac5493d5fa1",
+    "569c3a5fc84bda1b221b0426a57b8e2fa2a1dc116bdbba375b141397efc70a50",
+    "da623ff64f1e2ea6ac2613b6904c7068a73d1fbf772a66e74a58c7fbedeb3f0f",
+    "519c5b58d9bf0debb8e180d089287137f65d94728d403583f2bae5e6cf2b0e8d",
+    "205898ab1387c3ddba03fb163a4e8c8f4d44e742684239e629a8e7e4ac8db94e",
+    "55901fce180ab5ac7d83674c8fcfd1fc0ef5bfe5a6f8c8a1dffcacda3822e3c4",
+    "fe9b0b84af328e51d8c3992964e71ce99fcb3f03435afeb4b504f891e8da4a9b",
+    "caa0a4488a2624968f89633a51df0b699f7d96d8952e6ada1376af77df78aa7f",
+    "da8d4f91ddd763736ade5542fa91fb93a74e3917cce147673a0415160c0bcbff",
+    "3e8f55e5e5628557123782608a4afb6ec5a626e88c7533dcc0654c56922f346f",
+    "ed6ad765f1b245644bea02669984f60c6bcc53680e49fb6ccc9b197aab0278c9",
+    "15a8cf08497a78de67d76314d0cb1f92edfc66c5aabaf5f93d57d57eb34fdea2",
+    "67c8feb1fbd127a7965e3eb5790adbd2b160f0578a039b544e6836747670bca8",
+    "54ef99dffa65db2df40c57216b013cb46fb7a24475ac7a8b441bd1d32fdcf62f",
+    "3a05cbc727010d79e2132476f94a0d7b9b179afef69963d3865b5ef53948834a",
+    "7214c6c5cb9a9d56601670ea2f921235e085c560f0e551f0943148ad459cf459",
+    "70925a6f2f4e19f7018b3479770d4347c2948338819e650bc0be7c0f24a45181",
+    "1e799f83fdcf268ce6a9725f4b9eb8a50243a31ed48e32cb102af6c4d6c22d8d",
+    "31d2ebd6f17bdc00bfe48ae14f6aff37ce37e08e8dd1d87cce6c43d703ea2929",
+    "001766c11e59c4d0c1b3ef79648f0b243c980ebc1e9452f51f83d7356a61cc13",
+    "ff838a3e71b8b6e5debf66d55114dfc37c518e569c60785d7855d5d7447dd653",
+    "4d73a03febde8e6e15442a5f26464fc3dcef112ddc8f5134a1016be4190f0690",
+    "01a3087cf8a9909c1c7a77d986ea58728ebcfbb1c797a454590ad6c0bda4a717",
+    "1c371169ea6a40bfeecf9791d2f10b6c06cd38a5808fda1a3633e6286e75b6d0",
+    "8f59e3e48d3affbcffcc6de21ff98c85d1cef9f22c16e59128abfe694da4992c",
+    "facfbfe900e7841db7c7755ca4bd2889e41c86c18e35fe13c6cac67547977058",
+    "78b3e089e5ff668f58581127e9fb74a49a48215ce198a6edc1cf26e08c298f3b",
+    "5da70bcb18451c03aa645d763ef552cf025bed52b3671407dfe116ad91613612",
+    "c7f98932e4777772b48a674608ad7dac751f00126ea1e72b56054d677170b020",
+    "e448452bafcc73e42327ce902e6bd1058352e2074385e49cd74ae7763088fbe9",
+    "b1aaa7b850d975fecfad95ab99682e613d212ad7054d851504db572ff7505230",
+    "3eb2b31d151a1be3e7cdba066a97cd0a375914226c7a4d5aec8eabc5e52160b9",
+    "b8f7248a33110028dc0213a54ecf308066a82cacccf6fbffbd86d5ad691c7cfb",
+    "7da840319fc9251be7119b7645d92c518f40875a2f374c0e19784f7c4ff1c243",
+    "7d43cd3ba141c65b23677ed8141e8ac9ef63c98bbccb89355e187e4ede7177d3",
+    "489c2625ef772b6039203d954643a73ee7ddd6ee12a260cb584ac3d0a177f1bf",
+    "d7bf2002d34529f007da24870455cce2b13a44af3cc4f3c89e62117b44b63e3d",
+    "223228043bf5d2e3f798c832565d8a939c2ff07ab370b817cf147ceac3b9a8c5",
+    "a2b594b137e4ca8f6f22ba58e5b2771ababf2641eb56962841a9a102d1a0b784",
+    "6077fe012d8627345ca9e974a776481d62511a4913aef123db5c27c30467ea51",
+    "a044b4c585e44a10b2746d78c0ddcc4f0cd476164feac28f580146bca1590ba3",
+    "75f444149ee659bdde224a38b91814a1b1ffc636b430418ae2b63375e5c2e2e4",
+    "9d31ffc6110af2fdded231d324522e1b4db1e5e422c2fbe72985135fa6a16453",
+    "432a0577e33ebbd1d57c7025b5e062657fb0af6dbb402f40ca7a48428754dc57"
   ],
   "terms": [
     {
-      "path": "packages/frontend-console/src/Breadcrumbs.tsx",
-      "line": "/** Tiketo's route/staticData composition, with translated generated ancestors. */",
-      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test.",
-      "lineNumber": 23
+      "pathDigest": "0bef8feb475d621ad2cbb850735105ea69cb70c73671b0a8ead41901f45cdfd9",
+      "lineDigest": "86725275ff86cfacef93446bbcaee500ff890f1178058631fb2e4ab1f74050e6",
+      "lineNumber": 23,
+      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test."
     },
     {
-      "path": "packages/plugins/console/NOTICE",
-      "line": "This distribution includes shared components derived from Tiketo CMS",
-      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test.",
-      "lineNumber": 6
+      "pathDigest": "332f476a653474830fc7506dbc300e4ad0d15fd9265f4f3261416f16655a6d05",
+      "lineDigest": "90082d56e53377b9afd2c7588c11e2b158c5daabb38d729d485d08e7caa2e3ef",
+      "lineNumber": 6,
+      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test."
     },
     {
-      "path": "packages/plugins/console/NOTICE",
-      "line": "(tiketocz/tiketo-cms), reference commit",
-      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test.",
-      "lineNumber": 7
+      "pathDigest": "332f476a653474830fc7506dbc300e4ad0d15fd9265f4f3261416f16655a6d05",
+      "lineDigest": "35013cfc6aece15638a26b2659e56060e6fcf51baad704223190a8b919cba9d3",
+      "lineNumber": 7,
+      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test."
     },
     {
-      "path": "packages/ui/src/components/data-table/DataTableColumn.tsx",
-      "line": "export * from '../../vendor/tiketo/components/data-table/DataTableColumn'",
-      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test.",
-      "lineNumber": 1
+      "pathDigest": "04edcddee61aef2ff7ce5a7ed5990dcd8c70b3e99dedc2b480e8797c7b0abb55",
+      "lineDigest": "bb97928352c0cb7470935db27d64ace64d985a67088cd2c153aa75b87e57163a",
+      "lineNumber": 1,
+      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test."
     },
     {
-      "path": "packages/ui/src/components/data-table/DataTablePagination.tsx",
-      "line": "export * from '../../vendor/tiketo/components/data-table/DataTablePagination'",
-      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test.",
-      "lineNumber": 1
+      "pathDigest": "ae8552a11f45753b46fe6f8a363e7e23c527491e681c80b5166d6856cc50626c",
+      "lineDigest": "0d250dc4835f7b25219b5b514ac3150c1d1fbf8686cd8234eeb0dc499df504e2",
+      "lineNumber": 1,
+      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test."
     },
     {
-      "path": "packages/ui/src/components/data-table/filters/MultiSelectFilter.tsx",
-      "line": "export * from '../../../vendor/tiketo/components/data-table/filters/MultiSelectFilter'",
-      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test.",
-      "lineNumber": 1
+      "pathDigest": "d60e6e679ca23300d838fe0f3c0fc8b38ca0733232c30bcef3c780df0ee6bb60",
+      "lineDigest": "db8b7e95699bbe5bb3fea427bd37a2ed7551e53f771fa36449a9f1c97176a436",
+      "lineNumber": 1,
+      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test."
     },
     {
-      "path": "packages/ui/src/components/data-table/filters/TextFilter.tsx",
-      "line": "export * from '../../../vendor/tiketo/components/data-table/filters/TextFilter'",
-      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test.",
-      "lineNumber": 1
+      "pathDigest": "24d333fb6e802f60894e9a213da0f5306c9fc7a7a71600b74fa5f4d0e280e209",
+      "lineDigest": "8f0f0f4d3b81f0731535bdcf3242e8c5470f554ad41641a128b88548e5ceb825",
+      "lineNumber": 1,
+      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test."
     },
     {
-      "path": "packages/ui/src/components/data-table/filters/ToggleFilter.tsx",
-      "line": "export * from '../../../vendor/tiketo/components/data-table/filters/ToggleFilter'",
-      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test.",
-      "lineNumber": 1
+      "pathDigest": "d5f665f0856f7b1b748ac503ba4137aff05b909f73dc9e772e05799b1125e723",
+      "lineDigest": "dd6fa1ed6278654f8ac0db015284f14a6d47ea5d7c99cb9efcd100a6601e7cb2",
+      "lineNumber": 1,
+      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test."
     },
     {
-      "path": "packages/ui/src/components/detail-page/DetailPageHeader.tsx",
-      "line": "export * from '../../vendor/tiketo/components/detail-page/DetailPageHeader'",
-      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test.",
-      "lineNumber": 1
+      "pathDigest": "081d66c79110067ea322b5ce3044a99c14687b421781c00403c462642502e39c",
+      "lineDigest": "fcac976c6395608b64fc7951d5dfd042a762cf9f91ec720d25490f1a7ed95e21",
+      "lineNumber": 1,
+      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test."
     },
     {
-      "path": "packages/ui/src/components/dialog/ConfirmDialog.tsx",
-      "line": "export * from '../../vendor/tiketo/components/dialog/ConfirmDialog'",
-      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test.",
-      "lineNumber": 1
+      "pathDigest": "1a906efa2eb687d8a1257df500ebd547443be9521503675ee06ddb5ae653f761",
+      "lineDigest": "c644c8a69c8e7f4783cbdb75a08f1b9ffc99540cd03058084033b392dc1ac7bf",
+      "lineNumber": 1,
+      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test."
     },
     {
-      "path": "packages/ui/src/components/dialog/DeleteDialog.tsx",
-      "line": "export * from '../../vendor/tiketo/components/dialog/DeleteDialog'",
-      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test.",
-      "lineNumber": 1
+      "pathDigest": "db8979364acadd9a0ecd31efe26c78f407f470241dd0cdb0771c3ebcf1dcb8f4",
+      "lineDigest": "1fccb50ab57a7d1d8df83046d2c39b26be4cc42f37e0ffe631e59748f35ddfe7",
+      "lineNumber": 1,
+      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test."
     },
     {
-      "path": "packages/ui/src/components/dialog/FormDialog.tsx",
-      "line": "export * from '../../vendor/tiketo/components/dialog/FormDialog'",
-      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test.",
-      "lineNumber": 1
+      "pathDigest": "ba1574e3489b37cb1f2c07b5838973e6eb2e98ced9f46259dae3941d7ecc53ad",
+      "lineDigest": "9836218e410c33afc4ab2a80d447391676cfb06382d33253858ace24246c688d",
+      "lineNumber": 1,
+      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test."
     },
     {
-      "path": "packages/ui/src/components/dialog/UnsavedChangesPrompt.tsx",
-      "line": "export * from '../../vendor/tiketo/components/dialog/UnsavedChangesPrompt'",
-      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test.",
-      "lineNumber": 1
+      "pathDigest": "2dc3e3f08a587f5d3769386a59d8bda5e66fb7e7516240d78e54ad94e6030d40",
+      "lineDigest": "18994257291a2453398585859f8e32d0e8c6350954f7033e2dfe3a73cd074853",
+      "lineNumber": 1,
+      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test."
     },
     {
-      "path": "packages/ui/src/components/form/Form.tsx",
-      "line": "export * from '../../vendor/tiketo/components/form/Form'",
-      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test.",
-      "lineNumber": 1
+      "pathDigest": "8f3189385398ba32e6056a9804dad76d790d79c97f39fe1fb518d2bdd9ad5b02",
+      "lineDigest": "4ec24a278574584512ec73c08c8a77e2d07f5f816c7104e5be0655c4b264bbeb",
+      "lineNumber": 1,
+      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test."
     },
     {
-      "path": "packages/ui/src/components/form/FormFieldInput.tsx",
-      "line": "export * from '../../vendor/tiketo/components/form/FormFieldInput'",
-      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test.",
-      "lineNumber": 1
+      "pathDigest": "00dddcbca6f457e0714c4ab310a85b55ccceee94abbe66cf0c0e868c326c5436",
+      "lineDigest": "d9d59727ef8510420084adf7526e768c78db6630d4c89eeff7461434eef5cd19",
+      "lineNumber": 1,
+      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test."
     },
     {
-      "path": "packages/ui/src/components/form/FormFieldWrapper.tsx",
-      "line": "export * from '../../vendor/tiketo/components/form/FormFieldWrapper'",
-      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test.",
-      "lineNumber": 1
+      "pathDigest": "946b6e25504901eeb3acf3316635e4748dc5e6216b06beb1dd21e1042918d534",
+      "lineDigest": "19f3b45deaaa2553fc2e33ed232ea2d27645b275ff4cf8d9fa80188bf0c80c7a",
+      "lineNumber": 1,
+      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test."
     },
     {
-      "path": "packages/ui/src/components/form/FormSubmitButton.tsx",
-      "line": "export * from '../../vendor/tiketo/components/form/FormSubmitButton'",
-      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test.",
-      "lineNumber": 1
+      "pathDigest": "356e65688c96abbf08168803c28b0160d17eed375aadae326f0d1f412db40c20",
+      "lineDigest": "0f1cca3ec4148e70c666eff4352c2bd8ad49402f1a1b75ca45340ec5fa64f7c5",
+      "lineNumber": 1,
+      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test."
     },
     {
-      "path": "packages/ui/src/components/layout/Layout.tsx",
-      "line": "export { LayoutNavigationItem, LayoutNavigationGroup, LayoutNavigationSubItem, SidebarMenu } from '../../vendor/tiketo/components/layout/LayoutSidebarContent'",
-      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test.",
-      "lineNumber": 2
+      "pathDigest": "46f37a471cc465f77d24dc50f69342a7a5f69a937c8e2bdb7c4332defaedb7d8",
+      "lineDigest": "3e6073c10df92337379c09c482b00eb501d78e573f40158a57fdde18e7b2d896",
+      "lineNumber": 2,
+      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test."
     },
     {
-      "path": "packages/ui/src/components/layout/Layout.tsx",
-      "line": "export { BreadcrumbsBase as LayoutBreadcrumbs } from '../../vendor/tiketo/components/layout/Breadcrumbs'",
-      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test.",
-      "lineNumber": 3
+      "pathDigest": "46f37a471cc465f77d24dc50f69342a7a5f69a937c8e2bdb7c4332defaedb7d8",
+      "lineDigest": "bfd63e73cbc92306022b5d012a8a8f51b9a7632d72bb7d6587ed7fa039a5ba67",
+      "lineNumber": 3,
+      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test."
     },
     {
-      "path": "packages/ui/src/components/layout/LayoutUserDropdown.tsx",
-      "line": "export * from '../../vendor/tiketo/components/layout/LayoutUserDropdown'",
-      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test.",
-      "lineNumber": 1
+      "pathDigest": "9e98e3b2e901c7c1d8f8b025c3c7de6e82a1839afb8693e0af7448a0ac474956",
+      "lineDigest": "b98895edb6e730bd69054799b32556502fd1043b5d04770f1c17d8dd10c9c9f0",
+      "lineNumber": 1,
+      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test."
     },
     {
-      "path": "packages/ui/src/components/layout/WorkspaceSwitch.tsx",
-      "line": "export * from '../../vendor/tiketo/components/layout/WorkspaceSwitch'",
-      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test.",
-      "lineNumber": 1
+      "pathDigest": "7195360c9be0d006e6a9d6d23a077f5dcd832ff84ebdeffaa07d708c073a6cae",
+      "lineDigest": "1d426fe7072f200b0b3a6f7f3c082d10935acae77aa2589c24e53d05eb9511c0",
+      "lineNumber": 1,
+      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test."
     },
     {
-      "path": "packages/ui/src/components/resource-page/ResourcePageLayout.tsx",
-      "line": "export * from '../../vendor/tiketo/components/resource-page/ResourcePageLayout'",
-      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test.",
-      "lineNumber": 1
+      "pathDigest": "07cd36607c3d2b92cd7ade3342b89c9d0f6dd09c83635d5d4bb2e8f4f32195ea",
+      "lineDigest": "6b1c7c782f0364c9c0f7cf44827c1e0a795042a2b9589df5edd1aed28cc6981a",
+      "lineNumber": 1,
+      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test."
     },
     {
-      "path": "packages/ui/src/components/ui/MutationErrorAlert.tsx",
-      "line": "export * from '../../vendor/tiketo/components/ui/MutationErrorAlert'",
-      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test.",
-      "lineNumber": 1
+      "pathDigest": "b3f143749930cedbd7eb868647ce3290d12f25d8266b764636f12ef7967807b8",
+      "lineDigest": "8370486afc37204936391c8046fc426fceb33f1bef6f744c7b0379d01cdc8e4e",
+      "lineNumber": 1,
+      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test."
     },
     {
-      "path": "packages/ui/src/components/ui/alert-dialog.tsx",
-      "line": "export * from '../../vendor/tiketo/components/ui/alert-dialog'",
-      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test.",
-      "lineNumber": 1
+      "pathDigest": "076fc52db8cd6448be881b0cfa53dd4f5a64d5b1a7b96ade95cd4952e8dd11ef",
+      "lineDigest": "05ae8436faa7204f0029f3de9bb06568c2d35e4b19411efe9c5c77bdebed9dc5",
+      "lineNumber": 1,
+      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test."
     },
     {
-      "path": "packages/ui/src/components/ui/alert.tsx",
-      "line": "export * from '../../vendor/tiketo/components/ui/alert'",
-      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test.",
-      "lineNumber": 1
+      "pathDigest": "41431ce4a8607fb7e71801d4056252d40e336827ee1ce0add37c7eb2c59a6817",
+      "lineDigest": "0eb90ad739237c2771182e18cadbf832aeea0c64b0bd791d3163c344c558411c",
+      "lineNumber": 1,
+      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test."
     },
     {
-      "path": "packages/ui/src/components/ui/avatar.tsx",
-      "line": "export * from '../../vendor/tiketo/components/ui/avatar'",
-      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test.",
-      "lineNumber": 1
+      "pathDigest": "e40791b740e9007a2f397235e4ea47ba64b04a5f88b8039e7f193e6e0410b8de",
+      "lineDigest": "2b018ac63af58fcca08a84a905179b1a28fc5d811bc19150029c904aab4d4314",
+      "lineNumber": 1,
+      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test."
     },
     {
-      "path": "packages/ui/src/components/ui/badge.tsx",
-      "line": "export * from '../../vendor/tiketo/components/ui/badge'",
-      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test.",
-      "lineNumber": 1
+      "pathDigest": "52f8504b829adf7a183fad187d4647a85c1c01d7ff51fa95d8cb949e89a9fea9",
+      "lineDigest": "69963f5746bac816a79074344d7e9130f87a4827337a23c31f0bc00ff6f7521c",
+      "lineNumber": 1,
+      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test."
     },
     {
-      "path": "packages/ui/src/components/ui/breadcrumb.tsx",
-      "line": "export * from '../../vendor/tiketo/components/ui/breadcrumb'",
-      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test.",
-      "lineNumber": 1
+      "pathDigest": "4da3cdd3e33b4d2e7a69db568640161add1bebc8494380261bb4349889fd7892",
+      "lineDigest": "a3e847291462c48e950d9369382b0e17fb0a6d00c792878d43783da52f0b375b",
+      "lineNumber": 1,
+      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test."
     },
     {
-      "path": "packages/ui/src/components/ui/button.tsx",
-      "line": "export * from '../../vendor/tiketo/components/ui/button'",
-      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test.",
-      "lineNumber": 1
+      "pathDigest": "a0fb9e4b9fcfad777b822871c44ed4daf3f2f4b4a5f92d2fafd062a3f8c5c6d3",
+      "lineDigest": "374b2092568cdd2881755dcefff73213f9af41fa7f46991075aec1adab471799",
+      "lineNumber": 1,
+      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test."
     },
     {
-      "path": "packages/ui/src/components/ui/calendar.tsx",
-      "line": "export * from '../../vendor/tiketo/components/ui/calendar'",
-      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test.",
-      "lineNumber": 1
+      "pathDigest": "33afc95abfea4917a71962b885ab88997674aaaa296127e31c9520e722392077",
+      "lineDigest": "60e1256eb9233b0594f23ab8bb22a61b06b636031aea1c3771b1b1d290ed073c",
+      "lineNumber": 1,
+      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test."
     },
     {
-      "path": "packages/ui/src/components/ui/card.tsx",
-      "line": "export * from '../../vendor/tiketo/components/ui/card'",
-      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test.",
-      "lineNumber": 1
+      "pathDigest": "74373889798d144954fe43f8b5fb6c5424ccb39b69b7e9f82dcf9ba824cf0d9e",
+      "lineDigest": "ed1e931efac89d2b599ff98c9461cd19c2847c9a244fa148be2e28fd34907e78",
+      "lineNumber": 1,
+      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test."
     },
     {
-      "path": "packages/ui/src/components/ui/checkbox.tsx",
-      "line": "export * from '../../vendor/tiketo/components/ui/checkbox'",
-      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test.",
-      "lineNumber": 1
+      "pathDigest": "a1d08fd72436b00214745cc65c91dd8d68c14169936e7aae9abd2dd1037db657",
+      "lineDigest": "c2720b4fba800e626bc8c5e907564899a61e6be4d9866b9ceb788d1f216f0016",
+      "lineNumber": 1,
+      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test."
     },
     {
-      "path": "packages/ui/src/components/ui/collapsible.tsx",
-      "line": "export * from '../../vendor/tiketo/components/ui/collapsible'",
-      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test.",
-      "lineNumber": 1
+      "pathDigest": "0a8ff50539aa89cd56d75e4a5c0bb0729219c0189f3b3abeb3355791ac8e0c34",
+      "lineDigest": "956c85c225810f8209bbe5bc5170ec8781c74738eeb864a09ee820ef2926c89a",
+      "lineNumber": 1,
+      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test."
     },
     {
-      "path": "packages/ui/src/components/ui/dialog.tsx",
-      "line": "export * from '../../vendor/tiketo/components/ui/dialog'",
-      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test.",
-      "lineNumber": 1
+      "pathDigest": "a2d9ba021bf6ba6e5d4f34503600458f97208d183ff3622a8328f798c88dd049",
+      "lineDigest": "1a211d2f35689bbe095c982ba0c05e99be835b12f21763aa848bb0a45f7b4034",
+      "lineNumber": 1,
+      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test."
     },
     {
-      "path": "packages/ui/src/components/ui/dropdown-menu.tsx",
-      "line": "export * from '../../vendor/tiketo/components/ui/dropdown-menu'",
-      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test.",
-      "lineNumber": 1
+      "pathDigest": "e4c4b2b057bda7a046587921dce7b4cfbac416c1288e2f91e0ee3e23f78ceb1a",
+      "lineDigest": "f1872b111dc5942ff92df9e8a3da541429b3e524f7b45c82d86e54adff1ceb26",
+      "lineNumber": 1,
+      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test."
     },
     {
-      "path": "packages/ui/src/components/ui/form.tsx",
-      "line": "export * from '../../vendor/tiketo/components/ui/form'",
-      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test.",
-      "lineNumber": 1
+      "pathDigest": "08d6003b260c9b0b12b5240d785fc341425c30b38b17239b774f04aac90fe6d4",
+      "lineDigest": "6b40028a966e158eedf296e2d63f7a692839a6b353242fec23c0e04c2bc99cfa",
+      "lineNumber": 1,
+      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test."
     },
     {
-      "path": "packages/ui/src/components/ui/input.tsx",
-      "line": "export * from '../../vendor/tiketo/components/ui/input'",
-      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test.",
-      "lineNumber": 1
+      "pathDigest": "014be964ccc622b47a778a4c356b7fa65d73228c73ab97897b64331461956629",
+      "lineDigest": "7f6419583ba587b08c206f09a1894cf1219c66af543b5429f72a663cb1404aad",
+      "lineNumber": 1,
+      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test."
     },
     {
-      "path": "packages/ui/src/components/ui/label.tsx",
-      "line": "export * from '../../vendor/tiketo/components/ui/label'",
-      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test.",
-      "lineNumber": 1
+      "pathDigest": "20032e6c51d7f5269d2f6ae217ef9cfb4577fff797519af27e24da10533d3933",
+      "lineDigest": "d1ccf4c3ff3bf643bd87ccb3ca72abadcb58c66871e18b2784a59392ec2af280",
+      "lineNumber": 1,
+      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test."
     },
     {
-      "path": "packages/ui/src/components/ui/native-select.tsx",
-      "line": "export * from '../../vendor/tiketo/components/ui/native-select'",
-      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test.",
-      "lineNumber": 1
+      "pathDigest": "df237e9999564c161652642eaf374544f068f82ae5854b311d0eea009ba580b4",
+      "lineDigest": "81748a52d0773a0e847257c14f2da01ab7c270de970a3d24e4226ec4f56643a1",
+      "lineNumber": 1,
+      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test."
     },
     {
-      "path": "packages/ui/src/components/ui/popover.tsx",
-      "line": "export * from '../../vendor/tiketo/components/ui/popover'",
-      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test.",
-      "lineNumber": 1
+      "pathDigest": "601227d40a675b6f074713cf381ac9dd914a43d01012efadef7a9195eae07e7b",
+      "lineDigest": "11236ddf9072dfc0a570d18a014308b655574ee43b92aeb330d011c6b2ce8193",
+      "lineNumber": 1,
+      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test."
     },
     {
-      "path": "packages/ui/src/components/ui/scroll-area.tsx",
-      "line": "export * from '../../vendor/tiketo/components/ui/scroll-area'",
-      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test.",
-      "lineNumber": 1
+      "pathDigest": "cfbfdb779f1776e60a2e89cc313d134bf0f34ce8d241ef23cb33c34176b82699",
+      "lineDigest": "4fbdf0653e608a37c6cc96cbb844cef006360d9e0a360d7ed849b5312b8f8e55",
+      "lineNumber": 1,
+      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test."
     },
     {
-      "path": "packages/ui/src/components/ui/select.tsx",
-      "line": "export * from '../../vendor/tiketo/components/ui/select'",
-      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test.",
-      "lineNumber": 1
+      "pathDigest": "7731f1bd12e7948869f3c0fa1c7e7e3e65832db69b00f0185b1523fab56179e2",
+      "lineDigest": "39391808210dfef8b03c55b656a9c835035b1aecf16b21c2d9f77b9814ad3f17",
+      "lineNumber": 1,
+      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test."
     },
     {
-      "path": "packages/ui/src/components/ui/separator.tsx",
-      "line": "export * from '../../vendor/tiketo/components/ui/separator'",
-      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test.",
-      "lineNumber": 1
+      "pathDigest": "9ca1cfc01c36e0b0f1fdfd4354b3498f1ebacbc7b85f7d24a0682d24e2b9e5d8",
+      "lineDigest": "5cd9be12a4347c296adceb2f6bd3009fe05b56af2259c04b2447f594dc5d2941",
+      "lineNumber": 1,
+      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test."
     },
     {
-      "path": "packages/ui/src/components/ui/sheet.tsx",
-      "line": "export * from '../../vendor/tiketo/components/ui/sheet'",
-      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test.",
-      "lineNumber": 1
+      "pathDigest": "b866e606d581875831d3e6096debb0b092449de00b3f093e81bf8f5806543df3",
+      "lineDigest": "a0a77ce1d7c53afcb345100d93eca7eea5636452ead91d7099acff1a3a30f2fc",
+      "lineNumber": 1,
+      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test."
     },
     {
-      "path": "packages/ui/src/components/ui/sidebar.tsx",
-      "line": "export * from '../../vendor/tiketo/components/ui/sidebar'",
-      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test.",
-      "lineNumber": 1
+      "pathDigest": "109d2694f8036b8346adaebaee30960540e21259c82744517fce127ce6865dd1",
+      "lineDigest": "a55fc5ae581b0db8538fcc86d80bd3e40568c04018c7bef31d098b07d56d80ae",
+      "lineNumber": 1,
+      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test."
     },
     {
-      "path": "packages/ui/src/components/ui/skeleton.tsx",
-      "line": "export * from '../../vendor/tiketo/components/ui/skeleton'",
-      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test.",
-      "lineNumber": 1
+      "pathDigest": "a62b600b80fc7d047a7d9a040c88b991e46bd0521faf818ab0bcfe2ec1c82093",
+      "lineDigest": "fb68209af08f5c576cc299e333e1e964cae15a986284afe03be4b4de2af6f47b",
+      "lineNumber": 1,
+      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test."
     },
     {
-      "path": "packages/ui/src/components/ui/sonner.tsx",
-      "line": "export * from '../../vendor/tiketo/components/ui/sonner'",
-      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test.",
-      "lineNumber": 1
+      "pathDigest": "45463773a1d923f3fdfaaf3af3679f8d852782f4ee5b717ab0fa1c9e85ffba4a",
+      "lineDigest": "5b3b205e68d742175a98379220aa459dd30e4bf8cd2c9ce5793ff182248e0d0d",
+      "lineNumber": 1,
+      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test."
     },
     {
-      "path": "packages/ui/src/components/ui/switch.tsx",
-      "line": "export * from '../../vendor/tiketo/components/ui/switch'",
-      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test.",
-      "lineNumber": 1
+      "pathDigest": "f79026e8c35b9efcdc86e9249a7514a23b3ac19757bdb7694c9843a99943d2c4",
+      "lineDigest": "ae701db67549637cb0b7793d5293067547ce56f62be6a7859a12c1203c1ed698",
+      "lineNumber": 1,
+      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test."
     },
     {
-      "path": "packages/ui/src/components/ui/table.tsx",
-      "line": "export * from '../../vendor/tiketo/components/ui/table'",
-      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test.",
-      "lineNumber": 1
+      "pathDigest": "5b83c42a90d5cc92091a85fccfe1cc4a45996c49ec04b0c2dba317688e3354aa",
+      "lineDigest": "3459d17df76dc067be387e16db8d202198f209ded48089e767e9f7eea4341e46",
+      "lineNumber": 1,
+      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test."
     },
     {
-      "path": "packages/ui/src/components/ui/tabs.tsx",
-      "line": "export * from '../../vendor/tiketo/components/ui/tabs'",
-      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test.",
-      "lineNumber": 1
+      "pathDigest": "74e3617fd59bd5d4200c2823c20ec96093d4a9e19f35fa3fe4940280ab200c82",
+      "lineDigest": "73f333a9a4e5218c62f38c03494d1b4940170e989cd3fdcac737405a6e1e800f",
+      "lineNumber": 1,
+      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test."
     },
     {
-      "path": "packages/ui/src/components/ui/textarea.tsx",
-      "line": "export * from '../../vendor/tiketo/components/ui/textarea'",
-      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test.",
-      "lineNumber": 1
+      "pathDigest": "81d6653a05e23a0f8f7d53169c253e1ae92a7e5edeefa3df60389a4577c06a50",
+      "lineDigest": "eda8fa853f0fbb0ea724695243710b118d86df7bfaa70be2c4cd5f85b5f943c9",
+      "lineNumber": 1,
+      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test."
     },
     {
-      "path": "packages/ui/src/components/ui/tooltip.tsx",
-      "line": "export * from '../../vendor/tiketo/components/ui/tooltip'",
-      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test.",
-      "lineNumber": 1
+      "pathDigest": "4019410272e56e6afec90e91cc791ccb8e823905f54917a0310e182553870762",
+      "lineDigest": "636770c99f0aa74524549bac465183f2dde6491d94e4d1a2620e7ba928e89a10",
+      "lineNumber": 1,
+      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test."
     },
     {
-      "path": "packages/ui/src/components/ui/use-mobile.tsx",
-      "line": "export * from '../../vendor/tiketo/components/ui/use-mobile'",
-      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test.",
-      "lineNumber": 1
+      "pathDigest": "20da6ffe988891933841ac6ac079851f2340aa836d86e157a57433c97914f9c9",
+      "lineDigest": "b57df3890285cc46d86665a71ef0e61d5bbdc65b95044be15e023c5a287c2bf4",
+      "lineNumber": 1,
+      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test."
     },
     {
-      "path": "packages/ui/src/data-table/DataTable.tsx",
-      "line": "import { DataTableProvider } from '../vendor/tiketo/components/data-table/DataTableProvider'",
-      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test.",
-      "lineNumber": 3
+      "pathDigest": "29d39cf0db6ef6abc070c73085adf340595ee00e6544c2b9d139cfb81c3c01ae",
+      "lineDigest": "82bc0c73f93bfb8d10b3a394fba560969f4d593cd8ed393705aceb068d592461",
+      "lineNumber": 3,
+      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test."
     },
     {
-      "path": "packages/ui/src/data-table/DataTable.tsx",
-      "line": "import { DataTableContent } from '../vendor/tiketo/components/data-table/DataTableContent'",
-      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test.",
-      "lineNumber": 4
+      "pathDigest": "29d39cf0db6ef6abc070c73085adf340595ee00e6544c2b9d139cfb81c3c01ae",
+      "lineDigest": "ab3a263073fabb53f12a98c91c296db377e47ea55f0d92d97d286f34cf3919d4",
+      "lineNumber": 4,
+      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test."
     },
     {
-      "path": "packages/ui/src/data-table/DataTable.tsx",
-      "line": "import { DataTableFooter } from '../vendor/tiketo/components/data-table/DataTableFooter'",
-      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test.",
-      "lineNumber": 5
+      "pathDigest": "29d39cf0db6ef6abc070c73085adf340595ee00e6544c2b9d139cfb81c3c01ae",
+      "lineDigest": "8d978b3c2e3465eca15fce6218c84297fc2d9c248dbc337c83cb0cb84f8ec8cd",
+      "lineNumber": 5,
+      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test."
     },
     {
-      "path": "packages/ui/src/data-table/DataTable.tsx",
-      "line": "import { mapColumn } from '../vendor/tiketo/components/data-table/DataTableColumn'",
-      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test.",
-      "lineNumber": 6
+      "pathDigest": "29d39cf0db6ef6abc070c73085adf340595ee00e6544c2b9d139cfb81c3c01ae",
+      "lineDigest": "7d8a789b535339b9fa92cf3a23c79b86855734d6ee8729671efb4ac2977ccba6",
+      "lineNumber": 6,
+      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test."
     },
     {
-      "path": "packages/ui/src/data-table/DataTableActiveFilters.tsx",
-      "line": "export * from '../vendor/tiketo/components/data-table/DataTableActiveFilters'",
-      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test.",
-      "lineNumber": 1
+      "pathDigest": "d7a423daaaaa18e6c00d8c251cbca5b20f83357773a6e8b72e7146f822085f21",
+      "lineDigest": "bb9f9509d39a19f7d55c28c985d028a36606d8a3690f7f49200f420b382a8bed",
+      "lineNumber": 1,
+      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test."
     },
     {
-      "path": "packages/ui/src/data-table/DataTableFilterDropdown.tsx",
-      "line": "import { DataTableFilterDropdown as SourceFilter } from '../vendor/tiketo/components/data-table/DataTableFilterDropdown'",
-      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test.",
-      "lineNumber": 2
+      "pathDigest": "9d016f667979781f5f9e652093d24fcd6695987a4bb7085e3df3d32e11171bc7",
+      "lineDigest": "62b92128aac6f3f92ceecaa7dc8c7b76d778aa3ddf9069d9f62cf5565ff2eb7d",
+      "lineNumber": 2,
+      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test."
     },
     {
-      "path": "packages/ui/src/data-table/DataTableSearch.tsx",
-      "line": "import { DataTableSearch as SourceSearch } from '../vendor/tiketo/components/data-table/DataTableSearch'",
-      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test.",
-      "lineNumber": 2
+      "pathDigest": "ead855d4c7e081ed89584c03b1b791a84fa8c6051582d4697173fef850207bf9",
+      "lineDigest": "97c9c29447c22f4d514609e4bead7b83b98c79cb94bd47ce61de8d6665a34225",
+      "lineNumber": 2,
+      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test."
     },
     {
-      "path": "packages/ui/src/data-table/RangeFilter.tsx",
-      "line": "import { RangeFilter as NumericRange, type RangeInput } from '../vendor/tiketo/components/data-table/filters/RangeFilter'",
-      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test.",
-      "lineNumber": 1
+      "pathDigest": "b8ad98987e3367e40cc04c1987ee05c6f8d26445ee6744cb83808e9fa3be7a52",
+      "lineDigest": "62af17fb97563b6b70a80c478e7179aee1c04e3dfdfa0b48cc67f6ee2cce0e24",
+      "lineNumber": 1,
+      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test."
     },
     {
-      "path": "packages/ui/src/data-table/RangeFilter.tsx",
-      "line": "import { DateRangePicker } from '../vendor/tiketo/components/form/DateRangePicker'",
-      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test.",
-      "lineNumber": 2
+      "pathDigest": "b8ad98987e3367e40cc04c1987ee05c6f8d26445ee6744cb83808e9fa3be7a52",
+      "lineDigest": "a437fa8bbd5faed2833b27e590e873a1a244cde3a92d59bd851db2c7c81443d3",
+      "lineNumber": 2,
+      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test."
     },
     {
-      "path": "packages/ui/src/data-table/RangeFilter.tsx",
-      "line": "export type { RangeInput } from '../vendor/tiketo/components/data-table/filters/RangeFilter'",
-      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test.",
-      "lineNumber": 5
+      "pathDigest": "b8ad98987e3367e40cc04c1987ee05c6f8d26445ee6744cb83808e9fa3be7a52",
+      "lineDigest": "f485347a1a84ae844df684ff12bb8bd2f0d7427dddf6617991a8b0749a243fc6",
+      "lineNumber": 5,
+      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test."
     },
     {
-      "path": "packages/ui/src/data-table/complete-table.tsx",
-      "line": "import { DataTableProvider } from '../vendor/tiketo/components/data-table/DataTableProvider'",
-      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test.",
-      "lineNumber": 2
+      "pathDigest": "1d449b76d3b123076f1b80076bc3ea25e891a9e339fc470ce8587900b1833177",
+      "lineDigest": "82bc0c73f93bfb8d10b3a394fba560969f4d593cd8ed393705aceb068d592461",
+      "lineNumber": 2,
+      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test."
     },
     {
-      "path": "packages/ui/src/data-table/complete-table.tsx",
-      "line": "import { DataTableContent } from '../vendor/tiketo/components/data-table/DataTableContent'",
-      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test.",
-      "lineNumber": 3
+      "pathDigest": "1d449b76d3b123076f1b80076bc3ea25e891a9e339fc470ce8587900b1833177",
+      "lineDigest": "ab3a263073fabb53f12a98c91c296db377e47ea55f0d92d97d286f34cf3919d4",
+      "lineNumber": 3,
+      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test."
     },
     {
-      "path": "packages/ui/src/data-table/complete-table.tsx",
-      "line": "import { DataTableFooter } from '../vendor/tiketo/components/data-table/DataTableFooter'",
-      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test.",
-      "lineNumber": 4
+      "pathDigest": "1d449b76d3b123076f1b80076bc3ea25e891a9e339fc470ce8587900b1833177",
+      "lineDigest": "8d978b3c2e3465eca15fce6218c84297fc2d9c248dbc337c83cb0cb84f8ec8cd",
+      "lineNumber": 4,
+      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test."
     },
     {
-      "path": "packages/ui/src/data-table/index.tsx",
-      "line": "import { DataTableProvider } from '../vendor/tiketo/components/data-table/DataTableProvider'",
-      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test.",
-      "lineNumber": 2
+      "pathDigest": "fde3c4d6997d152b3a458644c3a45be4e27daa0ddc1fa2452b2b9d1396b2d618",
+      "lineDigest": "82bc0c73f93bfb8d10b3a394fba560969f4d593cd8ed393705aceb068d592461",
+      "lineNumber": 2,
+      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test."
     },
     {
-      "path": "packages/ui/src/data-table/index.tsx",
-      "line": "import { DataTableContent } from '../vendor/tiketo/components/data-table/DataTableContent'",
-      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test.",
-      "lineNumber": 3
+      "pathDigest": "fde3c4d6997d152b3a458644c3a45be4e27daa0ddc1fa2452b2b9d1396b2d618",
+      "lineDigest": "ab3a263073fabb53f12a98c91c296db377e47ea55f0d92d97d286f34cf3919d4",
+      "lineNumber": 3,
+      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test."
     },
     {
-      "path": "packages/ui/src/form/registry-field.tsx",
-      "line": "import { DatePicker } from '../vendor/tiketo/components/form/DatePicker'",
-      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test.",
-      "lineNumber": 6
+      "pathDigest": "fbf86880baf3fc798698bdeba9e13dd45c7445407262d57f8423f869bbe7faee",
+      "lineDigest": "b7bdee93305257e9353c35389a866d12b63472d58fdcab948e6534143aec77d4",
+      "lineNumber": 6,
+      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test."
     },
     {
-      "path": "packages/ui/src/form/registry-field.tsx",
-      "line": "import { DateTimePicker } from '../vendor/tiketo/components/form/DateTimePicker'",
-      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test.",
-      "lineNumber": 7
+      "pathDigest": "fbf86880baf3fc798698bdeba9e13dd45c7445407262d57f8423f869bbe7faee",
+      "lineDigest": "1353b2b28f68a3894a9ed09128869b729b6dc03ebb1a9a2ced4a418b396a1439",
+      "lineNumber": 7,
+      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test."
     },
     {
-      "path": "packages/ui/src/form/registry-field.tsx",
-      "line": "import { NumberInput } from '../vendor/tiketo/components/form/NumberInput'",
-      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test.",
-      "lineNumber": 8
+      "pathDigest": "fbf86880baf3fc798698bdeba9e13dd45c7445407262d57f8423f869bbe7faee",
+      "lineDigest": "2a909d83939db9e0164b184927bc1e1a16ca7496a0fad4307c2f936a761147b7",
+      "lineNumber": 8,
+      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test."
     },
     {
-      "path": "packages/ui/src/index.ts",
-      "line": "export { UserSettings } from './vendor/tiketo/components/settings/UserSettings'",
-      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test.",
-      "lineNumber": 17
+      "pathDigest": "9e4dbca95e35575af9a723089becf12fe50cca28880ae6617894632560d12dcf",
+      "lineDigest": "c46fbbd0cc6fb44718a5ceb6d1f0ceb99ad2821b9b8530ae209f4cae2bb64779",
+      "lineNumber": 17,
+      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test."
     },
     {
-      "path": "packages/ui/src/index.ts",
-      "line": "export { WorkspaceSettings } from './vendor/tiketo/components/settings/WorkspaceSettings'",
-      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test.",
-      "lineNumber": 18
+      "pathDigest": "9e4dbca95e35575af9a723089becf12fe50cca28880ae6617894632560d12dcf",
+      "lineDigest": "3ea66ed7aa441e55b17e5dc303dbee5125b2dc050b462ef46778a040782ca79e",
+      "lineNumber": 18,
+      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test."
     },
     {
-      "path": "packages/ui/src/index.ts",
-      "line": "export { UserOnboarding } from './vendor/tiketo/components/settings/UserOnboarding'",
-      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test.",
-      "lineNumber": 19
+      "pathDigest": "9e4dbca95e35575af9a723089becf12fe50cca28880ae6617894632560d12dcf",
+      "lineDigest": "0a3ae2c05946a7f3465c9b8034fe31e21c1f0ec79cc2e5ffd01194b754f28abc",
+      "lineNumber": 19,
+      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test."
     },
     {
-      "path": "packages/ui/src/index.ts",
-      "line": "export { APITokensSettings } from './vendor/tiketo/components/settings/APITokensSettings'",
-      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test.",
-      "lineNumber": 20
+      "pathDigest": "9e4dbca95e35575af9a723089becf12fe50cca28880ae6617894632560d12dcf",
+      "lineDigest": "7a2a7732fc0e972b5a9f2b3b8805f55befea184a9ba1829634dc14101f7f39b4",
+      "lineNumber": 20,
+      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test."
     },
     {
-      "path": "packages/ui/src/index.ts",
-      "line": "export { WorkspaceMembers } from './vendor/tiketo/components/user-management/WorkspaceMembers'",
-      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test.",
-      "lineNumber": 21
+      "pathDigest": "9e4dbca95e35575af9a723089becf12fe50cca28880ae6617894632560d12dcf",
+      "lineDigest": "98c2bd5bffa2a7f9d5d3896507373b0a9f215e423f57b0a040e48b2efb989c3f",
+      "lineNumber": 21,
+      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test."
     },
     {
-      "path": "packages/ui/src/index.ts",
-      "line": "export { WorkspaceMembersTable } from './vendor/tiketo/components/user-management/WorkspaceMembersTable'",
-      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test.",
-      "lineNumber": 22
+      "pathDigest": "9e4dbca95e35575af9a723089becf12fe50cca28880ae6617894632560d12dcf",
+      "lineDigest": "70d6dfd4ac0a28ee947e49778bfa926719c2c6e4e6cec5616766da2c9c08810d",
+      "lineNumber": 22,
+      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test."
     },
     {
-      "path": "packages/ui/src/index.ts",
-      "line": "export { InviteUserModal } from './vendor/tiketo/components/user-management/InviteUserModal'",
-      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test.",
-      "lineNumber": 23
+      "pathDigest": "9e4dbca95e35575af9a723089becf12fe50cca28880ae6617894632560d12dcf",
+      "lineDigest": "823088841b1f5b25f019fe59cc6f7e9fee3ce132ebc0d1e009622595ff7e327b",
+      "lineNumber": 23,
+      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test."
     },
     {
-      "path": "packages/ui/src/index.ts",
-      "line": "export { UserWorkspaceOnboarding } from './vendor/tiketo/components/settings/UserWorkspaceOnboarding'",
-      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test.",
-      "lineNumber": 25
+      "pathDigest": "9e4dbca95e35575af9a723089becf12fe50cca28880ae6617894632560d12dcf",
+      "lineDigest": "dab455b034054074f8395a98062bb06350782588a0bd7e4a557480ddc555f8d3",
+      "lineNumber": 25,
+      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test."
     },
     {
-      "path": "packages/ui/src/layout/index.tsx",
-      "line": "export { SettingsLayout } from '../vendor/tiketo/components/layout/SettingsLayout'",
-      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test.",
-      "lineNumber": 5
+      "pathDigest": "6ff4b773d4330d9bdab3992c263ee1073c50442b4fbb760b7a9cf48b8d8261c2",
+      "lineDigest": "09e558275ca7b825137021c6d66805de6da82b4c67b61d5ea3ba68dcce7f6cc8",
+      "lineNumber": 5,
+      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test."
     },
     {
-      "path": "packages/ui/src/layout/index.tsx",
-      "line": "export { CreateWorkspaceModal } from '../vendor/tiketo/components/layout/CreateWorkspaceModal'",
-      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test.",
-      "lineNumber": 6
+      "pathDigest": "6ff4b773d4330d9bdab3992c263ee1073c50442b4fbb760b7a9cf48b8d8261c2",
+      "lineDigest": "3e4af21f254d67b0f7482b4f8a7d3bed4f4e8c2cea9bf6d75a8ffc219d6f60db",
+      "lineNumber": 6,
+      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test."
     },
     {
-      "path": "packages/ui/src/layout/shell.tsx",
-      "line": "import { Layout, LayoutBase, LayoutHeader } from '../vendor/tiketo/components/layout/Layout'",
-      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test.",
-      "lineNumber": 2
+      "pathDigest": "09079cbbbe3c4a5ace7fa82aff633dae898af447e4f5ad063b5291f92065b5d1",
+      "lineDigest": "6a2532fcac66bd880e40eecb764a9e7c226c10ab3c00e55834ee6fb063dcf250",
+      "lineNumber": 2,
+      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test."
     },
     {
-      "path": "packages/ui/src/lib.ts",
-      "line": "export { cn } from './vendor/tiketo/lib/utils'",
-      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test.",
-      "lineNumber": 1
+      "pathDigest": "575f6ba458c352563ceccc1a42897cc0ab4d39644cce162137f37aafebb602d9",
+      "lineDigest": "dc1475153ea3436226dedba3491cd5888605a173ffeda6081dbb711abbdd1803",
+      "lineNumber": 1,
+      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test."
     },
     {
-      "path": "packages/ui/src/lib/form/types.ts",
-      "line": "export * from '../../vendor/tiketo/lib/form/types'",
-      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test.",
-      "lineNumber": 1
+      "pathDigest": "add75a04bd96272a0d775cf8ac4f4a0f719a102eac3c0d02dd4bc34b03643dc4",
+      "lineDigest": "76b620fabe2b185151a15c8f89d62006f930db3c26e20f4419ed190598444fd0",
+      "lineNumber": 1,
+      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test."
     },
     {
-      "path": "packages/ui/src/styles.css",
-      "line": "/* Source: tiketo-cms packages/ui/src/index.css (reset + @theme inline) @ 523ee6a",
-      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test.",
-      "lineNumber": 1
+      "pathDigest": "fbd648d37867b730dd839ed622c31b7388b3c013099137a4fb3a14a7ee8ef63f",
+      "lineDigest": "15e2d056a483a10aa1f05f87378dbcace63694acea9986608ef1aa79dceb45b4",
+      "lineNumber": 1,
+      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test."
     },
     {
-      "path": "packages/ui/src/styles.css",
-      "line": " * Source: tiketo-cms packages/frontend-app/src/index.css (:root/.dark) @ 523ee6a",
-      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test.",
-      "lineNumber": 2
+      "pathDigest": "fbd648d37867b730dd839ed622c31b7388b3c013099137a4fb3a14a7ee8ef63f",
+      "lineDigest": "146f94cc1a9cfd7819c866f6308cb7a95baf4895b587c8ae5451050fff425d2c",
+      "lineNumber": 2,
+      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test."
     },
     {
-      "path": "packages/ui/src/styles.css",
-      "line": " * U1 removes legacy element overrides; tiketo composition owns typography and spacing.",
-      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test.",
-      "lineNumber": 5
+      "pathDigest": "fbd648d37867b730dd839ed622c31b7388b3c013099137a4fb3a14a7ee8ef63f",
+      "lineDigest": "88495f8234a4cd4940c4e1ac86d6cdb107a0f5206b5bc668b7a0f7b27284d315",
+      "lineNumber": 5,
+      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test."
     },
     {
-      "path": "packages/ui/test/account-footer.test.tsx",
-      "line": "import { LayoutUserDropdown } from '../src/vendor/tiketo/components/layout/LayoutUserDropdown'",
-      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test.",
-      "lineNumber": 3
+      "pathDigest": "f12c2c1e2a18049da6ff246899ebc75c3dbe950754eff6d8bf73515f4f847160",
+      "lineDigest": "7e1e1a8ad1977aae9150046d93080a3b1b3e062174989928d1ec1a1105599288",
+      "lineNumber": 3,
+      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test."
     },
     {
-      "path": "packages/ui/test/button-disabled.test.tsx",
-      "line": "  const root = 'src/vendor/tiketo'",
-      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test.",
-      "lineNumber": 33
+      "pathDigest": "449cdabd3a1b5bd958fa87e33dc5546c853b64cfcfd5f79f52ca7e3ed9add39f",
+      "lineDigest": "e0e81c5fd5c1e1f5ad740e590756481b79b4a807700cc90b284d1376d17f1a25",
+      "lineNumber": 33,
+      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test."
     },
     {
-      "path": "scripts/check-console-public.test.ts",
-      "line": "it.each(['tiketo', 'infodental', 'cleaning', 'service-requests', 'ControlDental', 'TeamVibe'])('public bundle scan rejects %s', content => {",
-      "reason": "Reviewed privacy detector vocabulary or legal-attribution assertion; no catalog is exported.",
-      "lineNumber": 6
+      "pathDigest": "31aa36cf687fe2d5a590cddf304be798fb4a42fdd3a9f367c277b75fc47bf853",
+      "lineDigest": "0f2547e960229e72c59de250641eaa1222fde52383888163c36f4eab1ae1e33b",
+      "lineNumber": 45,
+      "reason": "Required public npm dependency/import; exact package identity, not an owner deployment."
     },
     {
-      "path": "scripts/check-console-public.test.ts",
-      "line": "  const content = JSON.stringify({ privateMarker: 'infodental' })",
-      "reason": "Reviewed privacy detector vocabulary or legal-attribution assertion; no catalog is exported.",
-      "lineNumber": 26
+      "pathDigest": "31aa36cf687fe2d5a590cddf304be798fb4a42fdd3a9f367c277b75fc47bf853",
+      "lineDigest": "86bf7c56d5374a156088ad84ea3e1823a1a0276f3582c476e922cc3e02dc6d45",
+      "lineNumber": 1817,
+      "reason": "Required public npm dependency/import; exact package identity, not an owner deployment."
     },
     {
-      "path": "scripts/check-console-public.test.ts",
-      "line": "    writeFileSync(resolve(directory, 'NOTICE'), notice + '\\nControlDental\\n')",
-      "reason": "Reviewed privacy detector vocabulary or legal-attribution assertion; no catalog is exported.",
-      "lineNumber": 42
+      "pathDigest": "31aa36cf687fe2d5a590cddf304be798fb4a42fdd3a9f367c277b75fc47bf853",
+      "lineDigest": "b9540f355daf10044f1b61506226f04a5228478133772ae53fe0b761c99d1bde",
+      "lineNumber": 1818,
+      "reason": "Required public npm dependency/import; exact package identity, not an owner deployment."
     },
     {
-      "path": "scripts/check-console-public.ts",
-      "line": "  return new Set(['en', 'cs', 'tiketo-en', 'tiketo-cs'].flatMap(locale => {",
-      "reason": "Reviewed privacy detector vocabulary or legal-attribution assertion; no catalog is exported.",
-      "lineNumber": 14
+      "pathDigest": "616e9a931a0c7bea02752f9e4b81381f577c1cdd03da8446ff2678f5303fe79c",
+      "lineDigest": "fbab3836d5fcfea53ee18c1add81f4217d4fcfe974df656b3b83e861467b8ef9",
+      "lineNumber": 42,
+      "reason": "Required public npm dependency/import; exact package identity, not an owner deployment."
     },
     {
-      "path": "scripts/check-sdk-boundary.test.ts",
-      "line": "  \"instance: 'tiketo'\", \"instance: 'infodental'\", \"instance: 'controldental'\",",
-      "reason": "Reviewed privacy detector vocabulary or legal-attribution assertion; no catalog is exported.",
-      "lineNumber": 30
+      "pathDigest": "cf481ab7a4196f726c8779baf3919c68b8a0ddeef3781422c41895f2073c46d6",
+      "lineDigest": "bd1522f82bb30394cc84d1997a40f25e0be5afc9d4c4ade8563ce1e752a19ba5",
+      "lineNumber": 2,
+      "reason": "Required public npm dependency/import; exact package identity, not an owner deployment."
     },
     {
-      "path": "scripts/check-sdk-boundary.test.ts",
-      "line": "  \"instance: 'cleaning'\", \"instance: 'dentist'\", \"instance: 'service-requests'\",",
-      "reason": "Reviewed privacy detector vocabulary or legal-attribution assertion; no catalog is exported.",
-      "lineNumber": 31
+      "pathDigest": "f06b688867f786d268328fc2c79b0eb405fff41bacdee92c32ddbed5fd24a37c",
+      "lineDigest": "04ea09f3521d4207e11f9fca7440fde19fa5f997df7020ec330e927f311a14d6",
+      "lineNumber": 4,
+      "reason": "Required public npm dependency/import; exact package identity, not an owner deployment."
     },
     {
-      "path": "scripts/check-sdk-boundary.test.ts",
-      "line": "  'const cleaningUp = () => {}', 'const lékařský = true',",
-      "reason": "Reviewed privacy detector vocabulary or legal-attribution assertion; no catalog is exported.",
-      "lineNumber": 38
+      "pathDigest": "39782b26cbd42b381d0099b1ae4cefd07dbc175b8be9fa31ba1b6278cd0bd7f4",
+      "lineDigest": "78db930e391cace80bed35929489306556d4f833f038639a1e73bb23a64b097b",
+      "lineNumber": 4,
+      "reason": "Required public npm dependency/import; exact package identity, not an owner deployment."
     },
     {
-      "path": "scripts/check-sdk-boundary.test.ts",
-      "line": "    for (const content of ['// infodental', '// ../../instances/neutral/config.ts', '// ../../examples/neutral/config.ts', '// ../../apps/neutral/config.ts']) {",
-      "reason": "Reviewed privacy detector vocabulary or legal-attribution assertion; no catalog is exported.",
-      "lineNumber": 173
+      "pathDigest": "40c42f9152ca56c2989df2862a4e134176a68703e6d0d7375c13ec9b7874d5eb",
+      "lineDigest": "99b8b38eacb4afb29e1a60121b4e109a5f4f05ba2cd845fe591f9613a3fc6e11",
+      "lineNumber": 1,
+      "reason": "Required public npm dependency/import; exact package identity, not an owner deployment."
     },
     {
-      "path": "scripts/check-terminology.ts",
-      "line": "    if (file === 'packages/ui/src/vendor/tiketo/files.json') return // exact source-blob mapping; reviewed provenance",
-      "reason": "Reviewed privacy detector vocabulary or legal-attribution assertion; no catalog is exported.",
-      "lineNumber": 198
+      "pathDigest": "1e6a4b67734bd533bb3be622311503754d3536f1bfd1c8d1a284c2b3544312f1",
+      "lineDigest": "c9851fe200805bc8abb6fcd29c92a4958386491183a0c7be889870a5f13c579a",
+      "lineNumber": 2,
+      "reason": "Required public npm dependency/import; exact package identity, not an owner deployment."
     },
     {
-      "path": "scripts/smoke-console-package.ts",
-      "line": "assert(readFileSync(join(assets, 'NOTICE'), 'utf8').includes('tiketocz/tiketo-cms'))",
-      "reason": "Reviewed privacy detector vocabulary or legal-attribution assertion; no catalog is exported.",
-      "lineNumber": 97
+      "pathDigest": "43357d219d6a6ea269f21de70be0f0ded945ac2b887c0e1369abdd219c707d80",
+      "lineDigest": "d589c0148250151ba46dd05713847c11bcb6e00cb922309180644f57d915400f",
+      "lineNumber": 2,
+      "reason": "Required public npm dependency/import; exact package identity, not an owner deployment."
     },
     {
-      "path": "scripts/smoke-mcp-template.ts",
-      "line": "    assert(!/workspace:|file:|overrides|tarball|public-console|BOOTSTRAP GAP|knejzlik|controldental|tiketo|infodental|packages\\/core\\/src/i.test(readFileSync(path, 'utf8')), `Forbidden generated content: ${path}`)",
-      "reason": "Reviewed privacy detector vocabulary or legal-attribution assertion; no catalog is exported.",
-      "lineNumber": 89
+      "pathDigest": "4a615c97f42e7fc1cb1ab756e9de5b504d4cbde1ba755ba21c777f51be90c560",
+      "lineDigest": "bc3d623c649857cd625cf90be2bff9bcb22edb1ac975c18bc91a666aa102027b",
+      "lineNumber": 58,
+      "reason": "Required public npm dependency/import; exact package identity, not an owner deployment."
     },
     {
-      "path": "bun.lock",
-      "line": "        \"@jakub.knejzlik/ts-query\": \"0.15.0\"",
-      "reason": "Required public npm dependency/import; exact package identity, not an owner deployment.",
-      "lineNumber": 45
+      "pathDigest": "e8792d82dd9edf537dfe8d4881619204fac0bd2d6551f6180f223d4c35d9daba",
+      "lineDigest": "bd1522f82bb30394cc84d1997a40f25e0be5afc9d4c4ade8563ce1e752a19ba5",
+      "lineNumber": 15,
+      "reason": "Required public npm dependency/import; exact package identity, not an owner deployment."
     },
     {
-      "path": "bun.lock",
-      "line": "    \"@jakub.knejzlik/ts-query\": [",
-      "reason": "Required public npm dependency/import; exact package identity, not an owner deployment.",
-      "lineNumber": 1817
+      "pathDigest": "d94a88aff577afa4cdd0acd4d014f218cab35514baf37ecc32109332efedde8c",
+      "lineDigest": "cebf645fa81e0439bdb59305e983a35533cb6158fd68fa4149114252eae96810",
+      "lineNumber": 2,
+      "reason": "Required public npm dependency/import; exact package identity, not an owner deployment."
     },
     {
-      "path": "bun.lock",
-      "line": "      \"@jakub.knejzlik/ts-query@0.15.0\",",
-      "reason": "Required public npm dependency/import; exact package identity, not an owner deployment.",
-      "lineNumber": 1818
+      "pathDigest": "fc1e0174e2b3ed1fe9e15d882c896e5c652775b9d93ccab4e841db9b23b92f1c",
+      "lineDigest": "cebf645fa81e0439bdb59305e983a35533cb6158fd68fa4149114252eae96810",
+      "lineNumber": 1,
+      "reason": "Required public npm dependency/import; exact package identity, not an owner deployment."
     },
     {
-      "path": "packages/core/package.json",
-      "line": "    \"@jakub.knejzlik/ts-query\": \"0.15.0\"",
-      "reason": "Required public npm dependency/import; exact package identity, not an owner deployment.",
-      "lineNumber": 42
-    },
-    {
-      "path": "packages/core/src/admin-ui.tsx",
-      "line": "import { Q } from '@jakub.knejzlik/ts-query'",
-      "reason": "Required public npm dependency/import; exact package identity, not an owner deployment.",
-      "lineNumber": 2
-    },
-    {
-      "path": "packages/core/src/config.ts",
-      "line": "import { Q, Fn as LibraryFn, Cond, type ISequelizable, type ISerializable } from '@jakub.knejzlik/ts-query'",
-      "reason": "Required public npm dependency/import; exact package identity, not an owner deployment.",
-      "lineNumber": 4
-    },
-    {
-      "path": "packages/core/src/query/compiler.ts",
-      "line": "import { Q, Fn, Cond, Condition, toSQLWithBindings, type ISQLFlavor, type SelectQuery, type ISequelizable } from '@jakub.knejzlik/ts-query'",
-      "reason": "Required public npm dependency/import; exact package identity, not an owner deployment.",
-      "lineNumber": 4
-    },
-    {
-      "path": "packages/core/src/query/display-parts.ts",
-      "line": "import { Condition, Q, type ISequelizable, type ISQLFlavor, type SelectQuery } from '@jakub.knejzlik/ts-query'",
-      "reason": "Required public npm dependency/import; exact package identity, not an owner deployment.",
-      "lineNumber": 1
-    },
-    {
-      "path": "packages/core/src/query/expressions.ts",
-      "line": "import { Q, SelectQuery, type ISequelizable } from '@jakub.knejzlik/ts-query'",
-      "reason": "Required public npm dependency/import; exact package identity, not an owner deployment.",
-      "lineNumber": 2
-    },
-    {
-      "path": "packages/core/src/query/labels.ts",
-      "line": "import { Q, walk, type ISequelizable } from '@jakub.knejzlik/ts-query'",
-      "reason": "Required public npm dependency/import; exact package identity, not an owner deployment.",
-      "lineNumber": 2
-    },
-    {
-      "path": "packages/core/test/infra/packed-cli.test.ts",
-      "line": "    expect(Object.keys(installed.dependencies).sort()).toEqual(['@jakub.knejzlik/ts-query', 'hono', 'zod'])",
-      "reason": "Required public npm dependency/import; exact package identity, not an owner deployment.",
-      "lineNumber": 58
-    },
-    {
-      "path": "packages/core/test/policies-null-regressions.test.ts",
-      "line": "import { Q } from '@jakub.knejzlik/ts-query'",
-      "reason": "Required public npm dependency/import; exact package identity, not an owner deployment.",
-      "lineNumber": 15
-    },
-    {
-      "path": "packages/core/test/w44-review2-regressions.test.ts",
-      "line": "import { toSQLWithBindings } from '@jakub.knejzlik/ts-query'",
-      "reason": "Required public npm dependency/import; exact package identity, not an owner deployment.",
-      "lineNumber": 2
-    },
-    {
-      "path": "packages/core/test/w44-review4-regressions.test.ts",
-      "line": "import { toSQLWithBindings } from '@jakub.knejzlik/ts-query'",
-      "reason": "Required public npm dependency/import; exact package identity, not an owner deployment.",
-      "lineNumber": 1
-    },
-    {
-      "path": "scripts/check-sdk-boundary.test.ts",
-      "line": "  \"doctor: 'Doctor'\", \"doctor: 'Lékař'\", \"label: 'Lékař'\",",
-      "reason": "Public privacy detector definition or planted detector acceptance input; intentional negative coverage.",
-      "lineNumber": 23
-    },
-    {
-      "path": "scripts/check-sdk-boundary.test.ts",
-      "line": "  \"reception: 'Reception'\", \"label: 'Recepce'\",",
-      "reason": "Public privacy detector definition or planted detector acceptance input; intentional negative coverage.",
-      "lineNumber": 24
-    },
-    {
-      "path": "scripts/check-sdk-boundary.test.ts",
-      "line": "  \"technician: 'Technician'\", \"label: 'Technik'\",",
-      "reason": "Public privacy detector definition or planted detector acceptance input; intentional negative coverage.",
-      "lineNumber": 25
-    },
-    {
-      "path": "scripts/check-sdk-boundary.test.ts",
-      "line": "  \"surgery_user: 'User'\", \"saddler: 'Supplier'\", \"lab_choice: 'Choice'\",",
-      "reason": "Public privacy detector definition or planted detector acceptance input; intentional negative coverage.",
-      "lineNumber": 26
-    },
-    {
-      "path": "scripts/check-sdk-boundary.test.ts",
-      "line": "  \"stump: 'Part'\", \"implant: 'Part'\", \"per_doctor: 'Each'\", \"per_surgery: 'Each'\",",
-      "reason": "Public privacy detector definition or planted detector acceptance input; intentional negative coverage.",
-      "lineNumber": 27
-    },
-    {
-      "path": "scripts/check-sdk-boundary.test.ts",
-      "line": "  \"label: 'Ordinace'\", \"label: 'Sedlář'\", \"label: 'Pahýl'\",",
-      "reason": "Public privacy detector definition or planted detector acceptance input; intentional negative coverage.",
-      "lineNumber": 28
-    },
-    {
-      "path": "scripts/check-sdk-boundary.test.ts",
-      "line": "  \"label: 'Implantát'\", \"label: 'Za lékaře'\",",
-      "reason": "Public privacy detector definition or planted detector acceptance input; intentional negative coverage.",
-      "lineNumber": 29
-    },
-    {
-      "path": "scripts/check-sdk-boundary.test.ts",
-      "line": "  \"instance: 'service_requests'\", \"instance: 'servicerequests'\", \"instance: 'surgery'\",",
-      "reason": "Public privacy detector definition or planted detector acceptance input; intentional negative coverage.",
-      "lineNumber": 32
-    },
-    {
-      "path": "scripts/lib/public-vocabulary.ts",
-      "line": "export const forbiddenInstanceTerms = ['tiketo', 'infodental', 'controldental', 'cleaning', 'dentist', 'service-requests', 'service_requests', 'servicerequests', 'surgery', 'saddler', 'implant', 'stump', 'lab_choice', 'ordinace', 'sedlář', 'pahýl', 'implantát', 'za lékaře', 'doctor', 'reception', 'technician', 'surgery_user', 'Lékař', 'Recepce', 'Technik', 'per_doctor', 'per_surgery'] as const",
-      "reason": "Public privacy detector definition or planted detector acceptance input; intentional negative coverage.",
-      "lineNumber": 3
-    },
-    {
-      "path": "scripts/lib/public-vocabulary.ts",
-      "line": "export const consolePrivateTerms = /tiketo|infodental|cleaning|service[-_]requests|loyalty_|tooth_|surgery_|patient_|\\b(?:controldental|knejzlik|orbi|teamvibe)\\b/i",
-      "reason": "Public privacy detector definition or planted detector acceptance input; intentional negative coverage.",
-      "lineNumber": 7
-    },
-    {
-      "path": "scripts/lib/public-vocabulary.ts",
-      "line": "export const privateBrand = /tiketo(?:cz)?/iu",
-      "reason": "Public privacy detector definition or planted detector acceptance input; intentional negative coverage.",
-      "lineNumber": 8
-    },
-    {
-      "path": "scripts/lib/sdk-export-scan.ts",
-      "line": "export const customerTerms = new RegExp([consolePrivateTerms.source, instanceNames.source, privateBrand.source, 'studyplanner'].join('|'), 'iu')",
-      "lineNumber": 40,
-      "reason": "Reviewed public privacy detector vocabulary; no instance configuration or owner data."
-    },
-    {
-      "path": "scripts/sdk-bootstrap-workflows.test.ts",
-      "line": "    for (const name of ['README.md', 'CONTRIBUTING.md', 'SECURITY.md']) expect(readFileSync(join(root, name), 'utf8')).not.toMatch(/knejzlik\\.cz|github\\.com\\/jakubknejzlik\\/workbase(?:[/.#\\s]|$)/)",
-      "lineNumber": 50,
-      "reason": "Reviewed public privacy detector vocabulary; no instance configuration or owner data."
-    },
-    {
-      "path": "packages/mcp/test/fixtures/sdk-upgrade/valid-0.2.9/bun.lock",
-      "line": "    \"@jakub.knejzlik/ts-query\": [\"@jakub.knejzlik/ts-query@0.15.0\", \"\", { \"dependencies\": { \"dayjs\": \"^1.11.19\", \"pako\": \"^2.1.0\" } }, \"sha512-toTYsbYpkm5kng56mLEkujn3cu9EGlcVkOUXWWQ23OnwT6OtUo2mKq22ONqzrll5VfdH4Vag0VQBJBOJDa2F/g==\"],",
+      "pathDigest": "48a01c7d0b11d06459ad36d1c903da722fe9ec0494bf116c97aea955f0c59f03",
+      "lineDigest": "6c4bbba449ca7b5494fb237029253172994634e3328ea1c80834ab422374c59f",
       "lineNumber": 164,
-      "reason": "Public npm dependency @jakub.knejzlik/ts-query in the unmodified lockfile generated by published SDK 0.2.9; dependency attribution, not private owner content."
+      "reason": "Public npm dependency in the unmodified lockfile generated by published SDK 0.2.9; dependency attribution, not private owner content."
     },
     {
-      "path": "packages/mcp/test/fixtures/sdk-upgrade/valid-0.2.9/bun.lock",
-      "line": "    \"@workbasehq/core\": [\"@workbasehq/core@0.2.9\", \"\", { \"dependencies\": { \"@jakub.knejzlik/ts-query\": \"0.15.0\", \"hono\": \"4.13.13\", \"zod\": \"4.6.7\" }, \"peerDependencies\": { \"@pulumi/command\": \"1.2.1\", \"@pulumi/pulumi\": \"^3.215.0\", \"sst\": \"4.17.1\", \"tsx\": \"4.23.15\" }, \"optionalPeers\": [\"@pulumi/command\", \"@pulumi/pulumi\", \"sst\", \"tsx\"], \"bin\": { \"workbase-migrate\": \"src/infra/bin.mjs\" } }, \"sha512-DoFVrBEpT+SYswwUmYgX3kvmjFXDo1khd0IKXjKGiwThq0gWJqYXElB60dvNolnaacdhwe89ScqFailYgkB80g==\"],",
+      "pathDigest": "48a01c7d0b11d06459ad36d1c903da722fe9ec0494bf116c97aea955f0c59f03",
+      "lineDigest": "598ed101268c643174c0166ef12f7a6511c74458a5a64d52a76f1a30fdd3c311",
       "lineNumber": 192,
-      "reason": "Public npm dependency @jakub.knejzlik/ts-query in the unmodified lockfile generated by published SDK 0.2.9; dependency attribution, not private owner content."
+      "reason": "Public npm dependency in the unmodified lockfile generated by published SDK 0.2.9; dependency attribution, not private owner content."
     },
     {
-      "path": "packages/mcp/test/sdk-upgrade-worker.test.ts",
-      "line": "  for (const name of ['zod', 'hono', '@jakub.knejzlik/ts-query']) await copyDependency(name)",
+      "pathDigest": "ef647dfc74b46dd7092f0a52c97d52d8e7b3fbb9bd7d41b41f33c20a3ef52139",
+      "lineDigest": "f5b88636a5e5a9b7d63a335662b5f5f4ad9cc2e939bfb1b0189ddb76fa4072a2",
       "lineNumber": 95,
       "reason": "Public npm dependency used to copy the existing SDK runtime into offline bridge fixtures; dependency attribution, not private owner content."
     }
@@ -912,7 +768,7 @@
       "payload": "%ZZ",
       "reason": "Exact malformed-URI acceptance fixture; no decodable bytes.",
       "line": "    writeFileSync(resolve(directory, 'index.js'), `const assets = [${JSON.stringify(uri)}, \"data:text/plain,%ZZ\"]`)",
-      "lineNumber": 15
+      "lineNumber": 24
     }
   ],
   "hosts": [
@@ -998,14 +854,14 @@
       "line": "assert.equal(config.app({ stage: 'production' }).protect, true)",
       "value": "config.app",
       "reason": "Dotted SST config method in an embedded smoke script; not a network host.",
-      "lineNumber": 244
+      "lineNumber": 242
     },
     {
       "path": "scripts/smoke-mcp-template.ts",
       "line": "assert.equal(config.app({ stage: 'trial' }).removal, 'remove')",
       "value": "config.app",
       "reason": "Dotted SST config method in an embedded smoke script; not a network host.",
-      "lineNumber": 245
+      "lineNumber": 243
     }
   ]
 }

@@ -1,3 +1,4 @@
+import { customerTerms, reviewDigest } from './lib/public-vocabulary'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, mkdirSync, writeFileSync } from 'node:fs'
@@ -47,7 +48,14 @@ describe('exported public bootstrap workflow policy', () => {
   it('contains exactly the two public workflows and SDK root documentation', () => {
     expect(readdirSync(join(root, '.github'))).toEqual(['workflows'])
     expect(readdirSync(join(root, '.github/workflows')).sort()).toEqual(['ci.yml', 'release.yml'])
-    for (const name of ['README.md', 'CONTRIBUTING.md', 'SECURITY.md']) expect(readFileSync(join(root, name), 'utf8')).not.toMatch(/knejzlik\.cz|github\.com\/jakubknejzlik\/workbase(?:[/.#\s]|$)/)
+    for (const name of ['README.md', 'CONTRIBUTING.md', 'SECURITY.md']) {
+      const content = readFileSync(join(root, name), 'utf8')
+      expect(customerTerms.test(content)).toBe(false)
+      // Keep the retired source-repository check without publishing its identity.
+      for (const [link] of content.matchAll(/github\.com\/[\w.-]+\/workbase(?=[/.#\s]|$)/g)) {
+        expect(reviewDigest(link)).not.toBe('a915f740a2e57859628b44665cc483debddb0bd06df5ecddcab473db1b778734')
+      }
+    }
     expect(JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).repository.url).toBe('git+https://github.com/jakubknejzlik/workbase-sdk.git')
   })
   it.each(['ci', 'release'])('%s uses hosted runners, immutable actions and credential-free checks', name => {

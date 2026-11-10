@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { assertGeneratedMcpContent } from './lib/check-generated-mcp'
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { cpSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
@@ -85,10 +86,7 @@ try {
   assert(report.ok && report.files.every((file: { status: string }) => file.status === 'created'))
   for (const path of ['sst.config.ts', 'deploy.env.example', 'scripts/typecheck.ts']) assert(report.files.some((file: { path: string }) => file.path === path), `Missing packaged template: ${path}`)
   const generatedFiles = files(consumer)
-  for (const path of generatedFiles) {
-    assert(!/workspace:|file:|overrides|tarball|public-console|BOOTSTRAP GAP|knejzlik|controldental|tiketo|infodental|packages\/core\/src/i.test(readFileSync(path, 'utf8')), `Forbidden generated content: ${path}`)
-    assert(!/\{\{(?:SDK_VERSION|INSTANCE_ID|INSTANCE_SELECTOR)\}\}/.test(readFileSync(path, 'utf8')), `Unresolved placeholder: ${path}`)
-  }
+  for (const path of generatedFiles) assertGeneratedMcpContent(path, readFileSync(path, 'utf8'))
   const manifestPath = join(consumer, 'package.json')
   const generatedManifest = readFileSync(manifestPath, 'utf8')
   const manifest = json(manifestPath)

@@ -10,9 +10,9 @@ import { sdkWorkspaceDirectories } from './lib/sdk-workspaces'
 import { assertSdkPackageNames, sdkPackageNames } from './sdk-provenance'
 import { consolePublicContent, checkConsolePublic } from './check-console-public'
 
-export { forbiddenInstanceTerms, instanceNames } from './lib/public-vocabulary'
-import { instanceNames } from './lib/public-vocabulary'
-export function checkSdkBoundary(root: string, sourceOnly = false) {
+export { instanceNames } from './lib/public-vocabulary'
+import { instanceNames, type TermMatcher } from './lib/public-vocabulary'
+export function checkSdkBoundary(root: string, sourceOnly = false, vocabulary: TermMatcher = instanceNames) {
   const files = (directory: string): string[] => readdirSync(directory, { withFileTypes: true }).flatMap(entry =>
     entry.isDirectory() ? files(join(directory, entry.name)) : [join(directory, entry.name)])
   const failures: string[] = []
@@ -87,7 +87,7 @@ export function checkSdkBoundary(root: string, sourceOnly = false) {
           const content = readFileSync(path, 'utf8')
           const scanned = name === 'console/assets/NOTICE' ? consolePublicContent('NOTICE', content) : content
           if (/(?:[/\\]|["'`])(?:instances|examples|apps)[/\\]/iu.test(scanned)) failures.push(`private workspace path: ${archive}: ${name}`)
-          if (instanceNames.test(name) || instanceNames.test(scanned)) failures.push(`instance data: ${archive}: ${name}`)
+          if (vocabulary.test(name) || vocabulary.test(scanned)) failures.push(`instance data: ${archive}: ${name}`)
         }
         // Templates are inert guide data with their own dependency manifests.
         for (const path of files(directory).filter(path => path.endsWith('/package.json'))) {

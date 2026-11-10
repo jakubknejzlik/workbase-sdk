@@ -4,8 +4,14 @@ import { mkdtempSync, lstatSync, readdirSync, readFileSync, rmSync } from 'node:
 import { tmpdir } from 'node:os'
 import { isIP } from 'node:net'
 import { join, relative } from 'node:path'
-import { consolePrivateTerms, instanceNames, privateBrand } from './public-vocabulary'
+import { customerTerms, reviewDigest } from './public-vocabulary'
 
+interface TermReview {
+  pathDigest: string
+  lineDigest: string
+  lineNumber: number
+  reason: string
+}
 interface ReviewedLine {
   path: string
   line: string
@@ -13,23 +19,22 @@ interface ReviewedLine {
   reason: string
 }
 export interface ScanPolicy {
-  names: string[]
+  nameDigests: string[]
   hosts?: { value: string; reason: string }[]
   hostLiterals?: (ReviewedLine & { value: string })[]
   emails?: (ReviewedLine & { value: string })[]
   encoded?: (ReviewedLine & { payload: string })[]
-  terms: ReviewedLine[]
+  terms: TermReview[]
   ids: (ReviewedLine & { value: string })[]
 }
-// Policy JSON contains intentional detector/legal vocabulary and synthetic
-// literals. Review its exact serialized lines using only already reviewed values.
+// Policy JSON contains hashed legal reviews and synthetic literals.
+// Review exact serialized lines using only already reviewed values.
 // New workflow/docs content receives no additional allowance.
 export function withPolicyDataReviews(policy: ScanPolicy): ScanPolicy {
   const lines = (JSON.stringify(policy, null, 2) + '\n').split('\n')
   const review = (line: string, index: number) => ({ path: 'scripts/sdk-scan-policy.json', line, lineNumber: index + 1, reason: 'Exact serialization of reviewed scan policy data.' })
   return {
     ...policy,
-    terms: [...policy.terms, ...lines.flatMap((line, index) => customerTerms.test(line) ? [review(line, index)] : [])],
     ids: [...policy.ids, ...lines.flatMap((line, index) => policy.ids.filter(entry => line.includes(entry.value)).map(entry => ({ ...review(line, index), value: entry.value })))],
     emails: [...policy.emails ?? [], ...lines.flatMap((line, index) => (policy.emails ?? []).filter(entry => line.includes(entry.value)).map(entry => ({ ...review(line, index), value: entry.value })))],
     encoded: [...policy.encoded ?? [], ...lines.flatMap((line, index) => (policy.encoded ?? []).filter(entry => line.includes(entry.payload)).map(entry => ({ ...review(line, index), payload: entry.payload })))],
@@ -37,7 +42,7 @@ export function withPolicyDataReviews(policy: ScanPolicy): ScanPolicy {
   }
 }
 // Union of the public console, package boundary and terminology brand detectors.
-export const customerTerms = new RegExp([consolePrivateTerms.source, instanceNames.source, privateBrand.source, 'studyplanner'].join('|'), 'iu')
+export { customerTerms } from './public-vocabulary'
 // Consume each local-part run once, even without @. Retrying after punctuation
 // would scan every suffix of inputs such as a.a.a. or a+a+a+.
 function* emailCandidates(text: string): Generator<string> {
@@ -72,12 +77,18 @@ function* emailCandidates(text: string): Generator<string> {
 }
 const allowedEmail = /^(?:[^@]+@(?:example\.(?:com|org|net|test|invalid)|[^@]+\.example\.(?:com|org|net|test|invalid))|noreply@workbase\.dev|workbase@users\.noreply\.github\.com)$/i
 const hash = /(?<![a-f\d])[a-f\d]{32}(?![a-f\d])/gi
-function matchesLine(review: ReviewedLine, path: string, line: string, index: number): boolean {
-  return review.path === path && review.lineNumber === index + 1 && review.line === line && !!review.reason
+function matchesLine(review: ReviewedLine | TermReview, path: string, line: string, index: number): boolean {
+  return review.lineNumber === index + 1 && !!review.reason && ('lineDigest' in review
+    ? review.pathDigest === reviewDigest(path) && review.lineDigest === reviewDigest(line)
+    : review.path === path && review.line === line)
 }
 function unchangedLinePolicy(policy: ScanPolicy, original: string, transformed: string): ScanPolicy {
   const before = original.split('\n'), after = transformed.split('\n')
-  const unchanged = (review: ReviewedLine) => before[review.lineNumber - 1] === review.line && after[review.lineNumber - 1] === review.line
+  const unchanged = (review: ReviewedLine | TermReview) => {
+    const index = review.lineNumber - 1
+    return before[index] !== undefined && before[index] === after[index] && ('lineDigest' in review
+      ? reviewDigest(before[index]) === review.lineDigest : before[index] === review.line)
+  }
   return {
     ...policy,
     terms: policy.terms.filter(unchanged), ids: policy.ids.filter(unchanged),
@@ -194,10 +205,10 @@ function assertText(path: string, text: string, policy: ScanPolicy, depth = 0, s
   }
 }
 export function assertBytes(path: string, bytes: Buffer, policy: ScanPolicy, depth = 0): void {
-  if (customerTerms.test(path) && !policy.names.includes(path)) throw new Error(`customer/owner filename: ${path}`)
+  if (customerTerms.test(path) && !policy.nameDigests.includes(reviewDigest(path))) throw new Error(`customer/owner filename: ${path}`)
   const text = bytes.toString('utf8')
   if (bytes.includes(0) || !Buffer.from(text).equals(bytes)) throw new Error(`binary/encoded asset requires explicit review: ${path}`)
-  const namePolicy = { ...policy, terms: policy.names.includes(path) ? [{ path, line: path, lineNumber: 1, reason: 'Exact reviewed vendor filename' }] : [] }
+  const namePolicy = { ...policy, terms: policy.nameDigests.includes(reviewDigest(path)) ? [{ pathDigest: reviewDigest(path), lineDigest: reviewDigest(path), lineNumber: 1, reason: 'Exact reviewed vendor filename' }] : [] }
   if (depth === 0) assertText(path, path, namePolicy)
   assertText(path, text, policy, depth)
 }
