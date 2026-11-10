@@ -2,10 +2,13 @@ import '@workbasehq/plugins/local-auth/better-auth-als-preseed'
 import { createApp, scheduledRelay, consumeEvents, type AuditOutboxRow, type RuntimeEnv } from '@workbasehq/core'
 import { workerFetch } from '@workbasehq/core/worker-fetch'
 import { sample } from './model'
+import { withD1Retry } from '../data/d1-retry'
 const apps = new WeakMap<RuntimeEnv, ReturnType<typeof createApp>>()
 const appFor = (env: RuntimeEnv) => {
   let app = apps.get(env)
-  if (!app) { app = createApp(sample, env); apps.set(env, app) }
+  // The HTTP Worker shares local SQLite files with the fixture's platform proxy.
+  // Both peers need the harness-only BUSY retry, including authentication reads.
+  if (!app) { app = createApp(sample, { ...env, DB: withD1Retry(env.DB) }); apps.set(env, app) }
   return app
 }
 const worker = {
