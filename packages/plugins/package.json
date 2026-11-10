@@ -1,6 +1,6 @@
 {
   "name": "@workbasehq/plugins",
-  "version": "0.2.12",
+  "version": "0.2.13",
   "type": "module",
   "exports": {
     "./audit": "./audit/src/index.ts",
@@ -31,7 +31,7 @@
     "better-auth": "1.7.1"
   },
   "peerDependencies": {
-    "@workbasehq/core": "0.2.12"
+    "@workbasehq/core": "0.2.13"
   },
   "devDependencies": {
     "@workbasehq/test-support": "workspace:*",
