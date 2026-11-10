@@ -24,7 +24,7 @@ it.each([
     expect(() => scan(directory)).toThrow(/forbidden public/)
   } finally { rmSync(directory, { recursive: true }) }
 })
-it.each([...syntheticTerms, 'QUARTZBEACON', 'getQuartzbeacon', 'cobalt_gateway', 'cobalt/gateway', 'cobaltGateway', 'secret_value', 'secretValue'])('public bundle scan rejects %s', content => {
+it.each([...syntheticTerms, 'QUARTZBEACON', 'getQuartzbeacon', 'secret_value'])('public bundle scan rejects %s', content => {
   const directory = mkdtempSync(resolve(tmpdir(), 'console-scan-'))
   try { writeFileSync(resolve(directory, 'index.js'), `const label = ${JSON.stringify(content)}`); expect(() => scan(directory)).toThrow('forbidden public content') }
   finally { rmSync(directory, { recursive: true }) }
@@ -110,16 +110,16 @@ it('matches an offline built-in digest without exposing its preimage', () => {
 it('merges optional comma-separated runtime terms and prefixes with offline digests', () => {
   vi.stubEnv('WORKBASE_PRIVATE_TERMS', '  amberbeacon , hidden_, silver blue green, , ')
   const matcher = createTermMatcher({ terms: [digestTerm('quartzbeacon')] })
-  for (const content of ['AMBERBEACON', 'hidden_value', 'hiddenValue', 'silver blue green', 'quartzbeacon']) expect(matcher.test(content), content).toBe(true)
+  for (const content of ['AMBERBEACON', 'hidden_value', 'silver blue green', 'quartzbeacon']) expect(matcher.test(content), content).toBe(true)
   expect(matcher.test('generic field_name')).toBe(false)
   vi.stubEnv('WORKBASE_PRIVATE_TERMS', '')
   expect(createTermMatcher({ terms: [digestTerm('quartzbeacon')] }).test('amberbeacon')).toBe(false)
 })
 
-it('normalizes Unicode and separators while matching embedded terms and prefixes', () => {
+it('normalizes Unicode and keeps literal separators while matching embedded terms and prefixes', () => {
   expect(vocabulary.test('Žlutý signál'.normalize('NFD'))).toBe(true)
-  for (const content of ['secret', 'secretive', 'unrelated field_name']) expect(vocabulary.test(content), content).toBe(false)
-  for (const content of ['secret_', 'secret-value', 'secret/value', 'getSecretValue', 'QUARTZBEACON', 'xquArtzbeaconx', 'xseCret_value']) expect(vocabulary.test(content), content).toBe(true)
+  for (const content of ['secret', 'secretive', 'unrelated field_name', 'secret-value', 'secret/value', 'getSecretValue', 'cobaltGateway', 'cobalt/gateway']) expect(vocabulary.test(content), content).toBe(false)
+  for (const content of ['secret_', 'QUARTZBEACON', 'xquArtzbeaconx', 'xseCret_value']) expect(vocabulary.test(content), content).toBe(true)
 })
 
 it.each([

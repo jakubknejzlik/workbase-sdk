@@ -24,14 +24,14 @@ it('ships labels only for core-declared enum values', () => {
 })
 
 const knownBadSnippets = [
-  "label: 'quartzbeacon'", "label: 'QUARTZBEACON'", "label: 'cobalt_gateway'",
-  "label: 'cobalt/gateway'", "const cobaltGateway = true", "label: 'Žlutý signál'",
+  "label: 'quartzbeacon'", "label: 'QUARTZBEACON'", "label: 'cobalt-gateway'",
+  "const label = 'cobalt-gateway'", "label: 'Žlutý signál'",
   "label: 'quArtzbeacon'", "label: 'cobalt-gateway\u0301'",
 ]
 
 it.each([
   'const fieldId = 1', 'const member_name = "value"', 'const quartzbeaconish = true',
-  'const unrelated = true',
+  'const unrelated = true', 'const cobaltGateway = true', "label: 'cobalt/gateway'", "label: 'cobalt_gateway'", 'const quartzbeaconId = 1', 'const getQuartzbeacon = true',
 ])('does not flag generic code or partial words: %s', source => {
   expect(instanceNames.test(source)).toBe(false)
 })
