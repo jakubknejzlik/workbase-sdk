@@ -5,7 +5,7 @@ import { once } from 'node:events'
 import { cp, mkdtemp, readFile, symlink, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
-import { afterEach, beforeEach, expect, it } from 'vitest'
+import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { CORE_VERSION } from '@workbasehq/core/config'
 import { copyHistoricalInstances } from './fixtures.ts'
 import { captureSdkInputs } from '../src/sdk-target.ts'
@@ -46,7 +46,17 @@ class Peer {
     this.send('notifications/initialized', {})
   }
   async call(name: string, args: unknown) { return (await this.request('tools/call', { name, arguments: args }).result).result.structuredContent }
-  release() { this.child.send('continue') }
+  release(): Promise<void> {
+    if (!this.child.connected) return Promise.resolve()
+    return new Promise((resolve, reject) => {
+      // The child can disconnect after the connected check, especially on SIGTERM.
+      this.child.send('continue', error => {
+        const code = (error as NodeJS.ErrnoException | null)?.code
+        if (error && code !== 'EPIPE' && code !== 'ERR_IPC_CHANNEL_CLOSED') reject(error)
+        else resolve()
+      })
+    })
+  }
 }
 let scratch: string, root: string, entry: string, peers: Peer[]
 beforeEach(async () => {
@@ -72,11 +82,46 @@ afterEach(async () => {
   for (const peer of peers) {
     if (peer.child.exitCode === null && peer.child.signalCode === null) {
       peer.child.kill('SIGTERM')
-      peer.release()
+      await peer.release()
     }
     await peer.closed
   }
   cleanupTempDir(scratch)
+})
+it('releases safely after the MCP child has disconnected and exited', async () => {
+  const peer = new Peer(entry, root); peers.push(peer); await peer.init()
+  peer.child.kill('SIGTERM')
+  await peer.closed
+  expect(peer.child.connected).toBe(false)
+  expect(peer.child.exitCode, peer.stderr).toBe(0)
+  const errors: Error[] = []
+  peer.child.on('error', error => errors.push(error))
+  await peer.release()
+  // A send without a callback emits its error on the next tick.
+  await new Promise<void>(resolve => setImmediate(resolve))
+  expect(errors).toEqual([])
+})
+it('releases safely if IPC disconnects between the connected check and send', async () => {
+  const peer = new Peer(entry, root); peers.push(peer); await peer.init()
+  const send = peer.child.send.bind(peer.child)
+  vi.spyOn(peer.child, 'send').mockImplementationOnce((...args) => {
+    peer.child.kill('SIGTERM')
+    // Hold the actual send until shutdown closes IPC, after release's check.
+    void peer.closed.then(() => send(args[0], args.find((arg): arg is (error: Error | null) => void => typeof arg === 'function')!))
+    return false
+  })
+  await expect(peer.release()).resolves.toBeUndefined()
+})
+it.each(['EPIPE', 'ERR_IPC_CHANNEL_CLOSED', 'EIO'])('handles release callback error %s without hiding other errors', async code => {
+  const peer = new Peer(entry, root); peers.push(peer); await peer.init()
+  const error = Object.assign(new Error('Controlled IPC send failure'), { code })
+  vi.spyOn(peer.child, 'send').mockImplementationOnce((...args) => {
+    const callback = args.find((arg): arg is (error: Error | null) => void => typeof arg === 'function')!
+    queueMicrotask(() => callback(error))
+    return false
+  })
+  if (code === 'EIO') await expect(peer.release()).rejects.toBe(error)
+  else await expect(peer.release()).resolves.toBeUndefined()
 })
 it.each([['request cancellation', 'verify'], ['stdin EOF', 'verify'], ['SIGTERM', 'verify'], ['request cancellation', 'install']] as const)('keeps a second actual MCP process busy across install, verification and group cleanup on %s at %s', async (cancellation, phase) => {
   const owner = new Peer(entry, root); peers.push(owner); await owner.init()
@@ -89,7 +134,7 @@ it.each([['request cancellation', 'verify'], ['stdin EOF', 'verify'], ['SIGTERM'
   expect(await competitor.call('validate', { instance: 'sample' })).toMatchObject({ error: { code: 'instance_busy' } })
   let verify = install
   if (phase === 'verify') {
-    owner.release()
+    await owner.release()
     verify = await owner.event(); expect(verify.event).toBe('verify')
     expect(await competitor.call('validate', { instance: 'sample' })).toMatchObject({ error: { code: 'instance_busy' } })
   }
@@ -102,7 +147,7 @@ it.each([['request cancellation', 'verify'], ['stdin EOF', 'verify'], ['SIGTERM'
   expect(() => process.kill(verify.descendant, 0)).not.toThrow()
   // Cleanup is held by IPC with a living descendant, not a timed sleep.
   expect(await competitor.call('validate', { instance: 'sample' })).toMatchObject({ error: { code: 'instance_busy' } })
-  owner.release()
+  await owner.release()
   expect((await owner.event()).event).toBe('cleaned')
   if (cancellation !== 'request cancellation') { await owner.closed; expect(owner.child.exitCode, owner.stderr).toBe(0) }
   else {
