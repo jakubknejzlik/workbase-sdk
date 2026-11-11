@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+## 0.2.14 — 2026-11-11
+
+- Invite accounts from entity rows: console row access state (no account / invited / signed in), invitation create/resend/cancel gated by the `create` operation plus the invite permission, account link written only on atomic acceptance (409 on duplicates, confirmation for existing members), and access removal that also cancels open invitations. (#176)
 - Minor additive change: add optional `OPS_TOKEN` (`opsToken` in provisioning) for protected operations, with boolean diagnostics. It takes precedence over `INTERNAL_TOKEN`; legacy-only deployments keep their existing behavior and `X-Internal-Token` header.
 
 ## 0.2.13 — 2026-11-10
