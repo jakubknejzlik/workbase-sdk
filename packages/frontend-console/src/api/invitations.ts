@@ -2,6 +2,7 @@ import { api } from './client'
 
 export interface InvitationSummary {
   id: string
+  target?: { entity: string; row: string }
   organization: { id: string; name: string | null }
   inviter: { display_name: string | null }
   role: string; expires_at: string

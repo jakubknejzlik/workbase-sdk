@@ -1,3 +1,5 @@
+import { rowInvitationGuard } from './row-invitations'
+import { loadActorProjection } from '../../../core/src/policies'
 import { z } from 'zod'
 import type { App, AppContext, RuntimeEnv } from '../../../core/src/types'
 import type { InstanceConfig } from '@workbasehq/core/config'
@@ -15,7 +17,7 @@ import { invitationOrigin, inviterDisplay } from './mail'
 import { hasInvitationMailboxProof, invitationSelector, invitationTokenSchema } from './invitation-token'
 
 interface Invitation {
-  entity?: string | null; row?: string | null
+  target_entity: string | null; target_row: string | null
   id: string; organization_id: string; email: string; role: string; token_hash: string; inviter_id: string
   expires_at: string; accepted_at: string | null; accepted_user_id: string | null; revoked_at: string | null
   expired_at: string | null; declined_at: string | null; bound_user_id: string | null
@@ -71,7 +73,7 @@ export function recipientRoutes(app: App, config: InstanceConfig, env: RuntimeEn
     if (!matches(row, actor)) throw new ApiError(403, 'invitation_not_for_this_account')
     assertPending(row)
     if (!config.roles.includes(row.role)) throw new ApiError(403, 'invalid_invitation_role')
-    if (checkMember && await env.DB.prepare('SELECT 1 FROM memberships WHERE organization_id=? AND user_id=?').bind(row.organization_id, actor.user!.id).first()) throw new ApiError(409, 'already_member', undefined, { organization_id: row.organization_id })
+    if (checkMember && !row.target_entity && await env.DB.prepare('SELECT 1 FROM memberships WHERE organization_id=? AND user_id=?').bind(row.organization_id, actor.user!.id).first()) throw new ApiError(409, 'already_member', undefined, { organization_id: row.organization_id })
     // Enforce the existing single-domain-account rule before offering an actionable invitation.
     if (config.account?.entity === 'users') {
       const account = await env.DB.prepare('SELECT organization_id FROM users WHERE id=?').bind(actor.user!.id).first<{ organization_id: string }>()
@@ -82,7 +84,7 @@ export function recipientRoutes(app: App, config: InstanceConfig, env: RuntimeEn
     const organization = await env.DB.prepare('SELECT name FROM organizations WHERE id=?').bind(row.organization_id).first<{ name: string }>()
     return { id: row.id, organization: { id: row.organization_id, name: organization?.name ?? null },
       inviter: { display_name: await inviterDisplay(env.DB, row.inviter_id) }, role: row.role, expires_at: row.expires_at,
-      state: state(row), account_match: actor ? matches(row, actor) : null }
+      ...(row.target_entity ? { target: { entity: row.target_entity, row: row.target_row } } : {}), state: state(row), account_match: actor ? matches(row, actor) : null }
   }
   function navigation(row: Invitation) { return `/invitation?id=${encodeURIComponent(row.id)}` }
   // Return targets are local product destinations and must be accessible now (or after this invitation).
@@ -219,7 +221,14 @@ export function recipientRoutes(app: App, config: InstanceConfig, env: RuntimeEn
     const scope = await accountScope(actor, row.organization_id, row.role, c.get('correlationId'))
     // Acceptance consumes the stored grant; the recipient never grants themselves
     // authority. Recheck the original issuer's live membership in the claim SQL.
-    const grant = action === 'accept' ? issuerGuard(config, { ...scope, actor: { type: 'user', id: row.inviter_id } }, undefined, row.role) : { sql: '1', values: [] }
+    let grant: { sql: string; values: import("../../../core/src/execution/types").SqlValue[] } = action === 'accept' ? issuerGuard(config, { ...scope, actor: { type: 'user', id: row.inviter_id } }, undefined, row.role) : { sql: '1', values: [] }
+    if (action === 'accept' && row.target_entity) {
+      const membership = await env.DB.prepare('SELECT role FROM memberships WHERE organization_id=? AND user_id=?').bind(row.organization_id, row.inviter_id).first<{ role: string }>()
+      if (!membership || row.role !== 'member') throw new ApiError(403, 'permission_denied')
+      const issuerScope = { ...scope, actor: { type: 'user' as const, id: row.inviter_id }, role: membership.role }
+      await loadActorProjection(config, issuerScope, (sql, bindings) => env.DB.prepare(sql).bind(...bindings).first())
+      grant = rowInvitationGuard(config, issuerScope, { entity: row.target_entity, row: row.target_row! })
+    }
     const dev = devLocalIdentityEnabled(env, c.req.raw)
     const provider = await requireVerifiedSession(actor, env.DB)
     try {
@@ -230,18 +239,19 @@ export function recipientRoutes(app: App, config: InstanceConfig, env: RuntimeEn
             AND (bound_user_id IS NULL OR bound_user_id=?)
             AND role=? AND inviter_id=? AND ${grant.sql}
             AND EXISTS (SELECT 1 FROM "user" WHERE id=? AND lower(email)=lower(trim(invitations.email)) AND (?=1 OR "emailVerified"=1))
-            AND NOT EXISTS (SELECT 1 FROM memberships WHERE organization_id=invitations.organization_id AND user_id=?)
+            AND (?=1 OR NOT EXISTS (SELECT 1 FROM memberships WHERE organization_id=invitations.organization_id AND user_id=?))
             AND ${config.account?.entity === 'users' ? 'NOT EXISTS (SELECT 1 FROM users account WHERE account.id=? AND account.organization_id<>invitations.organization_id)' : '1'}
             AND (?=0 OR EXISTS (SELECT 1 FROM identity_profiles p WHERE p.user_id=? AND length(trim(p.first_name))>0 AND length(trim(p.last_name))>0
               AND (NOT EXISTS (SELECT 1 FROM identities WHERE user_id=p.user_id AND provider<>'local') OR (p.synced_at IS NOT NULL
                 AND (SELECT count(*) FROM identities WHERE user_id=p.user_id AND provider<>'local')=1
                 AND EXISTS (SELECT 1 FROM identities WHERE user_id=p.user_id AND provider=p.source_provider AND issuer=p.source_issuer AND subject=p.source_subject)))))`,
           bindings: [...(action === 'accept' ? [now, actor.user!.id] : [now]), actor.user!.id, row.id, row.token_hash, now,
-            actor.user!.id, row.role, row.inviter_id, ...grant.values, actor.user!.id, dev || provider ? 1 : 0, actor.user!.id, ...(config.account?.entity === 'users' ? [actor.user!.id] : []), action === 'accept' ? 1 : 0, actor.user!.id],
-        }, ...(action === 'accept' ? [{
-          sql: 'INSERT INTO memberships (user_id,organization_id,role) SELECT ?,organization_id,role FROM invitations WHERE id=? AND changes()=1',
-          bindings: [actor.user!.id, row.id],
-        }] : [])), ...(action === 'accept' ? invitationAccountLink({ config, scope, now }, row, actor.user!.id) : [])],
+            actor.user!.id, row.role, row.inviter_id, ...grant.values, actor.user!.id, dev || provider ? 1 : 0, row.target_entity ? 1 : 0, actor.user!.id, ...(config.account?.entity === 'users' ? [actor.user!.id] : []), action === 'accept' ? 1 : 0, actor.user!.id],
+        }), ...(action === 'accept' ? [{ name: 'invitation_membership', statements: [{
+          sql: 'INSERT INTO memberships (user_id,organization_id,role) SELECT ?,organization_id,role FROM invitations WHERE id=? AND accepted_user_id=? AND accepted_at=? AND NOT EXISTS (SELECT 1 FROM memberships WHERE organization_id=invitations.organization_id AND user_id=?)',
+          bindings: [actor.user!.id, row.id, actor.user!.id, now, actor.user!.id],
+          expectRows: row.target_entity ? undefined : 1 as const,
+        }] }] : []), ...(action === 'accept' ? invitationAccountLink({ config, scope, now }, { entity: row.target_entity, row: row.target_row }, actor.user!.id) : [])],
         event: { operation: `invitation.${action === 'accept' ? 'accepted' : 'declined'}`, entity: 'invitations', entityId: row.id },
         result: { status: action === 'accept' ? 201 : 200, body: response(false) },
       })

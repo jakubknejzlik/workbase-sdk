@@ -105,6 +105,7 @@ export function AcceptInvitation() {
     <CardDescription className="text-center">{t('p10PreviewDescription')}</CardDescription>
     {wrongAccount && <div role="alert" className="space-y-2 rounded-lg border border-destructive p-4 text-sm text-destructive"><p className="font-medium">{t('p10WrongAccountTitle')}</p><p>{t('p10WrongAccountDescription')}</p>{profile.data && <p className="break-all">{profile.data.email}</p>}<Button variant="outline" disabled={busy} onClick={() => logout.mutate()}>{t('p10SwitchAccount')}</Button></div>}
     <dl className="space-y-2 rounded-lg border p-4 text-sm">{[[t('p10Organization'), organization], [t('p10InvitedBy'), summary.inviter.display_name ?? t('p10InviterUnavailable')], [t('role'), t(`role_${summary.role}`, { defaultValue: summary.role })]].map(([label, value]) => <div key={label} className="flex justify-between gap-4"><dt className="text-muted-foreground">{label}</dt><dd className="min-w-0 break-words text-right font-medium">{value}</dd></div>)}</dl>
+    {summary.target && <p>{t('rowInvitationTarget', { entity: t(`entitySingular_${summary.target.entity}`, { defaultValue: summary.target.entity }), row: summary.target.row })}</p>}
     {summary.account_match === null && <p className="text-sm text-muted-foreground">{t('p10AnonymousDescription')}</p>}
     {(action.error || logout.error) && !wrongAccount && <p role="alert" className="text-sm text-destructive">{t('p10ActionFailed')}</p>}
     {logout.error && wrongAccount && <p role="alert">{t('requestFailed')}</p>}

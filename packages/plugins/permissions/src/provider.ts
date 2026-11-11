@@ -34,7 +34,7 @@ function check(config: InstanceConfig, scope: Scope, command: KernelCommand) {
       if (scope.actor.type !== 'service') throw new ApiError(403, 'permission_denied')
       return
     }
-    if (scope.actor.type !== 'user') throw new ApiError(403, 'user_required')
+    if (scope.actor.type !== 'user' && !(scope.actor.type === 'agent' && ['invitations.create', 'invitations.read', 'invitations.revoke'].includes(action))) throw new ApiError(403, 'user_required')
     if (action !== 'organizations.create' && action !== 'members.leave' && action !== 'invitations.accept') organizationPermission(config, scope, action)
   } else {
     if (!config.commands.includes(command.name)) throw new ApiError(405, 'unsupported_command')

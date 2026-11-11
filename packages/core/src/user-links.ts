@@ -48,24 +48,33 @@ export function linkAccountRow(ctx: LinkContext, entity: string, rowId: string, 
     diagnose: { sql: `SELECT ${unique} AS ok`, bindings: [ctx.scope.organizationId, userId, rowId] }, failureCode: 'account_already_linked',
   }, invitation ? 'cleanup' : 'link')] }
 }
+function revokeAccountInvitations(scope: Scope, userId: string): GuardedStatement {
+  return writer({ sql: `UPDATE invitations SET revoked_at=? WHERE organization_id=? AND accepted_at IS NULL AND revoked_at IS NULL
+    AND lower(trim(email))=(SELECT lower(trim(email)) FROM users WHERE id=? AND organization_id=?)`,
+    bindings: [new Date().toISOString(), scope.organizationId, userId, scope.organizationId] }, 'cleanup')
+}
 /** Config-derived registry, scoped to the removed membership's organization. */
 export function clearAccountLinks(config: InstanceConfig, scope: Scope, userId: string): GuardedStatement[] {
-  return userLinks(config).map(({ entity, field }) => writer({
+  return [revokeAccountInvitations(scope, userId), ...userLinks(config).map(({ entity, field }) => writer({
     sql: `UPDATE ${quote(entity)} SET ${quote(field)}=NULL,updated_at=?,version=version+1 WHERE organization_id=? AND ${quote(field)}=?`,
     bindings: [new Date().toISOString(), scope.organizationId, userId],
-  }, 'cleanup'))
+  }, 'cleanup'))]
 }
 /** Remove access clears ALL links of the account selected by this row. The source
  * is cleared last so every statement reads the same selector inside the batch. */
 export function unlinkAccountRow(ctx: LinkContext, entity: string, rowId: string): AtomicRule {
   const field = linkField(ctx.config, entity)
   const links = userLinks(ctx.config).sort((a, b) => Number(a.entity === entity) - Number(b.entity === entity))
-  return { name: 'account_unlink', statements: links.map(link => writer({
+  return { name: 'account_unlink', statements: [writer({
+    sql: `UPDATE invitations SET revoked_at=? WHERE organization_id=? AND accepted_at IS NULL AND revoked_at IS NULL
+      AND lower(trim(email))=(SELECT lower(trim(email)) FROM users WHERE organization_id=? AND id=(SELECT ${field} FROM ${quote(entity)} WHERE organization_id=? AND id=?))`,
+    bindings: [ctx.now, ctx.scope.organizationId, ctx.scope.organizationId, ctx.scope.organizationId, rowId],
+  }, 'cleanup'), ...links.map(link => writer({
     sql: `UPDATE ${quote(link.entity)} SET ${quote(link.field)}=NULL,updated_at=?,version=version+1 WHERE organization_id=? AND ${quote(link.field)}=(SELECT ${field} FROM ${quote(entity)} WHERE organization_id=? AND id=?)`,
     bindings: [ctx.now, ctx.scope.organizationId, ctx.scope.organizationId, rowId],
-  }, 'cleanup')) }
+  }, 'cleanup'))] }
 }
-/** No invitation columns/payload are introduced here; #176 supplies the target. */
+/** The recipient route supplies only the persisted invitation target. */
 export function invitationAccountLink(ctx: LinkContext, invitation: { entity?: string | null; row?: string | null }, userId: string): AtomicRule[] {
   return invitation.entity && invitation.row ? [linkAccountRow(ctx, invitation.entity, invitation.row, userId, true)] : []
 }

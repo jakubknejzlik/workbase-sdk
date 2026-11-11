@@ -65,10 +65,11 @@ export function GeneratedActions(props: Context & { row?: Record<string, any> })
   const createLabel = resourceCreateLabel(model, entity, i18n.language, t, caps)
   const createCommand = !row ? listCommandActions(model, entity, caps).create : undefined
   return <div className="wb-write-actions">
+    {row && <GeneratedRowInvitation {...props} row={row} />}
     {createCommand && <CreateCommandDialog {...props} command={createCommand} />}
     {(!row ? ['create'] : ['update']).filter(operation => operations.includes(operation) && (operation !== 'update' || caps.entities[entity].readable.includes('version'))).map(operation => <ResourceFormDialog entity={entity} outcome={row ? 'updated' : 'created'} schema={writeSchema(model, entity, caps, row ? 'edit' : 'create')} compact={!!row} key={operation} trigger={operation === 'create' ? createLabel : t('edit', { context: '' })} triggerIcon={row ? 'edit' : undefined} triggerVariant={row ? 'secondary' : undefined} title={t(operation === 'create' ? 'createEntity' : 'editEntity', { entity: t(`entitySingular_${entity}`) })} description={t(operation === 'create' ? 'createEntityDescription' : 'editEntityDescription', { entity: t(`entitySingular_${entity}`) })} cancelLabel={t('cancel')}>{controls => <EntityMutation {...props} row={row} controls={controls} />}</ResourceFormDialog>)}
     {row && operations.includes('delete') && <ResourceDeleteDialog entity={entity} entityType={t(`entity_${entity}`, { defaultValue: entity })} entityName={recordLabel(model, entity, row, caps, i18n.language, t)} targetDescription={t('deleteTarget')} warningMessage={t('deleteDescription')} confirmText={t('delete')} compact trigger={t('delete', { context: '' })} triggerIcon="delete" triggerVariant="destructive" title={t('deleteRecord')} description={t('deleteDescription')} cancelLabel={t('cancel')} destructive>{controls => <DeleteMutation {...props} row={row} close={controls.close} />}</ResourceDeleteDialog>}
-    {row ? commandDefinitions(model, entity, caps).filter(command => !!commandRowField(command, entity)).map(command => {
+    {row ? commandDefinitions(model, entity, caps).filter(command => !!commandRowField(command, entity) && !(model.entities[entity].rowInvitations && command.name === `${entity}/remove_access`)).map(command => {
       const replacement = command.ui?.replacesCrud
       const label = commandLabel(command, i18n.language, t)
       return <ResourceFormDialog entity={command.permission.entity} outcome={command.name.endsWith('/create') ? 'created' : command.name.endsWith('/delete') ? 'deleted' : undefined} schema={commandFormSchema(command.inputSchema)} compact key={command.name}
@@ -82,19 +83,19 @@ export function GeneratedRowActions(props: Context & { row: Record<string, any>;
   const { t, i18n } = useEntityTranslation(props.entity); const { model, caps, entity, row } = props
   if (!visibleEntities(model, caps).includes(entity)) return null
   const operations = caps.entities[entity].operations
-  const commands = commandDefinitions(model, entity, caps).filter(command => !!commandRowField(command, entity))
+  const commands = commandDefinitions(model, entity, caps).filter(command => !!commandRowField(command, entity) && !(model.entities[entity].rowInvitations && command.name === `${entity}/remove_access`))
   const items = [
     ...(operations.includes('update') && caps.entities[entity].readable.includes('version') ? [{ id: 'edit', label: t('edit') }] : []),
     ...commands.map(command => ({ id: command.name, label: commandLabel(command, i18n.language, t) })),
     ...(operations.includes('delete') ? [{ id: 'delete', label: t('delete'), destructive: true }] : []),
   ]
-  return <RowActions label={t('rowActions', { name: recordLabel(model, entity, row, caps, i18n.language, t) })} items={items} disabled={props.disabled}>{(action, close, restoreFocus) => {
+  return <><GeneratedRowInvitation {...props} /><RowActions label={t('rowActions', { name: recordLabel(model, entity, row, caps, i18n.language, t) })} items={items} disabled={props.disabled}>{(action, close, restoreFocus) => {
     const common = { open: true, onOpenChange: (open: boolean) => { if (!open) close() }, onCloseAutoFocus: restoreFocus, cancelLabel: t('cancel') }
     if (action.id === 'edit') return <ResourceFormDialog entity={entity} outcome={row ? 'updated' : 'created'} schema={writeSchema(model, entity, caps, 'edit')} {...common} title={t('editEntity', { entity: t(`entitySingular_${entity}`) })} description={t('editEntityDescription', { entity: t(`entitySingular_${entity}`) })}>{controls => <EntityMutation {...props} row={row} controls={controls} />}</ResourceFormDialog>
     if (action.id === 'delete') return <ResourceDeleteDialog entity={entity} {...common} title={t('deleteRecord')} description={t('deleteDescription')} entityType={t(`entity_${entity}`)} entityName={recordLabel(model, entity, row, caps, i18n.language, t)} targetDescription={t('deleteTarget')} warningMessage={t('deleteDescription')} confirmText={t('delete')}>{controls => <DeleteMutation {...props} row={row} close={controls.close} />}</ResourceDeleteDialog>
     const command = commands.find(command => command.name === action.id)!
     return <ResourceFormDialog entity={command.permission.entity} outcome={command.name.endsWith('/create') ? 'created' : command.name.endsWith('/delete') ? 'deleted' : undefined} schema={commandFormSchema(command.inputSchema)} {...common} title={action.label} description={t('commandDescription', { context: command.name.replace('/', '_') })}>{controls => <CommandMutation {...props} schema={command.inputSchema} name={command.name} values={{ [commandRowField(command, entity)!]: row.id }} controls={controls} />}</ResourceFormDialog>
-  }}</RowActions>
+  }}</RowActions></>
 }
 export function HeaderCommands(props: Context) {
   const { t, i18n } = useEntityTranslation(props.entity)
@@ -115,7 +116,7 @@ export function HeaderCommands(props: Context) {
 }
 function useRefresh() {
   const client = useQueryClient()
-  return () => Promise.all([client.invalidateQueries({ queryKey: createDataTableQueryKey() }), client.invalidateQueries({ queryKey: ['read'] }), client.invalidateQueries({ queryKey: ['picker'] }), client.invalidateQueries({ queryKey: ['lookup'] })])
+  return () => Promise.all([client.invalidateQueries({ queryKey: createDataTableQueryKey() }), client.invalidateQueries({ queryKey: ['read'] }), client.invalidateQueries({ queryKey: ['picker'] }), client.invalidateQueries({ queryKey: ['lookup'] }), client.invalidateQueries({ queryKey: ['row-access'] })])
 }
 function formLabel(model: Model, entity: string, name: string, translate: (key: string, options?: any) => string) {
   const section = model.entities[entity].sections?.find(section => `section:${section.id}` === name)
@@ -271,4 +272,50 @@ export function ContextCreateAction(props: Context & { lockedValues: Record<stri
     : props.caps.entities[props.entity]?.operations.includes('create') && fields.every(field => writableFields(props.model, props.entity, props.caps).includes(field))
   if (!allowed) return null
   return <><Button onClick={() => setOpen(true)}>{resourceCreateLabel(props.model, props.entity, i18n.language, t, props.caps)}</Button><GeneratedCreateDialog {...props} open={open} onOpenChange={setOpen} /></>
+}
+
+interface RowAccess {
+  state: 'invited' | 'signed_in' | 'no_account'
+  can_invite: boolean; can_cancel: boolean
+  invitation?: { id: string; email: string; expires_at: string }
+}
+/** Status is read from the server; the protected field is never submitted by a form. */
+export function GeneratedRowInvitation(props: Context & { row: Record<string, any>; disabled?: boolean }) {
+  const enabled = !props.disabled && !!props.model.entities[props.entity]?.rowInvitations
+  const { t } = useTranslation()
+  const status = useQuery<RowAccess>({ queryKey: ['row-access', props.orgId, props.entity, props.row.id, props.caps],
+    queryFn: () => props.write(`/orgs/${encodeURIComponent(props.orgId)}/row-access/${encodeURIComponent(props.entity)}/${encodeURIComponent(props.row.id)}`, 'GET'), enabled, retry: false })
+  if (!enabled) return null
+  if (status.error) return <span role="alert">{t('requestFailed')}</span>
+  if (!status.data) return <span role="status">{t('loading')}</span>
+  const data = status.data
+  const pending = data.invitation
+  const actions = props.disabled ? [] : data.state === 'no_account' && data.can_invite ? ['invite'] : data.state === 'invited' && pending
+    ? [...(data.can_invite ? ['resend'] : []), ...(data.can_cancel ? ['cancel'] : [])]
+    : data.state === 'signed_in' && props.caps.commands?.includes(`${props.entity}/remove_access`) ? ['remove'] : []
+  return <div className="flex flex-wrap items-center gap-2" aria-label={t('rowAccess')}>
+    <span role="status" className="text-sm">{t(`rowAccess_${data.state}`)}</span>
+    {pending && <span className="text-sm break-all">{pending.email}</span>}
+    {actions.map(action => <ResourceFormDialog key={action} entity={props.entity} compact
+      schema={action === 'invite' ? rowInviteSchema : emptyRowSchema} trigger={t(`rowInvite_${action}`)} triggerLabel={t(`rowInvite_${action}`)}
+      title={t(`rowInvite_${action}`)} description={t(action === 'remove' ? 'rowInviteRemoveDescription' : 'rowInviteDescription')} cancelLabel={t('cancel')}>
+      {controls => <RowInvitationMutation {...props} action={action} invitationId={pending?.id} controls={controls} />}
+    </ResourceFormDialog>)}
+  </div>
+}
+const emptyRowSchema = { type: 'object' as const, properties: {}, additionalProperties: false }
+const rowInviteSchema = { type: 'object' as const, properties: { email: { type: 'string' as const, format: 'email' } }, required: ['email'], additionalProperties: false }
+function RowInvitationMutation(props: Context & { row: Record<string, any>; disabled?: boolean; action: string; invitationId?: string; controls: { close: () => void } }) {
+  const { t } = useTranslation(); const refresh = useRefresh()
+  const mutation = useMutation({ gcTime: 0, retry: false, mutationFn: async (values: Record<string, any>) => {
+    const base = `/orgs/${encodeURIComponent(props.orgId)}/invitations`
+    if (props.action === 'invite') await props.write(base, 'POST', { email: values.email, target: { entity: props.entity, row: props.row.id } })
+    else if (props.action === 'resend') await props.write(`${base}/${encodeURIComponent(props.invitationId!)}/resend`, 'POST', {})
+    else if (props.action === 'cancel') await props.write(`${base}/${encodeURIComponent(props.invitationId!)}`, 'DELETE')
+    else await props.write(`/commands/${props.entity}/remove_access`, 'POST', { rowId: props.row.id })
+    // No accept_url/credential enters the mutation cache.
+  }, onSuccess: async () => { await refresh(); props.controls.close() }, onError: (error: WriteFailure) => { if (error.status === 403) props.onDenied?.() } })
+  return <><WriteError error={mutation.error} /><RegistryForm schema={props.action === 'invite' ? rowInviteSchema : emptyRowSchema}
+    label={() => t('email')} submitLabel={t(`rowInvite_${props.action}`)} invalidLabel={t('invalidField')} pending={mutation.isPending} disabled={props.disabled}
+    onSubmit={values => mutation.mutateAsync(values)} /></>
 }

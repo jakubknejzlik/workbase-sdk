@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import type { Fixture } from './fixture.ts'
-const allTools = ['describe_schema', 'query', 'list_records', 'get_record', 'create_record', 'update_record', 'delete_record', 'run_command', 'start_workflow', 'get_workflow', 'list_workflows', 'read_audit', 'whoami']
+const allTools = ['describe_schema', 'query', 'list_records', 'get_record', 'create_record', 'update_record', 'delete_record', 'run_command', 'start_workflow', 'get_workflow', 'list_workflows', 'read_audit', 'whoami', 'row_access', 'invite_from_row', 'resend_row_invitation', 'cancel_row_invitation']
 const workflowName = 'bookings/reserve'
 const commandArgs = { name: 'jobs/transition', input: { jobId: 'seed-job', to: 'scheduled' } }
 const workflowArgs = { name: workflowName, input: { slotId: 'seed-slot', clientId: 'seed-client' } }

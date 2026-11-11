@@ -20,7 +20,7 @@
   "scripts": {
     "lint": "bun scripts/sdk-lint.ts",
     "typecheck": "tsc --noEmit && tsc --noEmit -p packages/ui && tsc --noEmit -p packages/frontend-console",
-    "test": "vitest run && vitest run --config vitest.infra.config.ts && vitest run --config vitest.tools.config.ts && bun test scripts/sdk-provenance.test.ts scripts/lib/sdk-workspaces.test.ts && bun run --cwd packages/ui test",
+    "test": "vitest run && vitest run --config vitest.infra.config.ts && vitest run --config vitest.tools.config.ts && bun test scripts/sdk-provenance.test.ts scripts/lib/sdk-workspaces.test.ts && bun run --cwd packages/ui test && bun run --cwd packages/frontend-console test",
     "test:mcp": "vitest run --config packages/mcp/vitest.config.ts",
     "check:ci-invariants": "bun scripts/sdk-ci-invariants.ts",
     "console:build": "bun scripts/build-console.ts",

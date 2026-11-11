@@ -127,6 +127,7 @@ export interface ConsoleModelRelation {
   through?: { entity: string; field: string; createCommand: string; deleteCommand: string }
 }
 export interface ConsoleModelEntity extends Omit<ConsoleEntityDisplay, 'fields'> {
+  rowInvitations?: boolean
   fields: Record<string, ConsoleModelField>
   columns: string[]
   listColumns?: string[]

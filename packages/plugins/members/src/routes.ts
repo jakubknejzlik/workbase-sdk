@@ -1,3 +1,7 @@
+import { actorAccountId } from '../../../core/src/policies'
+import { rowTargetSchema, rowLink, rowInvitationGuard } from './row-invitations'
+import { quote } from '../../../core/src/migrations/schema'
+import { writeFilter } from '../../../core/src/execution/policies'
 import { displayIdentity } from '../../identity/src/display-identity'
 import { isOrganizationAdministrator } from '../../permissions/src/roles'
 import { recipientRoutes } from './recipient-routes'
@@ -105,30 +109,60 @@ export function memberRoutes(app: App, config: InstanceConfig, env: RuntimeEnv) 
   app.delete('/orgs/:orgId/members/:userId', scoped, c => mutateMember(c, true))
   app.post('/orgs/:orgId/leave', scoped, c => mutateMember(c, true, true))
 
+  app.get('/orgs/:orgId/row-access/:entity/:rowId', scoped, async c => {
+    c.header('Cache-Control', 'private, no-store')
+    const scope = scopeFor(c, 'invitations.read')
+    const target = rowTargetSchema.parse({ entity: c.req.param('entity'), row: c.req.param('rowId') })
+    const link = rowLink(config, target)
+    kernelFor(config).permission(scope, target.entity, 'read')
+    const filter = writeFilter(kernelFor(config), scope, target.entity)
+    const row = await env.DB.prepare(`SELECT ${quote(link.field)} AS user FROM ${quote(target.entity)} WHERE organization_id=? AND id=? AND ${filter.sql}`)
+      .bind(scope.organizationId, target.row, ...(filter.bindings ?? [])).first<{ user: string | null }>()
+    if (!row) throw new ApiError(404, 'not_found')
+    const invitation = await env.DB.prepare(`SELECT id,email,expires_at FROM invitations WHERE organization_id=? AND target_entity=? AND target_row=?
+      AND accepted_at IS NULL AND revoked_at IS NULL AND declined_at IS NULL AND expired_at IS NULL AND expires_at>?`).bind(scope.organizationId, target.entity, target.row, nowISO()).first()
+    const guard = rowInvitationGuard(config, scope, target, false)
+    let invitePermission = false
+    try { kernelFor(config).resourcePermission(scope, 'invitations.create'); organizationPermission(config, scope, 'invitations.create'); invitePermission = true } catch {}
+    const canInvite = invitePermission && kernelFor(config).can(scope, target.entity, 'create') && !!await env.DB.prepare(`SELECT 1 WHERE ${guard.sql}`).bind(...guard.values).first()
+    let canCancel = false
+    try { kernelFor(config).resourcePermission(scope, 'invitations.revoke'); organizationPermission(config, scope, 'invitations.revoke'); canCancel = true } catch {}
+    return c.json({ can_cancel: canCancel, state: row.user ? 'signed_in' : invitation ? 'invited' : 'no_account',
+      ...(invitation && (canInvite || canCancel) ? { invitation } : {}), can_invite: canInvite })
+  })
   app.post('/orgs/:orgId/invitations', scoped, async c => {
     const scope = scopeFor(c, 'invitations.create')
-    const body = z.strictObject({ email: z.string().trim().pipe(emailSchema), role: roleSchema, profile_prefill: profileNamesSchema.optional() }).parse(await c.req.json())
+    const parsed = z.strictObject({ email: z.string().trim().pipe(emailSchema), role: roleSchema.optional(), target: rowTargetSchema.optional(), profile_prefill: profileNamesSchema.optional() }).parse(await c.req.json())
+    if (parsed.target && parsed.role !== undefined && parsed.role !== 'member') throw new ApiError(400, 'invalid_invitation_role')
+    const body = { ...parsed, role: parsed.target ? 'member' : roleSchema.parse(parsed.role) }
+    if (body.target) {
+      const link = rowLink(config, body.target)
+      kernelFor(config).permission(scope, body.target.entity, 'create')
+      const guard = rowInvitationGuard(config, scope, body.target, false)
+      if (!await env.DB.prepare(`SELECT 1 WHERE ${guard.sql}`).bind(...guard.values).first()) throw new ApiError(404, 'not_found')
+      if (await env.DB.prepare(`SELECT 1 FROM ${quote(link.entity)} WHERE organization_id=? AND id=? AND ${quote(link.field)} IS NOT NULL`).bind(scope.organizationId, body.target.row).first()) throw new ApiError(409, 'account_already_linked')
+    }
     if (!canGrantRole(config, scope.role, body.role)) throw new ApiError(403, 'role_escalation')
     const member = await env.DB.prepare('SELECT m.user_id FROM memberships m JOIN users u ON u.id=m.user_id WHERE m.organization_id=? AND lower(u.email)=?').bind(scope.organizationId, body.email).first()
-    if (member) return c.json({ message: 'already_member' })
+    if (member && !body.target) return c.json({ message: 'already_member' })
     const token = randomToken(); const id = ulid(); const now = nowISO(); const outboxId = ulid()
     const link = new URL('/invitations/accept', invitationOrigin(env, c.req.url))
     link.searchParams.set('token', token)
     const expires = new Date(Date.now() + 7 * 86400000).toISOString()
-    const mail = await invitationMail(env, config, outboxId, scope.organizationId, body.email, link.href, { inviterId: scope.actor.id, role: body.role, expiresAt: expires, kind: 'invite' })
-    const guard = issuerGuard(config, scope, 'invitations.create', body.role)
+    const mail = await invitationMail(env, config, outboxId, scope.organizationId, body.email, link.href, { inviterId: actorAccountId(scope), role: body.role, expiresAt: expires, kind: 'invite' })
+    const guard = body.target ? rowInvitationGuard(config, scope, body.target) : issuerGuard(config, scope, 'invitations.create', body.role)
     try {
       await execute(scope, 'invitations/create', 'invitations.create', {
         rules: [organizationRule('invitation_create', {
-          sql: `INSERT INTO invitations (id,organization_id,email,role,token_hash,expires_at,inviter_id,created_at,delivery_outbox_id,name_first,name_last)
-            SELECT ?,?,?,?,?,?,?,?,?,?,? WHERE ${guard.sql} AND NOT EXISTS (SELECT 1 FROM memberships m JOIN users u ON u.id=m.user_id WHERE m.organization_id=? AND lower(u.email)=?)`,
-          bindings: [id, scope.organizationId, body.email, body.role, await sha256(token), expires, scope.actor.id, now, outboxId, body.profile_prefill?.firstName ?? null, body.profile_prefill?.lastName ?? null, ...guard.values, scope.organizationId, body.email],
+          sql: `INSERT INTO invitations (id,organization_id,email,role,token_hash,expires_at,inviter_id,created_at,delivery_outbox_id,name_first,name_last,target_entity,target_row)
+            SELECT ?,?,?,?,?,?,?,?,?,?,?,?,? WHERE ${guard.sql} AND (?=1 OR NOT EXISTS (SELECT 1 FROM memberships m JOIN users u ON u.id=m.user_id WHERE m.organization_id=? AND lower(u.email)=?))`,
+          bindings: [id, scope.organizationId, body.email, body.role, await sha256(token), expires, actorAccountId(scope), now, outboxId, body.profile_prefill?.firstName ?? null, body.profile_prefill?.lastName ?? null, body.target?.entity ?? null, body.target?.row ?? null, ...guard.values, body.target ? 1 : 0, scope.organizationId, body.email],
         }, mail.intent(expires))],
         event: { operation: 'invitation.created', entity: 'invitations', entityId: id },
         result: { status: 201, body: { id, email: body.email, role: body.role, expires_at: expires } },
       })
     } catch (error) {
-      if (/UNIQUE constraint failed: index 'invitations_one_pending_email'/i.test(String(error))) throw new ApiError(409, 'invitation_pending')
+      if (/UNIQUE constraint failed: (index 'invitations_one_pending_email'|invitations.organization_id, invitations.target_entity, invitations.target_row)/i.test(String(error))) throw new ApiError(409, 'invitation_pending')
       if (error instanceof RuleFailed) throw new ApiError(409, 'invitation_conflict')
       throw error
     }
@@ -138,15 +172,16 @@ export function memberRoutes(app: App, config: InstanceConfig, env: RuntimeEnv) 
   })
   app.post('/orgs/:orgId/invitations/:invitationId/resend', scoped, async c => {
     const scope = scopeFor(c, 'invitations.create'); const id = c.req.param('invitationId')
-    const invitation = await env.DB.prepare('SELECT email,role,token_hash,inviter_id FROM invitations WHERE id=? AND organization_id=? AND accepted_at IS NULL AND revoked_at IS NULL AND declined_at IS NULL AND expired_at IS NULL AND expires_at>?').bind(id, scope.organizationId, nowISO()).first<{email: string; role: string; token_hash: string; inviter_id: string}>()
+    const invitation = await env.DB.prepare('SELECT email,role,token_hash,inviter_id,target_entity,target_row FROM invitations WHERE id=? AND organization_id=? AND accepted_at IS NULL AND revoked_at IS NULL AND declined_at IS NULL AND expired_at IS NULL AND expires_at>?').bind(id, scope.organizationId, nowISO()).first<{email: string; role: string; token_hash: string; inviter_id: string; target_entity: string | null; target_row: string | null}>()
     if (!invitation) throw new ApiError(409, 'invitation_unavailable')
     const member = await env.DB.prepare('SELECT m.user_id FROM memberships m JOIN users u ON u.id=m.user_id WHERE m.organization_id=? AND lower(u.email)=lower(?)').bind(scope.organizationId, invitation.email).first()
-    if (member) return c.json({ message: 'already_member' })
+    if (member && !invitation.target_entity) return c.json({ message: 'already_member' })
     if (!canGrantRole(config, scope.role, invitation.role)) throw new ApiError(403, 'role_escalation')
+    if (invitation.target_entity) kernelFor(config).permission(scope, invitation.target_entity, 'create')
     const token = randomToken(); const outboxId = ulid()
     const link = new URL('/invitations/accept', invitationOrigin(env, c.req.url))
     link.searchParams.set('token', token)
-    const guard = issuerGuard(config, scope, 'invitations.create', invitation.role)
+    const guard = invitation.target_entity ? rowInvitationGuard(config, scope, { entity: invitation.target_entity, row: invitation.target_row! }) : issuerGuard(config, scope, 'invitations.create', invitation.role)
     const expires = new Date(Date.now() + 7 * 86400000).toISOString()
     const mail = await invitationMail(env, config, outboxId, scope.organizationId, invitation.email, link.href, { inviterId: invitation.inviter_id, role: invitation.role, expiresAt: expires, kind: 'reminder' })
     try { await execute(scope, 'invitations/resend', 'invitations.create', {
@@ -162,11 +197,12 @@ export function memberRoutes(app: App, config: InstanceConfig, env: RuntimeEnv) 
   })
   async function managedInvitation(c: AppContext) {
     const scope = scopeFor(c, 'invitations.create')
-    const invitation = await env.DB.prepare(`SELECT id,email,role,token_hash,expires_at,delivery_outbox_id FROM invitations
+    const invitation = await env.DB.prepare(`SELECT id,email,role,token_hash,expires_at,delivery_outbox_id,target_entity,target_row FROM invitations
       WHERE id=? AND organization_id=? AND accepted_at IS NULL AND revoked_at IS NULL AND declined_at IS NULL AND expired_at IS NULL AND expires_at>?`)
-      .bind(c.req.param('invitationId'), scope.organizationId, nowISO()).first<{ id: string; email: string; role: string; token_hash: string; expires_at: string; delivery_outbox_id: string | null }>()
+      .bind(c.req.param('invitationId'), scope.organizationId, nowISO()).first<{ id: string; email: string; role: string; token_hash: string; expires_at: string; delivery_outbox_id: string | null; target_entity: string | null; target_row: string | null }>()
     if (!invitation) throw new ApiError(409, 'invitation_unavailable')
     if (!canGrantRole(config, scope.role, invitation.role)) throw new ApiError(403, 'role_escalation')
+    if (invitation.target_entity) kernelFor(config).permission(scope, invitation.target_entity, 'create')
     return { scope, invitation }
   }
   app.post('/orgs/:orgId/invitations/:invitationId/copy-link', scoped, async c => {
@@ -175,7 +211,7 @@ export function memberRoutes(app: App, config: InstanceConfig, env: RuntimeEnv) 
     const token = randomToken()
     const link = new URL('/invitations/accept', invitationOrigin(env, c.req.url))
     link.searchParams.set('token', token)
-    const guard = issuerGuard(config, scope, 'invitations.create', invitation.role)
+    const guard = invitation.target_entity ? rowInvitationGuard(config, scope, { entity: invitation.target_entity, row: invitation.target_row! }) : issuerGuard(config, scope, 'invitations.create', invitation.role)
     try {
       await execute(scope, 'invitations/copy_link', 'invitations.create', {
         rules: [organizationRule('invitation_rotate', {
@@ -197,7 +233,7 @@ export function memberRoutes(app: App, config: InstanceConfig, env: RuntimeEnv) 
     c.header('Cache-Control', 'no-store')
     const { scope, invitation } = await managedInvitation(c)
     if (!invitation.delivery_outbox_id) throw new ApiError(409, 'invitation_delivery_unavailable')
-    const guard = issuerGuard(config, scope, 'invitations.create', invitation.role)
+    const guard = invitation.target_entity ? rowInvitationGuard(config, scope, { entity: invitation.target_entity, row: invitation.target_row! }) : issuerGuard(config, scope, 'invitations.create', invitation.role)
     await kernelFor(config).mailOutbox.retry(env, config, invitation.delivery_outbox_id, async () =>
       await invitationDeliveryEligible(env.DB, invitation.id, scope.organizationId, invitation.delivery_outbox_id!, invitation.token_hash)
       && !!await env.DB.prepare(`SELECT 1 WHERE ${guard.sql}`).bind(...guard.values).first())

@@ -22,9 +22,13 @@ export const schemas = {
   list_workflows: z.strictObject({ status: z.enum(['pending', 'running', 'waiting_external', 'compensating', 'completed', 'failed', 'compensated', 'needs_attention', 'cancelled']).optional() }),
   read_audit: z.strictObject({ entity: entity.optional(), entityId: id.optional(), limit, cursor }),
   whoami: z.strictObject({}),
+  row_access: z.strictObject({ entity, id }),
+  invite_from_row: z.strictObject({ entity, id, email: z.email() }),
+  resend_row_invitation: z.strictObject({ id }),
+  cancel_row_invitation: z.strictObject({ id }),
 }
 export type ToolName = keyof typeof schemas
-export const mutations = new Set<ToolName>(['create_record', 'update_record', 'delete_record', 'run_command', 'start_workflow'])
+export const mutations = new Set<ToolName>(['create_record', 'update_record', 'delete_record', 'run_command', 'start_workflow', 'invite_from_row', 'resend_row_invitation', 'cancel_row_invitation'])
 export const descriptions: Record<ToolName, string> = {
   describe_schema: 'Describe live entities, fields, commands, workflows, roles and grants from public GET /health and /schema. Permission: public metadata; no record access.',
   query: 'Execute the filter-object document accepted by POST /query; returns its exact data/next_cursor or error/path/cost envelope. Discover typed filters and relation caps with describe_schema. Permission: live entity/field policies and token operations through the HTTP compiler.',
@@ -38,5 +42,9 @@ export const descriptions: Record<ToolName, string> = {
   get_workflow: 'Read a workflow result and step statuses. Permission: organization access and live permissions/allowlist for every definition step.',
   list_workflows: 'List up to 100 visible workflows, optionally filtered by status. Permission: organization access; API filters runs by live step permissions.',
   read_audit: 'Read relayed audit events using keyset pagination; relay may lag. Permission: owner role plus audit.read in token allowlist. Dispatcher/viewer receive owner_required.',
+  row_access: 'Read invitation/link state for one row. Permission: entity.read and invitations.read; row policies apply.',
+  invite_from_row: 'Invite an email to a row as member; only acceptance writes the link. Permission: entity.create and invitations.create, subset grant and row policies.',
+  resend_row_invitation: 'Resend a pending invitation, rotating its credential. Permission: invitations.create and target entity.create for row invitations.',
+  cancel_row_invitation: 'Cancel a pending invitation (row or workspace). Permission: invitations.revoke.',
   whoami: 'Return verified actor, selected organization, live role and token operation allowlist (null means unrestricted). Permission: authenticated organization access.',
 }

@@ -1,3 +1,4 @@
+import { rbacRoles, hasActorProjection } from './policies'
 import type { InstanceConfig, OrganizationAction } from './config'
 import type { Scope } from './types'
 import { ApiError } from './errors'
@@ -32,7 +33,8 @@ export function canGrantRole(config: InstanceConfig, actorRole: string, targetRo
   return [...effectiveRolePrivileges(config, targetRole)].every(privilege => issuer.has(privilege))
 }
 export function organizationPermission(config: InstanceConfig, scope: Scope, action: OrganizationAction) {
-  if (scope.actor.type !== 'user') throw new ApiError(403, 'user_required')
+  if (scope.actor.type !== 'user' && !(scope.actor.type === 'agent' && ['invitations.create', 'invitations.read', 'invitations.revoke'].includes(action))) throw new ApiError(403, 'user_required')
+  if (scope.actor.type === 'agent' && (!hasActorProjection(scope) || rbacRoles(scope).some(role => !config.roles.includes(role) || action !== 'invitations.read' && !config.organizationPermissions[role]?.includes(action)))) throw new ApiError(403, 'permission_denied')
   if ((action === 'members.read' || action === 'invitations.read') && config.roles.includes(scope.role)) return
   if (!Object.hasOwn(config.organizationPermissions, scope.role) || !config.organizationPermissions[scope.role].includes(action)) throw new ApiError(403, 'permission_denied')
 }

@@ -658,7 +658,8 @@ it.each(['link_account', 'remove_access'])('variant C bounds the emitted batch t
       .toEqual(action === 'link_account'
         ? [{ rule: 'account_link_issuer', where: 1, filter: 0 }, { rule: 'account_link', where: 0, filter: 1 }]
         : [{ rule: 'account_link_issuer', where: 1, filter: 0 },
-          { rule: 'account_unlink', where: 0, filter: 0 }, { rule: 'account_unlink', where: 0, filter: 0 }])
+          { rule: 'account_unlink', where: 0, filter: 0 }, { rule: 'account_unlink', where: 0, filter: 0 },
+          { rule: 'account_unlink', where: 0, filter: 0 }])
     const statements = compile(plan)
     expect(statements.every(statement => !statement.sql.includes('policy_issuer'))).toBe(true)
     expect(statements.filter(statement => occurrences(statement.sql)).map(statement => occurrences(statement.sql)))

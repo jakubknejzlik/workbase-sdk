@@ -181,6 +181,7 @@ function constantPredicate(node: Predicate): boolean | undefined {
   return undefined
 }
 /** A token's live role caps its issuer's live membership; it cannot outlive a role loss. */
+export const hasActorProjection = (scope: Scope) => projections.has(scope)
 export function rbacRoles(scope: Scope): string[] {
   const principal = projections.get(scope)?.role
   return principal && principal !== scope.role ? [scope.role, String(principal)] : [scope.role]

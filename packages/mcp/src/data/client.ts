@@ -48,6 +48,15 @@ export function createApi(env: ReturnType<typeof loadEnvironment>, request: type
     const record = `/api/${segment(args?.entity ?? '')}`
     switch (name) {
       case 'describe_schema': return { health: await get('/health'), schema: await get('/schema') }
+      case 'row_access': return get(`/orgs/${segment(env.WORKBASE_ORG_ID)}/row-access/${segment(args.entity)}/${segment(args.id)}`)
+      case 'invite_from_row': {
+        const value = await write(`/orgs/${segment(env.WORKBASE_ORG_ID)}/invitations`, 'POST', { email: args.email, target: { entity: args.entity, row: args.id } })
+        // Mail owns the credential. It must never enter the agent conversation.
+        const { accept_url: _credential, ...result } = value
+        return result
+      }
+      case 'resend_row_invitation': return write(`/orgs/${segment(env.WORKBASE_ORG_ID)}/invitations/${segment(args.id)}/resend`, 'POST', {})
+      case 'cancel_row_invitation': return write(`/orgs/${segment(env.WORKBASE_ORG_ID)}/invitations/${segment(args.id)}`, 'DELETE')
       case 'whoami': return get('/me?scope=organization')
       case 'list_records': return get(record + query({ ...args.filters, limit: args.limit, cursor: args.cursor }))
       case 'get_record': return get(`${record}/${segment(args.id)}`)

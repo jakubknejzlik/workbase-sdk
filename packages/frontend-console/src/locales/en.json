@@ -531,5 +531,16 @@
   "field_name": "Name",
   "field_email": "Email",
   "field_title": "Title",
-  "instanceMembersTitle": "Members"
+  "instanceMembersTitle": "Members",
+  "rowAccess": "Application access",
+  "rowAccess_invited": "Invited",
+  "rowAccess_signed_in": "Signed in",
+  "rowAccess_no_account": "No account",
+  "rowInvite_invite": "Invite to application",
+  "rowInvite_resend": "Resend",
+  "rowInvite_cancel": "Cancel invitation",
+  "rowInvite_remove": "Remove access",
+  "rowInviteDescription": "The account is linked to this row only after acceptance. Cancel to invite another email.",
+  "rowInviteRemoveDescription": "Clears all account links in this application. The account is kept.",
+  "rowInvitationTarget": "Accepting links your account to the {{entity}} row ({{row}})."
 }
