@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Minor additive change: add optional `OPS_TOKEN` (`opsToken` in provisioning) for protected operations, with boolean diagnostics. It takes precedence over `INTERNAL_TOKEN`; legacy-only deployments keep their existing behavior and `X-Internal-Token` header.
+
 ## 0.2.13 — 2026-11-10
 
 - Add policy-only `actorLinkedIn` for protected user links: organization-scoped live account/issuer authority collected across the full related-policy graph and asserted once outside Boolean and relation negation, execution-time token expiry, an indexed EXISTS without target read-policy recursion, and atomic write pre/post-image enforcement. MCP config validation and serialization preserve the predicate. (#172 G1)

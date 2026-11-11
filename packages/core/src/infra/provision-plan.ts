@@ -24,6 +24,8 @@ export interface ProvisionOptions {
   email?: { from: string }
   webhook?: { url: Input<string>; allowedHosts: Input<string>; service?: Input<string>; events?: string }
   internalToken?: Input<string>
+  /** Secret OPS_TOKEN for protected operations; takes precedence over INTERNAL_TOKEN. */
+  opsToken?: Input<string>
   /** Defaults to CLOUDFLARE_DEFAULT_ACCOUNT_ID. Credentials stay in the deploy environment. */
   accountId?: string
   /** Defaults to the SST app root (process.cwd() inside SST run()). */
@@ -112,7 +114,7 @@ export async function createProvisionPlan(options: ProvisionOptions): Promise<Pr
   try {
     if (!(await stat(handler)).isFile() || !(await stat(configPath)).isFile() || !(await stat(migrationsDir)).isDirectory() || (assetsDir && !(await stat(assetsDir)).isDirectory())) throw 0
   } catch { throw new ProvisionDiagnostic('provision_inputs_unreadable') }
-  const secrets = [options.authSecret, options.internalToken, options.webhook?.url, options.webhook?.allowedHosts, options.webhook?.service]
+  const secrets = [options.authSecret, options.internalToken, options.opsToken, options.webhook?.url, options.webhook?.allowedHosts, options.webhook?.service]
     .filter((value): value is string => typeof value === 'string' && value.length > 0)
   const schema = await provisionConfigSchema(root, configPath, migrationsDir, secrets)
   try {
@@ -132,6 +134,7 @@ export async function createProvisionPlan(options: ProvisionOptions): Promise<Pr
         ...(assetsDir ? ['ASSETS'] : []), ...(options.email ? ['EMAIL', 'EMAIL_FROM'] : []),
         ...(options.webhook ? ['WEBHOOK_URL', 'WEBHOOK_ALLOWED_HOSTS', ...(options.webhook.service ? ['WEBHOOK_SERVICE'] : []), ...(options.webhook.events ? ['WEBHOOK_EVENTS'] : [])] : []),
         ...(options.internalToken ? ['INTERNAL_TOKEN'] : []),
+        ...(options.opsToken ? ['OPS_TOKEN'] : []),
       ],
       migration: {
         command: '"$WB_NODE_BINARY" "$WB_MIGRATION_BIN" migrate "$WB_DATABASE_ID" "$WB_MIGRATIONS_DIRECTORY" --config "$WB_CONFIG_MODULE"',

@@ -73,6 +73,7 @@ export async function provision(options: ProvisionOptions): Promise<ProvisionRes
       { name: 'EVENTS_QUEUE', type: 'queue', queueName: events.nodes.queue.queueName },
       { name: 'BETTER_AUTH_SECRET', type: 'secret_text', text: secret(options.authSecret, true) },
       ...(options.internalToken ? [{ name: 'INTERNAL_TOKEN', type: 'secret_text', text: secret(options.internalToken) }] : []),
+      ...(options.opsToken ? [{ name: 'OPS_TOKEN', type: 'secret_text', text: secret(options.opsToken) }] : []),
       ...(options.webhook ? [
         { name: 'WEBHOOK_URL', type: 'secret_text', text: secret(options.webhook.url) },
         { name: 'WEBHOOK_ALLOWED_HOSTS', type: 'secret_text', text: secret(options.webhook.allowedHosts) },

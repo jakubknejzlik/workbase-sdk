@@ -26,8 +26,9 @@ export async function auditActorLabels(db: D1Database, organizationId: string, e
     ? { ...event, actor: { ...event.actor, label: labels.get(event.actor.id) ?? event.actor.id } } : event)
 }
 export function requireInternal(env: RuntimeEnv, token: string | undefined) {
-  if (!env.INTERNAL_TOKEN) throw new ApiError(503, 'internal_token_not_configured')
-  if (!token || !equalHash(env.INTERNAL_TOKEN, token)) throw new ApiError(403, 'internal_token_required')
+  const configured = env.OPS_TOKEN ?? env.INTERNAL_TOKEN
+  if (!configured) throw new ApiError(503, 'internal_token_not_configured')
+  if (!token || !equalHash(configured, token)) throw new ApiError(403, 'internal_token_required')
 }
 export async function outboxStats(db: D1Database, now = Date.now()) {
   const row = await db.prepare('SELECT count(*) AS backlog,min(created_at) AS oldest FROM audit_outbox WHERE delivered_at IS NULL').first<{ backlog: number; oldest: string | null }>()
