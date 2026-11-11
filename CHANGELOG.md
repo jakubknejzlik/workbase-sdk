@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.2.15 — 2026-11-11
+
+- Row invitations follow-up: invitations unaccepted for 7 days show as expired and cannot be accepted (resend issues a fresh token), console filter by access state, copy-link action for actors allowed to invite, member navigation limited to entities their policies allow, and documented complete token operation allowlists with constrained-token tests. (#176)
+
 ## 0.2.14 — 2026-11-11
 
 - Invite accounts from entity rows: console row access state (no account / invited / signed in), invitation create/resend/cancel gated by the `create` operation plus the invite permission, account link written only on atomic acceptance (409 on duplicates, confirmation for existing members), and access removal that also cancels open invitations. (#176)
