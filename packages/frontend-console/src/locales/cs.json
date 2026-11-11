@@ -551,5 +551,16 @@
   "field_name": "Název",
   "field_email": "E-mail",
   "field_title": "Název",
-  "instanceMembersTitle": "Členové"
+  "instanceMembersTitle": "Členové",
+  "rowAccess": "Přístup do aplikace",
+  "rowAccess_invited": "Pozváno",
+  "rowAccess_signed_in": "Přihlášen",
+  "rowAccess_no_account": "Bez účtu",
+  "rowInvite_invite": "Pozvat do aplikace",
+  "rowInvite_resend": "Znovu odeslat",
+  "rowInvite_cancel": "Zrušit pozvánku",
+  "rowInvite_remove": "Odebrat přístup",
+  "rowInviteDescription": "Účet se propojí s tímto řádkem až po přijetí pozvánky. Po zrušení můžete pozvat jiný e-mail.",
+  "rowInviteRemoveDescription": "Odebere všechny vazby účtu v této aplikaci. Účet zůstane zachován.",
+  "rowInvitationTarget": "Přijetím propojíte svůj účet s řádkem {{entity}} ({{row}})."
 }

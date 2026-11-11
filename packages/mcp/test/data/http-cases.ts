@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import type { Fixture } from './fixture.ts'
-const allTools = ['describe_schema', 'query', 'list_records', 'get_record', 'create_record', 'update_record', 'delete_record', 'run_command', 'start_workflow', 'get_workflow', 'list_workflows', 'read_audit', 'whoami']
+const allTools = ['describe_schema', 'query', 'list_records', 'get_record', 'create_record', 'update_record', 'delete_record', 'run_command', 'start_workflow', 'get_workflow', 'list_workflows', 'read_audit', 'whoami', 'row_access', 'invite_from_row', 'resend_row_invitation', 'cancel_row_invitation']
 const workflowName = 'bookings/reserve'
 const commandArgs = { name: 'jobs/transition', input: { jobId: 'seed-job', to: 'scheduled' } }
 const workflowArgs = { name: workflowName, input: { slotId: 'seed-slot', clientId: 'seed-client' } }
@@ -60,8 +60,8 @@ export const cases: [string, (f: Fixture) => Promise<void>][] = [
   }],
   ['D2 read-only hides and refuses every mutating tool', async f => {
     const client = await f.connect(f.dispatcher.token, f.org, true)
-    assert.deepEqual((await client.listTools()).tools.map(t => t.name), allTools.filter(name => !['create_record', 'update_record', 'delete_record', 'run_command', 'start_workflow'].includes(name)))
-    for (const name of ['create_record', 'update_record', 'delete_record', 'run_command', 'start_workflow']) assert.deepEqual(await f.tool(client, name), { ok: false, code: 'read_only', status: 403 })
+    assert.deepEqual((await client.listTools()).tools.map(t => t.name), allTools.filter(name => !['create_record', 'update_record', 'delete_record', 'run_command', 'start_workflow', 'invite_from_row', 'resend_row_invitation', 'cancel_row_invitation'].includes(name)))
+    for (const name of ['create_record', 'update_record', 'delete_record', 'run_command', 'start_workflow', 'invite_from_row', 'resend_row_invitation', 'cancel_row_invitation']) assert.deepEqual(await f.tool(client, name), { ok: false, code: 'read_only', status: 403 })
   }],
   ['D3 schema validation errors are structured and reveal no rejected input', async f => {
     const client = await f.connect()

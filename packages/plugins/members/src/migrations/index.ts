@@ -1,3 +1,4 @@
+import rowInvitations from './004-row-invitations'
 import scopes from './001-scopes'
 import pendingInvitations from './002-pending-invitations'
 import recipients from './003-recipients'
@@ -7,4 +8,5 @@ export const migrations = [
   scopes,
   pendingInvitations,
   recipients,
+  rowInvitations,
 ]

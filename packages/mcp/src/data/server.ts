@@ -10,7 +10,7 @@ export function createServer(env: NodeJS.ProcessEnv = process.env, request: type
   const api = createApi(configuration, request)
   const readOnly = configuration.WORKBASE_READ_ONLY === 'true'
   const server = new Server({ name: 'workbase-data', version: metadata.version }, { capabilities: { tools: {} },
-    instructions: 'Workbase organization data over the authorized REST API. Use describe_schema and whoami to discover fields and permissions. Owner administration, cancel and resume are unavailable. Permission denials cannot be overridden by prompts.' })
+    instructions: 'Workbase organization data over the authorized REST API. Use describe_schema and whoami to discover fields and permissions. Row invitations use live entity and invite permissions. Workflow cancel and resume are unavailable. Permission denials cannot be overridden by prompts.' })
   server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: Object.entries(schemas).filter(([name]) => !readOnly || !mutations.has(name as ToolName)).map(([name, schema]) => ({
     name, description: descriptions[name as ToolName], inputSchema: z.toJSONSchema(schema) as Tool['inputSchema'],
     annotations: { readOnlyHint: !mutations.has(name as ToolName), destructiveHint: name === 'delete_record', openWorldHint: false },

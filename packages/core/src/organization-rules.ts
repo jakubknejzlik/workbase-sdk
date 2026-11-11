@@ -1,3 +1,4 @@
+import { rbacRoles } from './policies'
 import type { InstanceConfig, OrganizationAction } from './config'
 import { canGrantRole } from './execution/permissions'
 import type { Scope } from './identity'
@@ -8,6 +9,12 @@ export function issuerGuard(config: InstanceConfig, scope: Scope, action: Organi
   const roles = config.roles.filter(role => action === undefined || config.organizationPermissions[role]?.includes(action))
     .filter(role => grantRole === undefined || canGrantRole(config, role, grantRole))
     .filter(roleFilter)
+  if (scope.actor.type === 'agent') {
+    return { sql: `EXISTS (SELECT 1 FROM access_tokens credential JOIN memberships issuer ON issuer.organization_id=credential.organization_id AND issuer.user_id=credential.issuer_id
+      WHERE credential.id=? AND credential.organization_id=? AND credential.role=? AND credential.revoked_at IS NULL AND credential.expires_at>?
+        AND issuer.role=? AND issuer.role IN (${roles.map(() => '?').join(',') || 'NULL'}))`,
+      values: [scope.actor.tokenId ?? scope.actor.id, scope.organizationId, scope.role, new Date().toISOString(), rbacRoles(scope).at(-1)!, ...roles] }
+  }
   return { sql: `EXISTS (SELECT 1 FROM memberships issuer WHERE issuer.organization_id=? AND issuer.user_id=? AND issuer.role IN (${roles.map(() => '?').join(',') || 'NULL'}))`, values: [scope.organizationId, scope.actor.id, ...roles] }
 }
 /** Each gate raises an SQL assertion before any later membership, email or audit write. */

@@ -118,3 +118,24 @@ test('SR-34 describe_schema preserves both pure join endpoint and mutation decla
     teams: { relations: { people: { through: { entity: 'people', field: 'person_id' } } } },
   } } } } })
 })
+
+test('176 row invitation tools preserve row target, forward permissions and never return acceptance credentials', async () => {
+  const request = vi.fn<typeof fetch>().mockResolvedValue(Response.json({ id: 'invite', role: 'member', accept_url: 'https://example.test/secret' }))
+  const { call } = await connect(request)
+  expect((await call('invite_from_row', { entity: 'people', id: 'person', email: 'recipient@example.test' })).structuredContent).toEqual({ ok: true, data: { id: 'invite', role: 'member' } })
+  expect(request.mock.calls[0][0]).toBe('http://127.0.0.1:8997/orgs/test-org/invitations')
+  expect(JSON.parse(request.mock.calls[0][1]!.body as string)).toEqual({ email: 'recipient@example.test', target: { entity: 'people', row: 'person' } })
+  await call('row_access', { entity: 'people', id: 'person' })
+  await call('resend_row_invitation', { id: 'invite' })
+  await call('cancel_row_invitation', { id: 'invite' })
+  expect(request.mock.calls.slice(1).map(([url, init]) => [url, init?.method])).toEqual([
+    ['http://127.0.0.1:8997/orgs/test-org/row-access/people/person', 'GET'],
+    ['http://127.0.0.1:8997/orgs/test-org/invitations/invite/resend', 'POST'],
+    ['http://127.0.0.1:8997/orgs/test-org/invitations/invite', 'DELETE'],
+  ])
+  const readonly = await connect(request, { WORKBASE_READ_ONLY: 'true' })
+  for (const name of ['invite_from_row', 'resend_row_invitation', 'cancel_row_invitation']) {
+    expect((await readonly.call(name, {})).structuredContent).toEqual({ ok: false, code: 'read_only', status: 403 })
+    expect((await readonly.client.listTools()).tools.some(tool => tool.name === name)).toBe(false)
+  }
+})

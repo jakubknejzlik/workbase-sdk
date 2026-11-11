@@ -1,3 +1,4 @@
+import { canGrantRole, organizationPermission } from './organization-permissions'
 import { z } from 'zod'
 import { bodyValidator } from './config'
 import { capabilities } from './capabilities'
@@ -35,10 +36,15 @@ export function consoleModel(kernel: KernelRegistry, scope: Scope): ConsoleModel
       if (Array.isArray(schema.required)) schema.required = schema.required.filter(field => Object.hasOwn(schema.properties as object, field))
       return consoleInputSchema(schema, node => authority.schema(node) && literalGrants.get(node) !== false)
     }
+    let rowInvitations = false
+    if (kernel.providers.has('members') && authority.read(name, 'id') && Object.values(entity.fields).some(field => field.userLink)) {
+      try { kernel.permission(scope, name, 'create'); kernel.resourcePermission(scope, 'invitations.create'); organizationPermission(config, scope, 'invitations.create'); rowInvitations = canGrantRole(config, scope.role, 'member') } catch {}
+    }
     const display = authority.canRead(name) && config.ui?.entities[name] ? presentation.display(name, config.ui.entities[name]) : undefined
     const displayField = entity.displayField && authority.read(name, entity.displayField) ? entity.displayField : undefined
     return [name, {
       ...display,
+      ...(rowInvitations ? { rowInvitations: true } : {}),
       fields: Object.fromEntries(fieldsFor(config, name).filter(field => authority.read(name, field)).map(field => {
         const definition = entity.fields[field]
         const type = fieldType(config, name, field)
