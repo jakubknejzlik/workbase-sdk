@@ -134,6 +134,13 @@ it('retains config error messages while redacting environment and provision secr
   }
 })
 
+it('redacts opsToken from config-load diagnostics', async () => {
+  const opsToken = 'synthetic-ops-secret'
+  await writeFile(join(root, 'throwing.ts'), `throw new Error('config failure; ${opsToken}')\n`)
+  await expect(createProvisionPlan({ ...options, configPath: 'throwing.ts', opsToken }))
+    .rejects.toThrow('provision_config_load_failed: config failure; [redacted]')
+})
+
 it('reports missing config dependencies with the underlying module error', async () => {
   await writeFile(join(root, 'missing.ts'), "import './does-not-exist.ts'\nexport default {}\n")
   await expect(createProvisionPlan({ ...options, configPath: 'missing.ts' })).rejects.toThrow(/provision_config_load_failed: .*Cannot find module.*does-not-exist/)
@@ -264,6 +271,26 @@ it('migration triggers change for SQL, config and application verification finge
   mockSst()
   await provision({ ...options, migrationTriggers: ['application-verifier-v2'] })
   expect(records.find(record => record.type === 'migration')!.args.triggers).toContain('application-verifier-v2')
+})
+
+it.each([false, true])('binds opsToken as secret_text with legacy binding=%s and deterministic dry-plan order', async legacy => {
+  mockSst()
+  const tokenOptions = { ...options, opsToken: secret('synthetic-ops-token'),
+    ...(legacy ? { internalToken: secret('synthetic-internal-token') } : {}) }
+  const plan = await createProvisionPlan(tokenOptions)
+  expect(plan.bindingNames).toEqual(['DB', 'AUDIT_KV', 'EVENTS_QUEUE', 'BETTER_AUTH_SECRET', 'AUTH_BASE_URL', 'STAGE', 'SCHEMA_EXPECTED',
+    ...(legacy ? ['INTERNAL_TOKEN'] : []), 'OPS_TOKEN'])
+  expect(JSON.stringify(plan)).not.toContain('synthetic-ops-token')
+  expect(await createProvisionPlan(tokenOptions)).toEqual(plan)
+  await provision(tokenOptions)
+  const worker = records.find(record => record.type === 'worker')!
+  const bindings = await worker.child.args.bindings.promise()
+  expect(bindings.filter((binding: any) => ['INTERNAL_TOKEN', 'OPS_TOKEN'].includes(binding.name))).toEqual([
+    ...(legacy ? [{ name: 'INTERNAL_TOKEN', type: 'secret_text', text: 'synthetic-internal-token' }] : []),
+    { name: 'OPS_TOKEN', type: 'secret_text', text: 'synthetic-ops-token' },
+  ])
+  expect(await isSecret(worker.child.args.bindings)).toBe(true)
+  expect(bindings.map((binding: any) => binding.name).sort()).toEqual([...plan.bindingNames].sort())
 })
 
 it('requires SST only when provisioning, while dry planning works without SST or credentials', async () => {

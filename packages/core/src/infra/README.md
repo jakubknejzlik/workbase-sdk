@@ -73,9 +73,18 @@ The API does not discover the account subdomain or generate an auth secret.
 | `email?: { from }` | Native `EMAIL` send binding restricted to this sender, plus `EMAIL_FROM` |
 | `webhook?: { url, allowedHosts, service?, events? }` | Explicit URL/host allowlist, optional existing Worker service name and event filter |
 | `internalToken?` | Optional secret `INTERNAL_TOKEN` for protected operations |
+| `opsToken?` | Optional secret `OPS_TOKEN` for protected operations; takes precedence over `INTERNAL_TOKEN` |
 | `accountId?`, `projectRoot?` | Override account environment value or path root; SST normally runs in the app root |
 | `protect?` | Protect/retain primary resources; defaults to true for `production` |
 | `migrationTriggers?` | Extra fingerprints for imported application/plugin verification code |
+
+Protected `/internal/*` endpoints keep the `X-Internal-Token` header. Set
+`opsToken` (or the runtime `OPS_TOKEN` binding) to use a dedicated operations
+secret. Once `OPS_TOKEN` is set, only its value is accepted; the legacy
+`INTERNAL_TOKEN` value is rejected with 403. Without `OPS_TOKEN`, `INTERNAL_TOKEN`
+continues to work unchanged. With neither configured, these endpoints return 503.
+Both provisioning options may be supplied during transition; `/internal/ops`
+reports only boolean presence flags for these bindings.
 
 Config modules are trusted application code. Relative paths resolve from
 `projectRoot`, defaulting to `process.cwd()` (the app root inside SST). Secrets

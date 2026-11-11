@@ -29,6 +29,6 @@ export async function opsStatus(env: RuntimeEnv, config: InstanceConfig) {
   } catch { /* Presence alone cannot prove the binding target is healthy. */ }
   return { queries: queryMetrics(env.DB), ...(await relayMetrics(env)), lastRun: await lastRelayRun(env), webhookServiceHealthy, schema: await schemaStatus(env, config),
     tables: { DB: await tables(env.DB) },
-    bindings: { EVENTS_QUEUE: typeof env.EVENTS_QUEUE?.sendBatch === 'function', DB: !!env.DB, AUDIT_KV: !!env.AUDIT_KV, WEBHOOK_SERVICE: typeof env.WEBHOOK_SERVICE?.fetch === 'function', INTERNAL_TOKEN: !!env.INTERNAL_TOKEN, WEBHOOK_URL: !!env.WEBHOOK_URL, WEBHOOK_ALLOWED_HOSTS: !!env.WEBHOOK_ALLOWED_HOSTS, BETTER_AUTH_SECRET: !!env.BETTER_AUTH_SECRET, AUTH_BASE_URL: !!env.AUTH_BASE_URL },
+    bindings: { EVENTS_QUEUE: typeof env.EVENTS_QUEUE?.sendBatch === 'function', DB: !!env.DB, AUDIT_KV: !!env.AUDIT_KV, WEBHOOK_SERVICE: typeof env.WEBHOOK_SERVICE?.fetch === 'function', INTERNAL_TOKEN: !!env.INTERNAL_TOKEN, OPS_TOKEN: !!env.OPS_TOKEN, WEBHOOK_URL: !!env.WEBHOOK_URL, WEBHOOK_ALLOWED_HOSTS: !!env.WEBHOOK_ALLOWED_HOSTS, BETTER_AUTH_SECRET: !!env.BETTER_AUTH_SECRET, AUTH_BASE_URL: !!env.AUTH_BASE_URL },
   }
 }
