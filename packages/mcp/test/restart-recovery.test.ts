@@ -66,10 +66,10 @@ it('recovers before config import, then revokes old SDK evidence on cancelled re
   await fs.writeFile(join(root, 'bun.lock'), 'fixture lock')
   const store = await restart(), latest = await store.load('sample'), inputs = await captureSdkInputs(root)
   const proposalId = crypto.randomUUID()
-  const proof = await targetProof({ instanceRoot: root, checkoutRoot: resolve('.'), inputs, targetVersion: '0.2.13',
+  const proof = await targetProof({ instanceRoot: root, checkoutRoot: resolve('.'), inputs, targetVersion: '0.2.14',
     base: { instanceId: 'sample', baseRevision: latest.config.revision, baseFingerprint: latest.fingerprint, baseDependencyDigest: latest.dependencyDigest! },
     readBase: async () => ({ baseFingerprint: latest.fingerprint, baseDependencyDigest: latest.dependencyDigest! }) })
-  const proposal = { kind: 'sdk_upgrade', proposalId, instance: 'sample', baseRevision: latest.config.revision, targetVersion: '0.2.13',
+  const proposal = { kind: 'sdk_upgrade', proposalId, instance: 'sample', baseRevision: latest.config.revision, targetVersion: '0.2.14',
     baseFingerprint: latest.fingerprint, baseDependencyDigest: latest.dependencyDigest, status: 'verified', createdAt: new Date().toISOString(),
     evidence: { ...proof, state: 'verified', proposalId, baseInputHashes: Object.fromEntries(Object.entries(inputs).map(([path, bytes]) => [path, digestBytes(bytes)])),
       artifacts: Object.fromEntries(Object.entries(proof.artifacts).map(([path, file]) => [path, { data: file.bytes.toString('base64'), sha256: file.sha256 }])) } }

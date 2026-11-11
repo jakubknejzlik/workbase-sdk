@@ -18,7 +18,7 @@ export { Q, Cond }
 /** SQLite date formatting with column operands; values use the library wire encoding. */
 export const Fn = { ...LibraryFn, strftime: (format: string, date: string) => Q.expr(`FN(${JSON.stringify(['STRFTIME', Q.value(format).serialize(), Q.expr(date).serialize()])})`) }
 
-export const CORE_VERSION = '0.2.13'
+export const CORE_VERSION = '0.2.14'
 const navigationIconSchema = z.enum(['LayoutDashboard', 'Users', 'MapPin', 'Coins', 'Wallet', 'ArrowLeftRight', 'Settings', 'Building2', 'Activity', 'Workflow', 'Database', 'Folder'])
 const identifier = z.string().regex(/^[a-z][a-z0-9_]*$/)
 export const serializedExpressionSchema = z.union([z.string().min(1).max(32000), z.record(z.string(), z.unknown()).transform(value => JSON.stringify(value))])
