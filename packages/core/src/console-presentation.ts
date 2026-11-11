@@ -125,7 +125,7 @@ export function consolePresentation(kernel: KernelRegistry, scope: Scope, author
     })
     return {
       entities, pages,
-      navigation: source.navigation.filter(item => !!item.page !== !!item.entity && permits(item.grant) && (!item.roles || item.roles.includes(scope.role)) && (!item.page || pages.some(page => page.id === item.page))
+      navigation: source.navigation.filter(item => (scope.role !== 'member' || item.placement === 'sidebar' && !!item.entity) && !!item.page !== !!item.entity && permits(item.grant) && (!item.roles || item.roles.includes(scope.role)) && (!item.page || pages.some(page => page.id === item.page))
         && (!item.entity || canRead(item.entity) && (!item.view || entities[item.entity]?.list?.views?.some(view => view.id === item.view)))).map(item => ({ ...pick(item, ['id', 'placement', 'label', 'icon', 'order', 'roles', 'page', 'entity', 'view']),
           ...(item.grant ? { grant: safeGrant(item.grant) } : {}),
           ...(item.group ? { group: pick(item.group, ['id', 'label', 'order', 'icon']) } : {}) })),

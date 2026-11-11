@@ -1,3 +1,5 @@
+import { organizationPermission } from '../execution/permissions'
+import { userLinks } from '../user-links'
 import { z } from 'zod'
 import { baseFields, type Field, type InstanceConfig } from '../config'
 import type { KernelRegistry } from '../kernel/registry'
@@ -12,7 +14,8 @@ export type Scalar = string | number | boolean | null
 export interface Filter { [key: string]: unknown }
 export interface Order { field: string; dir: 'asc' | 'desc'; label?: boolean }
 export interface Selection { labels?: string[]; select?: string[]; where?: Filter; orderBy?: Order[]; limit?: number; include?: Record<string, Selection> }
-export interface QueryInput extends Selection { contextList?: { entity: string; list: string; id: string }; search?: { text: string; fields: string[]; locale?: 'en' | 'cs' }; labelWhere?: Record<string, { contains: string; locale?: 'en' | 'cs' }>; entity: string; limit: number; cursor?: string }
+export type RowAccessState = 'no_account' | 'invited' | 'expired' | 'signed_in'
+export interface QueryInput extends Selection { rowAccess?: RowAccessState; contextList?: { entity: string; list: string; id: string }; search?: { text: string; fields: string[]; locale?: 'en' | 'cs' }; labelWhere?: Record<string, { contains: string; locale?: 'en' | 'cs' }>; entity: string; limit: number; cursor?: string }
 export const fieldsFor = (config: InstanceConfig, entity: string) => [...baseFields, ...Object.keys(config.entities[entity].fields)]
 export function fieldType(config: InstanceConfig, entity: string, field: string): Field['type'] {
   return config.entities[entity].fields[field]?.type ?? (field === 'version' ? 'int' : ['created_at', 'updated_at'].includes(field) ? 'datetime' : 'string')
@@ -83,6 +86,7 @@ export function querySchema(config: InstanceConfig, entity: string, rest = false
       }
       shape.search = z.strictObject({ text: z.string().min(1).max(2000), fields: z.array(z.enum([...new Set([...names, ...labelNames])] as [string, ...string[]])).min(1).max(names.length + labelNames.length).refine(v => new Set(v).size === v.length), locale: z.enum(['en', 'cs']).optional() }).optional()
       shape.contextList = z.strictObject({ entity: z.string().regex(/^[a-z][a-z0-9_]*$/).max(100), list: z.string().regex(/^[a-z][a-z0-9_]*$/).max(100), id: z.string().min(1).max(2000) }).optional()
+      shape.rowAccess = z.enum(['no_account', 'invited', 'expired', 'signed_in']).optional()
       shape.entity = z.literal(name); shape.cursor = z.string().min(1).max(L.cursorBytes).optional()
     }
     return z.strictObject(shape)
@@ -129,12 +133,18 @@ export function validateQuery(kernel: KernelRegistry, scope: Scope, input: unkno
   if (!parsed.success) {
     const issue = parsed.error.issues[0]
     // Unknown client keys/values never become error text or paths.
-    const known = new Set(['entity', 'select', 'where', 'search', 'text', 'fields', 'locale', 'labelWhere', 'labels', 'label', 'orderBy', 'field', 'dir', 'limit', 'cursor', 'include', 'and', 'or', 'not', 'some', 'none',
+    const known = new Set(['entity', 'rowAccess', 'select', 'where', 'search', 'text', 'fields', 'locale', 'labelWhere', 'labels', 'label', 'orderBy', 'field', 'dir', 'limit', 'cursor', 'include', 'and', 'or', 'not', 'some', 'none',
       ...Object.values(kernel.config.entities).flatMap(e => [...Object.keys(e.fields), ...Object.keys(e.relations)]), ...baseFields,
       ...operatorsFor('string')])
     invalid(issue.path.map(p => typeof p === 'number' ? p : known.has(String(p)) ? String(p) : '?'))
   }
   const query = parsed.data as QueryInput
+  if (query.rowAccess) {
+    if (!kernel.providers.has('members') || !userLinks(kernel.config).some(link => link.entity === entity)) invalid(['rowAccess'])
+    kernel.resourcePermission(scope, 'invitations.read')
+    organizationPermission(kernel.config, scope, 'invitations.read')
+    kernel.readPermission(scope, entity)
+  }
   if (query.contextList) {
     const context = query.contextList
     // Resolve from trusted configuration using the same plugin-over-model precedence as the registry.
@@ -149,7 +159,7 @@ export function validateQuery(kernel: KernelRegistry, scope: Scope, input: unkno
     // This predicate goes through normal field masks, policy-scoped sources and cursor hashing.
     delete query.contextList
   }
-  const cost: QueryCost = { depth: 0, relations: 0, fieldRows: 0, exists: 0, nodes: 0 }
+  const cost: QueryCost = { depth: 0, relations: 0, fieldRows: 0, exists: query.rowAccess ? 2 : 0, nodes: 0 }
   // Every compiled client table source masks each readable FK once. Visibility
   // probes only test the target's scoped predicate, so do not recursively mask it.
   function foreignKeyCost(name: string) {

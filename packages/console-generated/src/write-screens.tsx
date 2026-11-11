@@ -1,3 +1,4 @@
+import { Badge } from '@workbasehq/ui/components/ui/badge'
 import { editableManyRelations, memberships, syncMemberships } from './many-to-many'
 import { ManyRelationField } from './many-relation-field'
 import type { ComponentProps, ReactNode } from 'react'
@@ -65,7 +66,6 @@ export function GeneratedActions(props: Context & { row?: Record<string, any> })
   const createLabel = resourceCreateLabel(model, entity, i18n.language, t, caps)
   const createCommand = !row ? listCommandActions(model, entity, caps).create : undefined
   return <div className="wb-write-actions">
-    {row && <GeneratedRowInvitation {...props} row={row} />}
     {createCommand && <CreateCommandDialog {...props} command={createCommand} />}
     {(!row ? ['create'] : ['update']).filter(operation => operations.includes(operation) && (operation !== 'update' || caps.entities[entity].readable.includes('version'))).map(operation => <ResourceFormDialog entity={entity} outcome={row ? 'updated' : 'created'} schema={writeSchema(model, entity, caps, row ? 'edit' : 'create')} compact={!!row} key={operation} trigger={operation === 'create' ? createLabel : t('edit', { context: '' })} triggerIcon={row ? 'edit' : undefined} triggerVariant={row ? 'secondary' : undefined} title={t(operation === 'create' ? 'createEntity' : 'editEntity', { entity: t(`entitySingular_${entity}`) })} description={t(operation === 'create' ? 'createEntityDescription' : 'editEntityDescription', { entity: t(`entitySingular_${entity}`) })} cancelLabel={t('cancel')}>{controls => <EntityMutation {...props} row={row} controls={controls} />}</ResourceFormDialog>)}
     {row && operations.includes('delete') && <ResourceDeleteDialog entity={entity} entityType={t(`entity_${entity}`, { defaultValue: entity })} entityName={recordLabel(model, entity, row, caps, i18n.language, t)} targetDescription={t('deleteTarget')} warningMessage={t('deleteDescription')} confirmText={t('delete')} compact trigger={t('delete', { context: '' })} triggerIcon="delete" triggerVariant="destructive" title={t('deleteRecord')} description={t('deleteDescription')} cancelLabel={t('cancel')} destructive>{controls => <DeleteMutation {...props} row={row} close={controls.close} />}</ResourceDeleteDialog>}
@@ -89,7 +89,7 @@ export function GeneratedRowActions(props: Context & { row: Record<string, any>;
     ...commands.map(command => ({ id: command.name, label: commandLabel(command, i18n.language, t) })),
     ...(operations.includes('delete') ? [{ id: 'delete', label: t('delete'), destructive: true }] : []),
   ]
-  return <><GeneratedRowInvitation {...props} /><RowActions label={t('rowActions', { name: recordLabel(model, entity, row, caps, i18n.language, t) })} items={items} disabled={props.disabled}>{(action, close, restoreFocus) => {
+  return <><RowActions label={t('rowActions', { name: recordLabel(model, entity, row, caps, i18n.language, t) })} items={items} disabled={props.disabled}>{(action, close, restoreFocus) => {
     const common = { open: true, onOpenChange: (open: boolean) => { if (!open) close() }, onCloseAutoFocus: restoreFocus, cancelLabel: t('cancel') }
     if (action.id === 'edit') return <ResourceFormDialog entity={entity} outcome={row ? 'updated' : 'created'} schema={writeSchema(model, entity, caps, 'edit')} {...common} title={t('editEntity', { entity: t(`entitySingular_${entity}`) })} description={t('editEntityDescription', { entity: t(`entitySingular_${entity}`) })}>{controls => <EntityMutation {...props} row={row} controls={controls} />}</ResourceFormDialog>
     if (action.id === 'delete') return <ResourceDeleteDialog entity={entity} {...common} title={t('deleteRecord')} description={t('deleteDescription')} entityType={t(`entity_${entity}`)} entityName={recordLabel(model, entity, row, caps, i18n.language, t)} targetDescription={t('deleteTarget')} warningMessage={t('deleteDescription')} confirmText={t('delete')}>{controls => <DeleteMutation {...props} row={row} close={controls.close} />}</ResourceDeleteDialog>
@@ -275,7 +275,7 @@ export function ContextCreateAction(props: Context & { lockedValues: Record<stri
 }
 
 interface RowAccess {
-  state: 'invited' | 'signed_in' | 'no_account'
+  state: 'invited' | 'expired' | 'signed_in' | 'no_account'
   can_invite: boolean; can_cancel: boolean
   invitation?: { id: string; email: string; expires_at: string }
 }
@@ -290,11 +290,11 @@ export function GeneratedRowInvitation(props: Context & { row: Record<string, an
   if (!status.data) return <span role="status">{t('loading')}</span>
   const data = status.data
   const pending = data.invitation
-  const actions = props.disabled ? [] : data.state === 'no_account' && data.can_invite ? ['invite'] : data.state === 'invited' && pending
-    ? [...(data.can_invite ? ['resend'] : []), ...(data.can_cancel ? ['cancel'] : [])]
+  const actions = props.disabled ? [] : data.state === 'no_account' && data.can_invite ? ['invite'] : ['invited', 'expired'].includes(data.state) && pending
+    ? [...(data.can_invite ? ['resend', ...(data.state === 'invited' ? ['copy'] : [])] : []), ...(data.can_cancel ? ['cancel'] : [])]
     : data.state === 'signed_in' && props.caps.commands?.includes(`${props.entity}/remove_access`) ? ['remove'] : []
   return <div className="flex flex-wrap items-center gap-2" aria-label={t('rowAccess')}>
-    <span role="status" className="text-sm">{t(`rowAccess_${data.state}`)}</span>
+    <Badge role="status" variant="secondary" className={data.state === 'expired' ? 'bg-red-100 text-red-800' : data.state === 'invited' ? 'bg-amber-100 text-amber-800' : data.state === 'signed_in' ? 'bg-green-100 text-green-800' : undefined}>{t(`rowAccess_${data.state}`)}</Badge>
     {pending && <span className="text-sm break-all">{pending.email}</span>}
     {actions.map(action => <ResourceFormDialog key={action} entity={props.entity} compact
       schema={action === 'invite' ? rowInviteSchema : emptyRowSchema} trigger={t(`rowInvite_${action}`)} triggerLabel={t(`rowInvite_${action}`)}
@@ -310,6 +310,10 @@ function RowInvitationMutation(props: Context & { row: Record<string, any>; disa
   const mutation = useMutation({ gcTime: 0, retry: false, mutationFn: async (values: Record<string, any>) => {
     const base = `/orgs/${encodeURIComponent(props.orgId)}/invitations`
     if (props.action === 'invite') await props.write(base, 'POST', { email: values.email, target: { entity: props.entity, row: props.row.id } })
+    else if (props.action === 'copy') {
+      const result = await props.write(`${base}/${encodeURIComponent(props.invitationId!)}/copy-link`, 'POST', {})
+      await navigator.clipboard.writeText(result.accept_url)
+    }
     else if (props.action === 'resend') await props.write(`${base}/${encodeURIComponent(props.invitationId!)}/resend`, 'POST', {})
     else if (props.action === 'cancel') await props.write(`${base}/${encodeURIComponent(props.invitationId!)}`, 'DELETE')
     else await props.write(`/commands/${props.entity}/remove_access`, 'POST', { rowId: props.row.id })

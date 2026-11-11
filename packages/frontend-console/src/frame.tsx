@@ -95,7 +95,7 @@ function FrameContent() {
   })}</SidebarMenu>
   const breadcrumbs = <Breadcrumbs navigation={registry.data?.modelUi?.navigation} membershipName={membership?.name} canReadWorkflows={!!canReadWorkflows} />
   const account = <LayoutUserDropdown onCloseAutoFocus={event => { if (aboutRequested.current) { event.preventDefault(); aboutRequested.current = false; setAboutOpen(true); return }; if (accountNavigation.current) { event.preventDefault(); accountNavigation.current = false; document.querySelector<HTMLElement>('main h1')?.focus() } }} user={me.data?.user ? { ...me.data.user, name: profile.data?.displayName ?? me.data.user.name } : undefined} label={t('accountLabel')} signOutLabel={t('signOut')} pendingLabel={t('saving')} signOut={() => void submit(() => logout.mutateAsync())} pending={logout.isPending} build={build.data && <><p>{t('revision', { revision: build.data.revision })}</p><p>{t('built', { date: new Intl.DateTimeFormat(i18n.language, { dateStyle: 'medium' }).format(new Date(build.data.builtAt)) })}</p><code>{build.data.sha.slice(0, 8)}</code></>}>
-    <AccountSettingsItem orgId={orgId} onNavigate={() => { accountNavigation.current = true }} />
+    <AccountSettingsItem member={membership?.role === 'member'} orgId={orgId} onNavigate={() => { accountNavigation.current = true }} />
     <DropdownMenuItem aria-label={t('switchLanguage')} onSelect={() => { const language = i18n.language === 'cs' ? 'en' : 'cs'; void i18n.changeLanguage(language); document.documentElement.lang = language }}><Languages />{t('languageLabel')}</DropdownMenuItem>
     <DropdownMenuItem onSelect={() => { aboutRequested.current = true }}><Info />{t('about')}</DropdownMenuItem>
   </LayoutUserDropdown>
@@ -117,7 +117,7 @@ export function Overview() {
   return <ResourcePage title={t('title', { instanceTitle: instanceTitle(schema.data?.displayName) })}><div className="wb-empty"><h2>{t('welcome')}</h2><p>{t('empty')}</p><Link to="/organizations">{t('organizations')}</Link><p><Dialog trigger={t('about')} title={t('about')} description={t('description')} closeLabel={t('close')} /></p></div></ResourcePage>
 }
 
-function AccountSettingsItem({ orgId, onNavigate }: { orgId?: string; onNavigate: () => void }) {
+function AccountSettingsItem({ orgId, onNavigate, member }: { member?: boolean; orgId?: string; onNavigate: () => void }) {
   const { t } = useTranslation(); const navigate = useNavigate(); const { setOpenMobile } = useSidebar()
-  return <DropdownMenuItem onSelect={() => { onNavigate(); setOpenMobile(false); void navigate({ to: orgId ? '/o/$orgId/settings/profile' : '/settings/profile', params: orgId ? { orgId } : {} }) }}><Settings />{t('settings')}</DropdownMenuItem>
+  return <DropdownMenuItem onSelect={() => { onNavigate(); setOpenMobile(false); void navigate({ to: orgId ? '/o/$orgId/settings/profile' : '/settings/profile', params: orgId ? { orgId } : {} }) }}><Settings />{t(member ? 'profileSettings' : 'settings')}</DropdownMenuItem>
 }

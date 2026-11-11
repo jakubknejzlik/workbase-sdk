@@ -16,6 +16,9 @@
     "*.ts"
   ],
   "exclude": [
+    "e2e/runtime/*-config.ts",
+    "e2e/runtime/*-worker.ts",
+    "e2e/runtime/*-seed.ts",
     "e2e/runtime/config.ts",
     "e2e/runtime/worker.ts",
     "e2e/runtime/seed.ts",

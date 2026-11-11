@@ -16,7 +16,7 @@ async function mount(state: string, canInvite = true) {
   let current = state
   const write = vi.fn(async (path: string, method: string, _body?: unknown) => {
     if (method === 'GET') return { state: current, can_invite: canInvite, can_cancel: canInvite,
-      ...(current === 'invited' ? { invitation: { id: 'pending', email: 'one@example.test' } } : {}) }
+      ...(['invited', 'expired'].includes(current) ? { invitation: { id: 'pending', email: 'one@example.test' } } : {}) }
     current = method === 'DELETE' || path.includes('remove_access') ? 'no_account' : 'invited'
     return { accept_url: 'credential-must-not-be-cached' }
   })
@@ -48,4 +48,38 @@ it('176 cancellation refreshes the row so another email can be invited', async (
   await waitFor(() => expect(write).toHaveBeenCalledWith('/orgs/org/invitations/pending', 'DELETE'))
   await screen.findByText('Bez účtu')
   expect(screen.getByRole('button', { name: 'Pozvat do aplikace' })).toBeTruthy()
+})
+
+it('176b expired row offers resend and hides copy-link', async () => {
+  await mount('expired')
+  await screen.findByText('Vypršela')
+  expect(screen.getByRole('button', { name: 'Znovu odeslat' })).toBeTruthy()
+  expect(screen.queryByRole('button', { name: 'Kopírovat odkaz' })).toBeNull()
+})
+it('176b pending row copies a link only on demand without caching the credential', async () => {
+  const { write, client, user } = await mount('invited')
+  const clipboard = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue()
+  await user.click(await screen.findByRole('button', { name: 'Kopírovat odkaz' }))
+  await user.click(screen.getAllByRole('button', { name: 'Kopírovat odkaz' }).at(-1)!)
+  await waitFor(() => expect(clipboard).toHaveBeenCalledWith('credential-must-not-be-cached'))
+  expect(write).toHaveBeenCalledWith('/orgs/org/invitations/pending/copy-link', 'POST', {})
+  expect(JSON.stringify(client.getMutationCache().getAll().map(entry => entry.state.data))).not.toContain('credential')
+})
+
+it.each(['no_account', 'invited', 'expired', 'signed_in'])('176b access filter %s round-trips URL state into the server query', async rowAccess => {
+  const { validateListSearch, stateFromSearch, searchFromState, toQueryDocument } = await import('../../console-generated/src/list-model')
+  const listModel = { instance: 'test', limits: { root: 100 }, entities: { people: { rowInvitations: true, fields: { id: { type: 'string' } }, columns: ['id'], relations: {} } } } as unknown as Model
+  const listCaps = { revision: 1, entities: { people: { readable: ['id'], writable: [], operations: ['read'] } } } as Capabilities
+  const { state, dropped } = stateFromSearch(validateListSearch({ rowAccess }), listModel, 'people', listCaps)
+  expect(dropped).toBe(false)
+  expect(searchFromState(state).rowAccess).toBe(rowAccess)
+  expect(toQueryDocument(state, listModel, 'people', listCaps)).toMatchObject({ rowAccess })
+  listModel.entities.people.rowInvitations = false
+  const denied = stateFromSearch(validateListSearch({ rowAccess }), listModel, 'people', listCaps)
+  expect(denied.dropped).toBe(true)
+  expect(toQueryDocument(denied.state, listModel, 'people', listCaps).rowAccess).toBeUndefined()
+})
+it('176b rejects malformed access filter URL values', async () => {
+  const { validateListSearch } = await import('../../console-generated/src/list-model')
+  for (const value of ['unknown', ['expired'], { state: 'expired' }]) expect(validateListSearch({ rowAccess: value })).toEqual({ invalidSettings: true })
 })

@@ -88,7 +88,7 @@ export function rowCommands(model: Model, entity: string, caps: Capabilities) {
   })
 }
 export function hasRowActions(model: Model, entity: string, caps: Capabilities) {
-  return visibleEntities(model, caps).includes(entity) && (model.entities[entity].rowInvitations || caps.entities[entity].operations.some(operation => operation === 'delete' || operation === 'update' && caps.entities[entity].readable.includes('version')) || rowCommands(model, entity, caps).length > 0)
+  return visibleEntities(model, caps).includes(entity) && (caps.entities[entity].operations.some(operation => operation === 'delete' || operation === 'update' && caps.entities[entity].readable.includes('version')) || rowCommands(model, entity, caps).some(command => !model.entities[entity].rowInvitations || command.name !== `${entity}/remove_access`))
 }
 export function pickerQuery(model: Model, entity: string, caps: Capabilities, options: { search?: string; cursor?: string; ids?: string[]; locale?: 'en' | 'cs' } = {}): ReadQuery {
   const select = projection(model, entity, caps)

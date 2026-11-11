@@ -119,16 +119,17 @@ export function memberRoutes(app: App, config: InstanceConfig, env: RuntimeEnv) 
     const row = await env.DB.prepare(`SELECT ${quote(link.field)} AS user FROM ${quote(target.entity)} WHERE organization_id=? AND id=? AND ${filter.sql}`)
       .bind(scope.organizationId, target.row, ...(filter.bindings ?? [])).first<{ user: string | null }>()
     if (!row) throw new ApiError(404, 'not_found')
-    const invitation = await env.DB.prepare(`SELECT id,email,expires_at FROM invitations WHERE organization_id=? AND target_entity=? AND target_row=?
-      AND accepted_at IS NULL AND revoked_at IS NULL AND declined_at IS NULL AND expired_at IS NULL AND expires_at>?`).bind(scope.organizationId, target.entity, target.row, nowISO()).first()
+    const latest = await env.DB.prepare(`SELECT id,email,expires_at,expired_at,accepted_at,revoked_at,declined_at FROM invitations WHERE organization_id=? AND target_entity=? AND target_row=?
+      ORDER BY created_at DESC,id DESC LIMIT 1`).bind(scope.organizationId, target.entity, target.row).first<{ id: string; email: string; expires_at: string; expired_at: string | null; accepted_at: string | null; revoked_at: string | null; declined_at: string | null }>()
+    const invitation = latest && !latest.accepted_at && !latest.revoked_at && !latest.declined_at ? latest : null
     const guard = rowInvitationGuard(config, scope, target, false)
     let invitePermission = false
     try { kernelFor(config).resourcePermission(scope, 'invitations.create'); organizationPermission(config, scope, 'invitations.create'); invitePermission = true } catch {}
     const canInvite = invitePermission && kernelFor(config).can(scope, target.entity, 'create') && !!await env.DB.prepare(`SELECT 1 WHERE ${guard.sql}`).bind(...guard.values).first()
     let canCancel = false
     try { kernelFor(config).resourcePermission(scope, 'invitations.revoke'); organizationPermission(config, scope, 'invitations.revoke'); canCancel = true } catch {}
-    return c.json({ can_cancel: canCancel, state: row.user ? 'signed_in' : invitation ? 'invited' : 'no_account',
-      ...(invitation && (canInvite || canCancel) ? { invitation } : {}), can_invite: canInvite })
+    return c.json({ can_cancel: canCancel, state: row.user ? 'signed_in' : invitation ? invitation.expired_at || invitation.expires_at <= nowISO() ? 'expired' : 'invited' : 'no_account',
+      ...(invitation && (canInvite || canCancel) ? { invitation: { id: invitation.id, email: invitation.email, expires_at: invitation.expires_at } } : {}), can_invite: canInvite })
   })
   app.post('/orgs/:orgId/invitations', scoped, async c => {
     const scope = scopeFor(c, 'invitations.create')
@@ -172,7 +173,7 @@ export function memberRoutes(app: App, config: InstanceConfig, env: RuntimeEnv) 
   })
   app.post('/orgs/:orgId/invitations/:invitationId/resend', scoped, async c => {
     const scope = scopeFor(c, 'invitations.create'); const id = c.req.param('invitationId')
-    const invitation = await env.DB.prepare('SELECT email,role,token_hash,inviter_id,target_entity,target_row FROM invitations WHERE id=? AND organization_id=? AND accepted_at IS NULL AND revoked_at IS NULL AND declined_at IS NULL AND expired_at IS NULL AND expires_at>?').bind(id, scope.organizationId, nowISO()).first<{email: string; role: string; token_hash: string; inviter_id: string; target_entity: string | null; target_row: string | null}>()
+    const invitation = await env.DB.prepare('SELECT email,role,token_hash,inviter_id,target_entity,target_row FROM invitations WHERE id=? AND organization_id=? AND accepted_at IS NULL AND revoked_at IS NULL AND declined_at IS NULL').bind(id, scope.organizationId).first<{email: string; role: string; token_hash: string; inviter_id: string; target_entity: string | null; target_row: string | null}>()
     if (!invitation) throw new ApiError(409, 'invitation_unavailable')
     const member = await env.DB.prepare('SELECT m.user_id FROM memberships m JOIN users u ON u.id=m.user_id WHERE m.organization_id=? AND lower(u.email)=lower(?)').bind(scope.organizationId, invitation.email).first()
     if (member && !invitation.target_entity) return c.json({ message: 'already_member' })
@@ -186,11 +187,14 @@ export function memberRoutes(app: App, config: InstanceConfig, env: RuntimeEnv) 
     const mail = await invitationMail(env, config, outboxId, scope.organizationId, invitation.email, link.href, { inviterId: invitation.inviter_id, role: invitation.role, expiresAt: expires, kind: 'reminder' })
     try { await execute(scope, 'invitations/resend', 'invitations.create', {
       rules: [organizationRule('invitation_resend', {
-        sql: `UPDATE invitations SET token_hash=?,expires_at=?,delivery_outbox_id=? WHERE id=? AND organization_id=? AND token_hash=? AND accepted_at IS NULL AND revoked_at IS NULL AND declined_at IS NULL AND expired_at IS NULL AND expires_at>? AND ${guard.sql}`,
-        bindings: [await sha256(token), expires, outboxId, id, scope.organizationId, invitation.token_hash, nowISO(), ...guard.values],
+        sql: `UPDATE invitations SET token_hash=?,expires_at=?,expired_at=NULL,delivery_outbox_id=? WHERE id=? AND organization_id=? AND token_hash=? AND accepted_at IS NULL AND revoked_at IS NULL AND declined_at IS NULL AND NOT EXISTS (SELECT 1 FROM invitations newer WHERE newer.organization_id=invitations.organization_id AND newer.target_entity=invitations.target_entity AND newer.target_row=invitations.target_row AND (newer.created_at>invitations.created_at OR (newer.created_at=invitations.created_at AND newer.id>invitations.id))) AND ${guard.sql}`,
+        bindings: [await sha256(token), expires, outboxId, id, scope.organizationId, invitation.token_hash, ...guard.values],
       }, mail.intent(expires))], event: { operation: 'invitation.resent', entity: 'invitations', entityId: id }, result: { status: 200, body: { id } }, conflict: 'invitation_conflict',
     })
-    } catch (error) { if (error instanceof RuleFailed) throw new ApiError(409, 'invitation_conflict'); throw error }
+    } catch (error) {
+      if (error instanceof RuleFailed || /UNIQUE constraint failed/i.test(String(error))) throw new ApiError(409, 'invitation_conflict')
+      throw error
+    }
     await mail.deliver()
     c.header('Cache-Control', 'no-store')
     return c.json({ id, expires_at: expires, delivery: await invitationDeliveryStatus(env, config, outboxId) })

@@ -562,5 +562,9 @@
   "rowInvite_remove": "Odebrat přístup",
   "rowInviteDescription": "Účet se propojí s tímto řádkem až po přijetí pozvánky. Po zrušení můžete pozvat jiný e-mail.",
   "rowInviteRemoveDescription": "Odebere všechny vazby účtu v této aplikaci. Účet zůstane zachován.",
-  "rowInvitationTarget": "Přijetím propojíte svůj účet s řádkem {{entity}} ({{row}})."
+  "rowInvitationTarget": "Přijetím propojíte svůj účet s řádkem {{entity}} ({{row}}).",
+  "rowAccess_expired": "Vypršela",
+  "rowInvite_copy": "Kopírovat odkaz",
+  "rowAccessFilter": "Stav přístupu",
+  "rowAccessAll": "Vše"
 }
