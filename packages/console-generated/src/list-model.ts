@@ -1,6 +1,6 @@
 import { availableCalendar, calendarQuery, dayKey, validDay, type CalendarMode } from './calendar-model'
 import { filterableFields, filterKind, filterMapping, selectionCap, type FilterKind } from './filter-kinds'
-import { projection, listSearchableFields, type Model, type Capabilities, type ReadQuery } from './read'
+import { projection, listSearchableFields, type Model, type Capabilities, type ReadQuery, type RowAccessState } from './read'
 export interface ListHints {
   compact?: boolean; mobileCards?: boolean
   filter?: Record<string, false | FilterKind>
@@ -14,6 +14,7 @@ export interface ListHints {
 }
 export interface ListFilter { field: string; predicate: Record<string, unknown> }
 export interface ListState {
+  rowAccess?: RowAccessState
   presentation?: 'table' | 'calendar'
   calendarMode?: CalendarMode
   calendarDate?: string
@@ -25,7 +26,7 @@ export interface ListState {
   cursor?: string
   limit: number
 }
-export interface ListSearch { presentation?: 'table' | 'calendar'; calendarMode?: CalendarMode; calendarDate?: string; invalidSettings?: boolean; filters?: ListFilter[]; view?: string; search?: string; sort?: string; direction?: 'asc' | 'desc'; pageSize?: number }
+export interface ListSearch { rowAccess?: RowAccessState; presentation?: 'table' | 'calendar'; calendarMode?: CalendarMode; calendarDate?: string; invalidSettings?: boolean; filters?: ListFilter[]; view?: string; search?: string; sort?: string; direction?: 'asc' | 'desc'; pageSize?: number }
 export const pageSizes = [10, 20, 30, 50, 100] as const
 /** Router validator: excludes actor-bound cursors; field/kind validation follows against capabilities. */
 export function validateListSearch(input: Record<string, unknown>): ListSearch {
@@ -38,6 +39,8 @@ export function validateListSearch(input: Record<string, unknown>): ListSearch {
   else if (input.calendarMode !== undefined) result.invalidSettings = true
   if (validDay(input.calendarDate)) result.calendarDate = input.calendarDate
   else if (input.calendarDate !== undefined) result.invalidSettings = true
+  if (typeof input.rowAccess === 'string' && ['no_account', 'invited', 'expired', 'signed_in'].includes(input.rowAccess)) result.rowAccess = input.rowAccess as RowAccessState
+  else if (input.rowAccess !== undefined) result.invalidSettings = true
   let filters = input.filters
   if (typeof filters === 'string' && filters.length <= 64000) { try { filters = JSON.parse(filters) } catch { filters = undefined; result.invalidSettings = true } }
   if (Array.isArray(filters) && filters.length <= 100) result.filters = filters.filter((filter): filter is ListFilter => !!filter && typeof filter === 'object' && typeof filter.field === 'string' && /^[a-z][a-z0-9_]*$/.test(filter.field) && !!filter.predicate && typeof filter.predicate === 'object' && !Array.isArray(filter.predicate))
@@ -101,6 +104,8 @@ export function stateFromSearch(search: ListSearch, model: Model, entity: string
     if (!predicate || filters.some(item => item.field === filter.field)) { dropped = true; continue }
     filters.push({ field: filter.field, predicate })
   }
+  if (search.rowAccess && model.entities[entity].rowInvitations) state.rowAccess = search.rowAccess
+  else if (search.rowAccess) dropped = true
   state.userFilters = filters
   const viewId = search.view ?? state.view
   const view = viewId === 'all' ? undefined : model.entities[entity].list?.views?.find(view => view.id === viewId)
@@ -111,7 +116,7 @@ export function stateFromSearch(search: ListSearch, model: Model, entity: string
   return { state, dropped }
 }
 export function searchFromState(state: ListState): ListSearch {
-  return { ...(state.presentation === 'calendar' ? { presentation: state.presentation } : {}), ...(state.calendarDate ? { calendarDate: state.calendarDate } : {}), ...(state.calendarMode ? { calendarMode: state.calendarMode } : {}), ...(state.view ? { view: state.view } : {}), ...(state.userFilters.length ? { filters: state.userFilters } : {}), ...(state.search ? { search: state.search } : {}), ...(state.sort ? { sort: state.sort.key, direction: state.sort.direction } : { sort: 'none' }), pageSize: state.limit }
+  return { ...(state.rowAccess ? { rowAccess: state.rowAccess } : {}), ...(state.presentation === 'calendar' ? { presentation: state.presentation } : {}), ...(state.calendarDate ? { calendarDate: state.calendarDate } : {}), ...(state.calendarMode ? { calendarMode: state.calendarMode } : {}), ...(state.view ? { view: state.view } : {}), ...(state.userFilters.length ? { filters: state.userFilters } : {}), ...(state.search ? { search: state.search } : {}), ...(state.sort ? { sort: state.sort.key, direction: state.sort.direction } : { sort: 'none' }), pageSize: state.limit }
 }
 /** The only list compiler adapter. All work is performed by POST /query, never by the table. */
 export function toQueryDocument(state: ListState, model: Model, entity: string, caps: Capabilities, locale: 'en' | 'cs' = 'en'): ReadQuery {
@@ -132,7 +137,7 @@ export function toQueryDocument(state: ListState, model: Model, entity: string, 
   const strings = listSearchableFields(model, entity, caps, state.presentation)
   const fields = state.sort ? sortFields(model, entity, caps, state.sort.key) : []
   const labels = labelColumns(model, entity, caps).filter(key => (model.entities[entity].list?.columns ?? model.entities[entity].listColumns ?? model.entities[entity].columns).includes(key))
-  const query: ReadQuery = { entity, ...(state.search.trim() && strings.length ? { search: { text: state.search.trim(), fields: strings, locale } } : {}), select: select.length ? select : ['id'], ...(labels.length ? { labels } : {}), limit: Math.min(pageSizes.includes(state.limit as any) ? state.limit : 30, model.limits.root),
+  const query: ReadQuery = { entity, ...(state.rowAccess && model.entities[entity].rowInvitations ? { rowAccess: state.rowAccess } : {}), ...(state.search.trim() && strings.length ? { search: { text: state.search.trim(), fields: strings, locale } } : {}), select: select.length ? select : ['id'], ...(labels.length ? { labels } : {}), limit: Math.min(pageSizes.includes(state.limit as any) ? state.limit : 30, model.limits.root),
     ...(conditions.length ? { where: { and: conditions } } : {}),
     ...(Object.keys(labelWhere).length ? { labelWhere } : {}),
     orderBy: (fields.length ? fields : ['id']).map(field => ({ field, dir: fields.length ? state.sort!.direction : 'asc', ...(labelColumns(model, entity, caps).includes(field) ? { label: true } : {}) })),

@@ -1,3 +1,4 @@
+import { userLinks } from '../user-link-fields'
 import { DisplayPartsExpression, needsDisplayParts, partsAlias } from './display-parts'
 import { expressionInfo, readableComputed, rebindExpression, type ExpressionInfo } from './expressions'
 import { ApiError } from '../errors'
@@ -25,6 +26,17 @@ class ScopedCondition extends Condition {
     return this.filter.kind === 'where'
       ? renderPredicate(this.filter.predicate, this.alias, v => value(v).toSQL(flavor), this.relation ? (node, parent, negated) => this.relation!(node, parent, negated, flavor) : undefined).sql
       : this.filter.kind === 'all' ? '1=1' : '0=1'
+  }
+}
+/** Access state is derived only for authorized root rows; credentials never enter projections. */
+class RowAccessCondition extends Condition {
+  constructor(private kernel: KernelRegistry, private scope: Scope, private query: QueryInput) { super() }
+  toSQL(flavor: ISQLFlavor) {
+    const link = userLinks(this.kernel.config).find(link => link.entity === this.query.entity)!
+    const bind = (v: unknown) => value(v).toSQL(flavor)
+    const root = `SELECT 1 FROM ${quote(link.entity)} access_row WHERE access_row.organization_id=${bind(this.scope.organizationId)} AND access_row.id="row"."id" AND access_row.${quote(link.field)} IS NOT NULL`
+    const invitation = `(SELECT CASE WHEN accepted_at IS NOT NULL OR revoked_at IS NOT NULL OR declined_at IS NOT NULL THEN 'no_account' WHEN expired_at IS NOT NULL OR expires_at<=strftime('%Y-%m-%dT%H:%M:%fZ','now') THEN 'expired' ELSE 'invited' END FROM invitations WHERE organization_id=${bind(this.scope.organizationId)} AND target_entity=${bind(this.query.entity)} AND target_row="row"."id" ORDER BY created_at DESC,id DESC LIMIT 1)`
+    return `(CASE WHEN EXISTS (${root}) THEN 'signed_in' ELSE coalesce(${invitation},'no_account') END)=${bind(this.query.rowAccess)}`
   }
 }
 class ContainsCondition extends Condition {
@@ -483,6 +495,7 @@ export function compileRoot(kernel: KernelRegistry, scope: Scope, query: QueryIn
     labeled = labeled.field(display ? Q.raw(`json_extract(${quote('labels')}."${labelAlias(key)}", '$.row.${display}')`) : Q.raw('NULL'), sortAlias(key))
   }
   let ast = labelKeys.length ? Q.select().from(labeled, 'row').field('row.*') : source
+  if (query.rowAccess) ast = ast.where(new RowAccessCondition(kernel, scope, query))
   const order = queryOrder(query).map(o => ({ ...o, field: orderField(o) }))
   function searchCondition(key: string, text: string, locale: 'en' | 'cs' = 'en'): Condition {
     const path = labelPath(kernel.config, query.entity, key)

@@ -67,7 +67,7 @@ export function consoleRegistry(config: InstanceConfig, scope: Scope): ConsoleRe
     const ids = new Set(widgets.map(widget => widget.id))
     return { ...page, widgets, sections: page.sections?.map(section => ({ row: section.row.filter(id => ids.has(id)) })).filter(section => section.row.length) }
   })
-  const navigation: ConsoleNavigation[] = parts.flatMap(part => part.navigation ?? []).filter(item => permits(item.grant) && (!item.roles || item.roles.includes(scope.role)) && (!item.page || pages.some(page => page.id === item.page)) && (!item.entity || caps.entities[item.entity]?.operations.includes('read')))
+  const navigation: ConsoleNavigation[] = parts.flatMap(part => part.navigation ?? []).filter(item => (scope.role !== 'member' || item.placement === 'sidebar' && !!item.entity) && permits(item.grant) && (!item.roles || item.roles.includes(scope.role)) && (!item.page || pages.some(page => page.id === item.page)) && (!item.entity || caps.entities[item.entity]?.operations.includes('read')))
   const hints = config.ui?.navigation
   const configured = new Set(hints?.items.map(item => item.entity))
   const entityItems: NonNullable<NonNullable<InstanceConfig['ui']>['navigation']>['items'] = [...(hints?.items ?? []), ...Object.keys(config.entities).filter(entity => !configured.has(entity)).map(entity => ({ id: entity, entity }))]

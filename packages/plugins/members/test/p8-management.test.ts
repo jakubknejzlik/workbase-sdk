@@ -112,11 +112,10 @@ it('failed audit leaves the old credential and mail association intact without r
   expect(result.status).toBeGreaterThanOrEqual(400); expect(await json(result)).not.toHaveProperty('accept_url')
   expect(await env.DB.prepare('SELECT token_hash,delivery_outbox_id FROM invitations WHERE id=?').bind(created.id).first()).toEqual(before)
 })
-it.each(['accepted', 'revoked', 'expired'])('terminal %s invitations cannot rotate, resend or retry', async terminal => {
+it.each(['accepted', 'revoked'])('terminal %s invitations cannot rotate, resend or retry', async terminal => {
   const created = await json(await invite())
   if (terminal === 'accepted') await env.DB.prepare('UPDATE invitations SET accepted_at=? WHERE id=?').bind(new Date().toISOString(), created.id).run()
   if (terminal === 'revoked') await env.DB.prepare('UPDATE invitations SET revoked_at=? WHERE id=?').bind(new Date().toISOString(), created.id).run()
-  if (terminal === 'expired') await env.DB.prepare("UPDATE invitations SET expires_at='2000-01-01' WHERE id=?").bind(created.id).run()
   for (const suffix of ['copy-link', 'resend', 'retry-delivery']) {
     const result = await request(app, path(created.id, suffix), 'POST')
     expect(result.status).toBe(409); expect(await json(result)).toEqual({ error: 'invitation_unavailable' })
@@ -220,4 +219,16 @@ it('combined members use external profile names only while their synchronized bi
   expect(await member()).toMatchObject({ display_name: 'Synced Person' })
   await env.DB.prepare("UPDATE identities SET subject='replacement' WHERE user_id='viewer-a' AND provider='test-idp'").run()
   expect(await member()).toMatchObject({ display_name: 'viewer-a' })
+})
+
+it('expired invitations refuse copy and retry until an authorized resend renews the credential', async () => {
+  const created = await json(await invite())
+  await env.DB.prepare("UPDATE invitations SET expires_at='2000-01-01' WHERE id=?").bind(created.id).run()
+  for (const suffix of ['copy-link', 'retry-delivery']) {
+    const result = await request(app, path(created.id, suffix), 'POST')
+    expect(result.status).toBe(409)
+    expect(await json(result)).toEqual({ error: 'invitation_unavailable' })
+  }
+  expect((await request(app, path(created.id, 'resend'), 'POST')).status).toBe(200)
+  expect((await request(app, path(created.id, 'copy-link'), 'POST')).status).toBe(200)
 })

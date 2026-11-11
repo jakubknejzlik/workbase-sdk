@@ -542,5 +542,9 @@
   "rowInvite_remove": "Remove access",
   "rowInviteDescription": "The account is linked to this row only after acceptance. Cancel to invite another email.",
   "rowInviteRemoveDescription": "Clears all account links in this application. The account is kept.",
-  "rowInvitationTarget": "Accepting links your account to the {{entity}} row ({{row}})."
+  "rowInvitationTarget": "Accepting links your account to the {{entity}} row ({{row}}).",
+  "rowAccess_expired": "Expired",
+  "rowInvite_copy": "Copy link",
+  "rowAccessFilter": "Access state",
+  "rowAccessAll": "All"
 }

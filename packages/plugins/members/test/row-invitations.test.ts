@@ -8,6 +8,7 @@ import { KernelRegistry } from '@workbasehq/core/kernel/registry'
 import { sha256 } from '@workbasehq/core/crypto'
 import { createIdentity } from '@workbasehq/plugins/identity'
 import { createLocalAuth } from '@workbasehq/plugins/local-auth'
+import { consoleUI } from '@workbasehq/plugins/console'
 import { createMembers } from '@workbasehq/plugins/members'
 import { createOrganizations } from '@workbasehq/plugins/organizations'
 import { permissions } from '@workbasehq/plugins/permissions'
@@ -17,7 +18,7 @@ import { runtime, request, json, completeInvitationProfiles } from '@workbasehq/
 
 function configuration() {
   return defineInstance({ id: 'row_invitations', revision: 1, interactive: true, account: { entity: 'users' },
-    plugins: [createIdentity(), createLocalAuth(), permissions({ roles: ['owner', 'member', 'creator', 'inviter'] }), createMembers(), createOrganizations(), machineCredentials(), mailOutbox()],
+    plugins: [createIdentity(), createLocalAuth(), permissions({ roles: ['owner', 'member', 'creator', 'inviter'] }), createMembers(), consoleUI(), createOrganizations(), machineCredentials(), mailOutbox()],
     roles: ['owner', 'member', 'creator', 'inviter'],
     entities: {
       users: { fields: { name: { type: 'string' } } },
@@ -205,4 +206,122 @@ it('176 an explicit Link made while invitation is pending cannot be overwritten 
   expect((await accept(i.id)).status).toBe(409)
   expect(await linked()).toBe('creator-a')
   expect(await env.DB.prepare('SELECT accepted_at FROM invitations WHERE id=?').bind(i.id).first('accepted_at')).toBeNull()
+})
+
+it('176b expired token is refused; expired row can resend a fresh seven-day token and accept', async () => {
+  const i = await invitation()
+  const token = new URL(i.accept_url).searchParams.get('token')
+  await env.DB.prepare("UPDATE invitations SET created_at='2000-01-01',expires_at='2000-01-08' WHERE id=?").bind(i.id).run()
+  expect(await json(await status())).toMatchObject({ state: 'expired', invitation: { id: i.id } })
+  const refused = await request(app, '/invitations/accept', 'POST', { token }, 'member-a')
+  expect(refused.status).toBe(410)
+  expect(await json(refused)).toMatchObject({ error: 'invitation_expired' })
+  expect(await linked()).toBeNull()
+  const resent = await request(app, `/orgs/org-a/invitations/${i.id}/resend`, 'POST', {})
+  expect(resent.status).toBe(200)
+  expect(Date.parse((await json(resent)).expires_at) - Date.now()).toBeGreaterThan(6.99 * 86400000)
+  expect((await request(app, '/invitations/accept', 'POST', { token }, 'member-a')).status).toBe(404)
+  expect(await json(await status())).toMatchObject({ state: 'invited' })
+  expect((await accept(i.id)).status).toBe(201)
+})
+it.each(['creator-a', 'inviter-a', 'member-a'])('176b copy-link denies non-inviter %s without rotating or disclosing token', async actor => {
+  const i = await invitation()
+  const hash = await env.DB.prepare('SELECT token_hash FROM invitations WHERE id=?').bind(i.id).first('token_hash')
+  expect((await request(app, `/orgs/org-a/invitations/${i.id}/copy-link`, 'POST', {}, actor)).status).toBe(403)
+  expect(await env.DB.prepare('SELECT token_hash FROM invitations WHERE id=?').bind(i.id).first('token_hash')).toBe(hash)
+  const list = await request(app, '/orgs/org-a/invitations', 'GET', undefined, actor)
+  expect(await list.text()).not.toMatch(/accept_url|token_hash|[a-f0-9]{64}/)
+})
+it('176b constrained token supports row read, invite, resend, copy and cancel with exact allowlists', async () => {
+  const call = await agentToken('owner', ['people.read', 'people.create', 'invitations.read', 'invitations.create', 'invitations.revoke', 'invitations/create', 'invitations/resend', 'invitations/copy_link', 'invitations/revoke'])
+  const i = await json(await call('/orgs/org-a/invitations'))
+  expect(i.id).toBeTruthy()
+  expect((await call('/orgs/org-a/row-access/people/p1', 'GET')).status).toBe(200)
+  expect((await call(`/orgs/org-a/invitations/${i.id}/resend`)).status).toBe(200)
+  const copy = await call(`/orgs/org-a/invitations/${i.id}/copy-link`)
+  expect(copy.status).toBe(200)
+  expect((await json(copy)).accept_url).toContain('token=')
+  expect((await call(`/orgs/org-a/invitations/${i.id}`, 'DELETE', {})).status).toBe(204)
+})
+it('176b access filter runs before pagination and keeps row policy and credentials private', async () => {
+  const i = await invitation()
+  await env.DB.prepare("UPDATE invitations SET expires_at='2000' WHERE id=?").bind(i.id).run()
+  for (const [rowAccess, ids] of [['expired', ['p1']], ['no_account', ['p2']], ['invited', []], ['signed_in', []]] as const) {
+    const response = await request(app, '/query', 'POST', { entity: 'people', select: ['id'], rowAccess, limit: 1 })
+    expect(response.status).toBe(200)
+    expect((await json(response)).data.map((row: { id: string }) => row.id)).toEqual(ids)
+  }
+  const hidden = await request(app, '/query', 'POST', { entity: 'people', select: ['id'], rowAccess: 'expired', limit: 10 }, 'member-a')
+  expect((await json(hidden)).data).toEqual([])
+  const call = await agentToken('owner', ['people.read'])
+  expect((await call('/query', 'POST', { entity: 'people', select: ['id'], rowAccess: 'expired', limit: 10 })).status).toBe(403)
+})
+it('176b member navigation contains only policy-readable entities and no settings or admin pages', async () => {
+  const c = configuration()
+  c.policies.teams.member = 'none'
+  app = createApp(c, runtime())
+  const response = await request(app, '/o/org-a/console-model', 'GET', undefined, 'member-a')
+  const body = await json(response)
+  expect(body.console.navigation.length).toBeGreaterThan(0)
+  expect(body.console.navigation.every((item: { entity?: string; placement: string }) => !!item.entity && item.placement === 'sidebar' && item.entity !== 'teams')).toBe(true)
+  const legacy = await json(await request(app, '/o/org-a/console-registry', 'GET', undefined, 'member-a'))
+  expect(legacy.navigation.every((item: { entity?: string; placement: string }) => !!item.entity && item.placement === 'sidebar' && item.entity !== 'teams')).toBe(true)
+})
+
+it.each([
+  ['invite', ['people.create', 'invitations.create', 'invitations/create']],
+  ['resend', ['people.create', 'invitations.create', 'invitations/resend']],
+  ['copy-link', ['people.create', 'invitations.create', 'invitations/copy_link']],
+  ['cancel', ['invitations.revoke', 'invitations/revoke']],
+] as const)('176b documented minimum constrained token succeeds for %s', async (action, operations) => {
+  const i = action === 'invite' ? undefined : await invitation()
+  const call = await agentToken('owner', [...operations])
+  const response = await call(action === 'invite' ? '/orgs/org-a/invitations' : `/orgs/org-a/invitations/${i!.id}${action === 'cancel' ? '' : `/${action}`}`, action === 'cancel' ? 'DELETE' : 'POST', action === 'invite' ? { email: 'member-a@example.test', target: { entity: 'people', row: 'p1' } } : {})
+  expect(response.status).toBe(action === 'invite' ? 201 : action === 'cancel' ? 204 : 200)
+})
+it.each(['people.create', 'invitations.create', 'invitations/create'])('176b constrained invite denies missing %s', async missing => {
+  const call = await agentToken('owner', ['people.create', 'invitations.create', 'invitations/create'].filter(operation => operation !== missing))
+  expect((await call('/orgs/org-a/invitations')).status).toBe(403)
+  expect(await env.DB.prepare('SELECT count(*) n FROM invitations').first('n')).toBe(0)
+})
+it('176b cancelled replacement never resurrects expired row history; superseded resend refuses', async () => {
+  const old = await invitation()
+  await env.DB.prepare("UPDATE invitations SET expires_at='2000',created_at='2000' WHERE id=?").bind(old.id).run()
+  const fresh = await invitation('other@example.test')
+  expect(await env.DB.prepare('SELECT expired_at FROM invitations WHERE id=?').bind(old.id).first('expired_at')).toBeTruthy()
+  expect((await request(app, `/orgs/org-a/invitations/${old.id}/resend`, 'POST', {})).status).toBe(409)
+  expect((await request(app, `/orgs/org-a/invitations/${fresh.id}`, 'DELETE')).status).toBe(204)
+  expect(await json(await status())).toMatchObject({ state: 'no_account' })
+  const response = await request(app, '/query', 'POST', { entity: 'people', select: ['id'], rowAccess: 'expired', limit: 10 })
+  expect((await json(response)).data).toEqual([])
+})
+it('176b status-only token sees state but no invitation details or management actions', async () => {
+  await invitation()
+  const call = await agentToken('owner', ['people.read', 'invitations.read'])
+  const response = await call('/orgs/org-a/row-access/people/p1', 'GET')
+  expect(response.status).toBe(200)
+  expect(await json(response)).toEqual({ state: 'invited', can_invite: false, can_cancel: false })
+})
+it('176b copy link requires verified matching recipient, rotates old token and never appears in list data', async () => {
+  const i = await invitation()
+  const copy = await request(app, `/orgs/org-a/invitations/${i.id}/copy-link`, 'POST', {})
+  const token = new URL((await json(copy)).accept_url).searchParams.get('token')
+  expect((await request(app, '/invitations/accept', 'POST', { token: new URL(i.accept_url).searchParams.get('token') }, 'member-a')).status).toBe(404)
+  expect((await request(app, '/invitations/accept', 'POST', { token }, 'creator-a')).status).toBe(403)
+  const list = await request(app, '/orgs/org-a/invitations', 'GET', undefined, 'creator-a')
+  expect(await list.text()).not.toMatch(/accept_url|token_hash|[a-f0-9]{64}/)
+  expect((await request(app, '/invitations/accept', 'POST', { token }, 'member-a')).status).toBe(201)
+})
+it('176b access filters select live invited and signed-in rows and bind cursors to the filter', async () => {
+  const i = await invitation()
+  const query = (rowAccess: string, cursor?: string) => request(app, '/query', 'POST', { entity: 'people', select: ['id'], rowAccess, limit: 1, ...(cursor ? { cursor } : {}) })
+  expect((await json(await query('invited'))).data).toEqual([{ id: 'p1' }])
+  expect((await accept(i.id)).status).toBe(201)
+  expect((await json(await query('signed_in'))).data).toEqual([{ id: 'p1' }])
+  await env.DB.exec("INSERT INTO people (id,organization_id,name,created_at,updated_at) VALUES ('p3','org-a','Three','now','now')")
+  const first = await json(await query('no_account'))
+  expect(first.data).toEqual([{ id: 'p2' }])
+  expect(first.next_cursor).toBeTruthy()
+  expect((await json(await query('no_account', first.next_cursor))).data).toEqual([{ id: 'p3' }])
+  expect((await query('signed_in', first.next_cursor)).status).toBe(400)
 })

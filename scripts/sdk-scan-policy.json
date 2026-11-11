@@ -659,7 +659,7 @@
     {
       "pathDigest": "39782b26cbd42b381d0099b1ae4cefd07dbc175b8be9fa31ba1b6278cd0bd7f4",
       "lineDigest": "78db930e391cace80bed35929489306556d4f833f038639a1e73bb23a64b097b",
-      "lineNumber": 4,
+      "lineNumber": 5,
       "reason": "Required public npm dependency/import; exact package identity, not an owner deployment."
     },
     {
