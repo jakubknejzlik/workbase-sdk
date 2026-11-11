@@ -1,3 +1,5 @@
+import { userLinks } from './user-link-fields'
+export { userLinks } from './user-link-fields'
 // Core-only account-link writers. No raw SQL or capability is exposed to clients.
 import { z } from 'zod'
 import type { InstanceConfig } from './config'
@@ -24,10 +26,7 @@ function writer(statement: GuardedStatement, mode: 'link' | 'cleanup'): GuardedS
 export const userLinkWriter = (statement: GuardedStatement) => writers.get(statement)
 // Only these core-minted statements can substitute a prepared-role policy filter.
 export const userLinkPolicyFilter = (statement: GuardedStatement) => livePolicies.get(statement)
-export function userLinks(config: InstanceConfig) {
-  return Object.entries(config.entities).flatMap(([entity, definition]) => Object.entries(definition.fields)
-    .filter(([, field]) => field.userLink).map(([field]) => ({ entity, field })))
-}
+
 export function assertUnprotectedFields(definition: Pick<InstanceConfig['entities'][string], 'fields'>, fields: string[]) {
   if (fields.some(field => definition.fields[field]?.userLink)) throw new ApiError(400, 'protected_field')
 }

@@ -1,5 +1,5 @@
-import { organizationPermission } from '../execution/permissions'
-import { userLinks } from '../user-links'
+import { organizationPermission } from '../organization-permissions'
+import { userLinks } from '../user-link-fields'
 import { z } from 'zod'
 import { baseFields, type Field, type InstanceConfig } from '../config'
 import type { KernelRegistry } from '../kernel/registry'

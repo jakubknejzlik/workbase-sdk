@@ -34,11 +34,12 @@ it('176 rendered row state invites an email without submitting the protected lin
   expect(write).toHaveBeenCalledWith('/orgs/org/invitations', 'POST', { email: 'one@example.test', target: { entity: 'people', row: 'person' } })
   expect(JSON.stringify(client.getMutationCache().getAll().map(entry => entry.state.data))).not.toContain('credential')
 })
-it.each(['no_account', 'invited', 'signed_in'])('176 renders Czech state %s and hides invitation actions without live authority', async state => {
+it.each(['no_account', 'invited', 'expired', 'signed_in'])('176 renders Czech state %s and hides invitation actions without live authority', async state => {
   await mount(state, false)
-  await screen.findByText({ no_account: 'Bez účtu', invited: 'Pozváno', signed_in: 'Přihlášen' }[state]!)
+  await screen.findByText({ no_account: 'Bez účtu', invited: 'Pozváno', expired: 'Vypršela', signed_in: 'Přihlášen' }[state]!)
   expect(screen.queryByRole('button', { name: 'Pozvat do aplikace' })).toBeNull()
   expect(screen.queryByRole('button', { name: 'Znovu odeslat' })).toBeNull()
+  expect(screen.queryByRole('button', { name: 'Kopírovat odkaz' })).toBeNull()
 })
 it('176 cancellation refreshes the row so another email can be invited', async () => {
   const { write, user } = await mount('invited')

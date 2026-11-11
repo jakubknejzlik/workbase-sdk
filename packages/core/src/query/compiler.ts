@@ -1,4 +1,4 @@
-import { userLinks } from '../user-links'
+import { userLinks } from '../user-link-fields'
 import { DisplayPartsExpression, needsDisplayParts, partsAlias } from './display-parts'
 import { expressionInfo, readableComputed, rebindExpression, type ExpressionInfo } from './expressions'
 import { ApiError } from '../errors'
