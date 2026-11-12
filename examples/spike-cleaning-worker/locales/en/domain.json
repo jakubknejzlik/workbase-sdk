@@ -1,0 +1,9 @@
+{
+  "entity.worker_one": "Worker",
+  "entity.worker_other": "Workers",
+  "field.worker.name": "Name",
+  "field.worker.user": "User account",
+  "field.slot.starts_at": "Start time (UTC)",
+  "field.slot.job_id": "Job",
+  "field.slot.booked": "Booked"
+}

@@ -1,0 +1,9 @@
+$ bun run --cwd examples/spike-cleaning-worker browser
+$ node --import tsx scripts/browser.ts
+P1 render PASS /workers (list)
+P1 render PASS /workers/w1 (detail)
+P1 render PASS /workers/new (create)
+P1 render PASS /workers/w1/edit (edit)
+P1 render PASS /workers/w1/trasa (trasa)
+P6 PASS desktop columns + interactive tabs + access slot; mobile columns stack; screenshots saved
+P1 PASS in-memory edit and create save/redirect

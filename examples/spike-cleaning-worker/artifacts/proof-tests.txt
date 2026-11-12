@@ -1,0 +1,66 @@
+$ bun run --cwd examples/spike-cleaning-worker test
+$ vitest run --reporter=verbose --silent=false
+
+ RUN  v4.1.12 /Users/jarvis/.sitebrew-work/wb-spike-v3/sdk/examples/spike-cleaning-worker
+
+stdout | test/proof.test.ts > P2/P5: Node extraction returns all five routes, layouts and dependencies without Leaflet execution
+/Users/jarvis/.sitebrew-work/wb-spike-v3/sdk/node_modules/.bun/leaflet@1.9.4/node_modules/leaflet/dist/leaflet-src.js:230
+  var requestFn = window.requestAnimationFrame || getPrefixed('RequestAnimationFrame') || timeoutDefer;
+                  ^
+
+ReferenceError: window is not defined
+    at /Users/jarvis/.sitebrew-work/wb-spike-v3/sdk/node_modules/.bun/leaflet@1.9.4/node_modules/leaflet/dist/leaflet-src.js:230:19
+    at /Users/jarvis/.sitebrew-work/wb-spike-v3/sdk/node_modules/.bun/leaflet@1.9.4/node_modules/leaflet/dist/leaflet-src.js:7:66
+    at Object.<anonymous> (/Users/jarvis/.sitebrew-work/wb-spike-v3/sdk/node_modules/.bun/leaflet@1.9.4/node_modules/leaflet/dist/leaflet-src.js:10:3)
+    at Module._compile (node:internal/modules/cjs/loader:1831:14)
+    at Module._extensions..js (node:internal/modules/cjs/loader:1971:10)
+    at Module.load (node:internal/modules/cjs/loader:1552:32)
+    at Module._load (node:internal/modules/cjs/loader:1354:12)
+    at wrapModuleLoad (node:internal/modules/cjs/loader:255:19)
+    at loadCJSModuleWithModuleLoad (node:internal/modules/esm/translators:325:3)
+    at ModuleWrap.<anonymous> (node:internal/modules/esm/translators:230:7)
+
+Node.js v25.8.0
+
+stdout | test/proof.test.ts > P2/P5: Node extraction returns all five routes, layouts and dependencies without Leaflet execution
+P2/P5: 5 routes; extraction 302.38 ms; stubbed ui/workers/-components/TrasaView.tsx, ui/-components/Access.tsx
+
+stdout | test/proof.test.ts > P3: nmae in nested layout fails the real TypeScript CLI
+.proof-Hz5vlK/negative.ts(1,59): error TS2322: Type '"nmae"' is not assignable to type 'Node<FieldName<{ readonly workers: { readonly singular: "worker"; readonly fields: { readonly name: { readonly type: "string"; }; readonly user: { readonly type: "ref"; readonly userLink: true; }; }; readonly relations: { ...; }; }; readonly slots: { ...; }; }, "workers">>'.
+
+ ✓ test/proof.test.ts > P2/P5: Node extraction returns all five routes, layouts and dependencies without Leaflet execution 360ms
+stdout | test/proof.test.ts > P3: removed field in custom uses fails the CI command
+Error: ui/workers/$id/trasa.ts: Unknown uses field worker.name
+
+ ✓ test/proof.test.ts > P3: nmae in nested layout fails the real TypeScript CLI 356ms
+stdout | test/proof.test.ts > P4: TSX route outside a minus directory fails the CI command
+Error: workers/bad.tsx: .tsx must be inside a -prefixed directory
+
+ ✓ test/proof.test.ts > P3: removed field in custom uses fails the CI command 1105ms
+stdout | test/proof.test.ts > P4: React import in a data page fails the CI command
+Error: workers/index.ts: data page must not import React (ui/workers/index.ts)
+workers/index.ts: data dependency must be an auditable local .ts module: react
+
+ ✓ test/proof.test.ts > P4: TSX route outside a minus directory fails the CI command 720ms
+stdout | test/proof.test.ts > CI: React re-export through a data layout fails
+Error: workers/index.ts: data page must not import React (ui/workers/-list.ts)
+workers/index.ts: data dependency must be an auditable local .ts module: react
+
+ ✓ test/proof.test.ts > P4: React import in a data page fails the CI command 734ms
+stdout | test/proof.test.ts > CI: customPage data import fails
+Error: workers/$id/trasa.ts: customPage may import components only: ../../../schema
+
+ ✓ test/proof.test.ts > CI: React re-export through a data layout fails 722ms
+stdout | test/proof.test.ts > CI: unknown slot id fails
+Error: ui/workers/index.ts: Unknown slot unknownSlot
+
+ ✓ test/proof.test.ts > CI: customPage data import fails 701ms
+ ✓ test/proof.test.ts > CI: unknown slot id fails 805ms
+ ✓ test/proof.test.ts > CI: parameter-name and index route collisions fail 1ms
+ ✓ test/proof.test.ts > CI: slots receive declared fields and validated props only 0ms
+ ✓ test/proof.test.ts > CI: runtime rejects forged page objects and layout typos 0ms
+
+ Test Files  1 passed (1)
+      Tests  11 passed (11)
+   Start at  23:23:44
+   Duration  6.09s (transform 50ms, setup 0ms, import 489ms, tests 5.51s, environment 0ms)
