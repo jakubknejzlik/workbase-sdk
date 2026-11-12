@@ -172,8 +172,8 @@
         "@testing-library/dom": "10.4.2"
       }
     },
-    "examples/spike-cleaning-worker": {
-      "name": "@workbasehq/spike-cleaning-worker",
+    "examples/spike-directory": {
+      "name": "@workbasehq/spike-directory",
       "dependencies": {
         "@tanstack/react-router": "1.170.41",
         "@workbasehq/ui-v3": "workspace:*",
@@ -10317,8 +10317,8 @@
       },
       "sha512-TbAd9DaPGSnzp6QvtYngntMZgcRk+igFELwR2N99XZn7RXUdKgsXMR+28bUO0rPsWp8MIu/f47luLIQuSLYv/w=="
     ],
-    "@workbasehq/spike-cleaning-worker": [
-      "@workbasehq/spike-cleaning-worker@workspace:examples/spike-cleaning-worker"
+    "@workbasehq/spike-directory": [
+      "@workbasehq/spike-directory@workspace:examples/spike-directory"
     ],
     "@workbasehq/ui-v3": [
       "@workbasehq/ui-v3@workspace:packages/ui-v3"

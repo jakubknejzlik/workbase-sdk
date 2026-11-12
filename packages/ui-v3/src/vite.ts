@@ -51,14 +51,14 @@ export async function generateRouteWrappers(root: string) {
   const output = resolve(root, '.ui-v3/routes')
   await rm(output, { recursive: true, force: true })
   await mkdir(output, { recursive: true })
-  await writeFile(resolve(output, '__root.tsx'), `import { createRootRoute } from '@tanstack/react-router'; import { Shell } from '../../src/runtime'; export const Route = createRootRoute({ component: Shell });\n`)
+  await writeFile(resolve(output, '__root.tsx'), `import { createRootRoute } from '@tanstack/react-router'; import { Shell } from '@workbasehq/ui-v3/react'; export const Route = createRootRoute({ component: Shell });\n`)
   for (const file of files) {
     const target = resolve(output, relative(resolve(root, 'ui'), file))
     await mkdir(dirname(target), { recursive: true })
     const imported = relative(dirname(target), file).replaceAll('\\', '/')
-    const runtime = relative(dirname(target), resolve(root, 'src/runtime')).replaceAll('\\', '/')
-    await writeFile(target, `import { createFileRoute, useParams } from '@tanstack/react-router';\nimport { createElement } from 'react';\nimport definition from '${imported}';\nimport { RouteView } from '${runtime}';\nexport const Route = createFileRoute('/placeholder')({component: function View() { const params = useParams({strict: false}); return createElement(RouteView, {definition, params}); }});\n`)
+    await writeFile(target, `import { createFileRoute, useParams } from '@tanstack/react-router';\nimport { createElement } from 'react';\nimport definition from '${imported}';\nimport { RouteView } from '@workbasehq/ui-v3/react';\nexport const Route = createFileRoute('/placeholder')({component: function View() { const params = useParams({strict: false}); return createElement(RouteView, {definition, params}); }});\n`)
   }
+  await writeFile(resolve(root, '.ui-v3/pages.ts'), files.map((file, index) => `import page${index} from '${relative(resolve(root, '.ui-v3'), file).replaceAll('\\', '/')}';`).join('\n') + `\nexport default [${files.map((_, index) => `{ source: '${relative(root, files[index])}', definition: page${index} }`).join(', ')}];\n`)
   const config = getConfig({ target: 'react', routesDirectory: output, generatedRouteTree: resolve(root, '.ui-v3/routeTree.gen.ts'), quoteStyle: 'single', semicolons: false, disableLogging: true }, root)
   await new Generator({ config, root }).run()
 }
@@ -66,16 +66,18 @@ export async function generateRouteWrappers(root: string) {
 export function uiV3(): Plugin {
   let root: string
   let generate: Promise<void> | undefined
+  let closing = false
   return {
     name: 'ui-v3-route-wrappers',
     configResolved(config) { root = config.root },
     async buildStart() { generate ??= generateRouteWrappers(root); await generate },
+    async closeBundle() { closing = true; await generate?.catch(() => {}) },
     configureServer(server) {
-      server.watcher.add(resolve(root, 'ui'))
+      server.watcher.add(['ui', 'schema.ts', 'config.ts'].map(name => resolve(root, name)))
       // Throwaway spike: regenerate then reload rather than patching a second route tree.
       server.watcher.on('all', (event, file) => {
-        if (file.startsWith(resolve(root, 'ui') + '/') && ['add', 'unlink', 'change'].includes(event)) {
-          generate = (generate ?? Promise.resolve()).then(() => generateRouteWrappers(root))
+        if (!closing && (file.startsWith(resolve(root, 'ui') + '/') || ['schema.ts', 'config.ts'].some(name => file === resolve(root, name))) && ['add', 'unlink', 'change'].includes(event)) {
+          generate = (generate ?? Promise.resolve()).catch(() => {}).then(() => generateRouteWrappers(root))
           void generate.then(() => server.ws.send({ type: 'full-reload' })).catch(error => server.config.logger.error(String(error)))
         }
       })

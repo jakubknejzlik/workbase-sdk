@@ -1,9 +1,11 @@
 import type { ComponentType, ReactNode } from 'react'
 
+export type Field = { type: string; userLink?: boolean; entity?: string; values?: readonly string[]; required?: boolean; readOnly?: boolean; default?: unknown }
 export type Schema = Record<string, {
+  displayField?: string
   singular: string
-  fields: Record<string, { type: string; userLink?: boolean }>
-  relations: Record<string, { entity: string }>
+  fields: Record<string, Field>
+  relations: Record<string, { entity: string; field: string; many?: boolean }>
 }>
 export type FieldName<S extends Schema, E extends keyof S> = keyof S[E]['fields'] & string
 export type Span = number | Partial<Record<'xs' | 'sm' | 'md' | 'lg' | 'xl', number>>
@@ -16,7 +18,10 @@ export type Node<F extends string = string> = F | {
   props?: Record<string, unknown>
   columns?: string[]
 }
-export type Layout<F extends string = string> = {
+declare const layoutSchema: unique symbol
+export type Layout<F extends string = string, S extends Schema = Schema, E extends string = string> = {
+  readonly [layoutSchema]?: S
+  readonly entity: E
   kind: 'layout' | 'list'
   nodes: Node<F>[]
   omit: F[]
@@ -62,8 +67,8 @@ export function defineUI<const S extends Schema, E extends keyof S & string, R e
         return value as Match
       } }
     },
-    layout(nodes: Node<F>[], options: { omit?: F[]; source?: string } = {}): Layout<F> { return { kind: 'layout', nodes, omit: [], ...options } },
-    list(nodes: Node<F>[], options: { orderBy?: F; search?: F[]; source?: string } = {}): Layout<F> { return { kind: 'list', nodes, omit: [], ...options } },
+    layout(nodes: Node<F>[], options: { omit?: F[]; source?: string } = {}): Layout<F, S, E> { return { entity, kind: 'layout', nodes, omit: [], ...options } },
+    list(nodes: Node<F>[], options: { orderBy?: F; search?: F[]; source?: string } = {}): Layout<F, S, E> { return { entity, kind: 'list', nodes, omit: [], ...options } },
     section: (id: string, children: Node<F>[], title?: string) => group('section', id, children, title),
     tab: (id: string, children: Node<F>[], title?: string) => group('tab', id, children, title),
     header: (options: { badges: Node<F>[] }): Node<F> => ({ kind: 'header', children: options.badges }),
@@ -78,25 +83,35 @@ export function defineUI<const S extends Schema, E extends keyof S & string, R e
 
 export function defineSlot<const P extends Shape>(definition: SlotDefinition<P>): SlotDefinition<P> { return definition }
 const brand = Symbol.for('@workbasehq/ui-v3/page')
-export type Page = {
+export type Page<S extends Schema = Schema, E extends keyof S & string = keyof S & string> = {
   readonly [brand]: true
   kind: 'page' | 'customPage'
   title: string
   nav?: { icon: string }
   uses: string[]
-  entity?: string
+  entity?: E
   mode?: 'list' | 'detail' | 'create' | 'edit'
-  layout?: Layout
+  layout?: Layout<FieldName<S, E>, S, E>
   component?: ComponentType<any>
 }
-type PageInput = Omit<Page, typeof brand | 'kind' | 'uses'> & { uses?: string[] }
-export function page(input: PageInput): Page { return { ...input, uses: input.uses ?? [], kind: 'page', [brand]: true } }
-export function customPage(input: PageInput & { uses: string[]; component: ComponentType<any> }): Page { return { ...page(input), kind: 'customPage' } }
-const entityPage = (mode: Page['mode'], entity: string, layout: Layout, options: { title: string; uses?: string[] }): Page => page({ ...options, entity, layout, mode })
-export const entityListPage = (entity: string, layout: Layout, options: { title: string; uses?: string[] }) => entityPage('list', entity, layout, options)
-export const entityDetailPage = (entity: string, layout: Layout, options: { title: string; uses?: string[] }) => entityPage('detail', entity, layout, options)
-export const entityCreatePage = (entity: string, layout: Layout, options: { title: string; uses?: string[] }) => entityPage('create', entity, layout, options)
-export const entityEditPage = (entity: string, layout: Layout, options: { title: string; uses?: string[] }) => entityPage('edit', entity, layout, options)
+type PageInput<S extends Schema, E extends keyof S & string> = Omit<Page<S, E>, typeof brand | 'kind' | 'uses' | 'layout'> & { uses?: string[]; layout?: Layout<FieldName<S, E>, S, NoInfer<E>> }
+export function page<S extends Schema, const E extends keyof S & string>(input: PageInput<S, E>): Page<S, E> { return { ...input, uses: input.uses ?? [], kind: 'page', [brand]: true } }
+export function customPage(input: PageInput<Schema, string> & { uses: string[]; component: ComponentType<any> }): Page { return { ...page(input), kind: 'customPage' } }
+type EntityOptions = { title: string; uses?: string[] }
+const entityPage = <S extends Schema, E extends keyof S & string>(mode: Page['mode'], entity: E, layout: Layout<FieldName<S, E>, S, NoInfer<E>>, options: EntityOptions): Page<S, E> => page<S, E>({ ...options, entity, layout, mode })
+export const entityListPage = <S extends Schema, E extends keyof S & string>(entity: E, layout: Layout<FieldName<S, E>, S, NoInfer<E>>, options: EntityOptions) => entityPage<S, E>('list', entity, layout, options)
+export const entityDetailPage = <S extends Schema, E extends keyof S & string>(entity: E, layout: Layout<FieldName<S, E>, S, NoInfer<E>>, options: EntityOptions) => entityPage<S, E>('detail', entity, layout, options)
+export const entityCreatePage = <S extends Schema, E extends keyof S & string>(entity: E, layout: Layout<FieldName<S, E>, S, NoInfer<E>>, options: EntityOptions) => entityPage<S, E>('create', entity, layout, options)
+export const entityEditPage = <S extends Schema, E extends keyof S & string>(entity: E, layout: Layout<FieldName<S, E>, S, NoInfer<E>>, options: EntityOptions) => entityPage<S, E>('edit', entity, layout, options)
+
+export const breakpoints = ['xs', 'sm', 'md', 'lg', 'xl'] as const
+export function resolvedSpans(span: Span): number[] {
+  if (!span || typeof span !== 'number' && (Array.isArray(span) || Object.keys(span).some(key => !breakpoints.includes(key as typeof breakpoints[number])))) throw new Error('Invalid responsive span')
+  const values = typeof span === 'number' ? [span] : Object.values(span)
+  if (!values.length || values.some(value => !Number.isInteger(value) || value < 1 || value > 12)) throw new Error('Span must be 1..12')
+  let previous = 12
+  return breakpoints.map(key => previous = typeof span === 'number' ? span : span[key] ?? previous)
+}
 
 export function slotInput(definition: SlotDefinition, input: Record<string, unknown>, record: Record<string, unknown>) {
   for (const key of Object.keys(input)) if (!(key in definition.props)) throw new Error(`Unknown slot prop ${key}`)
@@ -163,24 +178,26 @@ export function getManifest(routes: Record<string, unknown>, schema: Schema, slo
             uses.add(`${schema[target!].singular}.${name}`)
           }
         }
-        if (node.kind === 'action') fail(`No command registry in this worker slice: ${node.id}`)
+        if (node.kind === 'action') fail(`No command registry in this spike: ${node.id}`)
         if (node.children) walk(node.children)
         if (node.cells) {
-          for (const cell of node.cells) {
-            const spans = typeof cell.span === 'number' ? [cell.span] : Object.values(cell.span)
-            if (spans.some(span => !Number.isInteger(span) || span < 1 || span > 12)) fail('Span must be 1..12')
-            walk(cell.children)
-          }
-          for (const breakpoint of ['xs', 'sm', 'md', 'lg', 'xl'] as const) {
-            const preceding = ['xs', 'sm', 'md', 'lg', 'xl'].slice(0, ['xs', 'sm', 'md', 'lg', 'xl'].indexOf(breakpoint) + 1)
-            const total = node.cells.reduce((sum, cell) => sum + (typeof cell.span === 'number' ? cell.span : preceding.reduce((span, key) => cell.span && typeof cell.span !== 'number' ? cell.span[key as keyof typeof cell.span] ?? span : span, 12)), 0)
-            // At xs, stacked cells intentionally wrap; desktop rows must fit.
-            if (breakpoint === 'lg' && total > 12) fail('Columns exceed 12 at lg')
+          const spans = node.cells.map(cell => resolvedSpans(cell.span))
+          for (const cell of node.cells) walk(cell.children)
+          for (const [index, breakpoint] of breakpoints.entries()) {
+            // Full-width cells explicitly start a new grid row. Partial cells on
+            // each row must fit at every breakpoint, including inherited spans.
+            let total = 0
+            for (const cell of spans) {
+              if (cell[index] === 12) { total = 0; continue }
+              total += cell[index]
+              if (total > 12) fail(`Columns exceed 12 at ${breakpoint}`)
+            }
           }
         }
       }
     }
     if (route.layout) {
+      if (route.layout.entity !== route.entity) fail('Layout entity does not match page entity')
       walk(route.layout.nodes)
       for (const name of route.layout.omit) if (!entity || !(name in entity.fields)) fail(`Unknown omitted field ${name}`)
       if (route.layout.orderBy) field(route.layout.orderBy)
@@ -192,5 +209,9 @@ export function getManifest(routes: Record<string, unknown>, schema: Schema, slo
 }
 
 export function routePath(source: string) {
-  return '/' + source.replace(/^\.?\/?ui\//, '').replace(/\.ts$/, '').split('/').filter(part => part !== 'index').join('/')
+  const name = source.replace(/^\.?\/?ui\//, '').replace(/\.ts$/, '')
+  // The spike deliberately supports directory routes and $params only. Reject
+  // TanStack dots, pathless/layout prefixes, groups and escapes before import.
+  if (!name.split('/').every(part => /^(?:[a-zA-Z][a-zA-Z0-9-]*|\$[a-zA-Z][a-zA-Z0-9]*)$/.test(part)) || name.split('/').slice(0, -1).includes('index') || name.split('/').includes('route')) throw new Error(`Unsupported route filename: ${source}`)
+  return '/' + name.split('/').filter(part => part !== 'index').join('/')
 }

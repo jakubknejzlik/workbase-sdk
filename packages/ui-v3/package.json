@@ -5,7 +5,10 @@
   "exports": {
     ".": "./src/index.ts",
     "./vite": "./src/vite.ts",
-    "./check": "./src/check.ts"
+    "./check": "./src/check.ts",
+    "./react": "./src/react.tsx",
+    "./styles.css": "./src/styles.css",
+    "./messages": "./src/messages.ts"
   },
   "dependencies": {
     "vite": "7.3.1",
@@ -14,7 +17,8 @@
     "typescript": "^6.0.0"
   },
   "peerDependencies": {
-    "react": "19.2.8"
+    "react": "19.2.8",
+    "@tanstack/react-router": "1.170.41"
   },
   "devDependencies": {
     "@types/react": "19.2.18"

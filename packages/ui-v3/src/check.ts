@@ -1,6 +1,7 @@
 import { readdir, readFile } from 'node:fs/promises'
 import { resolve, relative, dirname, extname } from 'node:path'
 import ts from 'typescript'
+import { routePath } from './index.ts'
 
 export async function uiFiles(root: string): Promise<string[]> {
   async function walk(dir: string): Promise<string[]> {
@@ -25,6 +26,7 @@ export async function checkSources(root: string) {
     const local = relative(resolve(root, 'ui'), file)
     if (file.endsWith('.tsx') && !local.split('/').slice(0, -1).some(part => part.startsWith('-'))) errors.push(`${local}: .tsx must be inside a -prefixed directory`)
     if (!isRoute(root, file)) continue
+    try { routePath('ui/' + local) } catch (error) { errors.push(String(error)) }
     const tree = await source(file)
     let helper: string | undefined
     const helpers = new Map<string, string>()
@@ -62,7 +64,8 @@ export async function checkSources(root: string) {
         if (helper !== 'customPage') {
           if (!resolved || !id.startsWith('.')) { errors.push(`${local}: data dependency must be an auditable local .ts module: ${id}`); continue }
           if (resolved.endsWith('.tsx') || resolved.includes('/-components/')) errors.push(`${local}: data page cannot import components: ${id}`)
-          else if (resolved.endsWith('.ts')) await inspect(resolve(dirname(moduleFile), relative(dirname(moduleFile), resolved)), false)
+          else if (!resolved.endsWith('.ts') || resolved.endsWith('.d.ts')) errors.push(`${local}: unsupported runtime data dependency extension: ${id}`)
+          else await inspect(resolve(dirname(moduleFile), relative(dirname(moduleFile), resolved)), false)
         }
       }
     }

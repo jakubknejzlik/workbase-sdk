@@ -17,7 +17,7 @@
     "packages/ui",
     "packages/test-support",
     "packages/ui-v3",
-    "examples/spike-cleaning-worker"
+    "examples/spike-directory"
   ],
   "scripts": {
     "lint": "bun scripts/sdk-lint.ts && bun run spike:check",
@@ -27,12 +27,12 @@
     "check:ci-invariants": "bun scripts/sdk-ci-invariants.ts",
     "console:build": "bun scripts/build-console.ts",
     "sdk:pack": "bash scripts/sdk-pack.sh",
-    "spike:check": "bun run --cwd examples/spike-cleaning-worker check",
-    "spike:build": "bun run --cwd examples/spike-cleaning-worker build",
-    "spike:manifest": "bun run --cwd examples/spike-cleaning-worker manifest",
-    "spike:test": "bun run --cwd examples/spike-cleaning-worker test",
-    "spike:typecheck": "bun run --cwd examples/spike-cleaning-worker typecheck",
-    "spike:browser": "bun run --cwd examples/spike-cleaning-worker browser"
+    "spike:check": "bun run --cwd examples/spike-directory check",
+    "spike:build": "bun run --cwd examples/spike-directory build",
+    "spike:manifest": "bun run --cwd examples/spike-directory manifest",
+    "spike:test": "bun run --cwd examples/spike-directory test",
+    "spike:typecheck": "bun run --cwd examples/spike-directory typecheck",
+    "spike:browser": "bun run --cwd examples/spike-directory browser"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "0.23.0",

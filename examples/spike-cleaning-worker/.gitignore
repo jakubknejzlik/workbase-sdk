@@ -1,5 +1,0 @@
-.ui-v3/
-dist/
-artifacts/*.json
-artifacts/*.log
-.proof-*/
