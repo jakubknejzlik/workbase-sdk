@@ -15,7 +15,7 @@ export function accessGuards(policy: EffectiveAccessPolicy, names: readonly stri
     guards: [...new Set([...names, ...registry.keys()])].sort().map(name => {
       const command = registry.get(name)
       return { name, permission: command ? canonical(command.permission) : null,
-        additionalPermissions: (command?.additionalPermissions ?? []).map(canonical).sort((a, b) => key(a).localeCompare(key(b))),
+        additionalPermissions: (command?.additionalPermissions ?? []).map(canonical).sort((a, b) => key(a) < key(b) ? -1 : key(a) > key(b) ? 1 : 0),
         // A registered command's prepare/plan can contain further executable checks.
         opaque: true as const,
       }

@@ -104,9 +104,10 @@ function entityPath(binding: Binding, entry: string, name: string, directory = '
   if (![`${prefix}${name}`, `${prefix}${name}.ts`].includes(binding.module) || /[/\\]/.test(name)) fail(binding.node, 'Entity import must match schema/<entity>.ts')
   try {
     const schema = realpathSync(resolve(dirname(entry), directory))
-    // Reject every competing sibling, including an extensionless file or directory.
+    // Reject competing imports, excluding the two generated access audit artifacts.
     const lower = name.toLowerCase()
     if (readdirSync(schema).some(candidate => candidate !== `${name}.ts`
+      && !(directory === '' && name === 'access' && ['access.lock.json', 'access.lock.md'].includes(candidate))
       && (candidate.toLowerCase() === lower || candidate.toLowerCase().startsWith(lower + '.')))) fail(binding.node, 'Ambiguous entity import: competing schema candidate')
     const path = realpathSync(resolve(schema, `${name}.ts`))
     if (dirname(path) !== schema) fail(binding.node, 'Resolved entity import must match schema/<entity>.ts inside the schema directory')
@@ -200,6 +201,51 @@ function literal(node: ts.Expression, bindings: Map<string, Binding>, path: stri
     return fail(node, 'Function call is outside the literal boundary; only SDK accountLink() at fields.user is allowed')
   }
   return fail(node, 'Expected a literal value; variables and expressions are outside the literal boundary')
+}
+
+/** Source metadata only, for trusted executable configs with SDK/plugin registrations.
+ * No evaluation, access compilation or policy inference occurs here. Imported code
+ * guards are attributed to their enclosing config registration unless mapped directly.
+ */
+export function configSources(file: string): SourceMap {
+  const entry = realpathSync(resolve(file))
+  const source = read(entry)
+  const sources: SourceMap = { '': location(source) }
+  const declaration = exported(source, 'default')
+  if (!declaration || !ts.isCallExpression(declaration) || !declaration.arguments[0]) return sources
+  // Code registrations may contain methods, calls and spreads. Index their
+  // enclosing declarations without applying the data-only literal validator.
+  const members = (node: ts.ObjectLiteralExpression) => node.properties.filter((property): property is ts.PropertyAssignment | ts.ShorthandPropertyAssignment =>
+    (ts.isPropertyAssignment(property) || ts.isShorthandPropertyAssignment(property)) && !ts.isComputedPropertyName(property.name))
+  function record(node: ts.Expression, prefix: string) {
+    node = unwrap(node)
+    sources[prefix] = location(node)
+    if (ts.isObjectLiteralExpression(node)) for (const property of members(node)) {
+      const child = [prefix, key(property.name)].filter(Boolean).join('.')
+      record(ts.isPropertyAssignment(property) ? property.initializer : property.name, child)
+      sources[child] = location(property)
+    }
+    if (ts.isArrayLiteralExpression(node)) node.elements.forEach((child, i) => record(child, `${prefix}.${i}`))
+  }
+  const arg = unwrap(declaration.arguments[0])
+  record(arg, '')
+  if (!ts.isObjectLiteralExpression(arg)) return sources
+  const bindings = imports(source)
+  const props = new Map(members(arg).map(property => [key(property.name), property]))
+  const refs: [string, ts.Expression | undefined][] = [['access', value(props.get('access'))]]
+  const entities = value(props.get('entities'))
+  if (entities && ts.isObjectLiteralExpression(entities)) for (const property of members(entities)) refs.push([`entities.${key(property.name)}`, value(property)])
+  for (const [prefix, ref] of refs) {
+    if (!ref || !ts.isIdentifier(ref)) continue
+    const binding = bindings.get(ref.text)
+    if (!binding || !binding.module.startsWith('./')) continue
+    const name = prefix === 'access' ? 'access' : prefix.slice('entities.'.length)
+    const path = entityPath(binding, entry, name, prefix === 'access' ? '' : 'schema')
+    const imported = read(path)
+    const call = exported(imported, binding.imported)
+    if (call && ts.isCallExpression(call) && call.arguments[0]) record(call.arguments[0], prefix)
+  }
+  return sources
 }
 
 /**

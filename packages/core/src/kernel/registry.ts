@@ -33,6 +33,8 @@ export class KernelRegistry {
   readonly permissionsActive: boolean
   private readonly trust: boolean
   private readonly hasAuthorization: boolean
+  /** Audit the actual runtime bypass, including separately supplied options. */
+  get authorizationTrust(): boolean { return this.trust }
   constructor(config: InstanceInput & Pick<InstanceConfig, 'effectiveAccess'>, options: RuntimeOptions = {}, env?: RuntimeEnv) {
     if (config.baseline === 'workbase-sdk' && !config.effectiveAccess) throw new DeclarationError(['access'], 'Executable schema configurations require explicit entity access and shared access.ts')
     const resolved = resolvePlugins(options.plugins ?? config.plugins ?? [], config.interactive)
