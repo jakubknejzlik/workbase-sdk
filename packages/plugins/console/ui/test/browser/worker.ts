@@ -5,10 +5,11 @@ import { workerAccessFixture } from '../../../../../core/test/fixtures/worker-ac
 const config = workerAccessFixture()
 let app: ReturnType<typeof createApp> | undefined
 let publicOrigin: string | undefined
-let bootDelay = 0
+let bootDelay = 0, serverSHA = 'a'.repeat(40)
 export default { async fetch(request: Request, env: RuntimeEnv, ctx: ExecutionContext) {
   const url = new URL(request.url)
   if (bootDelay && (url.pathname === '/me' || url.pathname.endsWith('/capabilities'))) await new Promise(resolve => setTimeout(resolve, bootDelay))
+  if (url.pathname === '/build.json') return Response.json({ sha: serverSHA })
   if (url.pathname.startsWith('/__test/') && request.headers.get('X-Test-Control') === 'synthetic-ui-control') {
     if (url.pathname === '/__test/seed') {
       const candidate = request.headers.get('X-Test-Origin') ?? ''
@@ -35,6 +36,7 @@ export default { async fetch(request: Request, env: RuntimeEnv, ctx: ExecutionCo
     } else if (url.pathname === '/__test/mail') {
       return Response.json({ link: await env.DB.prepare('SELECT body FROM email_outbox WHERE recipient=? ORDER BY created_at DESC LIMIT 1').bind(url.searchParams.get('email')).first('body') })
     } else if (url.pathname === '/__test/boot-delay') bootDelay = url.searchParams.get('ms') === '1500' ? 1500 : 0
+    else if (url.pathname === '/__test/build') serverSHA = /^[0-9a-f]{40}$/.test(url.searchParams.get('sha') ?? '') ? url.searchParams.get('sha')! : 'a'.repeat(40)
     else if (url.pathname === '/__test/demote') await env.DB.exec("UPDATE memberships SET role='staff' WHERE user_id='admin'")
     else if (url.pathname === '/__test/promote') await env.DB.exec("UPDATE memberships SET role='admin' WHERE user_id='admin'")
     return Response.json({ ok: true })

@@ -106,3 +106,23 @@ test.each([1500, 0])('sign-out then browser Back purges private DOM at pageshow 
     await context.close()
   }
 }, 30000)
+test('dirty form with a deferred build reload is not reloaded while the document is left', async () => {
+  const context = await session('admin'), page = await context.newPage(), docs: string[] = [], errors: string[] = []
+  const setSHA = (sha: string) => context.request.get('/__test/build?sha=' + sha, { headers: control })
+  page.on('pageerror', error => errors.push(error.message))
+  page.on('request', request => { if (request.isNavigationRequest() && request.frame() === page.mainFrame()) docs.push(new URL(request.url()).pathname) })
+  try {
+    await setSHA('a'.repeat(40))
+    await page.goto('/workers/own/edit'); const field = page.getByLabel('Name', { exact: true }); await field.waitFor()
+    await field.fill('Unsaved draft')
+    await setSHA('b'.repeat(40))
+    await page.evaluate(() => (globalThis as any).document.dispatchEvent(new Event('visibilitychange')))
+    await page.waitForTimeout(200)
+    // The mismatch is deferred while the draft is mounted.
+    expect(await field.inputValue()).toBe('Unsaved draft'); expect(docs).toEqual(['/workers/own/edit'])
+    await page.goto('/workers'); await page.waitForTimeout(2000)
+    expect(new URL(page.url()).pathname).toBe('/workers')
+    expect(docs.slice(1).every(path => path === '/workers')).toBe(true)
+    expect(errors).toEqual([])
+  } finally { await setSHA('a'.repeat(40)); await context.close() }
+}, 30000)

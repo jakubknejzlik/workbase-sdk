@@ -139,24 +139,30 @@ export type AuthShellProps = { manifest: Manifest; i18n: I18n; children?: ReactN
 export function AuthShell({ manifest, i18n, children, fetch: transport = globalThis.fetch, navigate }: AuthShellProps) {
   const [initial, setEntry] = useState(entry), [org, setOrg] = useState(() => authStorage.org.read()), [memberships, setMemberships] = useState<Membership[]>(), [inbox, setInbox] = useState<Invitation[]>(), [failed, setFailed] = useState(false), [retry, setRetry] = useState(0)
   const [suspended, setSuspended] = useState(false), [boot, setBoot] = useState(0)
+  // Set while this document is being left or frozen: unmount cleanup must not release a deferred build reload here.
+  const leaving = useRef(false)
   const dropPrivateView = useCallback(() => {
+    leaving.current = true
     // Commit before the browser freezes this document or sign-out navigates away.
     flushSync(() => { setSuspended(true); setMemberships(undefined); setInbox(undefined); setFailed(false) })
   }, [])
   useEffect(() => {
     const resume = (event: { persisted: boolean }) => {
       if (!event.persisted) return
+      leaving.current = false
       // Re-read preferences and remount every private observer behind a fresh boot.
       flushSync(() => {
         setMemberships(undefined); setInbox(undefined); setFailed(false)
         setOrg(authStorage.org.read()); setBoot(value => value + 1); setSuspended(false)
       })
+      // The restored document still runs the old build; release a deferred reload once fresh owners have registered.
+      watcher.current?.flush()
     }
     window.addEventListener('pagehide', dropPrivateView); window.addEventListener('pageshow', resume)
     return () => { window.removeEventListener('pagehide', dropPrivateView); window.removeEventListener('pageshow', resume) }
   }, [dropPrivateView])
   const logoutBusy = useRef(false), drafts = useRef(new Set<symbol>()), watcher = useRef<ReturnType<typeof browserBuild> | null>(null)
-  const reportDirty = useCallback((owner: symbol, dirty: boolean) => { if (dirty) drafts.current.add(owner); else drafts.current.delete(owner); watcher.current?.flush() }, [])
+  const reportDirty = useCallback((owner: symbol, dirty: boolean) => { if (dirty) drafts.current.add(owner); else drafts.current.delete(owner); if (!leaving.current) watcher.current?.flush() }, [])
   useEffect(() => { const current = browserBuild(transport, () => drafts.current.size > 0); watcher.current = current; return () => { current.stop(); watcher.current = null } }, [transport])
   const request = useCallback(requestWith(transport), [transport])
   useSyncExternalStore(i18n.subscribe, i18n.language, i18n.language)

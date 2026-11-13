@@ -284,7 +284,17 @@ SDK record forms, sign-in and profile-gate forms register dirty state with their
 owning shell. Reload waits until all registrations are clean or unmounted.
 Custom forms can call the additive `useAuthDirty(dirty)` export from `/react`.
 No draft values enter the reload watcher or browser storage. The latch is public
-build state, independent of accounts and orgs. Navigation and session caches
+build state, independent of accounts and orgs.
+
+On `pagehide` (including sign-out) the shell synchronously unmounts every private
+view so the back/forward cache never stores account data. Unmounting a dirty form
+during that teardown does **not** release a deferred reload: the departing
+document is not reloaded, so the user's navigation completes and the destination
+document loads the new build. A `persisted` `pageshow` re-boots the shell and then
+releases a still-pending reload for the restored document. Compatibility note:
+because the restored document re-boots from fresh `/me` and capabilities, unsaved
+in-memory form drafts do not survive leaving the document and returning with
+Back/Forward (as with reload or tab close). Navigation and session caches
 retain their existing scope and recovery behavior.
 
 The `console/ui/react` and `console/ui/vite` source subpaths are included by the
