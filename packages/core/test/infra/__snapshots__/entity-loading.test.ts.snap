@@ -1,0 +1,71 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`loads explicit worker imports into the canonical normalized schema snapshot 1`] = `
+{
+  "account": {
+    "entity": "users",
+  },
+  "commands": [],
+  "entities": {
+    "users": {
+      "checks": [],
+      "displayField": "name",
+      "fields": {
+        "name": {
+          "required": true,
+          "type": "string",
+        },
+        "role": {
+          "required": true,
+          "type": "enum",
+          "values": [
+            "admin",
+            "staff",
+          ],
+        },
+      },
+      "relations": {},
+    },
+    "worker": {
+      "checks": [],
+      "displayField": "name",
+      "fields": {
+        "name": {
+          "required": true,
+          "type": "text",
+        },
+        "user": {
+          "entity": "users",
+          "readOnly": true,
+          "required": false,
+          "type": "ref",
+          "userLink": true,
+        },
+      },
+      "relations": {
+        "user_account": {
+          "entity": "users",
+          "field": "user",
+        },
+      },
+    },
+  },
+  "id": "sample",
+  "languages": [
+    "cs",
+    "en",
+  ],
+  "locale": "en",
+  "organizationOwnerRole": "admin",
+  "organizationPermissions": {},
+  "permissions": {},
+  "policies": {},
+  "registration": "open",
+  "revision": 1,
+  "roles": [
+    "admin",
+    "staff",
+  ],
+  "timeZone": "UTC",
+}
+`;

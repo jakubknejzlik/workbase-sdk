@@ -34,12 +34,15 @@
     "./session-contract": "./src/session-contract.ts",
     "./infra": "./src/infra/index.ts",
     "./infra/provision": "./src/infra/provision.ts",
-    "./query/expressions": "./src/query/expressions.ts"
+    "./query/expressions": "./src/query/expressions.ts",
+    "./schema": "./src/schema.ts",
+    "./schema/load": "./src/schema/load.ts"
   },
   "dependencies": {
     "hono": "4.13.13",
     "zod": "4.6.7",
-    "@jakub.knejzlik/ts-query": "0.15.0"
+    "@jakub.knejzlik/ts-query": "0.15.0",
+    "typescript": "^6.0.0"
   },
   "devDependencies": {
     "jose": "6.2.13",

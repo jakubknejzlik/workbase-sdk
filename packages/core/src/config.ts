@@ -88,6 +88,7 @@ const schema = z.object({
     }).optional(),
   }).optional(),
   pluginConfig: z.record(z.string(), z.unknown()).optional(),
+  languages: z.array(z.string()).optional(),
   locale: z.enum(['en', 'cs']).default('en'),
   timeZone: z.string().default('UTC'),
   enumLabels: z.record(z.string(), z.record(z.string(), z.string())).optional(),
@@ -123,7 +124,12 @@ export type InstanceInput = z.input<typeof schema>
 export type Operation = 'read' | 'create' | 'update' | 'delete'
 export const baseFields = ['id', 'organization_id', 'created_at', 'updated_at', 'version']
 const reserved = new Set(['users', 'organizations', 'memberships', 'sessions', 'invitations', 'email_outbox', 'audit_outbox', 'security_log', 'idempotency_keys', 'instance_meta', 'webhook_deliveries', 'audit_events', 'd1_migrations', 'identities', 'access_tokens', 'user', 'session', 'account', 'verification', 'rateLimit', 'identity_link_grants', '_plugin_migrations'])
-export function defineInstance(input: Omit<ShorthandInput, 'roles' | 'entities' | 'permissions'> & { roles?: string[]; entities?: ShorthandInput['entities']; permissions?: ShorthandInput['permissions'] }): InstanceConfig {
+type InstanceDefinitionInput = Omit<ShorthandInput, 'roles' | 'entities' | 'permissions'> & { roles?: string[]; entities?: ShorthandInput['entities']; permissions?: ShorthandInput['permissions'] }
+export function defineInstance(input: InstanceDefinitionInput): InstanceConfig {
+  return normalizeInstance(input)
+}
+/** @internal Shared kernel normalization; schema declarations opt into exact authored roles. */
+export function normalizeInstance(input: InstanceDefinitionInput, exactRoles = false): InstanceConfig {
   const resolved = resolvePlugins(input.plugins ?? [], input.interactive)
   const pluginConfig = { ...input.pluginConfig }
   let contribution: Partial<InstanceInput> = {}
@@ -146,14 +152,16 @@ export function defineInstance(input: Omit<ShorthandInput, 'roles' | 'entities' 
   // existing entries byte-for-byte. Newly materialized roles receive no grants.
   const authoredRoles = expanded.roles
   const roles = [...authoredRoles]
-  for (const role of [expanded.organizationOwnerRole ?? 'owner', 'member']) if (!roles.includes(role)) roles.push(role)
+  if (exactRoles) {
+    if (JSON.stringify(roles) !== JSON.stringify(input.roles) || expanded.organizationOwnerRole !== input.organizationOwnerRole) throw new Error('Plugin role configuration must match declared roles and organizationOwnerRole')
+  } else for (const role of [expanded.organizationOwnerRole ?? 'owner', 'member']) if (!roles.includes(role)) roles.push(role)
   const config = schema.parse({ ...expanded, roles })
   for (const name of Object.keys(config.pluginConfig ?? {})) {
     if (!config.plugins?.some(plugin => plugin.name === name)) throw new Error(`Unknown plugin config: ${name}`)
   }
   // Custom roles have no default grants. Preserve sparse explicit/model tables;
   // implicit tables retain their existing empty entries for custom roles.
-  const defaultRoles = input.organizationPermissions === undefined && model.organizationPermissions === undefined
+  const defaultRoles = exactRoles ? [] : input.organizationPermissions === undefined && model.organizationPermissions === undefined
     ? authoredRoles.filter(role => role !== 'member') : authoredRoles.filter(role => Object.hasOwn(defaultOrganizationPermissions, role))
   // Only absent entries receive legacy defaults; a persisted [] stays empty on reload.
   config.organizationPermissions = { ...Object.fromEntries(defaultRoles.filter(role => !Object.hasOwn(config.organizationPermissions, role))
