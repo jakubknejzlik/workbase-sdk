@@ -1,3 +1,4 @@
+import { recordActionRoutes } from './record-action-routes'
 import { recordActions } from './record-actions'
 import { assertActorFields } from './policies'
 import { enforcePlan, writeFilter } from './execution/policies'
@@ -28,6 +29,7 @@ export function serialize(config: InstanceConfig, name: string, row: Row) {
   return out
 }
 export function crudRoutes(app: App, config: InstanceConfig, env: RuntimeEnv) {
+  recordActionRoutes(app, config, env)
   const kernel = kernelFor(config)
   const storedFields = (name: string) => fieldsFor(config, name).filter(field => !config.entities[name].fields[field]?.computed).filter(field => !config.entities[name].label || field !== config.entities[name].displayField)
   const responseRow = async (name: string, scope: Scope, row: Row) => {

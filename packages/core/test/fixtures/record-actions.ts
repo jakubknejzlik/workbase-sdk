@@ -13,6 +13,7 @@ export const closeRecord = defineCommand({
     event: { entity: 'record', entityId: id, operation: 'record.closed' }, result: { status: 200, body: { ok: true } } }),
 })
 export function actionFixture(actions: any = {
+  touch: { command: 'record/close' },
   close: { command: 'record/close', available: [{ when: { use: 'open' }, reason: 'record.closed' }] },
   secret: { command: 'record/close', available: [{ when: { secret: { eq: 'yes' } }, reason: 'record.secret' }] },
   ordered: { command: 'record/close', available: [{ when: { state: { ne: null } }, reason: 'record.missing' }, { when: { use: 'open' }, reason: 'record.closed' }] },

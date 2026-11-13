@@ -170,6 +170,7 @@ Source locations identify the rule or its enclosing registration declaration. Ex
 | record | close | record/close | [{"reason":"record.closed","when":{"state":{"eq":"open"}}}] | ["record.state"] | packages/core/test/fixtures/record-actions.ts:1 |
 | record | ordered | record/close | [{"reason":"record.missing","when":{"state":{"ne":null}}},{"reason":"record.closed","when":{"state":{"eq":"open"}}}] | ["record.state"] | packages/core/test/fixtures/record-actions.ts:1 |
 | record | secret | record/close | [{"reason":"record.secret","when":{"secret":{"eq":"yes"}}}] | ["record.secret"] | packages/core/test/fixtures/record-actions.ts:1 |
+| record | touch | record/close | [] | [] | packages/core/test/fixtures/record-actions.ts:1 |
 
 ## Registered command guards
 

@@ -87,3 +87,25 @@ test('successful mutation seeds detail, invalidates other entries and supersedes
   await client.one('test', { id: 'y' }, signal())
   expect(fetch).toHaveBeenCalledTimes(4)
 })
+
+test('act writes a returned detail into cache and failure surfaces reason without overwriting detail', async () => {
+  const initial = { id: 'x', version: 1, actions: { close: { enabled: true } } }
+  const updated = { id: 'x', version: 2, actions: { close: { enabled: false, reason: 'record.closed' } } }
+  const fetch = vi.fn().mockResolvedValueOnce(response(initial)).mockResolvedValueOnce(response(updated)).mockResolvedValueOnce(response({ error: 'action_unavailable', reason: 'record.closed' }, 409))
+  const client = createClient({ baseURL: '', actorId: 'a', orgId: 'one', fetch })
+  await client.one('record', { id: 'x' }, signal())
+  expect(await client.act('record', 'x', 'close', signal())).toEqual(updated)
+  expect(await client.one('record', { id: 'x' }, signal())).toEqual(updated)
+  await expect(client.act('record', 'x', 'close', signal())).rejects.toMatchObject({ status: 409, code: 'action_unavailable', reason: 'record.closed' })
+  expect(await client.one('record', { id: 'x' }, signal())).toEqual(updated)
+  expect(fetch).toHaveBeenCalledTimes(3)
+  expect(fetch.mock.calls[1][0]).toBe('/api/record/x/actions/close')
+  expect(fetch.mock.calls[1][1]).toMatchObject({ method: 'POST', credentials: 'same-origin', body: '{}' })
+})
+test('act refetches detail after a command response without a returned row', async () => {
+  const fetch = vi.fn().mockResolvedValueOnce(response({ ok: true })).mockResolvedValueOnce(response({ id: 'x', version: 2, actions: {} }))
+  const client = createClient({ baseURL: '', actorId: 'a', orgId: 'one', fetch })
+  expect(await client.act('record', 'x', 'close', signal())).toMatchObject({ id: 'x', version: 2 })
+  expect(await client.one('record', { id: 'x' }, signal())).toMatchObject({ version: 2 })
+  expect(fetch.mock.calls.map(([url]) => url)).toEqual(['/api/record/x/actions/close', '/api/record/x'])
+})

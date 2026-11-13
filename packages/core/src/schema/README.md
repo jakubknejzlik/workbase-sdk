@@ -245,3 +245,11 @@ the first failing reason. List, query and generic mutation responses omit the ma
 The SDK era marker is `baseline: 'workbase-sdk'`; domain fields and relations named
 `actions` are reserved in that era, including declarations without compiled access.
 Legacy configurations retain their existing response and naming contracts.
+
+`POST /api/:entity/:id/actions/:name` accepts `{}` and supplies `{id}` to the
+existing command. Role permission runs before record access; the first rule of
+one atomic batch rechecks read/write predicates and conditions with `expectRows: 1`.
+A hidden/unknown/masked action returns GET's `404 not_found` body. A readable,
+unavailable action returns `409 {error: 'action_unavailable', reason}`. Diagnosis
+is read-only after rollback. `client.act(entity, id, name, signal)` caches a returned
+detail row or refetches detail; failures expose `ApiFailure.reason`.
