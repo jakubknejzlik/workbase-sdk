@@ -87,11 +87,12 @@ describe('exported public bootstrap workflow policy', () => {
       expect(job.steps.filter(step => step.run && ciCommands.includes(step.run)).map(step => step.run)).toEqual(ciCommands)
     }
   })
-  it('runs read-only CI for every fork PR and pushes to main, without OIDC', () => {
+  it('runs read-only CI for PRs into main, pushes to main and manual dispatch, without OIDC', () => {
     const { source, parsed } = workflow('ci')
-    expect(Object.keys(parsed.on).sort()).toEqual(['pull_request', 'push'])
+    expect(Object.keys(parsed.on).sort()).toEqual(['pull_request', 'push', 'workflow_dispatch'])
     expect(parsed.on.push).toEqual({ branches: ['main'] })
-    expect(parsed.on.pull_request).toBeNull()
+    expect(parsed.on.pull_request).toEqual({ branches: ['main'] })
+    expect(parsed.on.workflow_dispatch).toBeNull()
     expect(source).not.toContain('id-token')
     expect(Object.keys(parsed.jobs)).toEqual(['check'])
     expect(parsed.jobs.check.if).toBeUndefined()

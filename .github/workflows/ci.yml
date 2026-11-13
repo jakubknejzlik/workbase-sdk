@@ -1,8 +1,13 @@
 name: SDK CI
 on:
+  # Full CI runs automatically only for PRs into main (e.g. the integration PR).
+  # PRs into integration/* branches use targeted local checks; run this
+  # workflow manually (workflow_dispatch) on any ref when a full run is needed.
   pull_request:
+    branches: [main]
   push:
     branches: [main]
+  workflow_dispatch:
 permissions:
   contents: read
 jobs:
