@@ -1,4 +1,4 @@
-import { invitationRole, accountAccessState } from '../../../core/src/worker-access'
+import { invitationRole, latestRowInvitation } from '../../../core/src/worker-access'
 import { actorAccountId } from '../../../core/src/policies'
 import { rowTargetSchema, rowLink, rowInvitationGuard } from './row-invitations'
 import { quote } from '../../../core/src/migrations/schema'
@@ -119,15 +119,14 @@ export function memberRoutes(app: App, config: InstanceConfig, env: RuntimeEnv) 
     const row = await env.DB.prepare(`SELECT ${quote(link.field)} AS user FROM ${quote(target.entity)} WHERE organization_id=? AND id=? AND ${filter.sql}`)
       .bind(scope.organizationId, target.row, ...(filter.bindings ?? [])).first<{ user: string | null }>()
     if (!row) throw new ApiError(404, 'not_found')
-    const access = await accountAccessState(config, scope, env.DB, target.entity, target.row)
-    const invitation = access.invitation
+    const invitation = await latestRowInvitation(env.DB, scope.organizationId, target.entity, target.row)
     const guard = rowInvitationGuard(config, scope, target, false)
     let invitePermission = false
     try { kernelFor(config).resourcePermission(scope, 'invitations.create'); organizationPermission(config, scope, 'invitations.create'); invitePermission = true } catch {}
     const canInvite = invitePermission && kernelFor(config).can(scope, target.entity, 'create') && !!await env.DB.prepare(`SELECT 1 WHERE ${guard.sql}`).bind(...guard.values).first()
     let canCancel = false
     try { kernelFor(config).resourcePermission(scope, 'invitations.revoke'); organizationPermission(config, scope, 'invitations.revoke'); canCancel = true } catch {}
-    return c.json({ can_cancel: canCancel, state: access.state === 'linked' ? 'signed_in' : access.state,
+    return c.json({ can_cancel: canCancel, state: row.user ? 'signed_in' : invitation ? invitation.expired_at || invitation.expires_at <= nowISO() ? 'expired' : 'invited' : 'no_account',
       ...(invitation && (canInvite || canCancel) ? { invitation: { id: invitation.id, email: invitation.email, expires_at: invitation.expires_at } } : {}), can_invite: canInvite })
   })
   app.post('/orgs/:orgId/invitations', scoped, async c => {

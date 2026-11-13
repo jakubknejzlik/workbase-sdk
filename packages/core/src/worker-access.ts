@@ -27,6 +27,15 @@ export interface AccountAccessState {
   account: { id: string; display_name: string; email: string } | null
   invitation: { id: string; email: string; expires_at: string } | null
 }
+/** The caller checks invitation and row read authority before looking up history. */
+export async function latestRowInvitation(db: D1Database, organizationId: string, entity: string, id: string): Promise<(NonNullable<AccountAccessState['invitation']> & { expired_at: string | null }) | null> {
+  // Select history before filtering terminal rows, so a cancelled replacement
+  // never resurrects an older expired invitation.
+  const latest = await db.prepare(`SELECT id,email,expires_at,expired_at,accepted_at,revoked_at,declined_at FROM invitations WHERE organization_id=? AND target_entity=? AND target_row=? ORDER BY created_at DESC,id DESC LIMIT 1`)
+    .bind(organizationId, entity, id).first<{ id: string; email: string; expires_at: string; expired_at: string | null; accepted_at: string | null; revoked_at: string | null; declined_at: string | null }>()
+  if (!latest || latest.accepted_at || latest.revoked_at || latest.declined_at) return null
+  return { id: latest.id, email: latest.email, expires_at: latest.expires_at, expired_at: latest.expired_at }
+}
 /** Only public card data leaves this service. The caller checks invitations.read;
  * the row and account lookup independently retain the request's read authority. */
 export async function accountAccessState(config: InstanceConfig, scope: Scope, db: D1Database, entity: string, id: string): Promise<AccountAccessState> {
@@ -43,11 +52,8 @@ export async function accountAccessState(config: InstanceConfig, scope: Scope, d
       .bind(row.account_id, scope.organizationId).first<NonNullable<AccountAccessState['account']>>()
     return { state: 'linked', account, invitation: null }
   }
-  // Select history before filtering terminal rows, so a cancelled replacement
-  // never resurrects an older expired invitation.
-  const latest = await db.prepare(`SELECT id,email,expires_at,expired_at,accepted_at,revoked_at,declined_at FROM invitations WHERE organization_id=? AND target_entity=? AND target_row=? ORDER BY created_at DESC,id DESC LIMIT 1`)
-    .bind(scope.organizationId, entity, id).first<{ id: string; email: string; expires_at: string; expired_at: string | null; accepted_at: string | null; revoked_at: string | null; declined_at: string | null }>()
-  if (!latest || latest.accepted_at || latest.revoked_at || latest.declined_at) return { state: 'no_account', account: null, invitation: null }
+  const latest = await latestRowInvitation(db, scope.organizationId, entity, id)
+  if (!latest) return { state: 'no_account', account: null, invitation: null }
   return { state: latest.expired_at || latest.expires_at <= new Date().toISOString() ? 'expired' : 'invited', account: null,
     invitation: { id: latest.id, email: latest.email, expires_at: latest.expires_at } }
 }

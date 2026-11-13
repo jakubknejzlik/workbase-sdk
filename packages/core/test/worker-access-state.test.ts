@@ -26,7 +26,7 @@ beforeEach(async () => {
   }
   await completeInvitationProfiles()
   for (const state of ['no_account', 'invited', 'expired', 'linked']) await env.DB.prepare('INSERT INTO worker (id,organization_id,name,user,created_at,updated_at) VALUES (?,?,?,?,?,?)').bind(state, 'org-a', 'Jana', state === 'linked' ? 'staff' : null, 'now', 'now').run()
-  for (const state of ['invited', 'expired']) await env.DB.prepare('INSERT INTO invitations (id,organization_id,email,role,token_hash,expires_at,inviter_id,created_at,target_entity,target_row) VALUES (?,?,?,?,?,?,?,?,?,?)').bind(`inv-${state}`, 'org-a', `${state}@example.test`, 'staff', `hash-${state}`, state === 'invited' ? '2099-11-20T10:00:00.000Z' : '2000-01-01T00:00:00.000Z', 'admin', 'now', 'worker', state).run()
+  for (const state of ['invited', 'expired', 'linked']) await env.DB.prepare('INSERT INTO invitations (id,organization_id,email,role,token_hash,expires_at,inviter_id,created_at,target_entity,target_row) VALUES (?,?,?,?,?,?,?,?,?,?)').bind(`inv-${state}`, 'org-a', `${state}@example.test`, 'staff', `hash-${state}`, state === 'expired' ? '2000-01-01T00:00:00.000Z' : '2099-11-20T10:00:00.000Z', 'admin', 'now', 'worker', state).run()
   app = createApp(config, runtime())
 })
 it('detail supplies all four access states and a public account projection; staff has no access key', async () => {
