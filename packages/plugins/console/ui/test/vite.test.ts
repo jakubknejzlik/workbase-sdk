@@ -221,3 +221,13 @@ test('build bundles partial SDK overrides with the remaining SDK catalog', async
   const catalogs = JSON.parse(readFileSync(join(root, '.workbase-ui/locales.json'), 'utf8'))
   expect(catalogs.en.sdk.save).toBe('Store'); expect(catalogs.en.sdk.cancel).toBe('Cancel')
 })
+
+test('built HTML sets no-referrer and contains no inline script or style', async () => {
+  const { root, put } = setup()
+  put('index.html', '<!doctype html><html><head></head><body><script type="module" src="/entry.ts"></script></body></html>')
+  put('entry.ts', 'console.log("built")')
+  await build({ root, configFile: false, plugins: [consoleUI()], logLevel: 'silent' })
+  const html = readFileSync(join(root, 'dist/index.html'), 'utf8')
+  expect(html).toContain('<meta name="referrer" content="no-referrer">')
+  expect(html).not.toMatch(/<style|style=|<script(?![^>]*src=)/)
+})

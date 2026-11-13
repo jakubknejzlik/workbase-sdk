@@ -151,6 +151,7 @@ export function consoleUI(options: UIOptions = {}): UIPlugin {
         try { if (statSync(file).isFile()) return file + query } catch { /* Let Vite report a missing generated import. */ }
       }
     },
+    transformIndexHtml() { return [{ tag: 'meta', attrs: { name: 'referrer', content: 'no-referrer' }, injectTo: 'head-prepend' }] },
     configResolved(config) { root = config.root; output = resolve(root, options.directory ?? '.workbase-ui') },
     async buildStart() { if (!requested) request(); await plugin.idle(); if (plugin.error && !server) throw plugin.error },
     configureServer(value) {
