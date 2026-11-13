@@ -34,3 +34,19 @@ them. They are replaced with functions only in the extraction server.
 - No auth shell or boot (slice 13).
 - No `query()` grammar, MCP AST editing, `access.lock` consumption, legacy `frontend-console` changes or packaging proof (slice 18).
 - Wrappers render a placeholder `RouteView`.
+
+Use `consoleUI()` from `/vite` in the Instance's Vite plugins. It loads config
+through `loadConfig`, checks the entire UI import graph, then evaluates only UI
+sources with extraction-only component stubs. Install the optional peers `vite`,
+`@tanstack/router-generator`, `es-module-lexer` and `typescript`; the generated
+application also needs `@tanstack/react-router` and React.
+
+Import `routeTree` from `./.workbase-ui/routeTree.gen`. The adapter generates
+wrappers with a placeholder `RouteView`, retaining definitions in route static
+data for the later renderer. Add `.workbase-ui*` to the Instance's `.gitignore`.
+The directory is an atomic symlink to a completed generation; regeneration
+failures retain the last good tree and send Vite's error overlay. Successful
+regeneration invalidates modules and sends a full reload. The plugin exposes
+`idle()`, `generation` (manifest, hash and paths), and `error` for tooling/tests.
+An unused new schema file triggers regeneration without changing the manifest
+hash; it is never imported or evaluated by extraction.

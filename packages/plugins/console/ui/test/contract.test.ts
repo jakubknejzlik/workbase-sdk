@@ -19,3 +19,11 @@ layout<typeof worker>(['name'])
 layout<typeof worker>(['not_a_field'])
 // @ts-expect-error detail pages never assume an id parameter
 entityDetailPage('worker', { title: 'worker.detail' })
+
+test('build tools are optional peers declared for the packed runtime inventory', async () => {
+  const { default: manifest } = await import('../../../package.json')
+  for (const name of ['vite', '@tanstack/router-generator', 'es-module-lexer'] as const) {
+    expect(manifest.peerDependencies[name]).toBeTruthy()
+    expect(manifest.peerDependenciesMeta[name].optional).toBe(true)
+  }
+})

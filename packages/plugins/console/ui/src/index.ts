@@ -53,7 +53,7 @@ export type Page = {
   data: Record<string, Binding>; layout: Node[]; entity?: string; mode?: 'list' | 'detail' | 'create' | 'edit'; uses: string[]
   component?: (...args: any[]) => any
 }
-type PageInput = Pick<Page, 'title'> & Partial<Omit<Page, 'kind' | 'title'>>
+type PageInput = Pick<Page, 'title'> & Partial<Omit<Page, 'kind' | 'title' | 'component'>>
 export const page = (input: PageInput): Page => ({ params: {}, search: {}, data: {}, layout: [], uses: [], ...input, kind: 'page' })
 export const customPage = (input: PageInput & Required<Pick<Page, 'component' | 'uses'>>): Page => ({ ...page(input), kind: 'customPage' })
 type EntityOptions<E extends EntityShape> = Omit<PageInput, 'entity' | 'mode' | 'layout'> & { layout?: Node<Field<E>>[] }

@@ -17,10 +17,17 @@ export function checkSdkBoundary(root: string, sourceOnly = false, vocabulary: R
   const files = (directory: string): string[] => readdirSync(directory, { withFileTypes: true }).flatMap(entry =>
     entry.isDirectory() ? files(join(directory, entry.name)) : [join(directory, entry.name)])
   const failures: string[] = []
+  function uiPeers(manifest: { exports?: Record<string, unknown>; peerDependencies?: Record<string, string>; peerDependenciesMeta?: Record<string, { optional?: boolean }> }, where: string) {
+    if (!manifest.exports?.['./console/ui/vite']) return
+    for (const name of ['vite', '@tanstack/router-generator', 'es-module-lexer']) {
+      if (!manifest.peerDependencies?.[name] || manifest.peerDependenciesMeta?.[name]?.optional !== true) failures.push(`UI build dependency must be an optional peer: ${where}: ${name}`)
+    }
+  }
   for (const directory of sdkWorkspaceDirectories(root)) {
     const path = join(directory, 'package.json')
     if (!existsSync(path)) continue
     const manifest = JSON.parse(readFileSync(path, 'utf8'))
+    uiPeers(manifest, relative(root, path))
     if (!sdkPackageNames.map(name => `@workbasehq/${name}`).includes(manifest.name) && manifest.private !== true) failures.push(`non-SDK workspace must be private: ${relative(root, path)}`)
   }
   for (const path of files(join(root, 'packages/core/src'))) {
@@ -72,6 +79,7 @@ export function checkSdkBoundary(root: string, sourceOnly = false, vocabulary: R
         execFileSync('tar', ['-xzf', tarball, '-C', destination])
         const directory = join(destination, 'package')
         const manifest = JSON.parse(readFileSync(join(directory, 'package.json'), 'utf8'))
+        uiPeers(manifest, archive)
         packedNames.push(manifest.name)
         if (manifest.name === '@workbasehq/core') {
           try { assertCoreEnumLabels(JSON.parse(readFileSync(join(directory, 'src/query/enum-labels.json'), 'utf8'))) }

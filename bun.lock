@@ -117,15 +117,24 @@
         "zod": "4.6.7"
       },
       "devDependencies": {
+        "@tanstack/router-generator": "1.146.2",
         "@workbasehq/core": "workspace:*",
-        "@workbasehq/test-support": "workspace:*"
+        "@workbasehq/test-support": "workspace:*",
+        "es-module-lexer": "2.3.2",
+        "vite": "7.3.1"
       },
       "peerDependencies": {
+        "@tanstack/router-generator": "^1.146.2",
         "@workbasehq/core": "0.2.15",
-        "typescript": ">=5.7.2 <7"
+        "es-module-lexer": "^2.3.2",
+        "typescript": ">=5.7.2 <7",
+        "vite": "^7.3.1"
       },
       "optionalPeers": [
-        "typescript"
+        "@tanstack/router-generator",
+        "es-module-lexer",
+        "typescript",
+        "vite"
       ]
     },
     "packages/test-support": {

@@ -8,7 +8,7 @@ const sdk = '@workbasehq/plugins/console/ui'
 const sdkFile = fileURLToPath(new URL('./index.ts', import.meta.url))
 const helpers = ['page', 'customPage', 'entityListPage', 'entityDetailPage', 'entityCreatePage', 'entityEditPage']
 export interface Entry { file: string; source: string; location: SourceLocation; helper: string; path?: string }
-export interface Sources { root: string; entries: Entry[]; components: Set<string> }
+export interface Sources { root: string; entries: Entry[]; components: Set<string>; modules: ReadonlyMap<string, string> }
 const checked = new WeakSet<Sources>()
 export function assertChecked(sources: Sources) { if (!checked.has(sources)) throw new Error('Expected checkSources result') }
 function location(node: ts.Node): SourceLocation {
@@ -22,7 +22,19 @@ export function routePath(source: string): string {
   return '/' + parts.filter(part => part !== 'index').join('/')
 }
 function files(dir: string): string[] {
-  return readdirSync(dir, { withFileTypes: true }).flatMap(entry => entry.isDirectory() ? files(resolve(dir, entry.name)) : [resolve(dir, entry.name)]).sort()
+  return readdirSync(dir, { withFileTypes: true }).flatMap(entry => {
+    const file = resolve(dir, entry.name)
+    if (entry.isSymbolicLink()) throw new SourceError({ file, line: 1, column: 1 }, 'Unclassified UI symlink')
+    return entry.isDirectory() ? files(file) : [file]
+  }).sort()
+}
+function namedBindings(tree: ts.SourceFile) {
+  const bindings = new Map<string, { module: string; imported: string; node: ts.StringLiteral }>()
+  for (const statement of tree.statements) if (ts.isImportDeclaration(statement) && ts.isStringLiteral(statement.moduleSpecifier) && !statement.importClause?.isTypeOnly) {
+    const names = statement.importClause?.namedBindings
+    if (names && ts.isNamedImports(names)) for (const item of names.elements) if (!item.isTypeOnly) bindings.set(item.name.text, { module: statement.moduleSpecifier.text, imported: (item.propertyName ?? item.name).text, node: statement.moduleSpecifier })
+  }
+  return bindings
 }
 /** Fail closed: every runtime edge is SDK, local data, or a browser component. */
 export function checkSources(root: string): Sources {
@@ -49,11 +61,7 @@ export function checkSources(root: string): Sources {
     if (local.split('/').some(part => part.startsWith('-'))) continue
     const tree = read(file)
     if (extname(file) !== '.ts') fail(tree, 'Unclassified UI source extension')
-    const bindings = new Map<string, { module: string; imported: string; node: ts.StringLiteral }>()
-    for (const statement of tree.statements) if (ts.isImportDeclaration(statement) && ts.isStringLiteral(statement.moduleSpecifier) && !statement.importClause?.isTypeOnly) {
-      const names = statement.importClause?.namedBindings
-      if (names && ts.isNamedImports(names)) for (const item of names.elements) if (!item.isTypeOnly) bindings.set(item.name.text, { module: statement.moduleSpecifier.text, imported: (item.propertyName ?? item.name).text, node: statement.moduleSpecifier })
-    }
+    const bindings = namedBindings(tree)
     const exported = tree.statements.find(ts.isExportAssignment), call = exported?.expression
     const expected = local === 'nav.ts' ? ['defineNav'] : helpers
     if (!call || !ts.isCallExpression(call) || !ts.isIdentifier(call.expression)) fail(exported ?? tree, 'Default export must directly call a named SDK helper')
@@ -67,10 +75,8 @@ export function checkSources(root: string): Sources {
   const slots = resolve(ui, '-slots.ts')
   if (all.includes(slots)) {
     const tree = read(slots), exported = tree.statements.find(ts.isExportAssignment), call = exported?.expression
-    const declaration = tree.statements.find(statement => ts.isImportDeclaration(statement) && ts.isStringLiteral(statement.moduleSpecifier) && statement.moduleSpecifier.text === sdk) as ts.ImportDeclaration | undefined
-    const names = declaration?.importClause?.namedBindings
-    const name = names && ts.isNamedImports(names) ? names.elements.find(item => !item.isTypeOnly && (item.propertyName ?? item.name).text === 'defineSlots')?.name.text : undefined
-    if (!call || !ts.isCallExpression(call) || !ts.isIdentifier(call.expression) || !name || call.expression.text !== name || declaration?.importClause?.isTypeOnly) fail(exported ?? tree, 'Slots must directly call a named SDK defineSlots import')
+    if (!call || !ts.isCallExpression(call) || !ts.isIdentifier(call.expression) || exported!.isExportEquals
+      || !sdkBinding(namedBindings(tree).get(call.expression.text), slots, 'defineSlots', sdk, sdkFile)) fail(exported ?? tree, 'Slots must directly call a named SDK defineSlots import')
     entries.push({ file: slots, source: 'ui/-slots.ts', location: location(call), helper: 'defineSlots' })
   }
   const seen = new Set<string>()
@@ -105,6 +111,10 @@ export function checkSources(root: string): Sources {
       }
     }
     function visit(node: ts.Node) {
+      if (ts.isImportTypeNode(node)) {
+        if (!ts.isLiteralTypeNode(node.argument) || !ts.isStringLiteral(node.argument.literal)) fail(node, 'Unclassified type import')
+        edge(node, node.argument.literal.text, true)
+      }
       if (ts.isImportEqualsDeclaration(node)) fail(node, 'import = require is unclassified')
       if (ts.isExportDeclaration(node) && node.moduleSpecifier) fail(node, 'Re-exports are unclassified')
       if (ts.isImportDeclaration(node)) {
@@ -124,7 +134,7 @@ export function checkSources(root: string): Sources {
     visit(tree)
   }
   for (const entry of entries) inspect(entry.file, ['customPage', 'defineSlots'].includes(entry.helper))
-  const result = { root, entries: entries.sort((a, b) => a.source.localeCompare(b.source)), components }
+  const result = { root, entries: entries.sort((a, b) => (a.source < b.source ? -1 : a.source > b.source ? 1 : 0)), components, modules: new Map([...cache].map(([file, tree]) => [file, tree.text])) }
   checked.add(result)
   return result
 }

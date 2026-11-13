@@ -29,7 +29,7 @@ test('forged default object, extra keys and non-JSON values are rejected', () =>
   put('ui/index.ts', `export default { kind: 'page', title: 'sample.title' }`)
   expect(() => checkSources(root)).toThrow(SourceError)
   put('ui/index.ts', declaration)
-  for (const value of [ { ...page({ title: 'sample.title' }), extra: true }, { ...page({ title: 'sample.title' }), uses: [undefined] }, { ...page({ title: 'sample.title' }), layout: [new Date()] }, { ...page({ title: 'sample.title' }), component: 'fake' } ]) {
+  for (const value of [ { ...page({ title: 'sample.title' }), extra: true }, { ...page({ title: 'sample.title' }), uses: [undefined] }, { ...page({ title: 'sample.title' }), layout: [new Date()] }, { ...page({ title: 'sample.title' }), component: 'fake' }, { ...page({ title: 'sample.title' }), component: () => null } ]) {
     expect(() => normalise(checkSources(root), { 'ui/index.ts': value }, schema, 'hash')).toThrow(SourceError)
   }
 })

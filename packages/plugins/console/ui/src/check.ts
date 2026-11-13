@@ -3,6 +3,7 @@ import { z } from 'zod'
 import { buildPath, type Page, type Node, type Target } from './index'
 import { assertChecked, SourceError, type Sources, type Entry } from './sources'
 export { checkSources, routePath, SourceError } from './sources'
+const compare = (a: string, b: string) => a < b ? -1 : a > b ? 1 : 0
 const id = z.string().regex(/^[a-zA-Z][a-zA-Z0-9_]*$/)
 const title = z.string().regex(/^[\w-]+(?:\.[\w-]+)+$/)
 const paramSpec = z.discriminatedUnion('kind', [
@@ -51,6 +52,7 @@ function jsonData(value: unknown, seen = new Set<object>()): void {
 function stripComponent(value: unknown, required: boolean) {
   if (!value || typeof value !== 'object') throw new Error('Expected a declaration object')
   const descriptor = Object.getOwnPropertyDescriptor(value, 'component')
+  if (descriptor && !required) throw new Error('component is only allowed on custom pages and slots')
   if (descriptor && (!('value' in descriptor) || typeof descriptor.value !== 'function') || required && !descriptor) throw new Error('component must be a function')
   const clone = Object.create(Object.getPrototypeOf(value), Object.getOwnPropertyDescriptors(value))
   delete clone.component
@@ -123,7 +125,7 @@ export function normalise(sources: Sources, values: Record<string, unknown>, sch
     }
     walk(page.layout)
     return { ...page, source: entry.source, path, links: {} } as Manifest['routes'][number]
-  })).sort((a, b) => a.path.localeCompare(b.path))
+  })).sort((a, b) => compare(a.path, b.path))
   function resolveLink(target: Target): ResolvedLink {
     const matches = routes.filter(route => route.entity === target.entity && route.mode === target.mode)
     if (matches.length !== 1) throw new Error(`Missing or ambiguous page: ${target.entity}.${target.mode}`)
@@ -140,7 +142,7 @@ export function normalise(sources: Sources, values: Record<string, unknown>, sch
   const navEntry = sources.entries.find(e => e.helper === 'defineNav')
   const nav = navEntry ? at(navEntry, () => {
     jsonData(values[navEntry.source])
-    return navSchema.parse(values[navEntry.source]).map(item => ({ title: item.title, link: resolveLink(item.target) })).sort((a, b) => a.link.to.localeCompare(b.link.to) || a.title.localeCompare(b.title))
+    return navSchema.parse(values[navEntry.source]).map(item => ({ title: item.title, link: resolveLink(item.target) })).sort((a, b) => compare(a.link.to, b.link.to) || compare(a.title, b.title))
   }) : []
   return { version: 1, configHash, routes, nav, slots }
 }
