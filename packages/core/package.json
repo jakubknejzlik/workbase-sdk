@@ -36,6 +36,8 @@
     "./infra/provision": "./src/infra/provision.ts",
     "./query/expressions": "./src/query/expressions.ts",
     "./schema": "./src/schema.ts",
+    "./access/lock": "./src/access-lock.ts",
+    "./access/lock/cli": "./src/access-lock/cli.ts",
     "./schema/load": "./src/schema/load.ts"
   },
   "dependencies": {
