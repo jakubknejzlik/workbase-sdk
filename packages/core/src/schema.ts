@@ -6,7 +6,7 @@ export type { AccessInput, EntityAccess, EffectiveAccessPolicy } from './access'
 import { z } from 'zod'
 import { fieldSchema, serializedExpressionSchema, normalizeInstance, organizationActions, type InstanceConfig, type InstanceInput } from './config'
 
-import { DeclarationError, schemaConfigs as configs, type DeclarationPath } from './schema/declaration'
+import { DeclarationError, type DeclarationPath } from './schema/declaration'
 export { DeclarationError, type DeclarationPath } from './schema/declaration'
 const identifier = z.string().regex(/^[a-z][a-z0-9_]*$/)
 const relationSchema = z.strictObject({
@@ -60,7 +60,7 @@ export function accountLink() {
   return { type: 'ref', entity: 'users', userLink: true, readOnly: true } as const
 }
 
-export type ConfigInput = Omit<InstanceInput, 'entities' | 'roles' | 'organizationOwnerRole' | 'permissions' | 'account' | 'languages' | 'enumLabels' | 'locale'> & {
+export type ConfigInput = Omit<InstanceInput, 'entities' | 'roles' | 'organizationOwnerRole' | 'permissions' | 'account' | 'languages' | 'enumLabels' | 'locale' | 'baseline'> & {
   entities: Record<string, EntityDeclaration>
   roles: string[]
   organizationOwnerRole: string
@@ -144,11 +144,12 @@ export function defineConfig(input: ConfigInput): SchemaConfig {
     ]))
     validatePolicies(config)
   }
-  configs.add(config)
+  config.baseline = 'workbase-sdk'
   return config
 }
 
-/** Loader guard: a new-era module must export the result of defineConfig. */
+/** Shape/era check only: copies and serialized configs retain the SDK marker.
+ * This does not establish provenance or compiled access; the kernel checks access. */
 export function isSchemaConfig(value: unknown): value is SchemaConfig {
-  return typeof value === 'object' && value !== null && configs.has(value)
+  return typeof value === 'object' && value !== null && 'baseline' in value && value.baseline === 'workbase-sdk'
 }

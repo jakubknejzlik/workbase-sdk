@@ -1,11 +1,12 @@
 import { DatabaseSync } from 'node:sqlite'
 import { afterEach } from 'vitest'
 import { baselineContract } from '../fixtures/sdk-baseline/contract'
+import { eraContract } from '../fixtures/config-era/contract'
 import type { D1Query } from '../../src/infra/d1-migrations'
 
 const databases: DatabaseSync[] = []
 afterEach(() => { for (const db of databases.splice(0)) db.close() })
-baselineContract(() => {
+function database() {
   const sqlite = new DatabaseSync(':memory:'); databases.push(sqlite)
   sqlite.exec('PRAGMA foreign_keys=ON')
   const calls: string[] = []
@@ -32,4 +33,6 @@ baselineContract(() => {
     catch (error) { sqlite.exec('ROLLBACK'); throw error }
   } } as unknown as D1Database
   return { db, query, calls }
-})
+}
+baselineContract(database)
+eraContract(database)

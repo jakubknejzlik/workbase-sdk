@@ -2,7 +2,6 @@ import { coreEnums, type CoreRole } from './query/enum-values'
 import { z } from 'zod'
 import { calendarViewsSchema, validateCalendarViews } from './calendar-display'
 import { Q, Fn as LibraryFn, Cond, type ISequelizable, type ISerializable } from '@jakub.knejzlik/ts-query'
-import { schemaConfigs } from './schema/declaration'
 import { DISPLAY_VALUE, isExpression, validateComputedExpressions, expressionError } from './query/expressions'
 import { validateLabelExpressions } from './query/labels'
 import type { WorkbasePlugin } from './kernel/plugin'
@@ -90,6 +89,7 @@ const schema = z.object({
   }).optional(),
   pluginConfig: z.record(z.string(), z.unknown()).optional(),
   languages: z.array(z.string()).optional(),
+  baseline: z.literal('workbase-sdk').optional(),
   locale: z.enum(['en', 'cs']).default('en'),
   timeZone: z.string().default('UTC'),
   enumLabels: z.record(z.string(), z.record(z.string(), z.string())).optional(),
@@ -125,7 +125,7 @@ export type InstanceInput = z.input<typeof schema>
 export type Operation = 'read' | 'create' | 'update' | 'delete'
 export const baseFields = ['id', 'organization_id', 'created_at', 'updated_at', 'version']
 export const reservedEntities = new Set(['users', 'organizations', 'memberships', 'sessions', 'invitations', 'email_outbox', 'audit_outbox', 'security_log', 'idempotency_keys', 'instance_meta', 'webhook_deliveries', 'audit_events', 'd1_migrations', 'identities', 'access_tokens', 'user', 'session', 'account', 'verification', 'rateLimit', 'identity_link_grants', '_plugin_migrations'])
-type InstanceDefinitionInput = Omit<ShorthandInput, 'roles' | 'entities' | 'permissions'> & { roles?: string[]; entities?: ShorthandInput['entities']; permissions?: ShorthandInput['permissions'] }
+type InstanceDefinitionInput = Omit<ShorthandInput, 'roles' | 'entities' | 'permissions' | 'baseline'> & { roles?: string[]; entities?: ShorthandInput['entities']; permissions?: ShorthandInput['permissions'] }
 export function defineInstance(input: InstanceDefinitionInput): InstanceConfig {
   return normalizeInstance(input)
 }
@@ -156,7 +156,14 @@ export function normalizeInstance(input: InstanceDefinitionInput, exactRoles = f
   if (exactRoles) {
     if (JSON.stringify(roles) !== JSON.stringify(input.roles) || expanded.organizationOwnerRole !== input.organizationOwnerRole) throw new Error('Plugin role configuration must match declared roles and organizationOwnerRole')
   } else for (const role of [expanded.organizationOwnerRole ?? 'owner', 'member']) if (!roles.includes(role)) roles.push(role)
-  const config = schema.parse({ ...expanded, roles })
+  // Era belongs to the authored input, never a plugin configure() contribution.
+  // Strip the contributed key so absent legacy inputs retain no own baseline key.
+  const { baseline: _baseline, ...data } = expanded
+  const config: InstanceConfig = schema.parse({ ...data, roles,
+    ...(Object.hasOwn(input, 'baseline') ? { baseline: (input as InstanceInput).baseline } : {}),
+  })
+  // Re-normalizing an executable config retains its already-compiled access policy.
+  if ('effectiveAccess' in input) config.effectiveAccess = (input as InstanceConfig).effectiveAccess
   for (const name of Object.keys(config.pluginConfig ?? {})) {
     if (!config.plugins?.some(plugin => plugin.name === name)) throw new Error(`Unknown plugin config: ${name}`)
   }
@@ -315,8 +322,6 @@ export function normalizeInstance(input: InstanceDefinitionInput, exactRoles = f
     if (isDisplayFieldError(error)) error.config = config
     throw error
   }
-  // Retain declaration identity when migration tooling re-normalizes a config.
-  if (schemaConfigs.has(input)) schemaConfigs.add(config)
   return config
 }
 /** Diagnostics and migration baselines only; runtime and migration targets use defineInstance. */

@@ -15,8 +15,8 @@ async function main() {
     finish({ kind: 'invalid-config' })
   } else {
     try {
-      // Keep plugin functions, schemas and identity brands in this process. Only
-      // the resulting schema fingerprints cross the IPC boundary.
+      // Keep plugin functions and schemas in this process. Era is config data
+      // shared across both tsImport realms; only fingerprints cross IPC.
       const { tsImport } = await import('tsx/esm/api')
       const { expectedSchema } = await tsImport(new URL('./schema.ts', import.meta.url).href, import.meta.url)
       const schema = await expectedSchema({ migrationsDirectory, revision: config.revision, config })

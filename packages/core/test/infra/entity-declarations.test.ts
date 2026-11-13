@@ -137,8 +137,9 @@ function invalidDeclarationTypes() {
 }
 void invalidDeclarationTypes
 
-it('requires the defineConfig identity brand rather than a spread copy', () => {
+it('recognizes SDK era on the config value and its spread copy', () => {
   const config = defineConfig(input())
   expect(isSchemaConfig(config)).toBe(true)
-  expect(isSchemaConfig({ ...config })).toBe(false)
+  // This is an era check, not a claim about the copy's provenance or access.
+  expect(isSchemaConfig({ ...config })).toBe(true)
 })

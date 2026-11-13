@@ -1,12 +1,11 @@
 import type { InstanceConfig } from '../config'
-import { schemaConfigs } from '../schema/declaration'
 import { MigrationDiagnostic } from './diagnostics'
 import { SDK_BASELINE, SDK_NAMESPACE } from './sdk-baseline'
 
-export type MigrationConfig = Pick<InstanceConfig, 'entities'>
-/** Reuse the slice-1 declaration identity; legacy options never select an era. */
-export function usesSdkBaseline(config?: object) {
-  return config !== undefined && schemaConfigs.has(config)
+export type MigrationConfig = Pick<InstanceConfig, 'entities' | 'baseline'>
+/** Era is schema data and survives copies, serialization and module realms. */
+export function usesSdkBaseline(config?: Pick<InstanceConfig, 'baseline'>) {
+  return config?.baseline === 'workbase-sdk'
 }
 
 /** Read-only preflight, also used by direct kernel migration callers.

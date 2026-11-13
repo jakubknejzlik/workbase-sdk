@@ -5,6 +5,7 @@ exports[`loads explicit worker imports into the canonical normalized schema snap
   "account": {
     "entity": "users",
   },
+  "baseline": "workbase-sdk",
   "commands": [],
   "entities": {
     "users": {
