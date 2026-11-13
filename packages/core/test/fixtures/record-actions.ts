@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import { defineCommand } from '../../src/commands'
-import { defineAccess, defineConfig, defineEntity, accountLink, accessEntities, accessSystemActions } from '../../src/schema'
+import { schemaLock } from '../../src/migrations/schema-lock'
+import { defineAccess, defineConfig, bindSchemaLock, defineEntity, accountLink, accessEntities, accessSystemActions } from '../../src/schema'
 import { identity } from '@workbasehq/plugins/identity'
 import { localAuth } from '@workbasehq/plugins/local-auth'
 import { legacyPermissions } from '@workbasehq/plugins/permissions'
@@ -19,7 +20,7 @@ export function actionFixture(actions: any = {
   ordered: { command: 'record/close', available: [{ when: { state: { ne: null } }, reason: 'record.missing' }, { when: { use: 'open' }, reason: 'record.closed' }] },
 }, commands = [closeRecord], declared = commands.map(command => command.name)) {
   const server: WorkbasePlugin = { name: 'record-fixture', version: '1.0.0', commands }
-  return defineConfig({ id: 'record_test', revision: 1, roles: ['admin', 'staff', 'viewer'], organizationOwnerRole: 'admin', languages: ['en'],
+  const config = defineConfig({ id: 'record_test', roles: ['admin', 'staff', 'viewer'], organizationOwnerRole: 'admin', languages: ['en'],
     plugins: [identity, localAuth, legacyPermissions, server], interactive: false, commands: declared,
     entities: {
       worker: defineEntity({ fields: { name: { type: 'text' } }, access: { admin: all, staff: all, viewer: all } }),
@@ -31,5 +32,6 @@ export function actionFixture(actions: any = {
       entities: Object.fromEntries(accessEntities.map(entity => [entity, { admin: all, staff: all, viewer: all }])),
     }),
   })
+  return bindSchemaLock(config, schemaLock(config))
 }
 export default actionFixture()

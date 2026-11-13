@@ -30,11 +30,11 @@ it('actions compile expanded SQL inputs and finite reason keys into the lock', (
   expect(kernel.config.effectiveAccess!.version).toBe(1)
 })
 it('actions is reserved for fields and relations in SDK era even without effectiveAccess; legacy unchanged', () => {
-  const common = { id: 'reserved', revision: 1, roles: ['admin'], organizationOwnerRole: 'admin', languages: ['en'], permissions: {} }
+  const common = { id: 'reserved', roles: ['admin'], organizationOwnerRole: 'admin', languages: ['en'], permissions: {} }
   expect(() => defineConfig({ ...common, entities: { item: defineEntity({ fields: { actions: { type: 'text' } } }) } })).toThrow('Reserved field: actions')
   const entity = { fields: { parent: { type: 'ref' as const, entity: 'item' } }, relations: { actions: { field: 'parent', entity: 'item' } } }
   expect(() => defineConfig({ ...common, entities: { item: defineEntity(entity) } })).toThrow('Reserved relation: actions')
-  expect(defineInstance({ ...common, entities: { item: { ...entity, displayField: 'actions', fields: { ...entity.fields, actions: { type: 'text' } } } } }).entities.item.fields.actions).toEqual({ type: 'text', required: false })
+  expect(defineInstance({ ...common, revision: 1, entities: { item: { ...entity, displayField: 'actions', fields: { ...entity.fields, actions: { type: 'text' } } } } }).entities.item.fields.actions).toEqual({ type: 'text', required: false })
 })
 // Compile-time checks remain in the root typecheck gate.
 if (false) {
