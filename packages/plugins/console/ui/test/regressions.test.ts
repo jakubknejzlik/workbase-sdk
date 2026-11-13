@@ -3,7 +3,7 @@ import { dirname, join, relative, resolve } from 'node:path'
 import ts from 'typescript'
 import { afterEach, expect, test } from 'vitest'
 import { checkSources, normalise, canonicalJSON } from '../src/check'
-import { page } from '../src/index'
+import { page, parseParams } from '../src/index'
 import { extractManifest } from '../src/vite'
 import { fixture, sdk } from './fixture'
 
@@ -121,4 +121,11 @@ test('empty registries have no inherited manifest keys', async () => {
   expect(manifest.slots.constructor).toBeUndefined()
   expect(manifest.routes[0].search.constructor).toBeUndefined()
   expect(canonicalJSON(roundTrip(manifest))).toBe(canonicalJSON(manifest))
+})
+
+test('search params named like Object.prototype members read only own input and defaults', () => {
+  const specs = Object.assign(Object.create(null), { constructor: { kind: 'string', default: 'all' }, toString: { kind: 'int', default: 3 } })
+  expect(JSON.stringify(parseParams(specs, {}))).toBe('{"constructor":"all","toString":3}')
+  expect(JSON.stringify(parseParams(specs, { constructor: 'x', toString: '7' }))).toBe('{"constructor":"x","toString":7}')
+  expect(() => parseParams({ constructor: { kind: 'string' } } as never, {})).toThrow('Invalid param constructor')
 })

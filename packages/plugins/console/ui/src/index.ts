@@ -12,7 +12,8 @@ export function query(): never { throw new Error('query is not in slice 7') }
 export function parseParams(specs: Record<string, ParamSpec>, input: Record<string, unknown>): Record<string, string | number> {
   if (Object.keys(input).some(key => !Object.hasOwn(specs, key))) throw new Error('Unexpected params')
   return Object.fromEntries(Object.entries(specs).map(([key, spec]) => {
-    const raw = input[key] ?? ('default' in spec ? spec.default : undefined)
+    // Own keys only: names like constructor must not resolve to Object.prototype members.
+    const raw = (Object.hasOwn(input, key) ? input[key] : undefined) ?? (Object.hasOwn(spec, 'default') ? (spec as { default?: unknown }).default : undefined)
     if (spec.kind !== 'int') {
       if (typeof raw !== 'string' || spec.kind === 'id' && !raw.length) throw new Error(`Invalid param ${key}`)
       return [key, raw]
