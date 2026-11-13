@@ -6,7 +6,7 @@ export type { AccessInput, EntityAccess, EffectiveAccessPolicy } from './access'
 import { z } from 'zod'
 import { fieldSchema, serializedExpressionSchema, normalizeInstance, organizationActions, type InstanceConfig, type InstanceInput } from './config'
 
-import { DeclarationError, schemaConfigs as configs, type DeclarationPath } from './schema/declaration'
+import { DeclarationError, type DeclarationPath } from './schema/declaration'
 export { DeclarationError, type DeclarationPath } from './schema/declaration'
 const identifier = z.string().regex(/^[a-z][a-z0-9_]*$/)
 const relationSchema = z.strictObject({
@@ -60,7 +60,7 @@ export function accountLink() {
   return { type: 'ref', entity: 'users', userLink: true, readOnly: true } as const
 }
 
-export type ConfigInput = Omit<InstanceInput, 'entities' | 'roles' | 'organizationOwnerRole' | 'permissions' | 'account' | 'languages' | 'enumLabels' | 'locale'> & {
+export type ConfigInput = Omit<InstanceInput, 'entities' | 'roles' | 'organizationOwnerRole' | 'permissions' | 'account' | 'languages' | 'enumLabels' | 'locale' | 'baseline'> & {
   entities: Record<string, EntityDeclaration>
   roles: string[]
   organizationOwnerRole: string
@@ -76,7 +76,7 @@ const languageList = z.array(z.string().min(1).refine(value => {
   try { return new Set(Intl.getCanonicalLocales(values)).size === values.length } catch { return false }
 }, 'Duplicate languages')
 
-/** Minimal Model B account projection. SDK DDL ownership changes in a later slice. */
+/** Minimal Model B account descriptor; physical DDL belongs to the SDK baseline. */
 function accountEntity(roles: string[]): InstanceInput['entities'][string] {
   return { fields: {
     name: { type: 'string', required: true },
@@ -90,6 +90,8 @@ export function defineConfig(input: ConfigInput): SchemaConfig {
   const roles = parse(z.array(identifier).min(1).refine(value => new Set(value).size === value.length, 'Duplicate roles'), input.roles, ['roles'])
   if (!roles.includes(input.organizationOwnerRole)) throw new DeclarationError(['organizationOwnerRole'], 'organizationOwnerRole must be in roles')
   if ('account' in input || 'enumLabels' in input) throw new DeclarationError([], 'Account ownership and labels are SDK/dictionary concerns')
+  // effectiveAccess is compiler output only; an authored literal would bypass compileAccess.
+  if ('effectiveAccess' in input) throw new DeclarationError(['effectiveAccess'], 'effectiveAccess is compiled from access.ts and entity access; it cannot be authored')
   const domain: InstanceInput['entities'] = {}
   for (const [name, entity] of Object.entries(input.entities)) {
     if (name === 'users') throw new DeclarationError(['entities', name], 'users is SDK-owned; use accountLink()')
@@ -144,11 +146,12 @@ export function defineConfig(input: ConfigInput): SchemaConfig {
     ]))
     validatePolicies(config)
   }
-  configs.add(config)
+  config.baseline = 'workbase-sdk'
   return config
 }
 
-/** Loader guard: a new-era module must export the result of defineConfig. */
+/** Shape/era check only: copies and serialized configs retain the SDK marker.
+ * This does not establish provenance or compiled access; the kernel checks access. */
 export function isSchemaConfig(value: unknown): value is SchemaConfig {
-  return typeof value === 'object' && value !== null && configs.has(value)
+  return typeof value === 'object' && value !== null && 'baseline' in value && value.baseline === 'workbase-sdk'
 }

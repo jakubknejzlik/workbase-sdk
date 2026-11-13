@@ -16,6 +16,6 @@ export async function expectedSchema({ migrationsDirectory, revision, config, co
   const plugins = config ? new KernelRegistry(config).plugins : []
   return {
     revision, coreVersion, migrations: migrationHash(await readMigrationFiles(migrationsDirectory)),
-    ...(config ? { pluginMigrations: sha256(JSON.stringify(await expectedPluginMigrations(plugins))) } : {}),
+    ...(config ? { pluginMigrations: sha256(JSON.stringify(await expectedPluginMigrations(plugins, config))) } : {}),
   }
 }

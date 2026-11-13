@@ -14,6 +14,7 @@ export default defineConfig({
     },
   })],
   test: {
+    globalSetup: ['./packages/core/test/fixtures/config-era/provision-setup.ts'],
     include: ['packages/core/test/**/*.test.ts', 'packages/plugins/*/test/**/*.test.ts'],
     exclude: ['packages/core/test/infra/**', '**/node_modules/**'],
     fileParallelism: false, testTimeout: 30000, hookTimeout: 30000,

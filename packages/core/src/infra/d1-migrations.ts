@@ -12,7 +12,8 @@ export async function migrateD1(query: D1Query, input: readonly Migration[]) {
     if (!results.length || results.some(r => !r.success)) throw new MigrationDiagnostic({ code: 'd1_query_failed' })
     return results
   }
-  await execute('CREATE TABLE IF NOT EXISTS _migrations (filename TEXT PRIMARY KEY, applied_at TEXT NOT NULL, checksum TEXT NOT NULL);')
+  const ledger = (await execute("SELECT name FROM sqlite_master WHERE type='table' AND name='_migrations'"))[0].results ?? []
+  if (!ledger.length) await execute('CREATE TABLE IF NOT EXISTS _migrations (filename TEXT PRIMARY KEY, applied_at TEXT NOT NULL, checksum TEXT NOT NULL);')
   const applied = (await execute('SELECT filename, checksum FROM _migrations ORDER BY filename;'))[0].results ?? []
   const known = new Map(migrations.map(m => [m.filename, m]))
   for (const row of applied) {

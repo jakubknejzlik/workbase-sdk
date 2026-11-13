@@ -1,3 +1,5 @@
+import { sdkMigrations, SDK_NAMESPACE } from '../migrations/sdk-baseline'
+import { assertResetEra, usesSdkBaseline, type MigrationConfig } from '../migrations/reset-era'
 import { coreMigrations } from '../migrations/model-b'
 import { sha256 } from '../crypto'
 import type { WorkbasePlugin } from './plugin'
@@ -5,8 +7,10 @@ import type { InstanceConfig } from '../config'
 
 /** Per-plugin append-only ledgers. Absent namespaces are retained on uninstall. */
 export async function applyPluginMigrations(db: D1Database, plugins: readonly WorkbasePlugin[], config?: InstanceConfig) {
-  await db.prepare('CREATE TABLE IF NOT EXISTS _plugin_migrations (namespace TEXT NOT NULL, name TEXT NOT NULL, position INTEGER NOT NULL, checksum TEXT NOT NULL, PRIMARY KEY(namespace,name), UNIQUE(namespace,position))').run()
-  for (const plugin of ledgerPlugins(plugins, config)) {
+  const chain = ledgerPlugins(plugins, config)
+  const exists = usesSdkBaseline(config) && await assertResetEra(db)
+  if (!exists) await db.prepare('CREATE TABLE IF NOT EXISTS _plugin_migrations (namespace TEXT NOT NULL, name TEXT NOT NULL, position INTEGER NOT NULL, checksum TEXT NOT NULL, PRIMARY KEY(namespace,name), UNIQUE(namespace,position))').run()
+  for (const plugin of chain) {
     const migrations = plugin.migrations ?? []
     const { results: applied } = await db.prepare('SELECT name,position,checksum FROM _plugin_migrations WHERE namespace=? ORDER BY position').bind(plugin.name).all<{ name: string; position: number; checksum: string }>()
     const checksums = await Promise.all(migrations.map(m => sha256(m.sql)))
@@ -27,7 +31,7 @@ export async function applyPluginMigrations(db: D1Database, plugins: readonly Wo
 }
 
 /** Split SQL without treating semicolons in quoted strings/comments as boundaries. */
-function splitStatements(sql: string): string[] {
+export function splitStatements(sql: string): string[] {
   const statements: string[] = []
   let trigger = false; let bodyStatementStart = false; let words: string[] = []
   let start = 0; let depth = 0; let hasCode = false; let quote = ''; let lineComment = false; let blockComment = false
@@ -62,14 +66,14 @@ function splitStatements(sql: string): string[] {
 }
 
 export interface PluginMigrationRow { namespace: string; name: string; position: number; checksum: string }
-export async function expectedPluginMigrations(plugins: readonly WorkbasePlugin[]): Promise<PluginMigrationRow[]> {
-  const rows = await Promise.all(ledgerPlugins(plugins).flatMap(plugin => (plugin.migrations ?? []).map(async (migration, position) => ({ namespace: plugin.name, name: migration.name, position, checksum: await sha256(migration.sql) }))))
+export async function expectedPluginMigrations(plugins: readonly WorkbasePlugin[], config?: MigrationConfig): Promise<PluginMigrationRow[]> {
+  const rows = await Promise.all(ledgerPlugins(plugins, config).flatMap(plugin => (plugin.migrations ?? []).map(async (migration, position) => ({ namespace: plugin.name, name: migration.name, position, checksum: await sha256(migration.sql) }))))
   return rows.sort((a, b) => a.namespace < b.namespace ? -1 : a.namespace > b.namespace ? 1 : a.position - b.position)
 }
-export async function pluginMigrationStatus(db: D1Database, plugins: readonly WorkbasePlugin[], config: Pick<InstanceConfig, 'entities'>) {
+export async function pluginMigrationStatus(db: D1Database, plugins: readonly WorkbasePlugin[], config: MigrationConfig) {
   for (const plugin of plugins) await plugin.checkSchema?.(db, config)
-  const expected = await expectedPluginMigrations(plugins)
-  const names = new Set(ledgerPlugins(plugins).map(plugin => plugin.name))
+  const expected = await expectedPluginMigrations(plugins, config)
+  const names = new Set(ledgerPlugins(plugins, config).map(plugin => plugin.name))
   const { results } = await db.prepare('SELECT namespace,name,position,checksum FROM _plugin_migrations ORDER BY namespace,position').all<PluginMigrationRow>()
   // Uninstalled namespaces remain on disk but cannot satisfy installed contracts.
   const applied = results.filter(row => names.has(row.namespace))
@@ -78,7 +82,10 @@ export async function pluginMigrationStatus(db: D1Database, plugins: readonly Wo
 }
 
 /** Reserved core namespace shares the same transaction and verification contract. */
-function ledgerPlugins(plugins: readonly WorkbasePlugin[], config?: InstanceConfig): readonly WorkbasePlugin[] {
-  if (plugins.some(plugin => plugin.name === 'workbase-core')) throw new Error('Reserved migration namespace: workbase-core')
-  return [{ name: 'workbase-core', version: '1.0.0', migrations: coreMigrations(config) }, ...plugins]
+function ledgerPlugins(plugins: readonly WorkbasePlugin[], config?: MigrationConfig): readonly WorkbasePlugin[] {
+  for (const name of ['workbase-core', SDK_NAMESPACE]) if (plugins.some(plugin => plugin.name === name)) throw new Error(`Reserved migration namespace: ${name}`)
+  const sdk = usesSdkBaseline(config)
+    ? { name: SDK_NAMESPACE, version: '1.0.0', migrations: sdkMigrations() }
+    : { name: 'workbase-core', version: '1.0.0', migrations: coreMigrations(config as InstanceConfig | undefined) }
+  return [sdk, ...plugins]
 }

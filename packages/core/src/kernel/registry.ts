@@ -12,7 +12,7 @@ import type { AtomicOperation } from '../execution/types'
 import type { KernelCommand, ResourceAction, PluginMigration, Predicate, TableFilter, WorkbasePlugin } from './plugin'
 import { renderPredicate } from './predicate'
 export { renderPredicate } from './predicate'
-import { schemaConfigs, DeclarationError } from '../schema/declaration'
+import { DeclarationError } from '../schema/declaration'
 import { resolvePlugins } from './composition'
 import { applyPluginMigrations } from './migrations'
 import { timed } from '../request-timing'
@@ -34,7 +34,7 @@ export class KernelRegistry {
   private readonly trust: boolean
   private readonly hasAuthorization: boolean
   constructor(config: InstanceInput & Pick<InstanceConfig, 'effectiveAccess'>, options: RuntimeOptions = {}, env?: RuntimeEnv) {
-    if (schemaConfigs.has(config) && !config.effectiveAccess) throw new DeclarationError(['access'], 'Executable schema configurations require explicit entity access and shared access.ts')
+    if (config.baseline === 'workbase-sdk' && !config.effectiveAccess) throw new DeclarationError(['access'], 'Executable schema configurations require explicit entity access and shared access.ts')
     const resolved = resolvePlugins(options.plugins ?? config.plugins ?? [], config.interactive)
     this.plugins = resolved.plugins
     this.providers = resolved.providers

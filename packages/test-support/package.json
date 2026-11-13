@@ -3,6 +3,7 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./bootstrap": "./src/bootstrap.ts",
     "./helpers": "./src/helpers.ts",
     "./execution": "./src/execution.ts"
   },
