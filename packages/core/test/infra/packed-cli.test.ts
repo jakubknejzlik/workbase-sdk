@@ -56,14 +56,37 @@ void schema
       expect(realpathSync(join(consumer, 'node_modules', name)).startsWith(realpathSync(consumer) + '/')).toBe(true)
     }
     const installed = JSON.parse(readFileSync(join(consumer, 'node_modules/@workbasehq/core/package.json'), 'utf8'))
-    expect(Object.keys(installed.dependencies).sort()).toEqual(['@jakub.knejzlik/ts-query', 'hono', 'zod'])
+    expect(Object.keys(installed.dependencies).sort()).toEqual(['@jakub.knejzlik/ts-query', 'hono', 'typescript', 'zod'])
     expect(installed.peerDependencies).toEqual({ tsx: '4.23.15', sst: '4.17.1', '@pulumi/command': '1.2.1', '@pulumi/pulumi': '^3.215.0' })
     expect(installed.peerDependenciesMeta).toEqual({ tsx: { optional: true }, sst: { optional: true }, '@pulumi/command': { optional: true }, '@pulumi/pulumi': { optional: true } })
     expect(installed.exports['./infra']).toBe('./src/infra/index.ts')
     expect(installed.exports['./infra/provision']).toBe('./src/infra/provision.ts')
+    expect(installed.exports['./schema']).toBe('./src/schema.ts')
+    expect(installed.exports['./schema/load']).toBe('./src/schema/load.ts')
     expect(installed.bin).toEqual({ 'workbase-migrate': 'src/infra/bin.mjs' })
     expect(JSON.stringify(installed)).not.toMatch(/workspace:/)
     expect(JSON.stringify([installed.exports, installed.bin, installed.dependencies])).not.toContain('packages/core')
+    // The canonical loader must resolve its compiler from installed SDK dependencies.
+    mkdirSync(join(consumer, 'schema'))
+    writeFileSync(join(consumer, 'schema/worker.ts'), `import { defineEntity, accountLink } from '@workbasehq/core/schema'
+export default defineEntity({ fields: { name: { type: 'text', required: true }, user: accountLink() }, displayField: 'name' })
+`)
+    writeFileSync(join(consumer, 'canonical-config.ts'), `import { defineConfig } from '@workbasehq/core/schema'
+import worker from './schema/worker.ts'
+export default defineConfig({ id: 'sample', revision: 1, roles: ['admin', 'staff'], organizationOwnerRole: 'admin', languages: ['cs', 'en'], entities: { worker } })
+`)
+    writeFileSync(join(consumer, 'canonical-check.ts'), `import { loadConfig } from '@workbasehq/core/schema/load'
+const { config, sources } = await loadConfig('./canonical-config.ts')
+console.log(JSON.stringify({ config, sources }))
+`)
+    const canonical = JSON.parse(execFileSync(process.execPath, ['--import', './node_modules/tsx/dist/esm/index.mjs', 'canonical-check.ts'], { cwd: consumer, env, encoding: 'utf8', stdio: 'pipe' }))
+    expect(canonical.config.roles).toEqual(['admin', 'staff'])
+    expect(canonical.config.languages).toEqual(['cs', 'en'])
+    expect(canonical.config.entities.worker.fields.name).toEqual({ type: 'text', required: true })
+    expect(canonical.config.entities.worker.fields.user).toMatchObject({ type: 'ref', entity: 'users', readOnly: true, userLink: true })
+    expect(canonical.config.entities.worker.relations.user_account).toEqual({ field: 'user', entity: 'users' })
+    expect(canonical.sources['entities.worker.fields.name'].file).toBe(realpathSync(join(consumer, 'schema/worker.ts')))
+
     const inputs = join(consumer, 'application inputs'), migrations = join(inputs, 'sql')
     mkdirSync(migrations, { recursive: true })
     const migration = join(migrations, '0001_initial.sql')

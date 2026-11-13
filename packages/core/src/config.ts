@@ -88,6 +88,7 @@ const schema = z.object({
     }).optional(),
   }).optional(),
   pluginConfig: z.record(z.string(), z.unknown()).optional(),
+  languages: z.array(z.string()).optional(),
   locale: z.enum(['en', 'cs']).default('en'),
   timeZone: z.string().default('UTC'),
   enumLabels: z.record(z.string(), z.record(z.string(), z.string())).optional(),
@@ -123,7 +124,12 @@ export type InstanceInput = z.input<typeof schema>
 export type Operation = 'read' | 'create' | 'update' | 'delete'
 export const baseFields = ['id', 'organization_id', 'created_at', 'updated_at', 'version']
 const reserved = new Set(['users', 'organizations', 'memberships', 'sessions', 'invitations', 'email_outbox', 'audit_outbox', 'security_log', 'idempotency_keys', 'instance_meta', 'webhook_deliveries', 'audit_events', 'd1_migrations', 'identities', 'access_tokens', 'user', 'session', 'account', 'verification', 'rateLimit', 'identity_link_grants', '_plugin_migrations'])
-export function defineInstance(input: Omit<ShorthandInput, 'roles' | 'entities' | 'permissions'> & { roles?: string[]; entities?: ShorthandInput['entities']; permissions?: ShorthandInput['permissions'] }): InstanceConfig {
+type InstanceDefinitionInput = Omit<ShorthandInput, 'roles' | 'entities' | 'permissions'> & { roles?: string[]; entities?: ShorthandInput['entities']; permissions?: ShorthandInput['permissions'] }
+export function defineInstance(input: InstanceDefinitionInput): InstanceConfig {
+  return normalizeInstance(input)
+}
+/** @internal Shared kernel normalization; schema declarations opt into exact authored roles. */
+export function normalizeInstance(input: InstanceDefinitionInput, exactRoles = false, entityError?: (error: unknown, path: (string | number)[]) => never): InstanceConfig {
   const resolved = resolvePlugins(input.plugins ?? [], input.interactive)
   const pluginConfig = { ...input.pluginConfig }
   let contribution: Partial<InstanceInput> = {}
@@ -146,14 +152,16 @@ export function defineInstance(input: Omit<ShorthandInput, 'roles' | 'entities' 
   // existing entries byte-for-byte. Newly materialized roles receive no grants.
   const authoredRoles = expanded.roles
   const roles = [...authoredRoles]
-  for (const role of [expanded.organizationOwnerRole ?? 'owner', 'member']) if (!roles.includes(role)) roles.push(role)
+  if (exactRoles) {
+    if (JSON.stringify(roles) !== JSON.stringify(input.roles) || expanded.organizationOwnerRole !== input.organizationOwnerRole) throw new Error('Plugin role configuration must match declared roles and organizationOwnerRole')
+  } else for (const role of [expanded.organizationOwnerRole ?? 'owner', 'member']) if (!roles.includes(role)) roles.push(role)
   const config = schema.parse({ ...expanded, roles })
   for (const name of Object.keys(config.pluginConfig ?? {})) {
     if (!config.plugins?.some(plugin => plugin.name === name)) throw new Error(`Unknown plugin config: ${name}`)
   }
   // Custom roles have no default grants. Preserve sparse explicit/model tables;
   // implicit tables retain their existing empty entries for custom roles.
-  const defaultRoles = input.organizationPermissions === undefined && model.organizationPermissions === undefined
+  const defaultRoles = exactRoles ? [] : input.organizationPermissions === undefined && model.organizationPermissions === undefined
     ? authoredRoles.filter(role => role !== 'member') : authoredRoles.filter(role => Object.hasOwn(defaultOrganizationPermissions, role))
   // Only absent entries receive legacy defaults; a persisted [] stays empty on reload.
   config.organizationPermissions = { ...Object.fromEntries(defaultRoles.filter(role => !Object.hasOwn(config.organizationPermissions, role))
@@ -161,50 +169,67 @@ export function defineInstance(input: Omit<ShorthandInput, 'roles' | 'entities' 
   if (!authoredRoles.includes(config.organizationOwnerRole) && !Object.hasOwn(config.organizationPermissions, config.organizationOwnerRole)) config.organizationPermissions[config.organizationOwnerRole] = []
   if (config.organizationOwnerRole !== 'owner' && !config.roles.includes(config.organizationOwnerRole)) throw new Error('Unknown organization owner role')
   for (const [name, entity] of Object.entries(config.entities)) {
-    if ((reserved.has(name) && !(name === 'users' && config.account?.entity === name)) || name === 'atomic_assert' || name.startsWith('sqlite_') || name.startsWith('d1_')) throw new Error(`Reserved entity: ${name}`)
-    if (Object.keys(entity.fields).length > 90) throw new Error('Entity exceeds the supported field/parameter budget')
-    for (const [key, field] of Object.entries(entity.fields)) {
-      if (field.userLink) {
-        if (name === 'users' || config.account?.entity !== 'users' || key !== 'user' || field.type !== 'ref' || field.entity !== 'users'
-          || field.required || field.computed || field.default != null || field.backfillFrom || field.renameFrom
-          || !Object.values(entity.relations).some(relation => !relation.many && relation.field === key && relation.entity === 'users')) throw new Error(`Invalid user link: ${name}.${key}`)
-        field.readOnly = true
+    let path: (string | number)[] = ['entities', name]
+    try {
+      if ((reserved.has(name) && !(name === 'users' && config.account?.entity === name)) || name === 'atomic_assert' || name.startsWith('sqlite_') || name.startsWith('d1_')) throw new Error(`Reserved entity: ${name}`)
+      path = ['entities', name, 'fields']
+      if (Object.keys(entity.fields).length > 90) throw new Error('Entity exceeds the supported field/parameter budget')
+      for (const [key, field] of Object.entries(entity.fields)) {
+        path = ['entities', name, 'fields', key]
+        if (field.userLink) {
+          if (name === 'users' || config.account?.entity !== 'users' || key !== 'user' || field.type !== 'ref' || field.entity !== 'users'
+            || field.required || field.computed || field.default != null || field.backfillFrom || field.renameFrom
+            || !Object.values(entity.relations).some(relation => !relation.many && relation.field === key && relation.entity === 'users')) throw new Error(`Invalid user link: ${name}.${key}`)
+          field.readOnly = true
+        }
+        if (name === 'users' && ['email', 'password_hash', 'salt'].includes(key)) throw new Error(`Account identity field is private: ${key}`)
+        if (field.computed) field.readOnly = true
+        if (baseFields.includes(key)) throw new Error(`Reserved field: ${key}`)
+        path = ['entities', name, 'fields', key, 'min']
+        if (field.min !== undefined && !['int', 'float'].includes(field.type)) throw new Error('min requires a numeric field')
+        path = ['entities', name, 'fields', key, 'default']
+        if (field.default !== undefined && field.default !== null) {
+          const value = field.default
+          const valid = field.type === 'bool' ? typeof value === 'boolean'
+            : field.type === 'int' ? Number.isSafeInteger(value) && (value as number) >= (field.min ?? Number.MIN_SAFE_INTEGER)
+            : field.type === 'float' ? typeof value === 'number' && Number.isFinite(value) && value >= (field.min ?? -Number.MAX_VALUE)
+            : field.type === 'enum' ? field.values!.includes(String(value)) && typeof value === 'string'
+            : field.type === 'datetime' ? typeof value === 'string' && z.iso.datetime().safeParse(value).success
+            : typeof value === 'string'
+          if (!valid) throw new Error(`Invalid default: ${name}.${key}`)
+        }
+        if (field.required && field.default === null) throw new Error(`Required default cannot be null: ${name}.${key}`)
+        path = ['entities', name, 'fields', key, 'entity']
+        if (field.type === 'ref' && !Object.hasOwn(config.entities, field.entity!)) throw new Error(`Unknown reference: ${field.entity}`)
+        path = ['entities', name, 'fields', key, 'backfillFrom']
+        if (field.backfillFrom) {
+          const ref = entity.fields[field.backfillFrom.refField]
+          if (!ref?.entity || ref.computed || !config.entities[ref.entity]?.fields[field.backfillFrom.valueField] || config.entities[ref.entity].fields[field.backfillFrom.valueField].computed) throw new Error('Invalid backfill reference')
+        }
       }
-      if (name === 'users' && ['email', 'password_hash', 'salt'].includes(key)) throw new Error(`Account identity field is private: ${key}`)
-      if (field.computed) field.readOnly = true
-      if (baseFields.includes(key)) throw new Error(`Reserved field: ${key}`)
-      if (field.min !== undefined && !['int', 'float'].includes(field.type)) throw new Error('min requires a numeric field')
-      if (field.default !== undefined && field.default !== null) {
-        const value = field.default
-        const valid = field.type === 'bool' ? typeof value === 'boolean'
-          : field.type === 'int' ? Number.isSafeInteger(value) && (value as number) >= (field.min ?? Number.MIN_SAFE_INTEGER)
-          : field.type === 'float' ? typeof value === 'number' && Number.isFinite(value) && value >= (field.min ?? -Number.MAX_VALUE)
-          : field.type === 'enum' ? field.values!.includes(String(value)) && typeof value === 'string'
-          : field.type === 'datetime' ? typeof value === 'string' && z.iso.datetime().safeParse(value).success
-          : typeof value === 'string'
-        if (!valid) throw new Error(`Invalid default: ${name}.${key}`)
+      for (const [relationName, r] of Object.entries(entity.relations)) {
+        path = ['entities', name, 'relations', relationName, 'field']
+        const target = r.many ? config.entities[r.entity]?.fields[r.field] : entity.fields[r.field]
+        if (!target || target.type !== 'ref' || target.entity !== (r.many ? name : r.entity)) throw new Error(`Invalid relation on ${name}`)
+        path = ['entities', name, 'relations', relationName, 'through']
+        if (r.through) {
+          const join = config.entities[r.entity]
+          const other = join?.fields[r.through.field]
+          if (Object.hasOwn(entity.fields, relationName) || !r.many || r.field === r.through.field || other?.type !== 'ref' || other.entity !== r.through.entity
+            || Object.entries(join.fields).some(([field, spec]) => ![r.field, r.through!.field].includes(field) && !(spec.readOnly && spec.ui?.hidden))
+            || ![r.through.createCommand, r.through.deleteCommand].every(command => config.commands.includes(command))) throw new Error(`Invalid pure join relation on ${name}`)
+          const inverse = Object.values(config.entities[r.through.entity]?.relations ?? {}).some(inverse => inverse.entity === r.entity && inverse.field === r.through!.field && inverse.through?.entity === name && inverse.through.field === r.field)
+          if (!inverse) throw new Error(`Missing inverse pure join relation on ${name}`)
+        }
       }
-      if (field.required && field.default === null) throw new Error(`Required default cannot be null: ${name}.${key}`)
-      if (field.type === 'ref' && !Object.hasOwn(config.entities, field.entity!)) throw new Error(`Unknown reference: ${field.entity}`)
-      if (field.backfillFrom) {
-        const ref = entity.fields[field.backfillFrom.refField]
-        if (!ref?.entity || ref.computed || !config.entities[ref.entity]?.fields[field.backfillFrom.valueField] || config.entities[ref.entity].fields[field.backfillFrom.valueField].computed) throw new Error('Invalid backfill reference')
+      for (const [i, c] of entity.checks.entries()) {
+        path = ['entities', name, 'checks', i, !entity.fields[c.left] || entity.fields[c.left].computed ? 'left' : 'right']
+        if (!entity.fields[c.left] || !entity.fields[c.right] || entity.fields[c.left].computed || entity.fields[c.right].computed) throw new Error('Unknown check field')
       }
+    } catch (error) {
+      if (entityError) entityError(error, path)
+      throw error
     }
-    for (const [relationName, r] of Object.entries(entity.relations)) {
-      const target = r.many ? config.entities[r.entity]?.fields[r.field] : entity.fields[r.field]
-      if (!target || target.type !== 'ref' || target.entity !== (r.many ? name : r.entity)) throw new Error(`Invalid relation on ${name}`)
-      if (r.through) {
-        const join = config.entities[r.entity]
-        const other = join?.fields[r.through.field]
-        if (Object.hasOwn(entity.fields, relationName) || !r.many || r.field === r.through.field || other?.type !== 'ref' || other.entity !== r.through.entity
-          || Object.entries(join.fields).some(([field, spec]) => ![r.field, r.through!.field].includes(field) && !(spec.readOnly && spec.ui?.hidden))
-          || ![r.through.createCommand, r.through.deleteCommand].every(command => config.commands.includes(command))) throw new Error(`Invalid pure join relation on ${name}`)
-        const inverse = Object.values(config.entities[r.through.entity]?.relations ?? {}).some(inverse => inverse.entity === r.entity && inverse.field === r.through!.field && inverse.through?.entity === name && inverse.through.field === r.field)
-        if (!inverse) throw new Error(`Missing inverse pure join relation on ${name}`)
-      }
-    }
-    for (const c of entity.checks) if (!entity.fields[c.left] || !entity.fields[c.right] || entity.fields[c.left].computed || entity.fields[c.right].computed) throw new Error('Unknown check field')
   }
   for (const [role, grants] of Object.entries(config.permissions)) {
     if (!config.roles.includes(role as any)) throw new Error(`Unknown role ${role}`)
@@ -252,7 +277,11 @@ export function defineInstance(input: Omit<ShorthandInput, 'roles' | 'entities' 
     const known = (field: string) => baseFields.includes(field) || Object.hasOwn(entity.fields, field)
     validateFormDisplay(name, entity, hints)
     if (hints.detail) validateDetailDisplay(config, name, hints.detail)
-    for (const [field, spec] of Object.entries(entity.fields)) if (spec.ui?.signedBy && (!known(spec.ui.signedBy.field) || !['int', 'float'].includes(spec.type))) throw new Error(`Invalid signed UI field: ${name}.${field}`)
+    for (const [field, spec] of Object.entries(entity.fields)) if (spec.ui?.signedBy && (!known(spec.ui.signedBy.field) || !['int', 'float'].includes(spec.type))) {
+      const error = new Error(`Invalid signed UI field: ${name}.${field}`)
+      if (entityError) entityError(error, ['entities', name, 'fields', field, 'ui', 'signedBy', 'field'])
+      throw error
+    }
     validateCalendarViews(config, name, hints.views)
     const list = hints.list
     if (!list) continue
