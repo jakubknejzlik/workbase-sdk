@@ -2,7 +2,7 @@ import type { InstanceConfig } from '../config'
 import type { SourceMap } from '../schema/load'
 import { sha256 } from '../crypto'
 import { checkBundle, hasManual, manualEvidence, parseBundle, renderBundle } from './schema-bundle'
-import { diffSpecs, lockBytes, parseLock, schemaLock } from './schema-lock'
+import { diffSpecs, lockBytes, parseLock, schemaLock, type SchemaLock } from './schema-lock'
 
 export type MigrationFiles = Readonly<Record<string, string>>
 export interface ExistingBundle { filename: string; sql: string }
@@ -15,11 +15,21 @@ export function fileRevision(filename: string): number {
 export function assertBaseFiles(base: MigrationFiles, current: MigrationFiles, replacing?: string) {
   for (const [file, sql] of Object.entries(base)) if (file !== replacing && current[file] !== sql) throw new Error(`${file}:1: base migration ${current[file] === undefined ? 'missing' : 'edited'}; restore base bytes`)
 }
+function assertColumnOrder(base: SchemaLock | undefined, lock: SchemaLock) {
+  for (const table of base?.tables ?? []) {
+    const current = lock.tables.find(t => t.name === table.name)
+    if (!current) continue // diffSpecs reports unsupported table drops.
+    for (const [i, column] of table.columns.entries()) if (current.columns[i]?.name !== column.name) {
+      throw new Error(`schema.lock.json:1: ${table.name}.${column.name}: column order must preserve the base prefix; append new columns`)
+    }
+  }
+}
 /** Checks the single permitted transition from the ref tip, never a merge-base. */
 export async function checkLinkage(baseLock: string | undefined, baseMigrations: MigrationFiles, currentLock: string, migrations: MigrationFiles) {
   if (baseLock === undefined && Object.keys(baseMigrations).length) throw new Error('Missing schema.lock.json in base with domain migrations; unsupported base history')
   assertBaseFiles(baseMigrations, migrations)
   const lock = parseLock(currentLock), base = baseLock === undefined ? undefined : parseLock(baseLock)
+  assertColumnOrder(base, lock)
   const added = Object.keys(migrations).filter(file => !(file in baseMigrations))
   for (const [file, sql] of Object.entries(migrations)) {
     const bundle = await checkBundle(file, sql)
@@ -44,6 +54,7 @@ export async function plan(input: {
   const { baseLock, baseMigrations, config, existingBundle, confirmManual, sources } = input
   const base = baseLock === undefined ? undefined : parseLock(baseLock)
   const lock = schemaLock(config, base, sources)
+  assertColumnOrder(base, lock)
   const generated = diffSpecs(base?.tables ?? [], lock.tables)
   const previous = existingBundle && parseBundle(existingBundle.filename, existingBundle.sql)
   if (!generated && base) {

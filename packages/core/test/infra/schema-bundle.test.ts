@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process'
 import { cpSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
-import { afterEach, expect, it } from 'vitest'
+import { afterEach, expect, it, vi } from 'vitest'
 import { checkBundle, manualEvidence, parseBundle, renderBundle } from '../../src/migrations/schema-bundle'
 import { bundleFilename, checkLinkage, plan, type MigrationFiles } from '../../src/migrations/schema-plan'
 import { lockBytes, parseLock } from '../../src/migrations/schema-lock'
@@ -12,6 +12,10 @@ import { sdkMigrations } from '../../src/migrations/sdk-baseline'
 import { renderTable } from '../../src/migrations/schema'
 import { sha256 } from '../../src/crypto'
 import fixture from '../fixtures/config-era/config'
+import { readSchemaBase } from '../../src/migrations/schema-git'
+import { schemaBase } from '../../../../scripts/lib/schema-base'
+
+vi.mock('node:child_process', { spy: true })
 
 const roots: string[] = []
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }) })
@@ -40,6 +44,65 @@ async function repository() {
   return { root, git, commit, base, args, change }
 }
 const read = (root: string, file: string) => readFileSync(join(root, file), 'utf8')
+
+it.each(['schéma', 'schéma[1]\t\n '])('Git base reads literal Unicode path %j and rejects edited base migrations', async folder => {
+  const { root, git, commit } = await repository(), domain = join(root, folder)
+  cpSync(resolve('packages/core/test/fixtures/config-era'), domain, { recursive: true })
+  git('config', 'core.quotePath', 'true')
+  const base = commit(), args = ['--root', root, '--config', `${folder}/config.ts`, '--base', base]
+  const state = readSchemaBase(root, base, join(domain, 'schema.lock.json'), join(domain, 'migrations'))
+  expect(state.lock).toBe(read(domain, 'schema.lock.json'))
+  expect(state.migrations).toEqual({ '0001_r1.sql': read(domain, 'migrations/0001_r1.sql') })
+  const file = 'migrations/0001_r1.sql', bundle = parseBundle(file, read(domain, file))
+  bundle.pre = 'SELECT 123;\n'; bundle.manual = await manualEvidence(bundle)
+  writeFileSync(join(domain, file), renderBundle(bundle))
+  expect(await runSchemaCli('check', args)).toBe(1)
+  await expect(runSchemaCli('plan', args)).rejects.toThrow('base migration edited')
+})
+it('Git base fails closed when a listing omits an existing lock', async () => {
+  const { root, base } = await repository()
+  const listing = vi.mocked(execFileSync).mockReturnValueOnce(base + '\n').mockReturnValueOnce('')
+  try {
+    expect(() => readSchemaBase(root, base, join(root, 'schema.lock.json'), join(root, 'migrations')))
+      .toThrow('Git listing missed existing lock schema.lock.json')
+  } finally { listing.mockRestore() }
+})
+it.each(['inserted', 'reordered'])('linkage rejects %s columns before the base prefix ends', async kind => {
+  const { r1, r2, files } = await chain(), lock = parseLock(r2.lock)
+  const columns = lock.tables[0].columns
+  if (kind === 'inserted') columns.splice(5, 0, columns.pop()!)
+  else [columns[5], columns[6]] = [columns[6], columns[5]]
+  await expect(checkLinkage(r1.lock, files, lockBytes(lock), { ...files, [r2.bundle!.filename]: r2.bundle!.sql }))
+    .rejects.toThrow(/worker\.name:.*column order/)
+})
+it('planning preserves the base column prefix and appends new columns', async () => {
+  const { r1, files } = await chain()
+  const next = config(['z', 'a'])
+  next.entities.worker.fields = Object.fromEntries(Object.entries(next.entities.worker.fields).reverse())
+  const result = await plan({ baseLock: r1.lock, baseMigrations: files, config: next })
+  const before = parseLock(r1.lock).tables[0].columns, after = parseLock(result.lock).tables[0].columns
+  expect(after.slice(0, before.length)).toEqual(before)
+  expect(after.slice(before.length).map(c => c.name)).toEqual(['a', 'z'])
+})
+it('CI tag and push checks use HEAD after main advances; PR, local and CLI bases remain selectable', async () => {
+  const { root, git, args, change, commit } = await repository()
+  git('tag', 'sdk-v9.0.0'); change(['merged']); await runSchemaCli('plan', args)
+  git('update-ref', 'refs/remotes/origin/main', commit()); git('checkout', '-q', 'sdk-v9.0.0')
+  const check = (base: string, override: string[] = []) => runSchemaCli('check', ['--root', root, '--base', base, ...override])
+  expect(await check('origin/main')).toBe(1)
+  for (const ref of ['refs/tags/sdk-v9.0.0', 'refs/heads/main']) {
+    const base = schemaBase({ CI: 'true', GITHUB_REF: ref })
+    expect(base).toBe('HEAD'); expect(await check(base)).toBe(0)
+    expect(await check(base, ['--base', 'origin/main'])).toBe(1)
+  }
+  expect(schemaBase({ CI: 'true', GITHUB_BASE_REF: 'stable' })).toBe('origin/stable')
+  expect(schemaBase({})).toBe('origin/main')
+  expect(await check(schemaBase({}), ['--base', 'HEAD'])).toBe(0)
+  const file = 'migrations/0001_r1.sql', bundle = parseBundle(file, read(root, file))
+  bundle.pre = 'SELECT 123;\n'; bundle.manual = 'unconfirmed'
+  writeFileSync(join(root, file), renderBundle(bundle))
+  expect(await check('HEAD')).toBe(1)
+})
 
 it('base CLI writes r2, reruns byte-identically and checks ref-tip linkage', async () => {
   const { root, args, change } = await repository(); change(['z'])

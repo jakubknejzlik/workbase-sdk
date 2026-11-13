@@ -20,7 +20,12 @@ export function readSchemaBase(root: string, ref: string, lockPath: string, migr
     return name
   }
   const lockName = path(lockPath), directory = path(migrationsPath)
-  const names = execFileSync('git', ['ls-tree', '-r', '--name-only', tip, '--', lockName, directory], { cwd: top, encoding: 'utf8' }).trim().split('\n').filter(Boolean)
+  const names = execFileSync('git', ['--literal-pathspecs', 'ls-tree', '-r', '-z', '--name-only', tip, '--', lockName, directory], { cwd: top, encoding: 'utf8' }).split('\0').filter(Boolean)
+  if (!names.includes(lockName)) {
+    let present = false
+    try { git('cat-file', '-e', `${tip}:${lockName}`); present = true } catch { /* A lockless base is permitted for --init. */ }
+    if (present) throw new Error(`Git listing missed existing lock ${lockName}; refusing incomplete base state`)
+  }
   const migrations: Record<string, string> = {}
   for (const name of names) if (name.startsWith(directory + '/') && name.endsWith('.sql')) {
     const file = name.slice(directory.length + 1)
