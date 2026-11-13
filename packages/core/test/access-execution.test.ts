@@ -200,3 +200,190 @@ it('normalizes command declaration order and marks unresolved executable guards 
   expect(a).toEqual(b)
   expect(a.guards).toEqual(['worker/a', 'worker/b'].map(name => ({ name, permission: null, additionalPermissions: [], opaque: true })))
 })
+
+async function reviewToken(app: ReturnType<typeof createApp>, issuer: string, role: string, operations: string[] = ['worker.read', 'worker.update']) {
+  const token = `wb_review_${issuer}_${role}`
+  await env.DB.prepare('INSERT INTO access_tokens (id,organization_id,issuer_id,name,token_hash,prefix,role,operations,expires_at,created_at) VALUES (?,?,?,?,?,?,?,?,?,?)')
+    .bind(`review-${issuer}-${role}`, 'org-a', issuer, 'Review probe', await sha256(token), 'wb_review', role, JSON.stringify(operations), '2099-01-01T00:00:00.000Z', 'now').run()
+  return (path: string, method = 'GET', body?: object) => { const req = request(path, issuer, method, body); req.headers.set('Authorization', `Bearer ${token}`); return app.fetch(req) }
+}
+it.each([['admin', 'staff'], ['staff', 'admin']])('credential and principal independently cap rows, fields and writes: issuer=%s credential=%s', async (issuer, role) => {
+  const { app } = await setup(config({ admin: all, staff: { read: self, create: 'none', update: { where: { use: 'self' } }, delete: 'none' } }))
+  const call = await reviewToken(app, issuer, role)
+  const list = await call('/api/worker')
+  const data = await list.json() as any
+  expect(list.status).toBe(200)
+  expect(data.data).toEqual([{ id: `worker-${issuer}`, name: issuer, version: 1 }])
+  const update = await call('/api/worker/worker-other', 'PATCH', { name: 'escalated' })
+  expect(update.status).toBe(404)
+  expect(await env.DB.prepare('SELECT name FROM worker WHERE id=?').bind('worker-other').first('name')).toBe('other')
+  const excludedOperation = await call('/api/worker', 'POST', { name: 'blocked-by-name' })
+  expect(excludedOperation.status).toBe(403)
+})
+it.each([['admin', 'staff'], ['staff', 'admin']])('none in either authority layer caps create: issuer=%s credential=%s', async (issuer, role) => {
+  const { app } = await setup(config({ admin: all, staff: { read: self, create: 'none', update: 'none', delete: 'none' } }))
+  const call = await reviewToken(app, issuer, role, ['worker.create'])
+  const created = await call('/api/worker', 'POST', { name: 'credential-has-no-create' })
+  expect(created.status).toBe(403)
+  expect(await env.DB.prepare('SELECT count(*) AS count FROM worker WHERE name=?').bind('credential-has-no-create').first('count')).toBe(0)
+})
+it('relation update binds child predicates correctly', async () => {
+  const { app } = await setup(config({ admin: { ...all, update: { where: { user_account: { name: { eq: 'other' } } } } }, staff: 'deny' }))
+
+  const response = await app.fetch(request('/api/worker/worker-other', 'admin', 'PATCH', { name: 'cross-org' }))
+  expect(response.status).toBe(200)
+  expect(await env.DB.prepare('SELECT name FROM worker WHERE id=?').bind('worker-other').first('name')).toBe('cross-org')
+})
+
+it.each([false, true])('custom permissions allow hooks remain bound by authored row filters, masks and grants (mask hook=%s)', async (maskHook) => {
+  const selected = config()
+  const provider = { name: 'custom-permissions', version: '1.0.0', provides: { permissions: '1.x' as const }, authorization: true,
+    tableFilter: () => ({ kind: 'all' as const }), commandGuard: () => ({ allow: true as const }),
+    ...(maskHook ? { fieldMask: () => ['id', 'name', 'user', 'organization_id', 'version', 'created_at', 'updated_at'] } : {}) }
+  const { app } = await setup({ ...selected, plugins: selected.plugins!.map(p => p.name === 'rbac' ? provider : p) })
+  const response = await app.fetch(request('/api/worker'))
+  const data = await response.json() as any
+  expect(response.status).toBe(200)
+  expect(data.data).toEqual([{ id: 'worker-staff', name: 'staff', version: 1 }])
+  const update = await app.fetch(request('/api/worker/worker-other', 'staff', 'PATCH', { name: 'custom-bypass' }))
+  expect(update.status).toBe(404)
+  expect(await env.DB.prepare('SELECT name FROM worker WHERE id=?').bind('worker-other').first('name')).toBe('other')
+  expect((await app.fetch(request('/api/worker', 'staff', 'POST', { name: 'custom-create' }))).status).toBe(403)
+})
+it('direct atomic update enforces organization pin even without SQL organization predicate', async () => {
+  const { kernel } = await setup()
+  const { z } = await import('zod')
+  const { executeAtomic } = await import('../src/execution/atomic')
+  const { coreExecutionContext } = await import('../src/execution/context')
+  const { D1AtomicStore, D1AtomicReader } = await import('../src/execution/d1')
+  const { createCommandRegistry } = await import('../src/commands')
+  const operation = {
+    name: 'worker/review_foreign', permission: { entity: 'worker', operation: 'update' as const }, input: z.strictObject({}),
+    plan: () => ({ rules: [{ name: 'change', statements: [{ sql: 'UPDATE worker SET name=? WHERE id=?', bindings: ['foreign-write', 'worker-foreign'], expectRows: 1 as const }] }],
+      result: { status: 200, body: {} }, event: { entity: 'worker', entityId: 'worker-foreign', operation: 'worker.changed' } }),
+  }
+  const bound = new KernelRegistry({ ...kernel.config, commands: [operation.name] }, { commands: createCommandRegistry([operation]) })
+  const scope = await requireScope(await resolveActor(request('/', 'admin'), runtime(), bound.config), 'org-a', bound.config)
+  const ctx = coreExecutionContext(bound.config, scope, new D1AtomicStore(env.DB), new D1AtomicReader(env.DB))
+  await expect(executeAtomic(operation, {}, ctx)).rejects.toThrow('policy_violation')
+  expect(await env.DB.prepare('SELECT name FROM worker WHERE id=?').bind('worker-foreign').first('name')).toBe('foreign')
+})
+
+it('relation renderer pins child/root org and keeps positional binding order', async () => {
+  const { kernel } = await setup()
+  const { writeFilter } = await import('../src/execution/policies')
+  const scope = await requireScope(await resolveActor(request('/', 'admin'), runtime(), kernel.config), 'org-a', kernel.config)
+  const fakeKernel = { config: kernel.config, tableFilter: (entity: string) => entity === 'worker'
+    ? { kind: 'where', predicate: { exists: { entity: 'users', field: 'id', parentField: 'name', predicate: { name: { eq: 'foreign' } } } } }
+    : { kind: 'all' } } as unknown as KernelRegistry
+  const filter = writeFilter(fakeKernel, scope, 'worker', 'worker', 'update')
+  expect(filter.bindings).toEqual(['foreign', 'org-a', 'org-a'])
+  await env.DB.prepare('UPDATE worker SET name=? WHERE id=?').bind('foreign', 'worker-other').run()
+  const rows = await env.DB.prepare(`SELECT id FROM worker WHERE ${filter.sql}`).bind(...filter.bindings!).all()
+  expect(rows.results).toEqual([])
+})
+it('unknown actor roles/resources and unresolved entity commands fail closed', async () => {
+  const { kernel } = await setup()
+  const scope = await requireScope(await resolveActor(request('/', 'admin'), runtime(), kernel.config), 'org-a', kernel.config)
+  const { systemAccessTarget } = await import('../src/access-evaluator')
+  for (const action of accessSystemActions) expect(systemAccessTarget(action).entity).toBeTypeOf('string')
+  expect(systemAccessTarget('unmapped.read').entity).toBeUndefined()
+  expect(() => kernel.resourcePermission(scope, 'unmapped.read' as any)).toThrow('permission_denied')
+  expect(effectiveEntityGrants(kernel.config.effectiveAccess!, ['admin', 'unknown'], 'worker', 'read')).toEqual([])
+  expect(() => kernel.commandGuard({ kind: 'command', name: 'worker/unresolved', permission: { entity: 'worker', operation: 'update' } }, scope, undefined)).toThrow('unsupported_command')
+})
+
+it('capabilities list allowed mutations using each operation filter when read is denied', async () => {
+  const { app } = await setup(config({ admin: all, staff: { read: 'deny', create: 'allow', update: { where: { use: 'self' } }, delete: 'deny' } }))
+  const response = await app.fetch(request('/o/org-a/capabilities'))
+  expect(response.status).toBe(200)
+  const data = await response.json() as any
+  expect(data.entities.worker.operations).toEqual(['create', 'update'])
+  expect((await app.fetch(request('/api/worker', 'staff', 'POST', { name: 'actually-allowed' }))).status).toBe(201)
+  expect((await app.fetch(request('/api/worker/worker-staff', 'staff', 'PATCH', { name: 'also-allowed' }))).status).toBe(200)
+})
+
+it('narrow credential cannot inherit principal sensitive field grant', async () => {
+  const selected = defineConfig({ id: 'secret_probe', revision: 1, roles: ['admin', 'staff'], organizationOwnerRole: 'admin', languages: ['en'],
+    plugins: config().plugins, interactive: false,
+    entities: { worker: defineEntity({ fields: { name: { type: 'text', required: true }, user: accountLink(), secret: { type: 'text', sensitive: true } },
+      access: { admin: { ...all, read: { where: {}, fields: ['id', 'name', 'secret'] } }, staff: { read: self, create: 'none', update: { where: { use: 'self' } }, delete: 'none' } } }) },
+    access: defineAccess({ roles: Object.fromEntries(['admin', 'staff'].map(role => [role, { system: Object.fromEntries(accessSystemActions.map(action => [action, 'deny'])) }])),
+      entities: Object.fromEntries(accessEntities.map(entity => [entity, { admin: all, staff: 'deny' }])), predicates: { self: { user: { eq: '$actor.id' } } } }),
+  })
+  const { app } = await setup(selected)
+  await env.DB.prepare('UPDATE worker SET secret=? WHERE id=?').bind('synthetic-confidential', 'worker-other').run()
+  const staffResponse = await app.fetch(request('/api/worker'))
+  expect((await staffResponse.json() as any).data).toEqual([{ id: 'worker-staff', name: 'staff', version: 1 }])
+  const call = await reviewToken(app, 'admin', 'staff')
+  const response = await call('/api/worker/worker-other')
+  expect(response.status).toBe(404)
+  const own = await call('/api/worker/worker-admin')
+  expect(own.status).toBe(200)
+  expect(await own.json()).toEqual({ id: 'worker-admin', name: 'admin' })
+})
+
+it.each([['admin', 'staff', 'none'], ['staff', 'admin', 'none'], ['admin', 'staff', 'deny'], ['staff', 'admin', 'deny']] as const)(
+  'system and command guards require both layers: issuer=%s credential=%s staff=%s', async (issuer, role, decision) => {
+    const selected = config({ admin: all, staff: all })
+    // Permit the target entity in both roles to isolate the system-action cap.
+    selected.effectiveAccess = { ...selected.effectiveAccess!,
+      entities: selected.effectiveAccess!.entities.map(rule => rule.entity === 'audit_events' ? { ...rule, decision: 'allow' as const } : rule),
+      system: selected.effectiveAccess!.system.map(rule => rule.role === 'staff' && rule.action === 'audit.read' ? { ...rule, decision } : rule),
+    }
+    const { app, kernel } = await setup(selected)
+    await reviewToken(app, issuer, role, ['audit.read', 'worker/system_guard'])
+    const req = request('/')
+    req.headers.set('Authorization', `Bearer wb_review_${issuer}_${role}`)
+    const scope = await requireScope(await resolveActor(req, runtime(), kernel.config), 'org-a', kernel.config)
+    expect(hasOwnerRole(scope, kernel.config)).toBe(false)
+    expect(() => kernel.resourcePermission(scope, 'audit.read')).toThrow('permission_denied')
+    expect(() => kernel.commandGuard({ name: 'worker/system_guard', kind: 'command', permission: { system: 'audit.read' } }, scope, {})).toThrow('permission_denied')
+  },
+)
+it('custom provider hooks can further narrow compiled rows, masks and commands', async () => {
+  const selected = config()
+  const provider = { name: 'custom-permissions', version: '1.0.0', provides: { permissions: '1.x' as const }, authorization: true,
+    tableFilter: () => ({ kind: 'where' as const, predicate: { name: { eq: 'other' } } }),
+    fieldMask: () => ['id', 'organization_id'], commandGuard: () => ({ allow: false as const, code: 'custom_denial' }),
+  }
+  const { kernel } = await setup({ ...selected, plugins: selected.plugins!.map(p => p.name === 'rbac' ? provider : p) })
+  const scope = await requireScope(await resolveActor(request('/'), runtime(), kernel.config), 'org-a', kernel.config)
+  expect(kernel.fieldMask('worker', scope)).toEqual(['id'])
+  expect(() => kernel.permission(scope, 'worker', 'update')).toThrow('custom_denial')
+  const { writeFilter } = await import('../src/execution/policies')
+  const filter = writeFilter(kernel, scope, 'worker', 'worker', 'update')
+  expect((await env.DB.prepare(`SELECT id FROM worker WHERE ${filter.sql}`).bind(...filter.bindings!).all()).results).toEqual([])
+})
+it('atomic write guards intersect credential and issuer predicates', async () => {
+  const { app, kernel } = await setup()
+  const { z } = await import('zod')
+  const { executeAtomic } = await import('../src/execution/atomic')
+  const { coreExecutionContext } = await import('../src/execution/context')
+  const { D1AtomicStore, D1AtomicReader } = await import('../src/execution/d1')
+  const { createCommandRegistry } = await import('../src/commands')
+  const operation = {
+    name: 'worker/credential_guard', permission: { entity: 'worker', operation: 'update' as const }, input: z.strictObject({}),
+    plan: () => ({ rules: [{ name: 'change', statements: [{ sql: 'UPDATE worker SET name=? WHERE id=?', bindings: ['escalated', 'worker-other'], expectRows: 1 as const }] }],
+      result: { status: 200, body: {} }, event: { entity: 'worker', entityId: 'worker-other', operation: 'worker.changed' } }),
+  }
+  const bound = new KernelRegistry({ ...kernel.config, commands: [operation.name] }, { commands: createCommandRegistry([operation]) })
+  await reviewToken(app, 'admin', 'staff', [operation.name])
+  const req = request('/')
+  req.headers.set('Authorization', 'Bearer wb_review_admin_staff')
+  const scope = await requireScope(await resolveActor(req, runtime(), bound.config), 'org-a', bound.config)
+  const ctx = coreExecutionContext(bound.config, scope, new D1AtomicStore(env.DB), new D1AtomicReader(env.DB))
+  await expect(executeAtomic(operation, {}, ctx)).rejects.toThrow('policy_violation')
+  expect(await env.DB.prepare('SELECT name FROM worker WHERE id=?').bind('worker-other').first('name')).toBe('other')
+})
+it('credential authority fails closed without a live issuer projection', async () => {
+  const { kernel } = await setup()
+  const scope = { organizationId: 'org-a', actor: { type: 'agent' as const, id: 'missing' }, role: 'admin', correlationId: 'missing' }
+  const { effectiveAuthority } = await import('../src/access-evaluator')
+  const authority = effectiveAuthority(kernel.config.effectiveAccess!, scope)
+  expect(authority.permits({ entity: 'worker', operation: 'create' })).toBe(false)
+  expect(authority.permits({ system: 'audit.read' })).toBe(false)
+  expect(kernel.tableFilter('worker', scope).kind).toBe('none')
+  expect(kernel.fieldMask('worker', scope)).toEqual([])
+  expect(hasOwnerRole(scope, kernel.config)).toBe(false)
+})

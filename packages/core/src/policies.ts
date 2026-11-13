@@ -1,4 +1,4 @@
-import { effectiveEntityGrants, effectiveSystemGrant } from './access-evaluator'
+import { effectiveAuthority } from './access-evaluator'
 import { constantQuantifier } from './config-shorthand'
 import { z } from 'zod'
 import { baseFields, type Field, type InstanceConfig } from './config'
@@ -184,27 +184,28 @@ function constantPredicate(node: Predicate): boolean | undefined {
 }
 /** A token's live role caps its issuer's live membership; it cannot outlive a role loss. */
 export const hasActorProjection = (scope: Scope) => projections.has(scope)
+export const actorMembershipRole = (scope: Scope): string | undefined => {
+  const role = projections.get(scope)?.role
+  return role === undefined ? undefined : String(role)
+}
 export function rbacRoles(scope: Scope): string[] {
   const principal = projections.get(scope)?.role
   return principal && principal !== scope.role ? [scope.role, String(principal)] : [scope.role]
 }
 /** System audit access requires an owner credential and a live owner issuer. */
 export function hasOwnerRole(scope: Scope, config?: InstanceConfig): boolean {
-  if (config?.effectiveAccess) return (scope.actor.type !== 'agent' || projections.has(scope)) && effectiveSystemGrant(config.effectiveAccess, rbacRoles(scope), 'audit.read')
+  if (config?.effectiveAccess) return (scope.actor.type !== 'agent' || projections.has(scope)) && effectiveAuthority(config.effectiveAccess, scope).permits({ system: 'audit.read' })
   return (scope.actor.type !== 'agent' || projections.has(scope)) && rbacRoles(scope).every(role => roleNamePrivileges(role).has('audit.read'))
 }
 export function policyFilter(config: InstanceConfig, entity: string, scope: Scope, operation: import('./config').Operation = 'read'): TableFilter {
-  const roles = rbacRoles(scope)
   if (config.effectiveAccess) {
     if (scope.actor.type === 'service' && scope.role === 'SYSTEM') return { kind: 'all' }
-    const rules = effectiveEntityGrants(config.effectiveAccess, roles, entity, operation)
-    const filters = rules.map(rule => rolePolicyFilter(config, entity, scope, rule.role, { where: rule.where }))
+    const filter = effectiveAuthority(config.effectiveAccess, scope).filter(entity, operation,
+      rule => rolePolicyFilter(config, entity, scope, rule.role, { where: rule.where }))
     const authority = actorLinkProjection(scope)
-    const actorAuthorities = authority ? [authority] : []
-    if (filters.some(filter => filter.kind === 'all')) return { kind: 'all', actorAuthorities }
-    const predicates = filters.flatMap(filter => filter.kind === 'where' ? [filter.predicate] : [])
-    return predicates.length ? { kind: 'where', predicate: { any: predicates }, actorAuthorities } : { kind: 'none', actorAuthorities }
+    return { ...filter, actorAuthorities: authority ? [authority] : [] }
   }
+  const roles = rbacRoles(scope)
   const filters = roles.map(role => rolePolicyFilter(config, entity, scope, role))
   const where = filters.filter((filter): filter is Extract<TableFilter, { kind: 'where' }> => filter.kind === 'where')
   const result: TableFilter = filters.some(filter => filter.kind === 'none')
@@ -218,7 +219,7 @@ export function policyFilter(config: InstanceConfig, entity: string, scope: Scop
   return authority && policyGraphUsesActorLinks(config, entity, roles) ? { ...result, actorAuthorities: [authority] } : result
 }
 export function readableFields(config: InstanceConfig, entity: string, scope: Scope): string[] {
-  if (config.effectiveAccess) return [...new Set(effectiveEntityGrants(config.effectiveAccess, rbacRoles(scope), entity, 'read').flatMap(rule => rule.fields ?? []))].sort()
+  if (config.effectiveAccess) return effectiveAuthority(config.effectiveAccess, scope).fields(entity)
   return [...baseFields, ...Object.keys(config.entities[entity].fields)].filter(field => rbacRoles(scope).every(role => {
     const policy = config.policies[entity]?.[role]
     const allow = typeof policy === 'object' ? policy.fields : undefined

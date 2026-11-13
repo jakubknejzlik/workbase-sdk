@@ -1,4 +1,4 @@
-import { effectiveSystemGrant } from './access-evaluator'
+import { effectiveAuthority, effectiveSystemGrant } from './access-evaluator'
 import { rbacRoles, hasActorProjection } from './policies'
 import type { InstanceConfig, OrganizationAction } from './config'
 import type { Scope } from './types'
@@ -40,7 +40,7 @@ export function canGrantRole(config: InstanceConfig, actorRole: string, targetRo
 export function organizationPermission(config: InstanceConfig, scope: Scope, action: OrganizationAction) {
   if (config.effectiveAccess) {
     if (scope.actor.type !== 'user' && !(scope.actor.type === 'agent' && hasActorProjection(scope))) throw new ApiError(403, 'user_required')
-    if (!effectiveSystemGrant(config.effectiveAccess, rbacRoles(scope), action)) throw new ApiError(403, 'permission_denied')
+    if (!effectiveAuthority(config.effectiveAccess, scope).permits({ system: action })) throw new ApiError(403, 'permission_denied')
     return
   }
   if (scope.actor.type !== 'user' && !(scope.actor.type === 'agent' && ['invitations.create', 'invitations.read', 'invitations.revoke'].includes(action))) throw new ApiError(403, 'user_required')
