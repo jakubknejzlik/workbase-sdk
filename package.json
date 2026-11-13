@@ -15,18 +15,26 @@
     "packages/frontend-console",
     "packages/console-generated",
     "packages/ui",
-    "packages/test-support"
+    "packages/test-support",
+    "packages/ui-v3",
+    "examples/spike-directory"
   ],
   "scripts": {
-    "lint": "bun scripts/sdk-lint.ts",
-    "typecheck": "tsc --noEmit && tsc --noEmit -p packages/ui && tsc --noEmit -p packages/frontend-console",
-    "test": "vitest run && vitest run --config vitest.infra.config.ts && vitest run --config vitest.tools.config.ts && bun test scripts/sdk-provenance.test.ts scripts/lib/sdk-workspaces.test.ts && bun run --cwd packages/ui test && bun run --cwd packages/frontend-console test",
+    "lint": "bun scripts/sdk-lint.ts && bun run spike:check",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p packages/ui && tsc --noEmit -p packages/frontend-console && bun run spike:typecheck",
+    "test": "vitest run && vitest run --config vitest.infra.config.ts && vitest run --config vitest.tools.config.ts && bun test scripts/sdk-provenance.test.ts scripts/lib/sdk-workspaces.test.ts && bun run --cwd packages/ui test && bun run --cwd packages/frontend-console test && bun run spike:test",
     "test:mcp": "vitest run --config packages/mcp/vitest.config.ts",
     "check:access": "bun scripts/check-access.ts",
     "access:lock": "bun scripts/check-access.ts --write",
     "check:ci-invariants": "bun scripts/sdk-ci-invariants.ts",
     "console:build": "bun scripts/build-console.ts",
-    "sdk:pack": "bash scripts/sdk-pack.sh"
+    "sdk:pack": "bash scripts/sdk-pack.sh",
+    "spike:check": "bun run --cwd examples/spike-directory check",
+    "spike:build": "bun run --cwd examples/spike-directory build",
+    "spike:manifest": "bun run --cwd examples/spike-directory manifest",
+    "spike:test": "bun run --cwd examples/spike-directory test",
+    "spike:typecheck": "bun run --cwd examples/spike-directory typecheck",
+    "spike:browser": "bun run --cwd examples/spike-directory browser"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "0.23.0",

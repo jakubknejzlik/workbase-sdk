@@ -1,0 +1,33 @@
+{
+  "name": "@workbasehq/spike-directory",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "vite build",
+    "dev": "vite --host 127.0.0.1",
+    "preview": "vite preview --host 127.0.0.1 --port 4178 --strictPort",
+    "check": "node --import tsx scripts/check.ts",
+    "manifest": "node --import tsx scripts/manifest.ts",
+    "typecheck": "node --import tsx scripts/generate.ts && tsc --noEmit",
+    "test": "vitest run --reporter=verbose --silent=false",
+    "browser": "node --import tsx scripts/browser.ts"
+  },
+  "dependencies": {
+    "@workbasehq/ui-v3": "workspace:*",
+    "@tanstack/react-router": "1.170.41",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "i18next": "25.10.10",
+    "leaflet": "1.9.4"
+  },
+  "devDependencies": {
+    "vite": "7.3.1",
+    "@types/react": "19.2.18",
+    "@types/react-dom": "19.2.4",
+    "@types/leaflet": "1.9.21",
+    "vitest": "^4.1.0",
+    "tsx": "4.23.15",
+    "typescript": "^6.0.0",
+    "playwright": "1.58.2"
+  }
+}
