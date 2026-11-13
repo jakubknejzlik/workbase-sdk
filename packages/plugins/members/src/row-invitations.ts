@@ -19,7 +19,7 @@ export function rowLink(config: InstanceConfig, target: RowTarget) {
  * live role and the target pre-image in the same batch as the invitation claim. */
 export function rowInvitationGuard(config: InstanceConfig, scope: Scope, target: RowTarget, available = true) {
   const link = rowLink(config, target)
-  const policy = writeFilter(kernelFor(config), scope, target.entity)
+  const policy = writeFilter(kernelFor(config), scope, target.entity, target.entity, 'create')
   const issuer = issuerGuard(config, scope, 'invitations.create', 'member', role => (scope.actor.type === 'agent' || role === scope.role) && !!config.permissions[role]?.[target.entity]?.includes('create'))
   return {
     sql: `${issuer.sql} AND EXISTS (SELECT 1 FROM ${quote(target.entity)} WHERE organization_id=? AND id=? ${available ? `AND ${quote(link.field)} IS NULL` : ''} AND ${policy.sql})`,

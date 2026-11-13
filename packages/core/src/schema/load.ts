@@ -1,9 +1,10 @@
+import { createHash } from 'node:crypto'
 /** Build-time source validation only: keep Node and the TS compiler out of runtime imports. */
 import { readFileSync, realpathSync, readdirSync, statSync } from 'node:fs'
-import { dirname, extname, isAbsolute, resolve } from 'node:path'
+import { dirname, extname, isAbsolute, resolve, relative } from 'node:path'
 import { fileURLToPath, URL } from 'node:url'
 import ts from 'typescript'
-import { accountLink, DeclarationError, defineConfig, defineEntity } from '../schema'
+import { accountLink, DeclarationError, defineConfig, defineEntity, defineAccess } from '../schema'
 import type { InstanceConfig } from '../config'
 
 export interface SourceLocation { file: string; line: number; column: number }
@@ -98,10 +99,11 @@ function sdkBinding(binding: Binding | undefined, file: string, name: string) {
   }
 }
 /** Entity resolution is deliberately independent of host extension/index precedence. */
-function entityPath(binding: Binding, entry: string, name: string): string {
-  if (![`./schema/${name}`, `./schema/${name}.ts`].includes(binding.module) || /[/\\]/.test(name)) fail(binding.node, 'Entity import must match schema/<entity>.ts')
+function entityPath(binding: Binding, entry: string, name: string, directory = 'schema'): string {
+  const prefix = directory ? `./${directory}/` : './'
+  if (![`${prefix}${name}`, `${prefix}${name}.ts`].includes(binding.module) || /[/\\]/.test(name)) fail(binding.node, 'Entity import must match schema/<entity>.ts')
   try {
-    const schema = realpathSync(resolve(dirname(entry), 'schema'))
+    const schema = realpathSync(resolve(dirname(entry), directory))
     // Reject every competing sibling, including an extensionless file or directory.
     const lower = name.toLowerCase()
     if (readdirSync(schema).some(candidate => candidate !== `${name}.ts`
@@ -207,7 +209,7 @@ function literal(node: ts.Expression, bindings: Map<string, Binding>, path: stri
  * default or named defineEntity({...}) exports from schema/<entity>.ts.
  * Legacy defineInstance remains available through its existing runtime entry.
  */
-export async function loadConfig(file: string): Promise<{ config: InstanceConfig; sources: SourceMap }> {
+export async function loadConfig(file: string): Promise<{ config: InstanceConfig; sources: SourceMap; configHash: string }> {
   const entry = realpathSync(resolve(file))
   const source = read(entry)
   const sources: SourceMap = { '': location(source) }
@@ -228,9 +230,29 @@ export async function loadConfig(file: string): Promise<{ config: InstanceConfig
     if (!ref || !ts.isIdentifier(ref)) fail(ref ?? property, 'Entity must be an explicit schema import')
     entityImports.add(ref.text)
   }
+  const accessRef = value(props.get('access'))
+  if (accessRef) {
+    if (!ts.isIdentifier(accessRef)) fail(accessRef, 'access must be imported from ./access.ts')
+    entityImports.add(accessRef.text)
+  }
   moduleBoundary(source, declaration, ['defineConfig'], entityImports)
   const data: Record<string, unknown> = Object.create(null)
-  for (const [name, property] of props) if (name !== 'entities') data[name] = literal(value(property)!, new Map())
+  for (const [name, property] of props) if (name !== 'entities' && name !== 'access') data[name] = literal(value(property)!, new Map())
+  if (accessRef && ts.isIdentifier(accessRef)) {
+    const binding = bindings.get(accessRef.text)
+    if (!binding || !['./access', './access.ts'].includes(binding.module)) fail(accessRef, 'access must be imported from ./access.ts')
+    const path = entityPath(binding, entry, 'access', '')
+    const accessSource = read(path)
+    const expression = exported(accessSource, binding.imported)
+    const accessBindings = imports(accessSource)
+    if (!expression || !ts.isCallExpression(expression) || !ts.isIdentifier(expression.expression)
+      || !sdkBinding(accessBindings.get(expression.expression.text), path, 'defineAccess')) fail(accessSource, 'Expected an exported defineAccess({...}) declaration')
+    const arg = expression.arguments[0]
+    if (expression.arguments.length !== 1 || !arg || !ts.isObjectLiteralExpression(unwrap(arg))) fail(expression, 'defineAccess requires a literal object')
+    moduleBoundary(accessSource, expression, ['defineAccess'])
+    index(arg, 'access', sources)
+    try { data.access = defineAccess(literal(arg, accessBindings) as Parameters<typeof defineAccess>[0]) } catch (error) { remap(error, sources, 'access') }
+  }
   const entities: Record<string, ReturnType<typeof defineEntity>> = Object.create(null)
   for (const [name, property] of properties(entityMap)) {
     if (name === 'users') fail(property, 'users is SDK-owned; use accountLink()')
@@ -254,6 +276,10 @@ export async function loadConfig(file: string): Promise<{ config: InstanceConfig
   }
   try {
     const config = defineConfig({ ...data, entities } as Parameters<typeof defineConfig>[0])
-    return { config, sources }
+    const hash = createHash('sha256')
+    for (const file of [...new Set(Object.values(sources).map(source => source.file))].sort()) {
+      hash.update(JSON.stringify([relative(dirname(entry), file), readFileSync(file, 'utf8')]))
+    }
+    return { config, sources, configHash: hash.digest('hex') }
   } catch (error) { return remap(error, sources) }
 }

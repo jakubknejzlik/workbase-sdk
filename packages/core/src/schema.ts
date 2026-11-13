@@ -1,11 +1,13 @@
+import { effectiveSystemGrant } from './access-evaluator'
+import { entityAccessSchema, compileAccess, defineAccess, type AccessInput } from './access'
+import { validatePolicies } from './policies'
+export { defineAccess, compileAccess, accessEntities, accessOperations, accessSystemActions, ACCESS_EXPANSION_LIMITS } from './access'
+export type { AccessInput, EntityAccess, EffectiveAccessPolicy } from './access'
 import { z } from 'zod'
-import { fieldSchema, serializedExpressionSchema, normalizeInstance, type InstanceConfig, type InstanceInput } from './config'
+import { fieldSchema, serializedExpressionSchema, normalizeInstance, organizationActions, type InstanceConfig, type InstanceInput } from './config'
 
-export type DeclarationPath = (string | number)[]
-/** Paths are mapped to source positions by the build-time loader. */
-export class DeclarationError extends Error {
-  constructor(readonly path: DeclarationPath, message: string) { super(message); this.name = 'DeclarationError' }
-}
+import { DeclarationError, schemaConfigs as configs, type DeclarationPath } from './schema/declaration'
+export { DeclarationError, type DeclarationPath } from './schema/declaration'
 const identifier = z.string().regex(/^[a-z][a-z0-9_]*$/)
 const relationSchema = z.strictObject({
   field: identifier, entity: identifier, many: z.boolean().optional(),
@@ -19,12 +21,12 @@ const declarationSchema = z.strictObject({
   displayField: z.union([serializedExpressionSchema, z.literal(false)]).optional(),
   checks: z.array(z.strictObject({ left: identifier, op: z.enum(['<=', '>=']), right: identifier })).optional(),
   commandsOnly: z.boolean().optional(),
+  access: entityAccessSchema.optional(),
 })
 export type EntityInput = z.input<typeof declarationSchema>
 declare const entityBrand: unique symbol
 export type EntityDeclaration<T extends EntityInput = EntityInput> = T & { readonly [entityBrand]: true }
 const entities = new WeakSet<object>()
-const configs = new WeakSet<object>()
 
 function parse<T>(schema: z.ZodType<T>, input: unknown, prefix: DeclarationPath = []): T {
   const result = schema.safeParse(input)
@@ -64,6 +66,7 @@ export type ConfigInput = Omit<InstanceInput, 'entities' | 'roles' | 'organizati
   organizationOwnerRole: string
   languages: string[]
   permissions?: InstanceInput['permissions']
+  access?: AccessInput
 }
 export type SchemaConfig = InstanceConfig & { languages: string[] }
 
@@ -123,6 +126,23 @@ export function defineConfig(input: ConfigInput): SchemaConfig {
       if (issue?.entity) throw new DeclarationError(['entities', issue.entity, ...(issue.field && domain[issue.entity]?.fields[issue.field] ? ['fields', issue.field, 'computed'] : ['displayField'])], error.message)
     }
     throw error
+  }
+  if (input.access || Object.values(input.entities).some(entity => entity.access)) {
+    if (!input.access) throw new DeclarationError(['access'], 'Expected shared access.ts declaration')
+    if (input.permissions || input.policies || input.organizationPermissions) throw new DeclarationError(['access'], 'Authored access replaces permissions, policies and organizationPermissions')
+    const declarations = Object.fromEntries(Object.entries(input.entities).map(([name, entity]) => [name, entity.access]))
+    const policy = compileAccess(config, declarations, defineAccess(input.access))
+    config.effectiveAccess = policy
+    // Derived compatibility projections feed existing SQL issuer guards and metadata.
+    // Authorization always evaluates the normalized policy, including explicit denials.
+    config.permissions = Object.fromEntries(config.roles.map(role => [role,
+      Object.fromEntries(Object.keys(config.entities).map(entity => [entity, policy.entities
+        .filter(rule => rule.role === role && rule.entity === entity && rule.decision === 'allow').map(rule => rule.operation)])),
+    ]))
+    config.organizationPermissions = Object.fromEntries(config.roles.map(role => [role,
+      organizationActions.filter(action => effectiveSystemGrant(policy, [role], action)),
+    ]))
+    validatePolicies(config)
   }
   configs.add(config)
   return config

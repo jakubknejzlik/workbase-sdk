@@ -98,7 +98,7 @@ export function crudRoutes(app: App, config: InstanceConfig, env: RuntimeEnv) {
       if (!stored) return null
       if (stored.command !== operation || stored.request_hash !== hash) throw new ApiError(422, 'idempotency_payload_mismatch')
       const row = JSON.parse(stored.response_json).body as Row
-      const policy = writeFilter(kernel, scope, name)
+      const policy = writeFilter(kernel, scope, name, name, 'create')
       const visible = await env.DB.prepare(`SELECT id FROM ${table} WHERE id=? AND (${policy.sql})`).bind(row.id, ...(policy.bindings ?? [])).first()
       if (!visible) hidden(name, scope)
       return row
@@ -129,7 +129,7 @@ export function crudRoutes(app: App, config: InstanceConfig, env: RuntimeEnv) {
     assertActorFields(config, scope, name, Object.keys(raw), c.req.param('id'))
     const body = bodyValidator(definition, true).parse(raw) as Row
     if (!Object.keys(body).length) throw new ApiError(400, 'empty_update')
-    const policy = writeFilter(kernel, scope, name)
+    const policy = writeFilter(kernel, scope, name, name, 'update')
     const before = await env.DB.prepare(`SELECT ${storedFields(name).map(quote).join(',')} FROM ${table} WHERE organization_id=? AND id=? AND (${policy.sql})`).bind(scope.organizationId, c.req.param('id'), ...(policy.bindings ?? [])).first<Row>()
     if (!before) hidden(name, scope)
     if (before.version !== expected) throw new ApiError(409, 'version_conflict')
@@ -141,7 +141,7 @@ export function crudRoutes(app: App, config: InstanceConfig, env: RuntimeEnv) {
   })
   app.delete('/api/:entity/:id', async c => {
     const { name, scope, table } = entity(c, 'delete')
-    const policy = writeFilter(kernel, scope, name)
+    const policy = writeFilter(kernel, scope, name, name, 'delete')
     const before = await env.DB.prepare(`SELECT ${storedFields(name).map(quote).join(',')} FROM ${table} WHERE organization_id=? AND id=? AND (${policy.sql})`).bind(scope.organizationId, c.req.param('id'), ...(policy.bindings ?? [])).first<Row>()
     if (!before) hidden(name, scope)
     await mutate(name, scope, { sql: `DELETE FROM ${table} WHERE organization_id=? AND id=? AND version=?`, bindings: [scope.organizationId, c.req.param('id'), before.version] }, makeEvent(config, scope, `${name}.deleted`, name, before.id, serialize(config, name, before)))

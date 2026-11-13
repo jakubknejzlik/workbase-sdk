@@ -95,13 +95,13 @@ export function userLinkCommands(config: InstanceConfig): AtomicOperation<any>[]
       ui: { label: action === 'link_account' ? { en: 'Link', cs: 'Propojit účet' } : { en: 'Remove access', cs: 'Odebrat přístup' } },
       input: inputSchema,
       async prepare(ctx, input) {
-        const policy = kernelFor(ctx.config).tableFilter(entity, ctx.scope)
+        const policy = kernelFor(ctx.config).tableFilter(entity, ctx.scope, 'update')
         if (policy.kind === 'none') throw new ApiError(404, 'not_found')
         if (!await ctx.reader.first({ sql: `SELECT id FROM ${quote(entity)} WHERE organization_id=? AND id=?`, bindings: [ctx.scope.organizationId, input.rowId] })) throw new ApiError(404, 'not_found')
         if (action === 'link_account' && !await ctx.reader.first({ sql: 'SELECT u.id FROM users u JOIN memberships m ON m.user_id=u.id AND m.organization_id=u.organization_id WHERE u.id=? AND u.organization_id=?', bindings: [input.userId!, ctx.scope.organizationId] })) throw new ApiError(404, 'member_not_found')
         const kernel = kernelFor(ctx.config)
         kernel.atomicPermission(ctx.scope, operation, input)
-        return { role: ctx.scope.role, filter: writeFilter(kernel, ctx.scope, entity) }
+        return { role: ctx.scope.role, filter: writeFilter(kernel, ctx.scope, entity, entity, 'update') }
       },
       plan(ctx, input) {
         // A concurrent role change requires a fresh request under that role.

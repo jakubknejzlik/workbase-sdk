@@ -1,3 +1,4 @@
+import { effectiveAuthority, effectiveSystemGrant } from './access-evaluator'
 import { rbacRoles, hasActorProjection } from './policies'
 import type { InstanceConfig, OrganizationAction } from './config'
 import type { Scope } from './types'
@@ -13,6 +14,10 @@ export function roleNamePrivileges(role: string): ReadonlySet<string> {
  */
 export function effectiveRolePrivileges(config: InstanceConfig, role: string): ReadonlySet<string> {
   if (!config.roles.includes(role)) return new Set()
+  if (config.effectiveAccess) return new Set([
+    ...config.effectiveAccess.system.filter(rule => rule.role === role && effectiveSystemGrant(config.effectiveAccess!, [role], rule.action)).map(rule => `system:${rule.action}`),
+    ...config.effectiveAccess.entities.filter(rule => rule.role === role && rule.decision === 'allow').map(rule => `entity:${rule.entity}:${rule.operation}`),
+  ])
   const privileges = new Set([
     ...roleNamePrivileges(role), ...(config.organizationPermissions[role] ?? []),
     // These resource operations are available to every configured membership role.
@@ -33,6 +38,11 @@ export function canGrantRole(config: InstanceConfig, actorRole: string, targetRo
   return [...effectiveRolePrivileges(config, targetRole)].every(privilege => issuer.has(privilege))
 }
 export function organizationPermission(config: InstanceConfig, scope: Scope, action: OrganizationAction) {
+  if (config.effectiveAccess) {
+    if (scope.actor.type !== 'user' && !(scope.actor.type === 'agent' && hasActorProjection(scope))) throw new ApiError(403, 'user_required')
+    if (!effectiveAuthority(config.effectiveAccess, scope).permits({ system: action })) throw new ApiError(403, 'permission_denied')
+    return
+  }
   if (scope.actor.type !== 'user' && !(scope.actor.type === 'agent' && ['invitations.create', 'invitations.read', 'invitations.revoke'].includes(action))) throw new ApiError(403, 'user_required')
   if (scope.actor.type === 'agent' && (!hasActorProjection(scope) || rbacRoles(scope).some(role => !config.roles.includes(role) || action !== 'invitations.read' && !config.organizationPermissions[role]?.includes(action)))) throw new ApiError(403, 'permission_denied')
   if ((action === 'members.read' || action === 'invitations.read') && config.roles.includes(scope.role)) return

@@ -13,7 +13,7 @@ export function capabilities(kernel: KernelRegistry, scope: Scope) {
   }
   const entities = Object.fromEntries(Object.entries(kernel.config.entities).map(([name, entity]) => [name, {
     readable: kernel.fieldMask(name, scope), writable: writableFields(kernel.config, name, scope),
-    operations: (['read', 'create', 'update', 'delete'] as const).filter(operation => (operation === 'read' || !entity.commandsOnly) && kernel.tableFilter(name, scope).kind !== 'none' && kernel.can(scope, name, operation)),
+    operations: (['read', 'create', 'update', 'delete'] as const).filter(operation => (operation === 'read' || !entity.commandsOnly) && kernel.tableFilter(name, scope, operation).kind !== 'none' && kernel.can(scope, name, operation)),
     ...(entity.displayField && kernel.fieldMask(name, scope).includes(entity.displayField) ? { displayField: entity.displayField } : {}),
   }]))
   const commands = [...kernel.commands.values()].filter(command => kernel.config.commands.includes(command.name) && !('system' in command.permission) && permits(() => kernel.atomicPermission(scope, command))).map(command => command.name)
@@ -32,7 +32,7 @@ export function capabilities(kernel: KernelRegistry, scope: Scope) {
       permits(() => { kernel.resourcePermission(scope, action); organizationPermission(kernel.config, scope, action) }),
     ])),
     'workflows.read': permits(() => kernel.resourcePermission(scope, 'workflows.read')),
-    'audit.read': !!kernel.audit && hasOwnerRole(scope) && permits(() => kernel.resourcePermission(scope, 'audit.read')),
+    'audit.read': !!kernel.audit && hasOwnerRole(scope, kernel.config) && permits(() => kernel.resourcePermission(scope, 'audit.read')),
   }
   return { revision: kernel.config.revision, entities, commands, workflows, resources, organization: { role: scope.role } }
 }

@@ -21,13 +21,13 @@ export function receiptExpression(config: InstanceConfig, rules: readonly Atomic
     const guard = writeGuard(statement); const prefix = `policy_${guard ? index++ : -1}:`
     if (!guard || !config.entities[guard.entity] || guard.operation === 'DELETE') continue
     if (guard.where) {
-      parts.push('SELECT ? AS entity,substr(rule,?) AS id FROM atomic_assert WHERE run_id=? AND substr(rule,1,?)=?')
-      bindings.push(guard.entity, prefix.length + 1, runId, prefix.length, prefix)
+      parts.push(`SELECT ? AS entity,${config.effectiveAccess ? '? AS operation,' : ''}substr(rule,?) AS id FROM atomic_assert WHERE run_id=? AND substr(rule,1,?)=?`)
+      bindings.push(guard.entity, ...(config.effectiveAccess ? [guard.operation === 'INSERT' ? 'create' : 'update'] : []), prefix.length + 1, runId, prefix.length, prefix)
     } else {
-      parts.push('SELECT ? AS entity,? AS id'); bindings.push(guard.entity, guard.id!)
+      parts.push(`SELECT ? AS entity,${config.effectiveAccess ? '? AS operation,' : ''}? AS id`); bindings.push(guard.entity, ...(config.effectiveAccess ? ['create'] : []), guard.id!)
     }
   }
-  const rows = parts.length ? `(SELECT json_group_array(json_object('entity',entity,'id',id)) FROM (${parts.join(' UNION ALL ')}))` : "'[]'"
+  const rows = parts.length ? `(SELECT json_group_array(json_object('entity',entity,'id',id${config.effectiveAccess ? " ,'operation',operation" : ''})) FROM (${parts.join(' UNION ALL ')}))` : "'[]'"
   return { sql: `json_set(?, '$.__workbase_policy', json_object('actor',?, 'rows',json(${rows})))`, bindings }
 }
 export async function authorizeReplay(kernel: KernelRegistry, scope: Scope, reader: AtomicReader, serialized: string, identity?: string): Promise<AtomicResult> {
@@ -44,7 +44,8 @@ export async function authorizeReceiptRows(kernel: KernelRegistry, scope: Scope,
   for (const row of rows) {
     if (!row || !Object.hasOwn(kernel.config.entities, row.entity) || typeof row.id !== 'string') throw new ApiError(403, 'policy_violation')
     if (read && !kernel.can(scope, row.entity, 'read')) throw new ApiError(403, 'policy_violation')
-    const filter = writeFilter(kernel, scope, row.entity)
+    if (kernel.config.effectiveAccess && !read && !['create', 'update'].includes(row.operation)) throw new ApiError(403, 'policy_violation')
+    const filter = writeFilter(kernel, scope, row.entity, row.entity, read ? 'read' : row.operation ?? 'read')
     const visible = await reader.first<{ ok: number }>({ sql: `SELECT EXISTS(SELECT 1 FROM ${quote(row.entity)} WHERE id=? AND (${filter.sql})) AS ok`, bindings: [row.id, ...(filter.bindings ?? [])] })
     if (!visible?.ok) throw new ApiError(403, 'policy_violation')
   }
