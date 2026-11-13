@@ -221,3 +221,27 @@ Installed consumers invoke `@workbasehq/core/migrations/schema-cli` with `plan` 
 `check`; repository scripts only supply paths and the CI base.
 Runtime builds bind the lock with `bindSchemaLock`; direct `defineConfig`
 declarations remain unbound until a lock is supplied.
+
+Record actions are strict entity data pointing at registered commands:
+
+```ts
+actions: {
+  close: {
+    command: 'record/close',
+    available: [{ when: { state: { eq: 'open' } }, reason: 'record.closed' }],
+  },
+}
+```
+
+`when` uses access predicates, including `{ use: 'name' }`. Compilation rejects
+unregistered, unallowlisted and system-permission commands. Expanded conditions,
+field dependencies and declaration sources live in `effectiveAccess.actions` and
+both access locks; command bodies remain opaque guards. `actionReasonKeys(config)`
+from `@workbasehq/core/schema` exposes the finite authored reason keys.
+
+SDK-era detail GETs include an `actions` map, independent of projection. Forbidden
+or masked-dependency actions are omitted. SQL evaluates availability and selects
+the first failing reason. List, query and generic mutation responses omit the map.
+The SDK era marker is `baseline: 'workbase-sdk'`; domain fields and relations named
+`actions` are reserved in that era, including declarations without compiled access.
+Legacy configurations retain their existing response and naming contracts.

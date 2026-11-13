@@ -55,6 +55,8 @@ export function serializeAccessLock(kernel: AccessKernel, options: AccessLockOpt
   }
   lines.push('', '## System and account privileges', '', '| Role | Action | Decision | Target | Source |', '| --- | --- | --- | --- | --- |')
   for (const rule of policy.system) lines.push(`| ${cell(rule.role)} | ${cell(rule.action)} | ${rule.decision} | ${cell(json(rule.target))} | ${cell(locate(rule.source))} |`)
+  lines.push('', '## Record actions', '', '| Entity | Action | Command | Conditions | Dependencies | Source |', '| --- | --- | --- | --- | --- | --- |')
+  for (const action of policy.actions) lines.push(`| ${cell(action.entity)} | ${cell(action.name)} | ${cell(action.command)} | ${cell(json(action.conditions))} | ${cell(json(action.dependencies))} | ${cell(locate(action.source))} |`)
   lines.push('', '## Registered command guards', '', '| Command | Permission | Additional permissions | Executable checks | Registration source |', '| --- | --- | --- | --- | --- |')
   for (const guard of policy.guards) lines.push(`| ${cell(guard.name)} | ${cell(json(guard.permission))} | ${cell(json(guard.additionalPermissions))} | opaque | ${cell(locate(`guards.${guard.name}`, 'commands'))} |`)
   lines.push('', '## Opaque executable hooks', '')
@@ -87,10 +89,11 @@ function diff(previous: string, current: string): string[] {
     for (const [section, key] of [
       ['entities', (r: any) => `${r.role} / ${r.entity} / ${r.operation}`],
       ['system', (r: any) => `${r.role} / ${r.target.entity} / ${r.target.operation} (${r.action})`],
+      ['actions', (r: any) => `action ${r.entity} / ${r.name}`],
       ['guards', (r: any) => `command ${r.name}`],
     ] as const) {
-      const old = new Map<string, unknown>(before.effectiveAccess[section].map((r: any) => [key(r), r]))
-      const next = new Map<string, unknown>(after.effectiveAccess[section].map((r: any) => [key(r), r]))
+      const old = new Map<string, unknown>((before.effectiveAccess[section] ?? []).map((r: any) => [key(r), r]))
+      const next = new Map<string, unknown>((after.effectiveAccess[section] ?? []).map((r: any) => [key(r), r]))
       for (const id of [...new Set([...old.keys(), ...next.keys()])].sort()) {
         if (json(old.get(id)) !== json(next.get(id))) changes.push(`${old.has(id) ? next.has(id) ? '~' : '-' : '+'} ${id}`)
       }

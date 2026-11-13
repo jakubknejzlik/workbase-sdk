@@ -49,9 +49,16 @@ export interface EffectiveEntityPolicy {
  * are audited separately as enforcementInputs. Execution consumes these exact rules.
  * Arrays and object keys are canonical; no functions, implicit grants or host paths.
  */
+export interface EffectiveRecordAction {
+  entity: string; name: string; command: string
+  conditions: { when: Filter; reason: string }[]
+  dependencies: string[]
+  source: string
+}
 export interface EffectiveAccessPolicy {
   version: 1
   roles: string[]
+  actions: EffectiveRecordAction[]
   entities: EffectiveEntityPolicy[]
   guards: { name: string; permission: AtomicOperation['permission'] | null; additionalPermissions: AtomicOperation['permission'][]; opaque: true }[]
   opaqueHooks: string[]
@@ -69,7 +76,7 @@ export function compileAccess(config: InstanceConfig, declarations: Record<strin
   const known = sorted([...accessEntities, ...Object.keys(config.entities)])
   for (const role of Object.keys(input.roles)) if (!roles.includes(role)) error(`access.roles.${role}`, `Unknown access role: ${role}`)
   for (const entity of Object.keys(input.entities)) if (!accessEntities.includes(entity)) error(`access.entities.${entity}`, `Entity ${entity} must declare access in schema/${entity}.ts`)
-  const result: EffectiveAccessPolicy = { version: 1, roles, entities: [], system: [], guards: [], opaqueHooks: [] }
+  const result: EffectiveAccessPolicy = { version: 1, roles, actions: [], entities: [], system: [], guards: [], opaqueHooks: [] }
   function expand(value: unknown, source: string, names: Set<string>, stack: string[] = [], depth = 0, budget = { size: 0 }): any {
     if (depth > ACCESS_EXPANSION_LIMITS.depth || ++budget.size > ACCESS_EXPANSION_LIMITS.size) error(source, 'Predicate expansion exceeds depth/size budget')
     if (value && typeof value === 'object' && !Array.isArray(value) && Object.hasOwn(value, 'use')) {
@@ -146,6 +153,35 @@ export function compileAccess(config: InstanceConfig, declarations: Record<strin
       if (!Object.hasOwn(system!, action)) error(`access.roles.${role}.system`, `Missing explicit system action ${action} for role ${role}`)
       result.system.push({ role, action, decision: system![action], target: systemAccessTarget(action), source })
     }
+  }
+  for (const entity of Object.keys(config.entities).sort()) for (const name of Object.keys(config.entities[entity].actions ?? {}).sort()) {
+    const action = config.entities[entity].actions![name]
+    const source = `entities.${entity}.actions.${name}`
+    const dependencies = new Set<string>()
+    function fields(target: string, filter: Filter) {
+      for (const [key, value] of Object.entries(filter)) {
+        if (key === 'and' || key === 'or') (value as Filter[]).forEach(child => fields(target, child))
+        else if (key === 'not') fields(target, value as Filter)
+        else if (key === 'actorLinkedIn') dependencies.add(`${value}.user`)
+        else {
+          const relation = config.entities[target].relations[key]
+          if (relation) {
+            dependencies.add(`${target}.${relation.many ? 'id' : relation.field}`)
+            dependencies.add(`${relation.entity}.${relation.many ? relation.field : 'id'}`)
+            fields(relation.entity, (relation.many ? Object.values(value as object)[0] : value) as Filter)
+          } else dependencies.add(`${target}.${key}`)
+        }
+      }
+    }
+    const conditions = (action.available ?? []).map((condition, i) => {
+      const path = `${source}.available.${i}.when`
+      const when = canonical(expand(condition.when, path, new Set()))
+      try { validatePolicies({ ...config, effectiveAccess: undefined, policies: { [entity]: { [roles[0]]: { where: when } } } }) }
+      catch (cause) { error(path, cause instanceof Error ? cause.message : String(cause)) }
+      fields(entity, when)
+      return { when, reason: condition.reason }
+    })
+    result.actions.push({ entity, name, command: action.command, conditions, dependencies: sorted(dependencies), source })
   }
   return accessGuards(result, config.commands, [...(config.plugins ?? []).flatMap(plugin => [...(plugin.commands ?? [])]), ...userLinkCommands(config)], config.plugins ?? [])
 }

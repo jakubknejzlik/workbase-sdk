@@ -1,7 +1,7 @@
 import { rmSync } from 'node:fs'
 import { afterEach, expect, test } from 'vitest'
 import { checkSources, normalise, SourceError, canonicalJSON, manifestHash } from '../src/check'
-import { page, customPage, entityDetailPage, entityEditPage, entityListPage, param, p, slot } from '../src/index'
+import { page, customPage, entityDetailPage, entityEditPage, entityListPage, param, p, slot, action } from '../src/index'
 import { fixture, declaration, sdk, forbidden } from './fixture'
 const roots: string[] = []
 afterEach(() => { roots.splice(0).forEach(root => rmSync(root, { recursive: true, force: true })) })
@@ -44,7 +44,7 @@ test.each([
   const { root } = setup()
   expect(() => normalise(checkSources(root), { 'ui/index.ts': page({ title: 'sample.title', ...input } as any) }, schema, 'hash')).toThrow(/index.ts:2:16:/)
 })
-test.each(['query', 'action'])('%s is a source error', name => {
+test.each(['query'])('%s is a source error', name => {
   const { root, put } = setup()
   put('ui/index.ts', `${name}();\n${declaration}`)
   expect(() => checkSources(root)).toThrow(/not in slice 7/)
@@ -147,3 +147,19 @@ test('manifest v3 contains only referenced entity metadata and rejects extra lis
   expect(canonicalJSON(a)).toBe(canonicalJSON(b)); expect(manifestHash(a)).toBe(manifestHash(b))
   expect(() => normalise(sources, { 'ui/index.ts': entityListPage('worker', { title: 'worker.list', search: { n: param.string() }, data: { records: { kind: 'list', entity: 'worker', bind: { filter: param('n') } } } }) }, input, 'hash')).toThrow(/list bind/)
 })
+
+test('registered action nodes pass and unknown action names fail with source location', () => {
+  const { root, put } = setup()
+  put('ui/index.ts', `import { page, action } from '${sdk}'; export default page({ title: 'record.title', entity: 'record', layout: [action('close')] })`)
+  const values = { 'ui/index.ts': page({ title: 'record.title', entity: 'record', layout: [action('close')] }) }
+  const schema = { record: { fields: {}, actions: { close: {} } } }
+  expect(normalise(checkSources(root), values, schema, 'hash').routes[0].layout).toEqual([action('close')])
+  expect(() => normalise(checkSources(root), values, { record: { fields: {} } }, 'hash')).toThrow(/index.ts:1:.*Unknown action close/)
+})
+
+if (false) {
+  type RecordEntity = { fields: { state: { type: 'text' } }; actions: { close: { command: string } } }
+  action<RecordEntity>('close')
+  // @ts-expect-error action names are checked against the entity declaration
+  action<RecordEntity>('missing')
+}

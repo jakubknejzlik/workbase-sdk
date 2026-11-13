@@ -1,3 +1,4 @@
+import { recordActions } from './record-actions'
 import { assertActorFields } from './policies'
 import { enforcePlan, writeFilter } from './execution/policies'
 import { compile } from './execution/compiler'
@@ -82,7 +83,9 @@ export function crudRoutes(app: App, config: InstanceConfig, env: RuntimeEnv) {
     const { name, scope } = entity(c, 'read')
     const result = await executeQuery(kernel, scope, env.DB, await cursorSecret(env), restQuery(config, name, c.req.query(), c.req.param('id')), { legacyErrors: true, writeLog })
     if (!result.data.length) throw new ApiError(404, 'not_found')
-    return c.json(result.data[0])
+    const row = result.data[0]
+    if (config.baseline === 'workbase-sdk') row.actions = await recordActions(config, scope, env.DB, name, c.req.param('id')!)
+    return c.json(row)
   }))
   app.post('/api/:entity', async c => {
     const { name, definition, scope, table } = entity(c, 'create')

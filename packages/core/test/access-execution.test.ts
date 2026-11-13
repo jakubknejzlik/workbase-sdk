@@ -324,7 +324,7 @@ it('narrow credential cannot inherit principal sensitive field grant', async () 
   expect(response.status).toBe(404)
   const own = await call('/api/worker/worker-admin')
   expect(own.status).toBe(200)
-  expect(await own.json()).toEqual({ id: 'worker-admin', name: 'admin' })
+  expect(await own.json()).toEqual({ id: 'worker-admin', name: 'admin', actions: {} })
 })
 
 it.each([['admin', 'staff', 'none'], ['staff', 'admin', 'none'], ['admin', 'staff', 'deny'], ['staff', 'admin', 'deny']] as const)(

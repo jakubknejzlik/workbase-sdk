@@ -1,3 +1,4 @@
+import { recordActionsSchema } from './record-actions-data'
 import { coreEnums, type CoreRole } from './query/enum-values'
 import { z } from 'zod'
 import { calendarViewsSchema, validateCalendarViews } from './calendar-display'
@@ -100,6 +101,7 @@ const schema = z.object({
   entities: z.record(identifier, z.object({
     fields: z.record(identifier, fieldSchema),
     relations: z.record(identifier, z.object({ field: identifier, entity: identifier, many: z.boolean().optional(), through: z.strictObject({ entity: identifier, field: identifier, createCommand: z.string().min(1), deleteCommand: z.string().min(1) }).optional() })).default({}),
+    actions: recordActionsSchema.optional(),
     commandsOnly: z.boolean().optional(),
     displayField: serializedExpressionSchema.optional(),
     displayExpression: z.string().optional(),
@@ -196,7 +198,7 @@ export function normalizeInstance(input: InstanceDefinitionInput, exactRoles = f
         }
         if (name === 'users' && ['email', 'password_hash', 'salt'].includes(key)) throw new Error(`Account identity field is private: ${key}`)
         if (field.computed) field.readOnly = true
-        if (baseFields.includes(key)) throw new Error(`Reserved field: ${key}`)
+        if (baseFields.includes(key) || config.baseline === 'workbase-sdk' && key === 'actions') throw new Error(`Reserved field: ${key}`)
         path = ['entities', name, 'fields', key, 'min']
         if (field.min !== undefined && !['int', 'float'].includes(field.type)) throw new Error('min requires a numeric field')
         path = ['entities', name, 'fields', key, 'default']
@@ -220,7 +222,9 @@ export function normalizeInstance(input: InstanceDefinitionInput, exactRoles = f
         }
       }
       for (const [relationName, r] of Object.entries(entity.relations)) {
-        path = ['entities', name, 'relations', relationName, 'field']
+        path = ['entities', name, 'relations', relationName]
+        if (config.baseline === 'workbase-sdk' && relationName === 'actions') throw new Error('Reserved relation: actions')
+        path.push('field')
         const target = r.many ? config.entities[r.entity]?.fields[r.field] : entity.fields[r.field]
         if (!target || target.type !== 'ref' || target.entity !== (r.many ? name : r.entity)) throw new Error(`Invalid relation on ${name}`)
         path = ['entities', name, 'relations', relationName, 'through']

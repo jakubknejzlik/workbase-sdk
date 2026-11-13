@@ -20,7 +20,7 @@ export function diff(meta: EntityMeta, layout: Node[], initial: Record<string, u
   const body: Record<string, unknown> = {}, issues: Issue[] = []
   function walk(nodes: Node[]) {
     for (const node of nodes) {
-      if (typeof node !== 'string') { if (node.kind !== 'slot') walk(node.children); continue }
+      if (typeof node !== 'string') { if (node.kind !== 'slot' && node.kind !== 'action') walk(node.children); continue }
       const field = meta.fields[node]
       if (!field || field.readOnly || field.computed || field.userLink) continue
       let value = draft[node]

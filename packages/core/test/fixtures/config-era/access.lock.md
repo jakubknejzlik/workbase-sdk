@@ -112,6 +112,11 @@ Source locations identify the rule or its enclosing registration declaration. Ex
 | staff | workflows.read | deny | {"entity":"workflow_runs","operation":"read"} | packages/core/test/fixtures/config-era/access.ts:40 |
 | staff | workflows.resume | deny | {"entity":"workflow_runs","operation":"update"} | packages/core/test/fixtures/config-era/access.ts:41 |
 
+## Record actions
+
+| Entity | Action | Command | Conditions | Dependencies | Source |
+| --- | --- | --- | --- | --- | --- |
+
 ## Registered command guards
 
 | Command | Permission | Additional permissions | Executable checks | Registration source |
