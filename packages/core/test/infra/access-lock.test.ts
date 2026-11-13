@@ -1,4 +1,4 @@
-import { afterEach, expect, it } from 'vitest'
+import { afterEach, expect, it, vi } from 'vitest'
 import { mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -11,6 +11,7 @@ import { KernelRegistry } from '../../src/kernel/registry'
 import { createCommandRegistry } from '../../src/commands'
 import { effectiveEntityGrants } from '../../src/access-evaluator'
 import { serializeAccessLock, syncAccessLock } from '../../src/access-lock'
+import { enforcementInputs } from '../../src/access-inputs'
 
 const roots: string[] = []
 afterEach(() => roots.splice(0).forEach(root => rmSync(root, { recursive: true, force: true })))
@@ -56,6 +57,69 @@ it('serializes kernel.config.effectiveAccess exactly, without re-derivation', as
   expect(lock.md).toContain('sentinel.commandGuard')
   const rule = JSON.parse(lock.json).effectiveAccess.entities.find((r: any) => r.role === 'worker' && r.entity === 'worker' && r.operation === 'read')
   expect(rule).toMatchObject({ where: { user: { eq: '$actor.id' } }, fields: ['id', 'name'], predicates: ['self'] })
+})
+it('generates identical locks when the host locale reverses collation', async () => {
+  const options = await consumer().load()
+  const generate = () => serializeAccessLock(new KernelRegistry(options.kernel.config, { commands: createCommandRegistry([{
+    name: 'locale', permission: { entity: 'worker', operation: 'read' }, input: z.object({}),
+    additionalPermissions: [{ entity: 'aa', operation: 'read' }, { entity: 'z', operation: 'read' }],
+    plan: () => { throw new Error('opaque') },
+  }]) }), options)
+  const before = generate()
+  const locale = vi.spyOn(String.prototype, 'localeCompare').mockImplementation(function (this: string, other: string) {
+    return this < other ? 1 : this > other ? -1 : 0
+  })
+  try { expect(generate()).toEqual(before) } finally { locale.mockRestore() }
+})
+it('CLI detects relation binding and provider drift; regeneration makes each current', () => {
+  const fixture = consumer()
+  symlinkSync(resolve('node_modules'), join(fixture.root, 'node_modules'), 'dir')
+  const worker = join(fixture.root, 'schema/worker.ts')
+  writeFileSync(worker, readFileSync(worker, 'utf8')
+    .replace('user: accountLink()', "user: accountLink(), manager: { type: 'ref', entity: 'users' }")
+    .replace('access:', "relations: { owner: { field: 'user', entity: 'users' } }, access:")
+    .replace('"use":"self"', '"owner":{"name":{"eq":"Alice"}}'))
+  const cli = resolve('packages/core/src/access-lock/cli.ts')
+  const run = (...args: string[]) => spawnSync('bun', [cli, '--root', fixture.root, ...args], { encoding: 'utf8' })
+  expect(run('--write').status).toBe(0)
+  const grants = JSON.parse(readFileSync(join(fixture.root, 'access.lock.json'), 'utf8')).effectiveAccess
+  writeFileSync(worker, readFileSync(worker, 'utf8').replace("field: 'user'", "field: 'manager'"))
+  const relation = run()
+  expect(relation.status).toBe(1)
+  expect(relation.stdout).toContain('worker / relations / owner / field')
+  expect(run('--write').status).toBe(0)
+  expect(run().status).toBe(0)
+  expect(JSON.parse(readFileSync(join(fixture.root, 'access.lock.json'), 'utf8')).effectiveAccess).toEqual(grants)
+  const config = join(fixture.root, 'config.ts')
+  writeFileSync(config, `import { permissions } from '${resolve('packages/plugins/permissions/src/index.ts')}'\n` + readFileSync(config, 'utf8')
+    .replace("id: 'lock_probe'", "plugins: [permissions({ roles: ['admin', 'staff', 'worker'], ownerRole: 'admin' })], id: 'lock_probe'"))
+  const provider = run()
+  expect(provider.status).toBe(1)
+  expect(provider.stdout).toContain('permissions')
+  expect(run('--write').status).toBe(0)
+  expect(run().status).toBe(0)
+})
+it('audits the resolved runtime ports, bypass and account/schema objects without deriving grants', async () => {
+  const options = await consumer().load()
+  const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+  let kernel: KernelRegistry
+  try {
+    kernel = new KernelRegistry(options.kernel.config, { authorization: 'trust', plugins: [{
+      name: 'runtime', version: '1.0.0', provides: { permissions: '1.x' }, authorization: true,
+      tableFilter: () => ({ kind: 'all' }), fieldMask: () => ['id'], commandGuard: () => ({ allow: true }),
+    }] })
+  } finally { warn.mockRestore() }
+  const inputs = enforcementInputs(kernel!)
+  expect(inputs.authorization).toMatchObject({ trust: true, permissionsActive: false, providers: { permissions: [{ name: 'runtime', version: '1.0.0' }] } })
+  expect(inputs.account).toBe(kernel!.config.account)
+  expect(inputs.policies).toBe(kernel!.config.policies)
+  expect(inputs.organizationPermissions).toBe(kernel!.config.organizationPermissions)
+  expect(inputs.entities.worker.relations).toBe(kernel!.config.entities.worker.relations)
+  expect(inputs.entities.worker.fields.user).toMatchObject({ type: 'ref', entity: 'users', userLink: true, readOnly: true })
+  const lock = serializeAccessLock(kernel!, options)
+  expect(JSON.parse(lock.json).enforcementInputs).toEqual(JSON.parse(JSON.stringify(inputs)))
+  expect(lock.md).toContain('runtime')
+  expect(lock).not.toEqual(serializeAccessLock(options.kernel, options))
 })
 it('policy-only drift names role/entity/operation, never writes, and passes after regeneration', async () => {
   const fixture = consumer(); const before = await fixture.load()

@@ -126,3 +126,24 @@ None registered.
 ## Named predicate sources
 
 None used.
+
+## Enforcement inputs
+
+Resolved kernel/config inputs used alongside the compiled grants. Executable bodies remain opaque.
+
+| Input | Resolved value |
+| --- | --- |
+| account | {"entity":"users"} |
+| authorization | {"permissionsActive":false,"providers":{},"trust":false} |
+| users / commandsOnly | false |
+| users / fields | {"name":{"readOnly":false,"sensitive":false,"type":"string","userLink":false},"role":{"readOnly":false,"sensitive":false,"type":"enum","userLink":false,"values":["admin","staff"]}} |
+| users / relations | {} |
+| worker / commandsOnly | false |
+| worker / fields | {"name":{"readOnly":false,"sensitive":false,"type":"text","userLink":false},"user":{"entity":"users","readOnly":true,"sensitive":false,"type":"ref","userLink":true}} |
+| worker / relations | {"user_account":{"entity":"users","field":"user"}} |
+| organizationOwnerRole | "admin" |
+| organizationPermissions | {"admin":[],"staff":[]} |
+| permissions | {"admin":{"users":[],"worker":[]},"staff":{"users":[],"worker":[]}} |
+| plugins | [] |
+| policies | {} |
+| roles | ["admin","staff"] |

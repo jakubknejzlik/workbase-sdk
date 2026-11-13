@@ -2,7 +2,7 @@
 import { realpathSync } from 'node:fs'
 import { readFile, writeFile } from 'node:fs/promises'
 import { isAbsolute, relative, resolve, sep } from 'node:path'
-import type { KernelRegistry } from './kernel/registry'
+import { enforcementInputs, type AccessKernel } from './access-inputs'
 import type { SourceMap } from './schema/load'
 
 export interface AccessLockOptions {
@@ -19,9 +19,10 @@ function canonical(value: unknown): unknown {
 const json = (value: unknown) => JSON.stringify(canonical(value))
 const cell = (value: string) => value.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('|', '&#124;').replaceAll('`', '&#96;').replaceAll('\n', '<br>')
 
-export function serializeAccessLock(kernel: Pick<KernelRegistry, 'config'>, options: AccessLockOptions): AccessLockFiles {
+export function serializeAccessLock(kernel: AccessKernel, options: AccessLockOptions): AccessLockFiles {
   const policy = kernel.config.effectiveAccess
   if (!policy) throw new Error('Access lock requires a composed effectiveAccess policy')
+  const inputs = enforcementInputs(kernel)
   const root = realpathSync(resolve(options.root))
   const locations: Record<string, { file: string; line: number }> = {}
   const locate = (key: string, fallback = key) => {
@@ -62,14 +63,26 @@ export function serializeAccessLock(kernel: Pick<KernelRegistry, 'config'>, opti
   const predicates = [...new Set(policy.entities.flatMap(rule => rule.predicates))].sort()
   for (const name of predicates) lines.push(`- ${cell(name)}: ${cell(locate(`access.predicates.${name}`))}`)
   if (!predicates.length) lines.push('None used.')
+  lines.push('', '## Enforcement inputs', '', 'Resolved kernel/config inputs used alongside the compiled grants. Executable bodies remain opaque.', '', '| Input | Resolved value |', '| --- | --- |')
+  for (const [key, value] of Object.entries(canonical(inputs) as Record<string, unknown>)) {
+    if (key === 'entities') for (const [entity, definition] of Object.entries(value as Record<string, Record<string, unknown>>)) {
+      for (const [part, data] of Object.entries(definition)) lines.push(`| ${cell(`${entity} / ${part}`)} | ${cell(json(data))} |`)
+    } else lines.push(`| ${cell(key)} | ${cell(json(value))} |`)
+  }
   // Compact JSON keeps the full normalized representation together; no derived grants.
-  return { json: json({ effectiveAccess: policy, sources: locations }) + '\n', md: lines.join('\n') + '\n' }
+  return { json: json({ effectiveAccess: policy, enforcementInputs: inputs, sources: locations }) + '\n', md: lines.join('\n') + '\n' }
 }
 
 function diff(previous: string, current: string): string[] {
   try {
     const before = JSON.parse(previous); const after = JSON.parse(current)
     const changes: string[] = []
+    function inputs(old: any, next: any, path: string) {
+      if (json(old) === json(next)) return
+      if (old && next && typeof old === 'object' && typeof next === 'object' && !Array.isArray(old) && !Array.isArray(next)) {
+        for (const key of [...new Set([...Object.keys(old), ...Object.keys(next)])].sort()) inputs(old[key], next[key], `${path} / ${key}`)
+      } else changes.push(`~ ${path}: ${json(old) ?? 'missing'} -> ${json(next) ?? 'missing'}`)
+    }
     for (const [section, key] of [
       ['entities', (r: any) => `${r.role} / ${r.entity} / ${r.operation}`],
       ['system', (r: any) => `${r.role} / ${r.target.entity} / ${r.target.operation} (${r.action})`],
@@ -83,6 +96,7 @@ function diff(previous: string, current: string): string[] {
     }
     if (json(before.effectiveAccess.opaqueHooks) !== json(after.effectiveAccess.opaqueHooks)) changes.push('~ opaque executable hooks')
     if (json(before.effectiveAccess.roles) !== json(after.effectiveAccess.roles)) changes.push('~ configured roles')
+    inputs(before.enforcementInputs, after.enforcementInputs, 'enforcement inputs')
     if (json(before.sources) !== json(after.sources)) changes.push('~ source locations')
     return changes.slice(0, 12).concat(changes.length > 12 ? [`… ${changes.length - 12} more changes`] : [])
   } catch { return ['Invalid access.lock.json; regenerate it'] }
@@ -90,7 +104,7 @@ function diff(previous: string, current: string): string[] {
 
 /** Checks never create directories or touch either lock, including missing/invalid locks. */
 export async function syncAccessLock(options: AccessLockOptions & {
-  kernel: Pick<KernelRegistry, 'config'>
+  kernel: AccessKernel
   directory?: string
   write?: boolean
 }): Promise<{ ok: boolean; message: string }> {

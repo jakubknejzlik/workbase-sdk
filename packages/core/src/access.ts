@@ -45,7 +45,8 @@ export interface EffectiveEntityPolicy {
   /** Stable source-map key; loadConfig returns its file:line location separately. */
   source: string
 }
-/** Slice 2b's sole serialization input. Execution consumes these exact expanded rules.
+/** Normalized grants shared by execution and audit; other runtime/config inputs
+ * are audited separately as enforcementInputs. Execution consumes these exact rules.
  * Arrays and object keys are canonical; no functions, implicit grants or host paths.
  */
 export interface EffectiveAccessPolicy {
