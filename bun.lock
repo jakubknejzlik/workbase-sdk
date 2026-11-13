@@ -171,43 +171,7 @@
         "@types/react-dom": "19.2.4",
         "@testing-library/dom": "10.4.2"
       }
-    },
-    "examples/spike-directory": {
-      "name": "@workbasehq/spike-directory",
-      "dependencies": {
-        "@tanstack/react-router": "1.170.41",
-        "@workbasehq/ui-v3": "workspace:*",
-        "i18next": "25.10.10",
-        "leaflet": "1.9.4",
-        "react": "19.2.8",
-        "react-dom": "19.2.8"
-      },
-      "devDependencies": {
-        "@types/leaflet": "1.9.21",
-        "@types/react": "19.2.18",
-        "@types/react-dom": "19.2.4",
-        "playwright": "1.58.2",
-        "tsx": "4.23.15",
-        "typescript": "^6.0.0",
-        "vite": "7.3.1",
-        "vitest": "^4.1.0"
-      }
-    },
-    "packages/ui-v3": {
-      "name": "@workbasehq/ui-v3",
-      "dependencies": {
-        "@tanstack/router-generator": "1.146.2",
-        "es-module-lexer": "2.3.2",
-        "typescript": "^6.0.0",
-        "vite": "7.3.1"
-      },
-      "devDependencies": {
-        "@types/react": "19.2.18"
-      },
-      "peerDependencies": {
-        "react": "19.2.8"
-      }
-    }
+    }, "examples/spike-directory": {"name":"@workbasehq/spike-directory","dependencies":{"@tanstack/react-router":"1.170.41","@workbasehq/ui-v3":"workspace:*","i18next":"25.10.10","leaflet":"1.9.4","react":"19.2.8","react-dom":"19.2.8"},"devDependencies":{"@types/leaflet":"1.9.21","@types/react":"19.2.18","@types/react-dom":"19.2.4","playwright":"1.58.2","tsx":"4.23.15","typescript":"^6.0.0","vite":"7.3.1","vitest":"^4.1.0"}}, "packages/ui-v3": {"name":"@workbasehq/ui-v3","dependencies":{"@tanstack/router-generator":"1.146.2","es-module-lexer":"2.3.2","typescript":"^6.0.0","vite":"7.3.1"},"devDependencies":{"@types/react":"19.2.18"},"peerDependencies":{"react":"19.2.8","@tanstack/react-router":"1.170.41"}}
   },
   "patchedDependencies": {
     "@radix-ui/react-select@2.2.6": "patches/@radix-ui%2Freact-select@2.2.6.patch",
@@ -10300,34 +10264,6 @@
         }
       },
       "sha512-O/PgfnpT1xKSDeQYSCfRI5Gy3hPf91mKVDuYLUHZJMiDFptvP41MSnWofm8dnCm0256ZNfZIM7DSzuSMAFnjHA=="
-    ],
-    "@types/geojson": [
-      "@types/geojson@7946.0.16",
-      "",
-      {},
-      "sha512-6C8nqWur3j98U6+lXDfTUWIfgvZU+EumvpHKcYjujKH7woYyLj2sUmff0tRhrqM7BohUw7Pz3ZB1jj2gW9Fvmg=="
-    ],
-    "@types/leaflet": [
-      "@types/leaflet@1.9.21",
-      "",
-      {
-        "dependencies": {
-          "@types/geojson": "*"
-        }
-      },
-      "sha512-TbAd9DaPGSnzp6QvtYngntMZgcRk+igFELwR2N99XZn7RXUdKgsXMR+28bUO0rPsWp8MIu/f47luLIQuSLYv/w=="
-    ],
-    "@workbasehq/spike-directory": [
-      "@workbasehq/spike-directory@workspace:examples/spike-directory"
-    ],
-    "@workbasehq/ui-v3": [
-      "@workbasehq/ui-v3@workspace:packages/ui-v3"
-    ],
-    "leaflet": [
-      "leaflet@1.9.4",
-      "",
-      {},
-      "sha512-nxS1ynzJOmOlHp+iL3FyWqK89GtNL8U8rvlMOsQdTTssxZwCXh8N2NB3GDQOL+YR3XnWyZAxwQixURb+FA74PA=="
-    ]
+    ], "@types/geojson": ["@types/geojson@7946.0.16","",{},"sha512-6C8nqWur3j98U6+lXDfTUWIfgvZU+EumvpHKcYjujKH7woYyLj2sUmff0tRhrqM7BohUw7Pz3ZB1jj2gW9Fvmg=="], "@types/leaflet": ["@types/leaflet@1.9.21","",{"dependencies":{"@types/geojson":"*"}},"sha512-TbAd9DaPGSnzp6QvtYngntMZgcRk+igFELwR2N99XZn7RXUdKgsXMR+28bUO0rPsWp8MIu/f47luLIQuSLYv/w=="], "@workbasehq/spike-directory": ["@workbasehq/spike-directory@workspace:examples/spike-directory"], "@workbasehq/ui-v3": ["@workbasehq/ui-v3@workspace:packages/ui-v3"], "leaflet": ["leaflet@1.9.4","",{},"sha512-nxS1ynzJOmOlHp+iL3FyWqK89GtNL8U8rvlMOsQdTTssxZwCXh8N2NB3GDQOL+YR3XnWyZAxwQixURb+FA74PA=="]
   }
 }

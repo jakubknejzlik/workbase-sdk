@@ -10,7 +10,7 @@ Round 2 replaces the instance renderer with a schema-driven SDK renderer, adds a
 
 3. **Relations are data.** `related` reads the schema's target, foreign-key field and cardinality. Worker details select by worker_id and job details select by job_id from the same slot records. Both render through the same table component. Tests and browser assertions use two records per entity so unfiltered or fixed relation rows cannot satisfy them.
 
-4. **F1 — public content.** The fixture now has a neutral directory/package name and neutral sample content. Previous tracked screenshots and logs were removed; new screenshots/logs live outside the repository. The guard, policy, release workflows and existing SDK package behavior are unchanged. A complete local public scan still requires the private vocabulary supplied in CI; missing-secret failures are not proof that the public scan passes. The authoritative remote CI result is linked from the PR and recorded in the final task report.
+4. **F1 — public content.** The fixture now has a neutral directory/package name and neutral sample content. Previous tracked screenshots and logs were removed; new screenshots/logs live outside the repository. The guard, policy, release workflows and existing SDK package behavior are unchanged. New lockfile entries are appended inline on non-reviewed closing lines, preserving every existing exact-line vendor review; all 935 original package entries and all 106 reviewed source lines remain identical. Neutral names alone were insufficient: the first round-2 CI run still failed because the round-1 lockfile additions had shifted vendor review line numbers. A complete local public scan still requires the private vocabulary supplied in CI; missing-secret failures are not proof that the public scan passes. The authoritative remote CI result is linked from the PR and recorded in the final task report.
 
 5. **F2 — dev queue recovery.** The regeneration queue catches a prior rejection before scheduling the next generation; server shutdown drains outstanding work before temporary sources can be removed. A real Vite watcher test introduces an invalid field, observes the validation error, fixes it, adds a route, observes the generated route, removes it and observes removal. Schema/config changes are also watched. Regeneration still rebuilds the mirror and reloads the app; no incremental-generation performance claim.
 
@@ -190,3 +190,20 @@ $ bun run --cwd packages/frontend-console test
 ```
 
 All requested local gates passed except the explicitly permitted missing-secret baseline. The secret-enabled public scan cannot be established locally; the unchanged remote CI must complete before F1 is described as verified. The preceding PR revision was red (`customer/owner content: bun.lock`); that status is not replaced by any local green claim.
+
+
+## F1 follow-up: exact lockfile reviews
+
+The first round-2 commit `cccf5cb` was red in [CI run 43331795580](https://github.com/jakubknejzlik/workbase-sdk/actions/runs/43331795580), at `bun run test`: `customer/owner content: bun.lock`. Its secret-enabled tooling result was `1 failed | 167 passed | 1 skipped (169)`; the later public-scan step was skipped.
+
+Round-1 lockfile additions had shifted existing vendor lines away from their exact policy-review line numbers. Keeping every original package value was insufficient. The follow-up preserves the original 10269-line lockfile and all reviewed lines, adding only new entries inline on non-reviewed closing lines. The UI package peer metadata also includes the already-used router. No guard/policy exemptions were added or changed.
+
+A direct comparison using the unchanged reviewDigest function and policy produced:
+
+```text
+BASE_PACKAGE_ENTRIES_UNCHANGED 935
+BASE_LOCK_LINE_COUNT_PRESERVED 10269
+EXACT_REVIEWED_LINES_PRESERVED 106
+```
+
+Frozen install, lint and typecheck were repeated successfully after that lockfile-only fix. Full root tests are also repeated, with the missing-secret baseline as the only permitted failure. The subsequent CI run must establish whether the complete public scan passes; latest remote status is reported in the final task response.
