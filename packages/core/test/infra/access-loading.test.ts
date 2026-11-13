@@ -108,3 +108,20 @@ it('includes entity access sources in configHash while preserving physical schem
   expect(b.config.revision).toBe(a.config.revision)
   expect(initialSchema(b.config)).toBe(initialSchema(a.config))
 })
+it('rejects an authored effectiveAccess literal instead of trusting it as compiled policy', async () => {
+  const { root, load } = consumer()
+  const compiled = (await load()).config.effectiveAccess
+  // Reviewer repro (PR #18 verify2): no access.ts or entity access, policy injected as a literal.
+  writeFileSync(join(root, 'config.ts'), `import { defineConfig } from '@workbasehq/core/schema'
+import worker from './schema/worker.ts'
+export default defineConfig({ id: 'sample', revision: 1, roles: ['admin', 'staff'], organizationOwnerRole: 'admin', languages: ['en'], entities: { worker }, effectiveAccess: ${JSON.stringify(compiled)} })`)
+  writeFileSync(join(root, 'schema/worker.ts'), `import { defineEntity, accountLink } from '@workbasehq/core/schema'\nexport default defineEntity({ fields: { name: { type: 'text', required: true }, user: accountLink() } })`)
+  await expect(load()).rejects.toThrow(/effectiveAccess.*cannot be authored/)
+  // Alongside real declarations the literal is still rejected, not merged or overridden.
+  const declared = consumer()
+  writeFileSync(join(declared.root, 'config.ts'), `import { defineConfig } from '@workbasehq/core/schema'
+import worker from './schema/worker.ts'
+import access from './access.ts'
+export default defineConfig({ id: 'sample', revision: 1, roles: ['admin', 'staff'], organizationOwnerRole: 'admin', languages: ['en'], entities: { worker }, access, effectiveAccess: ${JSON.stringify(compiled)} })`)
+  await expect(declared.load()).rejects.toThrow(/effectiveAccess.*cannot be authored/)
+})

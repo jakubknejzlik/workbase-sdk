@@ -90,6 +90,8 @@ export function defineConfig(input: ConfigInput): SchemaConfig {
   const roles = parse(z.array(identifier).min(1).refine(value => new Set(value).size === value.length, 'Duplicate roles'), input.roles, ['roles'])
   if (!roles.includes(input.organizationOwnerRole)) throw new DeclarationError(['organizationOwnerRole'], 'organizationOwnerRole must be in roles')
   if ('account' in input || 'enumLabels' in input) throw new DeclarationError([], 'Account ownership and labels are SDK/dictionary concerns')
+  // effectiveAccess is compiler output only; an authored literal would bypass compileAccess.
+  if ('effectiveAccess' in input) throw new DeclarationError(['effectiveAccess'], 'effectiveAccess is compiled from access.ts and entity access; it cannot be authored')
   const domain: InstanceInput['entities'] = {}
   for (const [name, entity] of Object.entries(input.entities)) {
     if (name === 'users') throw new DeclarationError(['entities', name], 'users is SDK-owned; use accountLink()')
