@@ -76,13 +76,16 @@ export async function generateRoutes(root: string, directory: string, manifest: 
   const routes = resolve(directory, 'routes')
   await mkdir(routes, { recursive: true })
   await writeFile(resolve(routes, '__root.tsx'), `import { createRootRoute, Outlet } from '@tanstack/react-router'; export const Route = createRootRoute({ component: Outlet });\n`)
-  await writeFile(resolve(directory, 'RouteView.ts'), `// Placeholder until the renderer slice.\nexport function RouteView() { return null }\n`)
+  await writeFile(resolve(directory, 'RouteView.ts'), `export { RouteView } from '@workbasehq/plugins/console/ui/react';\nexport { createElement } from 'react';\nexport { parseParams } from '@workbasehq/plugins/console/ui';\n`)
   for (const route of manifest.routes) {
     const target = resolve(routes, relative('ui', route.source))
     await mkdir(dirname(target), { recursive: true })
     const imported = relative(dirname(target), resolve(root, route.source)).replaceAll('\\', '/')
     const view = relative(dirname(target), resolve(directory, 'RouteView.ts')).replaceAll('\\', '/')
-    await writeFile(target, `import { createFileRoute } from '@tanstack/react-router';\nimport definition from ${JSON.stringify(imported.startsWith('.') ? imported : './' + imported)};\nimport { RouteView } from ${JSON.stringify(view.startsWith('.') ? view : './' + view)};\nexport const Route = createFileRoute('/placeholder')({ component: RouteView, staticData: { definition } });\n`)
+    const metadata = relative(dirname(target), resolve(directory, 'manifest.json')).replaceAll('\\', '/')
+    const slotsFile = resolve(root, 'ui/-slots.ts')
+    const slotsImport = Object.keys(manifest.slots).length ? `import slots from ${JSON.stringify(relative(dirname(target), slotsFile).replaceAll('\\', '/'))};\n` : 'const slots = {};\n'
+    await writeFile(target, `import { createFileRoute } from '@tanstack/react-router';\nimport definition from ${JSON.stringify(imported.startsWith('.') ? imported : './' + imported)};\nimport { RouteView, createElement, parseParams } from ${JSON.stringify(view.startsWith('.') ? view : './' + view)};\nimport metadata from ${JSON.stringify(metadata.startsWith('.') ? metadata : './' + metadata)};\nimport type { Manifest } from '@workbasehq/plugins/console/ui/check';\n${slotsImport}const manifest = metadata as unknown as Manifest;\nexport const Route = createFileRoute('/placeholder')({ validateSearch: (search) => parseParams(definition.search, search), params: { parse: (params) => { parseParams(definition.params, params); return params } }, component: View, staticData: { definition } });\nfunction View(): ReturnType<typeof createElement> { return createElement(RouteView, { definition, route: manifest.routes.find(r => r.path === ${JSON.stringify(route.path)})!, entities: manifest.entities, routes: manifest.routes, params: parseParams(definition.params, Route.useParams()), search: Route.useSearch(), slots }) }\n`)
   }
   const generator = new Generator({ root, config: getConfig({ target: 'react', routesDirectory: routes, generatedRouteTree: resolve(directory, 'routeTree.gen.ts'), disableLogging: true, quoteStyle: 'single', semicolons: false, tmpDir: resolve(directory, '-tmp') }, root) })
   await generator.run()

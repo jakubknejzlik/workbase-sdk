@@ -28,7 +28,8 @@
     "./console/ui": "./console/ui/src/index.ts",
     "./console/ui/check": "./console/ui/src/check.ts",
     "./console/ui/vite": "./console/ui/src/vite.ts",
-    "./console/ui/client": "./console/ui/src/client.ts"
+    "./console/ui/client": "./console/ui/src/client.ts",
+    "./console/ui/react": "./console/ui/src/react/index.ts"
   },
   "dependencies": {
     "zod": "4.6.7",
@@ -39,14 +40,24 @@
     "typescript": ">=5.7.2 <7",
     "vite": "^7.3.1",
     "@tanstack/router-generator": "^1.146.2",
-    "es-module-lexer": "^2.3.2"
+    "es-module-lexer": "^2.3.2",
+    "react": "^19.2.8",
+    "@tanstack/react-query": "^5.90.21",
+    "@tanstack/react-router": "^1.170.41"
   },
   "devDependencies": {
     "@workbasehq/test-support": "workspace:*",
     "@workbasehq/core": "workspace:*",
     "vite": "7.3.1",
     "@tanstack/router-generator": "1.146.2",
-    "es-module-lexer": "2.3.2"
+    "es-module-lexer": "2.3.2",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "@types/react": "19.2.18",
+    "@tanstack/react-query": "5.90.21",
+    "@tanstack/react-router": "1.170.41",
+    "@testing-library/react": "16.3.3",
+    "jsdom": "30.1.2"
   },
   "files": [
     "*/src/**",
@@ -80,6 +91,15 @@
       "optional": true
     },
     "es-module-lexer": {
+      "optional": true
+    },
+    "react": {
+      "optional": true
+    },
+    "@tanstack/react-query": {
+      "optional": true
+    },
+    "@tanstack/react-router": {
       "optional": true
     }
   }

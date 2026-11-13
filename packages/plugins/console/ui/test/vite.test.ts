@@ -1,3 +1,4 @@
+import { spawnSync } from 'node:child_process'
 import { readFileSync, rmSync, unlinkSync, readdirSync, symlinkSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { createServer, build, type ViteDevServer } from 'vite'
@@ -186,3 +187,29 @@ test.each(['entry', 'ui', 'outside', 'query'])('extraction denies unchecked %s m
   try { await expect(extractManifest(root)).rejects.toThrow(/not in the checked UI graph/) }
   finally { checked.mockRestore() }
 })
+test('generated wrappers bind the real renderer, manifest metadata, parameters and live slots', async () => {
+  const { root, put } = setup()
+  put('ui/-components/card.tsx', `export default function Card() { return 'LIVE_SLOT_MARKER' }`)
+  put('ui/-slots.ts', `import { defineSlots, p } from '${sdk}'; import Card from './-components/card'; export default defineSlots({ card: { contexts: ['record'], props: { name: p.field('text') }, component: Card } })`)
+  put('ui/workers/$workerId/index.ts', `import { entityDetailPage, slot } from '${sdk}'; export default entityDetailPage('worker', { title: 'worker.detail', recordParam: 'workerId', layout: [slot('card', { name: 'name' })] })`)
+  await start(root)
+  const view = readFileSync(join(root, '.workbase-ui/RouteView.ts'), 'utf8')
+  const wrapper = readFileSync(join(root, '.workbase-ui/routes/workers/$workerId/index.ts'), 'utf8')
+  expect(view).toContain("from '@workbasehq/plugins/console/ui/react'")
+  expect(wrapper).toContain('manifest.entities'); expect(wrapper).toContain('Route.useParams()'); expect(wrapper).toContain('Route.useSearch()')
+  expect(wrapper).toContain('parseParams(definition.search, search)'); expect(wrapper).toContain('parseParams(definition.params, params)')
+  expect(wrapper).toContain('ui/-slots.ts'); expect(view).not.toContain('Placeholder')
+})
+
+test('generated four-route consumer passes strict TypeScript checking', async () => {
+  const { root, put } = setup()
+  for (const [file, helper, extra] of [
+    ['index.ts', 'entityListPage', ''], ['new.ts', 'entityCreatePage', ', layout: ["name"]'],
+    ['$workerId/index.ts', 'entityDetailPage', ', recordParam: "workerId", layout: ["name"]'],
+    ['$workerId/edit.ts', 'entityEditPage', ', recordParam: "workerId", layout: ["name"]'],
+  ]) put('ui/workers/' + file, `import { ${helper} } from '${sdk}'; export default ${helper}('worker', { title: 'worker.title'${extra} })`)
+  await start(root)
+  put('entry.ts', `import { createRouter } from '@tanstack/react-router'; import { routeTree } from './.workbase-ui/routeTree.gen'; const router = createRouter({ routeTree }); declare module '@tanstack/react-router' { interface Register { router: typeof router } }`)
+  const checked = spawnSync('bun', [resolve('node_modules/typescript/bin/tsc'), '--ignoreConfig', '--strict', '--noEmit', '--skipLibCheck', '--moduleResolution', 'bundler', '--module', 'esnext', '--target', 'es2023', '--allowImportingTsExtensions', '--resolveJsonModule', '--esModuleInterop', '--types', 'node,@cloudflare/workers-types', join(root, 'entry.ts')], { encoding: 'utf8' })
+  expect(checked.status, checked.stdout + checked.stderr).toBe(0)
+}, 20000)
