@@ -24,7 +24,7 @@ function fresh() {
   rmSync(join(root, 'migrations'), { force: true, recursive: true })
   return root
 }
-it('initializes final bundle and r1 lock; unchanged rerun preserves bytes; init refuses existing state', async () => {
+it('initializes final bundle and r1 lock; rerun requires base; init refuses existing state', async () => {
   const root = fresh(), args = ['--root', root]
   await expect(runSchemaCli('plan', args)).rejects.toThrow('--init')
   expect(await runSchemaCli('plan', [...args, '--init'])).toBe(0)
@@ -34,7 +34,7 @@ it('initializes final bundle and r1 lock; unchanged rerun preserves bytes; init 
   expect(sql).toMatch(/^-- workbase:migration r1 parent=none manual=none\n-- workbase:begin pre-data\n-- workbase:end pre-data\n-- workbase:begin generated\nCREATE TABLE/)
   expect(sql).toMatch(/-- workbase:end generated\n-- workbase:begin post-data\n-- workbase:end post-data\n$/)
   expect(sql).not.toMatch(/instance_meta|CREATE TABLE "users"|core_version/)
-  expect(await runSchemaCli('plan', args)).toBe(0)
+  await expect(runSchemaCli('plan', args)).rejects.toThrow('--base')
   await expect(runSchemaCli('plan', [...args, '--init'])).rejects.toThrow('already exists')
   expect(readFileSync(join(root, 'schema.lock.json'), 'utf8')).toBe(lock)
   expect(readFileSync(join(root, 'migrations/0001_r1.sql'), 'utf8')).toBe(sql)

@@ -2,7 +2,7 @@ import type { InstanceConfig } from '../config'
 import { physicalTables, renderTable, renderColumn, quote, type TableSpec } from './schema'
 import type { SourceMap } from '../schema/load'
 
-export interface SchemaLock { lockVersion: 1; revision: number; parent: null; tables: TableSpec[] }
+export interface SchemaLock { lockVersion: 1; revision: number; parent: string | null; tables: TableSpec[] }
 export const lockBytes = (lock: SchemaLock) => JSON.stringify(lock, null, 2) + '\n'
 const equal = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
 export class SpecError extends Error {
@@ -55,7 +55,7 @@ export function schemaLock(config: InstanceConfig, base?: SchemaLock, sources: S
 }
 export function parseLock(bytes: string): SchemaLock {
   const value = JSON.parse(bytes) as SchemaLock
-  if (value.lockVersion !== 1 || !Number.isSafeInteger(value.revision) || value.revision < 1 || value.parent !== null || !Array.isArray(value.tables)) throw new Error('Invalid schema.lock.json: expected lockVersion=1, positive revision, parent=null and tables')
+  if (value.lockVersion !== 1 || !Number.isSafeInteger(value.revision) || value.revision < 1 || (value.parent !== null && (typeof value.parent !== 'string' || !/^[a-f0-9]{64}$/.test(value.parent))) || !Array.isArray(value.tables)) throw new Error('Invalid schema.lock.json: expected lockVersion=1, positive revision, parent=null|sha256 and tables')
   return value
 }
 export function checkSchema(config: InstanceConfig, lock: SchemaLock, sources: SourceMap = {}) {

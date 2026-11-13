@@ -187,15 +187,37 @@ altering `config.revision` or physical schema SQL. The loader binds `config.revi
 by schema tools; the kernel refuses to execute them with legacy defaults.
 
 
-## Physical schema lock (slice 4a)
+## Physical schema lock and migration bundles
 
-Run `bun run migrate:plan --init` with no lock or domain SQL to write
-`schema.lock.json` and `migrations/0001_r1.sql`. The bundle has empty pre-data and
-post-data regions around generated domain DDL; SDK/plugin DDL stays in SDK ledgers.
-Run the command without `--init` to verify an unchanged plan. A repeated `--init`
-rejects existing state without writing. Planning changes against a base arrives in 4b.
-`bun run check:schema` checks config against the lock without writing.
+Run `bun run migrate:plan --init` with no lock or domain SQL to initialize r1.
+With `--base <ref> --init`, the ref must also have no lock or domain migrations.
+Subsequent plans require `--base <ref>` and compare against that ref's tip.
+The adapter only reads local Git objects; fetch the desired ref before planning.
+SDK/plugin DDL stays in SDK ledgers.
+
+A schema change writes one `NNNN_rN.sql` bundle and a lock whose parent is the
+SHA-256 of the exact base lock bytes. Repeated plans preserve the same bytes.
+Base migration files must remain unchanged. `check:schema --base <ref>` validates
+that linkage, the generated SQL, the config against the lock, and manual evidence.
+Without a base, `check:schema` checks config and bundle evidence only.
+The root invariant check supplies `origin/main` (or `origin/$GITHUB_BASE_REF`);
+pass `--base <ref>` to override it for a stacked branch.
+
+Bundles contain exactly one header followed by pre-data, generated, and post-data
+regions in that order. Regeneration preserves manual region bytes, including line
+endings. Changed generated SQL or a moved parent requires renewed manual review:
+run `migrate:plan --base <ref> --confirm-manual` to record evidence in the header.
+Evidence hashes decimal UTF-8 byte-length-prefixed bodies (`length:body`) in
+pre/generated/post order. Editing a confirmed manual region invalidates evidence.
+The migration ledger still hashes the entire file.
+
+Regenerating against a moved base renumbers the pending bundle and rewrites its
+parent. If its filename collides with a newly merged migration, the base file is
+restored and the pending bundle moves to the next revision. An empty schema diff
+removes a pending bundle only when both manual regions are empty.
+
 Both commands accept `--config`, `--root`, `--directory` and `--migrations`.
-Installed consumers can invoke `@workbasehq/core/migrations/schema-cli` with `plan`
-or `check`; repository scripts only supply paths. Runtime builds should consume
-loader-bound config; direct `defineConfig` declarations start at r1.
+Installed consumers invoke `@workbasehq/core/migrations/schema-cli` with `plan` or
+`check`; repository scripts only supply paths and the CI base.
+Runtime builds bind the lock with `bindSchemaLock`; direct `defineConfig`
+declarations remain unbound until a lock is supplied.
