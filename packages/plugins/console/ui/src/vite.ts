@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
-import { statSync } from 'node:fs'
+import { statSync, existsSync, readFileSync } from 'node:fs'
+import { mergeCatalogs, type Catalogs } from './catalogs'
 import { writeFile, mkdir, rm, rename, symlink, readlink } from 'node:fs/promises'
 import { dirname, relative, resolve, isAbsolute } from 'node:path'
 import { fileURLToPath, URL } from 'node:url'
@@ -101,6 +102,15 @@ async function stage(root: string, output: string): Promise<{ result: Generation
   try {
     const manifest = await extractManifest(root)
     const paths = await generateRoutes(root, temp, manifest)
+    const loaded = await loadConfig(resolve(root, 'config.ts')), catalogs: Catalogs = {}
+    for (const lang of loaded.config.languages ?? []) {
+      catalogs[lang] = {}
+      for (const ns of ['domain', 'ui', 'sdk']) {
+        const file = resolve(root, 'locales', lang, ns + '.json')
+        if (existsSync(file)) catalogs[lang][ns] = JSON.parse(readFileSync(file, 'utf8'))
+      }
+    }
+    await writeFile(resolve(temp, 'locales.json'), canonicalJSON(mergeCatalogs(loaded.config.languages ?? ['en'], catalogs)) + '\n')
     await writeFile(resolve(temp, 'manifest.json'), canonicalJSON(manifest) + '\n')
     const result = { manifest, manifestHash: manifestHash(manifest), paths }
     await writeFile(resolve(temp, 'generation.json'), canonicalJSON({ manifestHash: result.manifestHash, paths }) + '\n')

@@ -1,3 +1,5 @@
+import { sourceAt } from './locations'
+export { sourceAt } from './locations'
 import { existsSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { scanTSX } from './scan'
@@ -6,6 +8,7 @@ import type { Manifest, Schema } from './check'
 import { checkSources, type Sources } from './sources'
 import type { Node, Span } from './index'
 import { checkDictionaries, type Catalogs } from './dictionaries'
+import { sdkCatalogs } from './catalogs'
 export type Location = { file: string; line: number; col: number }
 export type Finding = Location & { code: string; key?: string; lang?: string; message?: string }
 export type KeySource = Location & { plural?: boolean }
@@ -14,10 +17,6 @@ export const breakpoints = ['xs', 'sm', 'md', 'lg', 'xl'] as const
 export function effectiveSpans(span: Span): number[] {
   let previous = 12
   return breakpoints.map(bp => previous = typeof span === 'number' ? span : span[bp] ?? previous)
-}
-export function sourceAt(file: string, text: string, key?: string): Location {
-  const pos = key ? Math.max(0, text.indexOf(key)) : 0, before = text.slice(0, pos).split('\n')
-  return { file, line: before.length, col: before.at(-1)!.length + 1 }
 }
 /** Inventory is derived from schema and declarations, never from Instance dictionaries. */
 export function requiredKeys(config: { entities: Schema }, manifest: Manifest, scan: Scan, sdkCatalog: Record<string, string>, sources?: Sources, schemaSources: Record<string, { file: string; line: number; column: number }> = {}): Map<string, KeySource[]> {
@@ -127,6 +126,6 @@ export async function validateInstance(root: string): Promise<Finding[]> {
     }
   }
   for (const family of Object.keys(manifest.keys)) if (!scan.families.has(family)) findings.push({ code: 'unused-family', ...sourceAt(resolve(root, 'ui/keys.ts'), sources.modules.get(resolve(root, 'ui/keys.ts')) ?? '', family), key: family })
-  findings.push(...checkDictionaries(root, requiredKeys(loaded.config, manifest, scan, {}, sources, loaded.sources), catalogs, {}))
+  findings.push(...checkDictionaries(root, requiredKeys(loaded.config, manifest, scan, sdkCatalogs.en, sources, loaded.sources), catalogs, sdkCatalogs))
   return findings.sort((a, b) => a.file.localeCompare(b.file, 'en') || a.line - b.line || a.col - b.col || a.code.localeCompare(b.code, 'en') || (a.key ?? '').localeCompare(b.key ?? '', 'en'))
 }

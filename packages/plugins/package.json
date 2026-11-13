@@ -29,7 +29,8 @@
     "./console/ui/check": "./console/ui/src/check.ts",
     "./console/ui/vite": "./console/ui/src/vite.ts",
     "./console/ui/client": "./console/ui/src/client.ts",
-    "./console/ui/react": "./console/ui/src/react/index.ts"
+    "./console/ui/react": "./console/ui/src/react/index.ts",
+    "./console/ui/i18n": "./console/ui/src/i18n.ts"
   },
   "dependencies": {
     "zod": "4.6.7",
@@ -43,7 +44,8 @@
     "es-module-lexer": "^2.3.2",
     "react": "^19.2.8",
     "@tanstack/react-query": "^5.90.21",
-    "@tanstack/react-router": "^1.170.41"
+    "@tanstack/react-router": "^1.170.41",
+    "i18next": "^25.10.10"
   },
   "devDependencies": {
     "@workbasehq/test-support": "workspace:*",
@@ -57,7 +59,8 @@
     "@tanstack/react-query": "5.90.21",
     "@tanstack/react-router": "1.170.41",
     "@testing-library/react": "16.3.3",
-    "jsdom": "30.1.2"
+    "jsdom": "30.1.2",
+    "i18next": "25.10.10"
   },
   "files": [
     "*/src/**",
@@ -100,6 +103,9 @@
       "optional": true
     },
     "@tanstack/react-router": {
+      "optional": true
+    },
+    "i18next": {
       "optional": true
     }
   }

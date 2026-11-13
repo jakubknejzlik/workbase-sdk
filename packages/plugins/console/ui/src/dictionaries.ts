@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { sourceAt, type Finding, type KeySource } from './validate'
+import { sourceAt } from './locations'
+import type { Finding, KeySource } from './validate'
 export type Catalogs = Record<string, Record<string, Record<string, string>>>
 const suffix = /_(zero|one|two|few|many|other)$/
 export const variables = (text: string) => [...new Set([...text.matchAll(/{{\s*([\w]+)\s*}}/g)].map(m => m[1]))].sort()
@@ -15,7 +16,6 @@ export function checkDictionaries(root: string, required: Map<string, KeySource[
   const accepted = new Map<string, Set<string>>()
   for (const [id, refs] of required) {
     const [ns, key] = id.split(':')
-    if (ns === 'sdk') continue
     const plural = refs.some(ref => ref.plural) || Object.values(catalogs).some(c => Object.keys(c[ns] ?? {}).some(k => suffix.test(k) && k.replace(suffix, '') === key))
     let expectedVars: string | undefined
     for (const [lang, resources] of Object.entries(catalogs)) {
@@ -23,7 +23,7 @@ export function checkDictionaries(root: string, required: Map<string, KeySource[
       const set = accepted.get(lang + ':' + ns) ?? new Set<string>(); accepted.set(lang + ':' + ns, set)
       for (const form of forms) {
         set.add(form)
-        const text = resources[ns]?.[form]
+        const text = (ns === 'sdk' ? sdk[lang] : resources[ns])?.[form]
         if (text === undefined) { emit('missing-key', lang, ns, form, refs); continue }
         const vars = JSON.stringify(variables(text))
         expectedVars ??= vars

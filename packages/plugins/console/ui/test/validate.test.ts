@@ -90,3 +90,10 @@ test('finite dynamic families and literal TSX calls build their key inventory', 
   expect([...scan.keys.keys()]).toEqual(['ui:workers.title']); expect([...scan.families]).toEqual(['workers.badge'])
   expect(scan.findings.map(f => f.code)).toEqual(['dynamic-key'])
 })
+test('admitted TSX bare text reaches the actual CLI', () => {
+  const f = setup()
+  f.put('ui/-components/FieldValue.tsx', 'export default function FieldValue() { return <p>Untranslated</p> }')
+  const result = cli(f.root)
+  expect(result.status).not.toBe(0)
+  expect(result.stderr).toMatch(/FieldValue.tsx:1:\d+.*bare-text/)
+})

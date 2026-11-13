@@ -14,6 +14,7 @@ import { consolePublicContent, checkConsolePublic } from './check-console-public
 // Independent inventory: the guard must not derive its required list from the manifest it checks,
 // otherwise deleting a peer from the manifest also deletes it from the assertion.
 export const uiOptionalPeers = [
+  'i18next',
   'typescript',
   'vite',
   '@tanstack/router-generator',
