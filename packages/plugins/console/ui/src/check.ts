@@ -1,6 +1,8 @@
 import { createHash } from 'node:crypto'
 import { z } from 'zod'
 import { canonicalJSON, type EntityMeta } from './client'
+export { validateInstance, requiredKeys } from './validate'
+export type { Finding } from './validate'
 export { canonicalJSON } from './client'
 import { buildPath, type Page, type Node, type Target } from './index'
 import { assertChecked, SourceError, type Sources, type Entry } from './sources'
@@ -17,11 +19,12 @@ const params = z.record(id, paramSpec)
 const binding = z.strictObject({ kind: z.enum(['one', 'list']), entity: id, bind: z.record(id, z.strictObject({ kind: z.literal('param'), name: id })) })
 const node: z.ZodType<Node> = z.lazy(() => z.union([
   id,
+  z.strictObject({ kind: z.literal('col'), children: z.array(node).length(1), span: z.union([z.number(), z.strictObject(Object.fromEntries(['xs', 'sm', 'md', 'lg', 'xl'].map(bp => [bp, z.number().optional()])))]) }),
   z.strictObject({ kind: z.enum(['section', 'row', 'columns', 'tabs', 'tab']), title: title.optional(), children: z.array(node) }),
   z.strictObject({ kind: z.literal('slot'), id, props: z.record(id, z.union([z.string(), z.boolean()])) }),
 ]))
 const pageSchema = z.strictObject({
-  kind: z.enum(['page', 'customPage']), title, params, search: params, data: z.record(id, binding), layout: z.array(node), uses: z.array(z.string()),
+  kind: z.enum(['page', 'customPage']), title, params, search: params, data: z.record(id, binding), layout: z.array(node), uses: z.array(z.string()), omit: z.array(id),
   entity: id.optional(), mode: z.enum(['list', 'detail', 'create', 'edit']).optional(),
 })
 const targetSchema = z.strictObject({ entity: id, mode: z.enum(['list', 'detail', 'edit']) })
@@ -30,6 +33,7 @@ const propSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('field'), type: z.string() }),
   z.strictObject({ kind: z.literal('boolean'), default: z.boolean().optional() }),
   z.strictObject({ kind: z.literal('when') }),
+  z.strictObject({ kind: z.literal('key') }),
 ])
 const slotsSchema = z.record(id, z.strictObject({ contexts: z.array(z.enum(['record', 'form', 'row'])).min(1), props: z.record(id, propSchema) }))
 export type Schema = Record<string, { displayField?: string; fields: Record<string, { type: string; required?: boolean; readOnly?: boolean; computed?: unknown; userLink?: boolean; values?: string[]; entity?: string }> }>
@@ -37,7 +41,7 @@ const entitySchema = z.strictObject({ displayField: z.string(), fields: z.record
   type: z.string(), required: z.boolean(), readOnly: z.boolean(), computed: z.boolean(), userLink: z.boolean(), values: z.array(z.string()).optional(), ref: id.optional(),
 })) })
 export type ResolvedLink = { to: string; bind: Record<string, string> }
-export type Manifest = { version: 2; configHash: string; entities: Record<string, EntityMeta>; routes: (Omit<Page, 'component'> & { source: string; path: string; links: Partial<Record<'list' | 'detail' | 'edit', ResolvedLink>> })[]; nav: { title: string; link: ResolvedLink }[]; slots: z.infer<typeof slotsSchema> }
+export type Manifest = { version: 3; keys: Record<string, string[]>; configHash: string; entities: Record<string, EntityMeta>; routes: (Omit<Page, 'component'> & { source: string; path: string; links: Partial<Record<'list' | 'detail' | 'edit', ResolvedLink>> })[]; nav: { title: string; link: ResolvedLink }[]; slots: z.infer<typeof slotsSchema> }
 /** Reject values JSON would silently coerce, drop, invoke, or reorder semantically. */
 function jsonData(value: unknown, seen = new Set<object>()): void {
   if (value === null || typeof value === 'string' || typeof value === 'boolean' || typeof value === 'number' && Number.isFinite(value) && !Object.is(value, -0)) return
@@ -141,6 +145,7 @@ export function normalise(sources: Sources, values: Record<string, unknown>, sch
         for (const [key, spec] of Object.entries(definition.props)) {
           const value = node.props[key] ?? ('default' in spec ? spec.default : undefined)
           if (spec.kind === 'field') { if (typeof value !== 'string') throw new Error(`Invalid field prop ${key}`); field(value, spec.type) }
+          if (spec.kind === 'key' && (typeof value !== 'string' || !title.safeParse(value).success)) throw new Error(`Invalid key prop ${key}`)
           if (spec.kind === 'boolean' && typeof value !== 'boolean' || spec.kind === 'when' && !['create', 'edit'].includes(String(value))) throw new Error(`Invalid slot prop ${key}`)
         }
       }
@@ -177,5 +182,7 @@ export function normalise(sources: Sources, values: Record<string, unknown>, sch
       return [key, { type: f.type, required: !!f.required, readOnly: !!f.readOnly, computed: !!f.computed, userLink: !!f.userLink, ...(f.values ? { values: f.values } : {}), ...(f.entity ? { ref: f.entity } : {}) }]
     })) })]
   }))
-  return nullObjects({ version: 2, configHash, entities, routes, nav, slots })
+  const keysEntry = sources.entries.find(e => e.helper === 'defineKeys')
+  const keys = keysEntry ? at(keysEntry, () => strictParse(z.record(title, z.array(id).min(1)), values[keysEntry.source])) : {}
+  return nullObjects({ version: 3, keys, configHash, entities, routes, nav, slots })
 }

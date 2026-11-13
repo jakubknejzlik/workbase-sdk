@@ -26,9 +26,10 @@
     "check:schema": "bun scripts/schema.ts check",
     "check:access": "bun scripts/check-access.ts",
     "access:lock": "bun scripts/check-access.ts --write",
-    "check:ci-invariants": "bun scripts/sdk-ci-invariants.ts",
+    "check:ci-invariants": "bun scripts/sdk-ci-invariants.ts && bun run check:ui",
     "console:build": "bun scripts/build-console.ts",
-    "sdk:pack": "bash scripts/sdk-pack.sh"
+    "sdk:pack": "bash scripts/sdk-pack.sh",
+    "check:ui": "bun packages/plugins/console/ui/src/cli.ts"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "0.23.0",

@@ -56,7 +56,7 @@ export type RenderContext = Runtime & { metadata: EntityMeta; mode?: Page['mode'
 export function renderNode(node: Node, ctx: RenderContext): ReactNode {
   if (typeof node !== 'string') {
     if (node.kind === 'tabs') return h(Tabs, { node, ctx })
-    if (node.kind !== 'slot') return h(node.kind === 'section' || node.kind === 'tab' ? 'section' : 'div', { 'data-layout': node.kind, style: structuralStyle[node.kind as keyof typeof structuralStyle] }, node.title && h('h2', null, ctx.t(node.title)), ...node.children.map((child, i) => h('div', { key: i }, renderNode(child, ctx))))
+    if (node.kind !== 'slot') return h(node.kind === 'section' || node.kind === 'tab' ? 'section' : 'div', { 'data-layout': node.kind, style: structuralStyle[node.kind as keyof typeof structuralStyle] }, 'title' in node && node.title && h('h2', null, ctx.t(node.title)), ...node.children.map((child, i) => h('div', { key: i }, renderNode(child, ctx))))
     const slot = ctx.slots[node.id]
     if (!slot) return h('p', { role: 'alert' }, ctx.t('console.unsupported') + ': ' + node.id)
     const props: Record<string, unknown> = {}
@@ -75,8 +75,8 @@ export function renderNode(node: Node, ctx: RenderContext): ReactNode {
 }
 function Tabs({ node, ctx }: { node: Exclude<Node, string | { kind: 'slot' }>; ctx: RenderContext }) {
   const [active, setActive] = useState(0)
-  return h('div', null, node.title && h('h2', null, ctx.t(node.title)),
-    h('div', { role: 'tablist' }, ...node.children.map((child, i) => h('button', { key: i, type: 'button', role: 'tab', 'aria-selected': active === i, onClick: () => setActive(i) }, typeof child !== 'string' && child.kind !== 'slot' && child.title ? ctx.t(child.title) : String(i + 1)))),
+  return h('div', null, 'title' in node && node.title && h('h2', null, ctx.t(node.title)),
+    h('div', { role: 'tablist' }, ...node.children.map((child, i) => h('button', { key: i, type: 'button', role: 'tab', 'aria-selected': active === i, onClick: () => setActive(i) }, typeof child !== 'string' && 'title' in child && child.title ? ctx.t(child.title) : String(i + 1)))),
     h('div', { role: 'tabpanel' }, node.children[active] && renderNode(node.children[active], ctx)))
 }
 function message(state: State<unknown>, t: Runtime['t']) { return state.kind === 'ready' ? null : h('p', { role: state.kind === 'loading' ? 'status' : 'alert' }, t('console.' + state.kind)) }

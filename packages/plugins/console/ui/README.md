@@ -92,3 +92,28 @@ packages/plugins/console/ui/vitest.config.ts` covers renderer states and browser
 history in jsdom; `bunx vitest run packages/core/test/console-client.test.ts`
 executes the same client against the real Worker and native D1 with a synthetic
 optional field, including persisted values read by a fresh Worker/client.
+
+Manifest v3 carries `omit`, `col(node, span)` and finite `defineKeys` families from
+`ui/keys.ts`. Columns are direct row children. Responsive spans inherit through
+xs/sm/md/lg/xl with xs defaulting to 12. A row must total at most 12 at each
+breakpoint; all-12 rows stack. Mixed rows do not reset their sum at full-width cells.
+Detail pages place or omit every field; forms cover editable fields. Slot field
+props count as placement; protected account links require slots or omission.
+
+`validateInstance(root)` from `/check` collects sorted findings. Run the same
+validator with `bun run check:ui [root]` (the root script defaults to the committed
+four-page cs/en fixture). Domain keys are `entity.<entity>` (plural),
+`field.<entity>.<field>` and `enum.<entity>.<field>.<value>`. The SDK-injected users
+projection is SDK-owned, outside authored domain inventory. UI titles, key props,
+TSX translation calls and finite dynamic families construct the UI inventory.
+Dictionary keys cannot create requirements themselves. Every configured locale
+must provide the required keys, plural forms and matching interpolation variables.
+
+Non-goals:
+- No action nodes or reason keys (slice 10).
+- No `/me`, profile storage, capability hiding or access card (slice 12).
+- No auth shell or switcher persistence (slice 13).
+- No template or Instance script wiring (slice 16).
+- No MCP translation operations, `CustomTypeOptions` typing, ICU, nested keys or contexts.
+- No languages beyond cs/en, no date/number formatting helpers, no visual/axe checks.
+- No list-column completeness and no `frontend-console` changes.

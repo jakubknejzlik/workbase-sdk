@@ -63,13 +63,13 @@ export function checkSources(root: string): Sources {
     if (extname(file) !== '.ts') fail(tree, 'Unclassified UI source extension')
     const bindings = namedBindings(tree)
     const exported = tree.statements.find(ts.isExportAssignment), call = exported?.expression
-    const expected = local === 'nav.ts' ? ['defineNav'] : helpers
+    const expected = local === 'nav.ts' ? ['defineNav'] : local === 'keys.ts' ? ['defineKeys'] : helpers
     if (!call || !ts.isCallExpression(call) || !ts.isIdentifier(call.expression)) fail(exported ?? tree, 'Default export must directly call a named SDK helper')
     const binding = bindings.get(call.expression.text)
     const helper = expected.find(name => sdkBinding(binding, file, name, sdk, sdkFile))
     if (!helper || exported!.isExportEquals) fail(call, 'Default export must directly call a named SDK helper')
     let path: string | undefined
-    if (local !== 'nav.ts') try { path = routePath(source) } catch (error) { fail(call, String(error)) }
+    if (!['nav.ts', 'keys.ts'].includes(local)) try { path = routePath(source) } catch (error) { fail(call, String(error)) }
     entries.push({ file, source, location: location(call), helper, ...(path !== undefined ? { path } : {}) })
   }
   const slots = resolve(ui, '-slots.ts')
@@ -125,7 +125,7 @@ export function checkSources(root: string): Sources {
         const typeOnly = clause.isTypeOnly
         if (!typeOnly && node.moduleSpecifier.text === sdk) {
           if (clause.name || !names || !ts.isNamedImports(names)) fail(node, 'Expected named SDK imports')
-          for (const item of names.elements) if (!item.isTypeOnly && ![...helpers, 'defineNav', 'defineSlots', 'param', 'one', 'list', 'p', 'layout', 'slot', 'link', 'buildPath', 'parseParams'].includes((item.propertyName ?? item.name).text)) fail(item, `${(item.propertyName ?? item.name).text} is not in slice 7`)
+          for (const item of names.elements) if (!item.isTypeOnly && ![...helpers, 'defineNav', 'defineSlots', 'defineKeys', 'col', 'param', 'one', 'list', 'p', 'layout', 'slot', 'link', 'buildPath', 'parseParams'].includes((item.propertyName ?? item.name).text)) fail(item, `${(item.propertyName ?? item.name).text} is not in slice 7`)
         }
         edge(node.moduleSpecifier, node.moduleSpecifier.text, typeOnly)
       }
