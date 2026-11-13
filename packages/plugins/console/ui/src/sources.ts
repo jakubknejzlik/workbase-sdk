@@ -113,14 +113,16 @@ export function checkSources(root: string): Sources {
     function visit(node: ts.Node) {
       if (ts.isImportTypeNode(node)) {
         if (!ts.isLiteralTypeNode(node.argument) || !ts.isStringLiteral(node.argument.literal)) fail(node, 'Unclassified type import')
-        edge(node, node.argument.literal.text, true)
+        edge(node, node.argument.literal.text, false)
       }
+      if (ts.isMetaProperty(node) && node.keywordToken === ts.SyntaxKind.ImportKeyword) fail(node, 'Unclassified import.meta (including glob) is prohibited')
       if (ts.isImportEqualsDeclaration(node)) fail(node, 'import = require is unclassified')
       if (ts.isExportDeclaration(node) && node.moduleSpecifier) fail(node, 'Re-exports are unclassified')
       if (ts.isImportDeclaration(node)) {
         if (!ts.isStringLiteral(node.moduleSpecifier) || !node.importClause || node.attributes) fail(node, 'Side-effect or unclassified import')
         const clause = node.importClause, names = clause.namedBindings
-        const typeOnly = clause.isTypeOnly || !clause.name && !!names && ts.isNamedImports(names) && names.elements.length > 0 && names.elements.every(item => item.isTypeOnly)
+        // Inline type specifiers can emit a side-effect import (verbatimModuleSyntax).
+        const typeOnly = clause.isTypeOnly
         if (!typeOnly && node.moduleSpecifier.text === sdk) {
           if (clause.name || !names || !ts.isNamedImports(names)) fail(node, 'Expected named SDK imports')
           for (const item of names.elements) if (!item.isTypeOnly && ![...helpers, 'defineNav', 'defineSlots', 'param', 'one', 'list', 'p', 'layout', 'slot', 'link', 'buildPath', 'parseParams'].includes((item.propertyName ?? item.name).text)) fail(item, `${(item.propertyName ?? item.name).text} is not in slice 7`)

@@ -39,6 +39,7 @@ function jsonData(value: unknown, seen = new Set<object>()): void {
   if (!value || typeof value !== 'object' || seen.has(value) || ![Object.prototype, Array.prototype, null].includes(Object.getPrototypeOf(value))) throw new Error('Expected JSON data equal to its round-trip')
   seen.add(value)
   for (const key of Reflect.ownKeys(value)) {
+    if (typeof key === 'string' && ['__proto__', 'constructor', 'prototype'].includes(key)) throw new Error(`Forbidden manifest key: ${key}`)
     if (Array.isArray(value) && key === 'length') continue
     if (Array.isArray(value) && (typeof key !== 'string' || !/^(0|[1-9]\d*)$/.test(key))) throw new Error('Expected JSON array indices')
     const descriptor = Object.getOwnPropertyDescriptor(value, key)!
@@ -59,6 +60,11 @@ function stripComponent(value: unknown, required: boolean) {
   jsonData(clone)
   return clone
 }
+function strictParse<T>(schema: z.ZodType<T>, input: unknown): T {
+  const parsed = schema.parse(input)
+  if (canonicalJSON(parsed) !== canonicalJSON(input)) throw new Error('Manifest parse dropped or changed an own key')
+  return parsed
+}
 export function canonicalJSON(value: unknown): string {
   if (Array.isArray(value)) return '[' + value.map(canonicalJSON).join(',') + ']'
   if (value && typeof value === 'object') return '{' + Object.keys(value).sort().map(key => JSON.stringify(key) + ':' + canonicalJSON((value as Record<string, unknown>)[key])).join(',') + '}'
@@ -76,21 +82,23 @@ export function normalise(sources: Sources, values: Record<string, unknown>, sch
     // Check the registry itself before reading its values, excluding only leaf components.
     const clean = Object.create(Object.getPrototypeOf(raw))
     for (const key of Reflect.ownKeys(raw)) {
+      if (typeof key === 'string' && ['__proto__', 'constructor', 'prototype'].includes(key)) throw new Error(`Forbidden manifest key: ${key}`)
       const d = Object.getOwnPropertyDescriptor(raw, key)!
       if (typeof key !== 'string' || !d.enumerable || !('value' in d)) throw new Error('Expected JSON slot registry')
       Object.defineProperty(clean, key, { value: stripComponent(d.value, true), enumerable: true })
     }
     jsonData(clean)
-    return slotsSchema.parse(clean)
+    return strictParse(slotsSchema, clean)
   }) : {}
-  const paths = new Set<string>()
+  const paths = new Map<string, Entry>()
   const routes = sources.entries.filter(e => e.path !== undefined).map(entry => at(entry, () => {
     const raw = values[entry.source]
-    const page = pageSchema.parse(stripComponent(raw, entry.helper === 'customPage'))
+    const page = strictParse(pageSchema, stripComponent(raw, entry.helper === 'customPage'))
     if ((page.kind === 'customPage') !== (entry.helper === 'customPage')) throw new Error('Page kind does not match SDK construction')
-    const path = entry.path!, collision = path.replace(/\$[^/]+/g, '$param')
-    if (paths.has(collision)) throw new Error(`Route collision: ${path}`)
-    paths.add(collision)
+    const path = entry.path!, collision = path.toLowerCase().replace(/\/+$/, '').replace(/\$[^/]+/g, '$param')
+    const previous = paths.get(collision)
+    if (previous) throw new Error(`Route collision: ${path}; first declared at ${previous.location.file}:${previous.location.line}:${previous.location.column}`)
+    paths.set(collision, entry)
     buildPath(path, Object.fromEntries(Object.keys(page.params).map(key => [key, 'probe'])))
     if (Object.keys(page.params).some(key => Object.hasOwn(page.search, key))) throw new Error('Duplicate path/search param')
     for (const spec of [...Object.values(page.params), ...Object.values(page.search)]) if (spec.kind === 'id' && !Object.hasOwn(schema, spec.entity)) throw new Error(`Unknown param entity ${spec.entity}`)
@@ -142,7 +150,7 @@ export function normalise(sources: Sources, values: Record<string, unknown>, sch
   const navEntry = sources.entries.find(e => e.helper === 'defineNav')
   const nav = navEntry ? at(navEntry, () => {
     jsonData(values[navEntry.source])
-    return navSchema.parse(values[navEntry.source]).map(item => ({ title: item.title, link: resolveLink(item.target) })).sort((a, b) => compare(a.link.to, b.link.to) || compare(a.title, b.title))
+    return strictParse(navSchema, values[navEntry.source]).map(item => ({ title: item.title, link: resolveLink(item.target) })).sort((a, b) => compare(a.link.to, b.link.to) || compare(a.title, b.title))
   }) : []
   return { version: 1, configHash, routes, nav, slots }
 }

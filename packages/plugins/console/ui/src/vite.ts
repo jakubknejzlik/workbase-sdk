@@ -12,18 +12,37 @@ import { checkSources, type Sources } from './sources'
 
 /** Private to extraction: this plugin is never installed into the application. */
 function componentStubs(sources: Sources): Plugin {
-  const prefix = '\0workbase-ui-component:'
+  const prefix = '\0workbase-ui-component:', ui = resolve(sources.root, 'ui') + '/'
+  const sdkFile = fileURLToPath(new URL('./index.ts', import.meta.url))
+  const clean = (id: string) => id.replace(/^\/@fs\//, '/').split(/[?#]/)[0]
+  function requireChecked(id: string) {
+    const file = clean(id)
+    if (id !== file || !sources.modules.has(file)) throw new Error(`Module not in the checked UI graph: ${id}`)
+    return file
+  }
   return {
     name: 'workbase-ui-extraction-stubs', enforce: 'pre',
     async resolveId(id, importer) {
-      if (id.startsWith(prefix)) return id
+      if (id.startsWith(prefix)) { requireChecked(id.slice(prefix.length)); return id }
+      const fromUI = importer && sources.modules.has(clean(importer))
       const result = await this.resolve(id, importer, { skipSelf: true })
-      if (result && sources.components.has(result.id.split('?')[0])) return prefix + result.id
+      const file = result && clean(result.id)
+      // Only the exact SDK entry is a trusted edge out of the checked graph.
+      if (file && (file.startsWith(ui) || fromUI && result!.id !== sdkFile)) {
+        requireChecked(result!.id)
+        return sources.components.has(file) ? prefix + file : file
+      }
+      const requested = id.startsWith('.') && importer ? resolve(dirname(clean(importer)), clean(id)) : clean(id)
+      if (!result && (fromUI || requested.startsWith(ui))) throw new Error(`Module not in the checked UI graph: ${id}`)
     },
     async load(id) {
       // Evaluate the exact text whose complete graph passed checkSources.
-      if (!id.startsWith(prefix)) return sources.modules.get(id.split('?')[0])
-      const file = id.slice(prefix.length).split('?')[0]
+      if (!id.startsWith(prefix)) {
+        const file = clean(id)
+        if (file.startsWith(ui) || sources.modules.has(file)) return sources.modules.get(requireChecked(id))!
+        return
+      }
+      const file = requireChecked(id.slice(prefix.length))
       const transformed = await transformWithEsbuild(sources.modules.get(file)!, file, { loader: /[jt]sx$/.test(file) ? 'tsx' : 'ts' })
       await init
       const [, exports] = parse(transformed.code)

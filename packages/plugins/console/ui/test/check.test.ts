@@ -84,3 +84,55 @@ test('entity detail links bind the declared workerId', () => {
   const manifest = normalise(checkSources(root), { 'ui/index.ts': page({ title: 'sample.title' }), 'ui/workers/index.ts': entityListPage('worker', { title: 'worker.list' }), 'ui/workers/$workerId/index.ts': entityDetailPage('worker', { title: 'worker.detail', recordParam: 'workerId' }) }, schema, 'hash')
   expect(manifest.routes.find(r => r.mode === 'list')!.links.detail).toEqual({ to: '/workers/$workerId', bind: { workerId: 'record.id' } })
 })
+
+test.each([
+  "import.meta.glob('./-evil.ts', { eager: true })",
+  "import.meta.glob('./-evil.ts')['./-evil.ts']()",
+  "import.meta['glob']('./-evil.ts')",
+  "const { glob } = import.meta; glob('./-evil.ts')",
+  "import(`./${'evil'}`)",
+])('unmodelled import form rejected before evaluation: %s', expression => {
+  const { root, put } = setup()
+  put('ui/-evil.ts', 'throw new Error("UNCHECKED_EXECUTED")')
+  put('ui/index.ts', `${declaration}\n${expression}`)
+  expect(() => checkSources(root)).toThrow(/index.ts:3:\d+:/)
+})
+test('inline-type-only-verbatim is a runtime schema edge', () => {
+  const { root, put } = setup()
+  put('tsconfig.json', '{"compilerOptions":{"verbatimModuleSyntax":true}}')
+  put('schema/unchecked.ts', 'throw new Error("SCHEMA_EXECUTED"); export type x = string')
+  put('ui/index.ts', `import { type x } from '../schema/unchecked'\n${declaration}`)
+  expect(() => checkSources(root)).toThrow(/index.ts:1:.*Value import outside ui/)
+})
+test('import type expressions are conservatively runtime edges', () => {
+  const { root, put } = setup()
+  put('ui/index.ts', `type Worker = import('../schema/worker').default\n${declaration}`)
+  expect(() => checkSources(root)).toThrow(/index.ts:1:.*Value import outside ui/)
+})
+test('inline type specifiers include a local runtime target in the checked graph', () => {
+  const { root, put } = setup()
+  put('ui/-types.ts', 'export type x = string')
+  put('ui/index.ts', `import { type x } from './-types'\n${declaration}`)
+  expect(checkSources(root).modules.has(`${root}/ui/-types.ts`)).toBe(true)
+})
+test('case and trailing-slash route collisions name both source locations', () => {
+  const { root, put } = setup()
+  put('ui/Foo.ts', declaration); put('ui/foo/index.ts', declaration)
+  const sources = checkSources(root)
+  sources.entries.find(e => e.source === 'ui/Foo.ts')!.path += '/'
+  expect(() => normalise(sources, Object.fromEntries(sources.entries.map(e => [e.source, page({ title: 'sample.title' })])), schema, 'hash'))
+    .toThrow(/foo\/index.ts:2:16: Route collision:.*Foo.ts:2:16/)
+})
+test.each(['__proto__', 'constructor', 'prototype'])('forbidden own key %s is rejected throughout manifest input', key => {
+  const { root, put } = setup()
+  put('ui/nav.ts', `import { defineNav } from '${sdk}'; export default defineNav([])`)
+  put('ui/-slots.ts', `import { defineSlots } from '${sdk}'; export default defineSlots({})`)
+  const bad = JSON.parse(`{"${key}":{"kind":"string"}}`)
+  const base = page({ title: 'sample.title' }), values = { 'ui/index.ts': base, 'ui/nav.ts': [], 'ui/-slots.ts': {} }
+  for (const patch of [
+    { 'ui/index.ts': { ...base, ...bad } },
+    { 'ui/index.ts': { ...base, search: bad } },
+    { 'ui/nav.ts': [{ title: 'worker.nav', target: { entity: 'worker', mode: 'list', ...bad } }] },
+    { 'ui/-slots.ts': bad },
+  ]) expect(() => normalise(checkSources(root), { ...values, ...patch }, schema, 'hash')).toThrow(new RegExp(`Forbidden.*${key}`))
+})

@@ -4,6 +4,7 @@ import { createServer, build, type ViteDevServer } from 'vite'
 import { afterEach, expect, test, vi } from 'vitest'
 import { consoleUI, extractManifest } from '../src/vite'
 import { canonicalJSON, manifestHash, SourceError } from '../src/check'
+import * as sourceChecks from '../src/sources'
 import { buildPath } from '../src/index'
 import { fixture, declaration, sdk, forbidden } from './fixture'
 const roots: string[] = [], servers: ViteDevServer[] = []
@@ -11,8 +12,14 @@ afterEach(async () => { await Promise.all(servers.splice(0).map(s => s.close()))
 function setup() { const f = fixture(); roots.push(f.root); return f }
 async function start(root: string) {
   const plugin = consoleUI()
-  const server = await createServer({ root, configFile: false, plugins: [plugin], logLevel: 'silent', server: { middlewareMode: true, ws: false }, appType: 'custom' })
+  // Polling events are spaced beyond Chokidar's 50 ms change deduplication.
+  let ready!: Promise<void>
+  const server = await createServer({ root, configFile: false, plugins: [{ name: 'watcher-ready', configureServer(server) {
+    ready = (server.watcher as typeof server.watcher & { _readyEmitted?: boolean })._readyEmitted
+      ? Promise.resolve() : new Promise(resolve => server.watcher.once('ready', resolve))
+  } }, plugin], logLevel: 'silent', server: { middlewareMode: true, ws: false, watch: { usePolling: true, interval: 100, atomic: false } }, appType: 'custom' })
   servers.push(server)
+  await ready
   await plugin.idle()
   if (plugin.error) throw plugin.error
   return { plugin, server }
@@ -44,15 +51,19 @@ test.each(['id', 'workerId'])('declared $%s: manifest → TanStack tree → buil
 })
 test('real watcher: invalid → fix → add page → remove page → add schema; keeps last good tree', async () => {
   const { root, put } = setup(), { plugin, server } = await start(root)
-  const sends = vi.spyOn(server.ws, 'send')
-  if (!(server.watcher as any)._readyEmitted) await new Promise<void>(resolve => server.watcher.once('ready', resolve))
+  let rebuilt: (() => void) | undefined
+  const sends = vi.spyOn(server.ws, 'send').mockImplementation(message => {
+    const payload = message as unknown as { type?: string }
+    if (['error', 'full-reload'].includes(payload?.type ?? '')) rebuilt?.()
+  })
   async function edit(file: string, operation: () => void) {
     const path = join(root, file)
+    const rebuild = new Promise<void>(resolve => { rebuilt = resolve })
     const event = new Promise<void>(resolve => {
       const handler = (_event: string, changed: string) => { if (changed === path) { server.watcher.off('all', handler); resolve() } }
       server.watcher.on('all', handler)
     })
-    operation(); await event; await plugin.idle()
+    operation(); await event; await rebuild; await plugin.idle(); rebuilt = undefined
   }
   const original = snapshot(root)
   await server.transformRequest('/.workbase-ui/routeTree.gen.ts')
@@ -79,7 +90,7 @@ test('real watcher: invalid → fix → add page → remove page → add schema;
   expect(snapshot(root)).toEqual(fixed)
   expect(sends.mock.calls.length).toBeGreaterThan(calls)
   expect(sends.mock.calls.at(-1)?.[0]).toMatchObject({ type: 'full-reload' })
-}, 20000)
+}, 60000)
 test('app build retains real component marker, extraction stubs never leak', async () => {
   const { root, put } = setup()
   put('ui/-components/widget.tsx', `export default function Widget() { return 'REAL_COMPONENT_MARKER' }`)
@@ -141,4 +152,37 @@ test('unclassified symlinks are rejected before evaluation', async () => {
   expect(error).toBeInstanceOf(SourceError)
   expect(error.message).toMatch(/-bridge.ts:1:1: Unclassified UI symlink/)
   expect(error.message).not.toContain('EVALUATED')
+})
+
+test.each(['eager', 'lazy'])('glob-%s is rejected before unchecked code executes', async mode => {
+  const { root, put } = setup()
+  put('ui/-evil.ts', 'throw new Error("UNCHECKED_EXECUTED"); export const x = 1')
+  const glob = mode === 'eager' ? "import.meta.glob('./-evil.ts', { eager: true })" : "import.meta.glob('./-evil.ts')['./-evil.ts']()"
+  put('ui/index.ts', `${declaration}\nawait ${glob}`)
+  await expect(extractManifest(root)).rejects.toThrow(/index.ts:3:.*[Uu]nclassified/)
+})
+test('inline-type-only-verbatim rejects schema before evaluation', async () => {
+  const { root, put } = setup()
+  put('tsconfig.json', '{"compilerOptions":{"verbatimModuleSyntax":true}}')
+  put('schema/unchecked.ts', 'throw new Error("SCHEMA_EXECUTED"); export type x = string')
+  put('ui/index.ts', `import { type x } from '../schema/unchecked'\n${declaration}`)
+  await expect(extractManifest(root)).rejects.toThrow(/index.ts:1:.*Value import outside ui/)
+})
+test('prototype-extract rejects own __proto__ search key', async () => {
+  const { root, put } = setup()
+  put('ui/index.ts', declaration.replace("title: 'sample.title'", `title: 'sample.title', search: JSON.parse('{"__proto__":{"kind":"string"}}')`))
+  await expect(extractManifest(root)).rejects.toThrow(/index.ts:2:16: Forbidden.*__proto__/)
+})
+test.each(['entry', 'ui', 'outside', 'query'])('extraction denies unchecked %s module instead of falling through', async kind => {
+  const { root, put } = setup(), sources = sourceChecks.checkSources(root)
+  const modules = sources.modules as Map<string, string>, entry = join(root, 'ui/index.ts')
+  if (kind === 'entry') modules.delete(entry)
+  else {
+    const target = kind === 'outside' ? '../unchecked.ts' : './-unchecked.ts'
+    put(kind === 'outside' ? 'unchecked.ts' : 'ui/-unchecked.ts', 'throw new Error("UNCHECKED_EXECUTED"); export const x = 1')
+    modules.set(entry, `import { x } from '${target}${kind === 'query' ? '?raw' : ''}'; console.log(x); ${declaration}`)
+  }
+  const checked = vi.spyOn(sourceChecks, 'checkSources').mockReturnValueOnce(sources)
+  try { await expect(extractManifest(root)).rejects.toThrow(/not in the checked UI graph/) }
+  finally { checked.mockRestore() }
 })
