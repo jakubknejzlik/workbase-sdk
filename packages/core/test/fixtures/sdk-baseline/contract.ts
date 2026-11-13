@@ -3,7 +3,7 @@ import * as sdk from '../../../src/migrations/sdk-baseline'
 import { expectedPluginMigrations, pluginMigrationStatus } from '../../../src/kernel/migrations'
 import { CORE_VERSION, defineInstance } from '../../../src/config'
 import { hashMigrationRows, schemaStatus } from '../../../src/schema-compatibility'
-import { defineConfig, defineEntity, accountLink } from '../../../src/schema'
+import { defineConfig, defineEntity, accountLink, defineAccess, accessEntities, accessSystemActions } from '../../../src/schema'
 import { KernelRegistry } from '../../../src/kernel/registry'
 import { plan } from '../../../src/migrations/planner'
 import { initialSchema } from '../../../src/migrations/schema'
@@ -20,7 +20,14 @@ export function composition(extra: WorkbasePlugin[] = [], roles = ['admin', 'sta
   return new KernelRegistry(defineConfig({
     id: 'baseline', revision: 1, interactive: false, languages: ['en'],
     roles, organizationOwnerRole: 'admin', plugins: [identity, permissions({ roles, ownerRole: 'admin' }), members, ...extra],
-    entities: { worker: defineEntity({ fields: { name: { type: 'text', required: true }, user: accountLink() } }) },
+    entities: { worker: defineEntity({ fields: { name: { type: 'text', required: true }, user: accountLink() },
+      access: Object.fromEntries(roles.map(role => [role, 'deny'])),
+    }) },
+    access: defineAccess({
+      predicates: {},
+      roles: Object.fromEntries(roles.map(role => [role, { system: Object.fromEntries(accessSystemActions.map(action => [action, 'deny'])) }])),
+      entities: Object.fromEntries(accessEntities.map(entity => [entity, Object.fromEntries(roles.map(role => [role, 'deny']))])),
+    }),
   }))
 }
 export async function domainFiles(kernel = composition()) {
@@ -31,6 +38,32 @@ export async function domainFiles(kernel = composition()) {
 /** Same acceptance contract runs on native workerd D1 and the Node SQLite adapter. */
 export function baselineContract(database: () => BaselineDatabase) {
   afterEach(() => { vi.restoreAllMocks() })
+  for (const languages of [['en'], []]) {
+    const label = JSON.stringify(languages)
+    const legacy = () => new KernelRegistry(defineInstance({ id: 'legacy', revision: 1, languages, entities: {} }))
+    it(`legacy languages=${label} keeps main's exact SQL and workbase-core ledger`, async () => {
+      const kernel = legacy()
+      // Captured from main 1f88765 for both language lists (and absent languages).
+      expect(await sha256(initialSchema(kernel.config))).toBe('e9f01a0c333eeac9ae63a449fac1691bad86f1172403dcf797481ebc3f86e544')
+      expect((await expectedPluginMigrations(kernel.plugins, kernel.config)).map(row => row.namespace)).toEqual(['workbase-core'])
+    })
+    it(`legacy languages=${label} replays a fresh database successfully`, async () => {
+      const { db, query } = database(), kernel = legacy()
+      await expect(migrateInstance(query, await domainFiles(kernel), kernel)).resolves.toMatchObject({ applied: 1 })
+      expect(await db.prepare('SELECT revision FROM instance_meta').first('revision')).toBe(1)
+      expect((await db.prepare('SELECT DISTINCT namespace FROM _plugin_migrations').all()).results).toEqual([{ namespace: 'workbase-core' }])
+    })
+    it(`legacy languages=${label} accepts an existing legacy database`, async () => {
+      const { db, query } = database()
+      // Seed the unchanged main-era SQL and receipts without the language option.
+      const existing = new KernelRegistry(defineInstance({ id: 'legacy', revision: 1, entities: {} }))
+      const files = await domainFiles(existing)
+      await migrateInstance(query, files, existing)
+      const before = (await db.prepare('SELECT * FROM _plugin_migrations').all()).results
+      await expect(migrateInstance(query, files, legacy())).resolves.toMatchObject({ applied: 0 })
+      expect((await db.prepare('SELECT * FROM _plugin_migrations').all()).results).toEqual(before)
+    })
+  }
   it('fresh SDK -> plugins -> domain, then verification, yields usable identity and worker', async () => {
     const { db, query, calls } = database()
     const kernel = composition([{ name: 'verify-domain', version: '1.0.0', async checkSchema(db) {

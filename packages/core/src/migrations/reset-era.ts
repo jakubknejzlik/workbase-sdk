@@ -1,11 +1,12 @@
 import type { InstanceConfig } from '../config'
+import { schemaConfigs } from '../schema/declaration'
 import { MigrationDiagnostic } from './diagnostics'
 import { SDK_BASELINE, SDK_NAMESPACE } from './sdk-baseline'
 
-export type MigrationConfig = Pick<InstanceConfig, 'entities'> & Partial<Pick<InstanceConfig, 'languages'>>
-/** languages is retained by kernel normalization, unlike the loader's WeakSet brand. */
-export function usesSdkBaseline(config?: Partial<Pick<InstanceConfig, 'languages'>>) {
-  return config?.languages !== undefined
+export type MigrationConfig = Pick<InstanceConfig, 'entities'>
+/** Reuse the slice-1 declaration identity; legacy options never select an era. */
+export function usesSdkBaseline(config?: object) {
+  return config !== undefined && schemaConfigs.has(config)
 }
 
 /** Read-only preflight, also used by direct kernel migration callers.

@@ -64,6 +64,8 @@ export class KernelRegistry {
     const normalize = config.effectiveAccess ? (input: Parameters<typeof normalizeInstance>[0]) => normalizeInstance(input, true) : defineInstance
     this.config = normalize({ ...config, plugins: this.plugins, entities, commands: commandNames,
       ...(config.pluginConfig || Object.keys(pluginConfig).length ? { pluginConfig } : {}) })
+    // Preserve slice-1 declaration identity across the kernel's normalized copy.
+    if (schemaConfigs.has(config)) schemaConfigs.add(this.config)
     if (config.effectiveAccess) { this.config.effectiveAccess = config.effectiveAccess; validatePolicies(this.config) }
     this.providers.get('console')?.[0]?.validateConsole?.(this.config)
     for (const command of userLinkCommands(this.config)) {

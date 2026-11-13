@@ -28,7 +28,7 @@ export async function schemaStatus(env: SchemaEnvironment & { DB: D1Database; AU
       if (!config?.plugins || !/^[a-f0-9]{64}$/.test(expected.pluginMigrations ?? '')) throw new Error('missing_plugin_revision')
       const plugins = resolvePlugins(config.plugins, config.interactive).plugins
       if (!config.entities) throw new Error('missing_instance_schema')
-      const pluginStatus = await pluginMigrationStatus(env.DB, plugins, { entities: config.entities, languages: config.languages })
+      const pluginStatus = await pluginMigrationStatus(env.DB, plugins, config as typeof config & Pick<InstanceConfig, 'entities'>)
       for (const plugin of plugins) await plugin.checkEnvironment?.(env)
       applied.pluginMigrations = pluginStatus.applied
       pluginsCompatible = expected.pluginMigrations === pluginStatus.expected && pluginStatus.applied === pluginStatus.expected

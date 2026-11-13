@@ -109,7 +109,7 @@ SQL-chain hash, expected schema, package sources and config source fingerprint t
 migration command; use `migrationTriggers` when imported application verifier code
 changes independently. The migration command is unprotected so trigger changes can
 replace it, while production D1 and other primary resources remain protected.
-New `defineConfig` Instances (the normalized `languages` contract) apply
+New `defineConfig` Instances (identified by their declaration marker, never by `languages`) apply
 `workbase-sdk` first, installed plugin namespaces next, then `migrations/`.
 The SDK and plugins share `_plugin_migrations`, including append-only names,
 positions, SQL checksums and retained uninstall receipts. Each file's SQL and

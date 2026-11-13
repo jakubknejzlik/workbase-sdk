@@ -5,6 +5,7 @@ import { opsSchema } from '../ops-schema'
 import { betterAuthSchema } from './better-auth-schema'
 import { emailDeliverySchema } from './email-delivery-schema'
 import { CORE_VERSION, type Field, type InstanceConfig } from '../config'
+import { usesSdkBaseline } from './reset-era'
 export function quote(name: string) {
   if (!/^[a-z][a-z0-9_]*$/.test(name)) throw new Error(`Invalid SQL identifier: ${name}`)
   return `"${name}"`
@@ -39,7 +40,7 @@ export const coreVersionSQL = (revision: number) => `UPDATE instance_meta SET co
 /** New-era Instance SQL owns domain tables and the domain revision only.
  * Preserve the inline defineInstance baseline until its consumers are retired. */
 export function initialSchema(config: InstanceConfig) {
-  const legacy = config.languages === undefined
+  const legacy = !usesSdkBaseline(config)
     ? configuredSystemSchema(config) + opsSchema + (config.account?.entity === 'users' ? betterAuthSchema.replace('user_id TEXT NOT NULL REFERENCES users(id)', 'user_id TEXT NOT NULL REFERENCES "user"(id)') : betterAuthSchema) + emailDeliverySchema + workflowSchema
     : ''
   return legacy + Object.entries(config.entities).filter(([n]) => !(n === 'users' && config.account?.entity === n)).map(([n, e]) => createEntity(n, e)).join('\n') + '\n' + revisionSQL(config.revision) + '\n'

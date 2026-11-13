@@ -2,6 +2,7 @@ import { coreEnums, type CoreRole } from './query/enum-values'
 import { z } from 'zod'
 import { calendarViewsSchema, validateCalendarViews } from './calendar-display'
 import { Q, Fn as LibraryFn, Cond, type ISequelizable, type ISerializable } from '@jakub.knejzlik/ts-query'
+import { schemaConfigs } from './schema/declaration'
 import { DISPLAY_VALUE, isExpression, validateComputedExpressions, expressionError } from './query/expressions'
 import { validateLabelExpressions } from './query/labels'
 import type { WorkbasePlugin } from './kernel/plugin'
@@ -314,6 +315,8 @@ export function normalizeInstance(input: InstanceDefinitionInput, exactRoles = f
     if (isDisplayFieldError(error)) error.config = config
     throw error
   }
+  // Retain declaration identity when migration tooling re-normalizes a config.
+  if (schemaConfigs.has(input)) schemaConfigs.add(config)
   return config
 }
 /** Diagnostics and migration baselines only; runtime and migration targets use defineInstance. */

@@ -4,7 +4,7 @@ import { reset } from 'cloudflare:test'
 import { beforeEach, expect, it } from 'vitest'
 import { defineConfig, defineEntity, accountLink, defineAccess } from '../src/schema'
 import { accessEntities, accessSystemActions, type EntityAccess } from '../src/access'
-import { initialSchema } from '../src/migrations/schema'
+import { bootstrap } from '@workbasehq/test-support/bootstrap'
 import { createApp } from '../src/app'
 import { KernelRegistry } from '../src/kernel/registry'
 import { resolveActor, requireScope } from '../src/authorization'
@@ -34,8 +34,7 @@ function config(matrix: EntityAccess = { admin: all, staff: { read: self, create
 const runtime = () => ({ DB: env.DB, AUDIT_KV: env.AUDIT_KV, INTERNAL_TOKEN: 'synthetic-access-internal', IDENTITY: { baseURL: 'http://localhost', secret: 'synthetic-access-secret-at-least-32', localPassword: true } })
 async function setup(selected = config()) {
   await reset()
-  await env.DB.exec(initialSchema(selected).replaceAll('\n', ' '))
-  await new KernelRegistry(selected).applyMigrations(env.DB)
+  await bootstrap(env.DB, selected)
   await env.DB.exec("INSERT INTO organizations VALUES ('org-a','A'),('org-b','B');")
   for (const [id, role, org] of [['admin', 'admin', 'org-a'], ['staff', 'staff', 'org-a'], ['other', 'staff', 'org-a'], ['foreign', 'staff', 'org-b']]) {
     await env.DB.prepare('INSERT INTO users (id,email,password_hash,salt,organization_id,name,role,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)').bind(id, `${id}@example.test`, 'x', 'x', org, id, role, 'now', 'now').run()
