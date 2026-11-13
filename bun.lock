@@ -113,16 +113,29 @@
       "name": "@workbasehq/plugins",
       "version": "0.2.15",
       "dependencies": {
-        "zod": "4.6.7",
-        "better-auth": "1.7.1"
+        "better-auth": "1.7.1",
+        "zod": "4.6.7"
       },
       "devDependencies": {
+        "@tanstack/router-generator": "1.146.2",
+        "@workbasehq/core": "workspace:*",
         "@workbasehq/test-support": "workspace:*",
-        "@workbasehq/core": "workspace:*"
+        "es-module-lexer": "2.3.2",
+        "vite": "7.3.1"
       },
       "peerDependencies": {
-        "@workbasehq/core": "0.2.15"
-      }
+        "@tanstack/router-generator": "^1.146.2",
+        "@workbasehq/core": "0.2.15",
+        "es-module-lexer": "^2.3.2",
+        "typescript": ">=5.7.2 <7",
+        "vite": "^7.3.1"
+      },
+      "optionalPeers": [
+        "@tanstack/router-generator",
+        "es-module-lexer",
+        "typescript",
+        "vite"
+      ]
     },
     "packages/test-support": {
       "name": "@workbasehq/test-support",

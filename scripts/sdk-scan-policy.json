@@ -629,13 +629,13 @@
     {
       "pathDigest": "31aa36cf687fe2d5a590cddf304be798fb4a42fdd3a9f367c277b75fc47bf853",
       "lineDigest": "86bf7c56d5374a156088ad84ea3e1823a1a0276f3582c476e922cc3e02dc6d45",
-      "lineNumber": 1818,
+      "lineNumber": 1831,
       "reason": "Required public npm dependency/import; exact package identity, not an owner deployment."
     },
     {
       "pathDigest": "31aa36cf687fe2d5a590cddf304be798fb4a42fdd3a9f367c277b75fc47bf853",
       "lineDigest": "b9540f355daf10044f1b61506226f04a5228478133772ae53fe0b761c99d1bde",
-      "lineNumber": 1819,
+      "lineNumber": 1832,
       "reason": "Required public npm dependency/import; exact package identity, not an owner deployment."
     },
     {

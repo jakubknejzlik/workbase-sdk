@@ -75,9 +75,9 @@ function imports(file: ts.SourceFile, statements: readonly ts.Statement[] = file
   return bindings
 }
 /** Bare SDK imports are syntax; local SDK imports must identify the canonical file. */
-function sdkBinding(binding: Binding | undefined, file: string, name: string) {
+export function sdkBinding(binding: Binding | undefined, file: string, name: string, sdkModule = '@workbasehq/core/schema', sdkFile = fileURLToPath(new URL('../schema.ts', import.meta.url))) {
   if (binding?.imported !== name) return false
-  if (binding.module === '@workbasehq/core/schema') return true
+  if (binding.module === sdkModule) return true
   if (!binding.module.startsWith('./') && !binding.module.startsWith('../') && !isAbsolute(binding.module)) return false
   const path = resolve(dirname(file), binding.module)
   const candidates = extname(path) ? [path] : [path, `${path}.ts`]
@@ -93,7 +93,7 @@ function sdkBinding(binding: Binding | undefined, file: string, name: string) {
     }
     if (files.length > 1) fail(binding.node, `Ambiguous SDK import: ${binding.module}`)
     if (!files.length) fail(binding.node, `Cannot resolve SDK import: ${binding.module}`)
-    return files[0] === realpathSync(fileURLToPath(new URL('../schema.ts', import.meta.url)))
+    return files[0] === realpathSync(sdkFile)
   } catch (error) {
     if (error instanceof SourceError) throw error
     return fail(binding.node, `Cannot resolve SDK import: ${binding.module}`)

@@ -199,3 +199,24 @@ it('scans generated MCP template content and paths with ordinary regexes', () =>
   }
   expect(() => assertGeneratedMcpContent(path, '{{SDK_VERSION}}', instanceNames)).toThrow('Unresolved placeholder')
 })
+
+it('requires UI build dependencies to be declared as optional peers', () => {
+  scratch = registerTempDir(mkdtempSync(join(tmpdir(), 'sdk-ui-peers-')))
+  vi.spyOn(console, 'log').mockImplementation(() => {})
+  const errors = vi.spyOn(console, 'error').mockImplementation(() => {})
+  mkdirSync(join(scratch, 'packages/core/src'), { recursive: true })
+  mkdirSync(join(scratch, 'packages/plugins'), { recursive: true })
+  writeFileSync(join(scratch, 'package.json'), JSON.stringify({ workspaces: ['packages/core', 'packages/plugins'] }))
+  const path = join(scratch, 'packages/plugins/package.json')
+  const peers = ['vite', '@tanstack/router-generator', 'es-module-lexer']
+  const manifest = { name: '@workbasehq/plugins', exports: { './console/ui/vite': './console/ui/src/vite.ts' }, peerDependencies: Object.fromEntries(peers.map(name => [name, '*'])), peerDependenciesMeta: Object.fromEntries(peers.map(name => [name, { optional: true }])) }
+  writeFileSync(path, JSON.stringify(manifest))
+  expect(checkBoundary(scratch, true, instanceNames)).toBe(0)
+  for (const name of peers) {
+    const changed = structuredClone(manifest)
+    delete changed.peerDependencies[name]
+    writeFileSync(path, JSON.stringify(changed))
+    expect(checkBoundary(scratch, true, instanceNames)).toBe(1)
+    expect(errors.mock.calls.flat().join('\n')).toContain(`UI build dependency must be an optional peer: packages/plugins/package.json: ${name}`)
+  }
+})

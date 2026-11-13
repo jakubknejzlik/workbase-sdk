@@ -24,21 +24,33 @@
     "./console/assets": {
       "types": "./console/src/assets.d.mts",
       "default": "./console/src/assets.mjs"
-    }
+    },
+    "./console/ui": "./console/ui/src/index.ts",
+    "./console/ui/check": "./console/ui/src/check.ts",
+    "./console/ui/vite": "./console/ui/src/vite.ts"
   },
   "dependencies": {
     "zod": "4.6.7",
     "better-auth": "1.7.1"
   },
   "peerDependencies": {
-    "@workbasehq/core": "0.2.15"
+    "@workbasehq/core": "0.2.15",
+    "typescript": ">=5.7.2 <7",
+    "vite": "^7.3.1",
+    "@tanstack/router-generator": "^1.146.2",
+    "es-module-lexer": "^2.3.2"
   },
   "devDependencies": {
     "@workbasehq/test-support": "workspace:*",
-    "@workbasehq/core": "workspace:*"
+    "@workbasehq/core": "workspace:*",
+    "vite": "7.3.1",
+    "@tanstack/router-generator": "1.146.2",
+    "es-module-lexer": "2.3.2"
   },
   "files": [
     "*/src/**",
+    "console/ui/src/**",
+    "console/ui/README.md",
     "console/assets",
     "LICENSE",
     "NOTICE"
@@ -55,5 +67,19 @@
   },
   "scripts": {
     "prepack": "bun ../../scripts/stage-console-assets.ts"
+  },
+  "peerDependenciesMeta": {
+    "typescript": {
+      "optional": true
+    },
+    "vite": {
+      "optional": true
+    },
+    "@tanstack/router-generator": {
+      "optional": true
+    },
+    "es-module-lexer": {
+      "optional": true
+    }
   }
 }
