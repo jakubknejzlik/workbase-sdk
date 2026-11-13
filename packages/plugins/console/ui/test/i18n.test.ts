@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { createRequire } from 'node:module'
-import { createElement as h, type ReactNode } from 'react'
+import { act, createElement as h, memo, type ReactNode } from 'react'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, expect, test, vi } from 'vitest'
 import { createI18n, initI18n, resolveLanguage, sdkCatalogs, t } from '../src/i18n'
@@ -36,6 +36,16 @@ test('authored custom pages stay bound to their consuming Instance across SSR re
   expect(a.t('page.title')).toBe('INSTANCE A')
   expect(b.t('page.title')).toBe('INSTANCE B')
   expect(() => renderToStaticMarkup(h(Authored))).toThrow('ConsoleProvider is required for authored t')
+})
+test('memoized authored copy follows a language switch', async () => {
+  const i18n = initI18n({ languages: ['en', 'cs'], catalogs: { en: { ui: { 'page.title': 'English' } }, cs: { ui: { 'page.title': 'Česky' } } } })
+  const Copy = memo(function Copy() { return h('p', null, t('page.title')) })
+  const definition = customPage({ title: 'page.title', uses: [], component: () => h(Copy) })
+  render(h(ConsoleProvider, { identity: { actorId: 'a', orgId: 'o' }, t: i18n.t, i18n }, h(LanguageSwitcher, { i18n }), h(PageView, { definition, route: { ...definition, source: 'ui/index.ts', path: '/', links: {} }, entities: {}, params: {}, search: {}, navigate: () => {} })))
+  expect(screen.getByText('English', { selector: 'p' })).toBeTruthy()
+  await act(async () => { fireEvent.change(screen.getByRole('combobox'), { target: { value: 'cs' } }) })
+  expect(screen.getByRole('heading', { name: 'Česky' })).toBeTruthy()
+  expect(screen.getByText('Česky', { selector: 'p' })).toBeTruthy()
 })
 test('flat namespaces, Intl plurals and interpolation use i18next', async () => {
   const ui = { greeting: 'Ahoj {{name}}', item_one: '{{count}} kus', item_few: '{{count}} kusy', item_many: '{{count}} kusu', item_other: '{{count}} kusů' }

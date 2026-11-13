@@ -17,12 +17,14 @@ const Context = createContext<Runtime | null>(null)
 export type ProviderProps = { identity: Runtime['identity']; t: Runtime['t']; baseURL?: string; fetch?: (url: string, init: ClientRequestInit) => Promise<Response>; slots?: Record<string, Slot>; i18n?: I18n; children?: ReactNode }
 /** Scope replacement remounts observers and drafts, and discards both caches. */
 export function ConsoleProvider({ identity, t, baseURL = '', fetch: transport = globalThis.fetch, slots = {}, i18n, children }: ProviderProps) {
-  useSyncExternalStore(i18n?.subscribe ?? (() => () => {}), i18n?.language ?? (() => ''), i18n?.language ?? (() => ''))
+  const language = useSyncExternalStore(i18n?.subscribe ?? (() => () => {}), i18n?.language ?? (() => ''), i18n?.language ?? (() => ''))
+  // A fresh translator identity per language makes memoized authored consumers re-render on language change.
+  const translate = useMemo<Translate>(() => t.bind(null), [t, language])
   const client = useMemo(() => createClient({ baseURL, ...identity, fetch: transport }), [baseURL, identity.actorId, identity.orgId, transport])
   const queries = useMemo(() => new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity, refetchOnWindowFocus: false } } }), [client])
   useEffect(() => client.subscribe(() => { void queries.invalidateQueries() }), [client, queries])
   useEffect(() => () => queries.clear(), [queries])
-  return h(Context.Provider, { value: { client, identity, t, slots }, key: canonicalJSON([baseURL, identity]) }, h(TranslationContext.Provider, { value: t }, h(QueryClientProvider, { client: queries }, children)))
+  return h(Context.Provider, { value: { client, identity, t, slots }, key: canonicalJSON([baseURL, identity]) }, h(TranslationContext.Provider, { value: translate }, h(QueryClientProvider, { client: queries }, children)))
 }
 function useRuntime() { const runtime = useContext(Context); if (!runtime) throw new Error('ConsoleProvider is required'); return runtime }
 export function useRecord(entity: string, id: string) {
