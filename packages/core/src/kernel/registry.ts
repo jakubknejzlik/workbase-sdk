@@ -1,5 +1,6 @@
+import { accessGuards } from '../access-guards'
 import { isBuiltinPlugin } from './builtin-source'
-import { baseFields, defineInstance, type InstanceConfig, type InstanceInput, type Operation } from '../config'
+import { baseFields, defineInstance, normalizeInstance, type InstanceConfig, type InstanceInput, type Operation } from '../config'
 import { createCommandRegistry, type CommandRegistry } from '../commands'
 import { createWorkflowRegistry, type WorkflowRegistry } from '../workflow-runtime'
 import { authorizeOperation } from '../authorization'
@@ -11,9 +12,13 @@ import type { AtomicOperation } from '../execution/types'
 import type { KernelCommand, ResourceAction, PluginMigration, Predicate, TableFilter, WorkbasePlugin } from './plugin'
 import { renderPredicate } from './predicate'
 export { renderPredicate } from './predicate'
+import { schemaConfigs, DeclarationError } from '../schema/declaration'
 import { resolvePlugins } from './composition'
 import { applyPluginMigrations } from './migrations'
 import { timed } from '../request-timing'
+import { policyFilter, validatePolicies } from '../policies'
+import { effectiveEntityGrants, effectiveSystemGrant } from '../access-evaluator'
+import { rbacRoles } from '../policies'
 import { userLinkCommands, userLinkActionPermission } from '../user-links'
 
 const registries = new WeakMap<InstanceConfig, KernelRegistry>()
@@ -29,7 +34,8 @@ export class KernelRegistry {
   readonly permissionsActive: boolean
   private readonly trust: boolean
   private readonly hasAuthorization: boolean
-  constructor(config: InstanceInput, options: RuntimeOptions = {}, env?: RuntimeEnv) {
+  constructor(config: InstanceInput & Pick<InstanceConfig, 'effectiveAccess'>, options: RuntimeOptions = {}, env?: RuntimeEnv) {
+    if (schemaConfigs.has(config) && !config.effectiveAccess) throw new DeclarationError(['access'], 'Executable schema configurations require explicit entity access and shared access.ts')
     const resolved = resolvePlugins(options.plugins ?? config.plugins ?? [], config.interactive)
     this.plugins = resolved.plugins
     this.providers = resolved.providers
@@ -56,8 +62,10 @@ export class KernelRegistry {
     const pluginConfig = { ...config.pluginConfig }
     for (const plugin of this.plugins) if (plugin.configSchema) pluginConfig[plugin.name] = plugin.configSchema.parse(pluginConfig[plugin.name])
     for (const name of Object.keys(pluginConfig)) if (!names.has(name)) throw new Error(`Unknown plugin config: ${name}`)
-    this.config = defineInstance({ ...config, plugins: this.plugins, entities, commands: commandNames,
+    const normalize = config.effectiveAccess ? (input: Parameters<typeof normalizeInstance>[0]) => normalizeInstance(input, true) : defineInstance
+    this.config = normalize({ ...config, plugins: this.plugins, entities, commands: commandNames,
       ...(config.pluginConfig || Object.keys(pluginConfig).length ? { pluginConfig } : {}) })
+    if (config.effectiveAccess) { this.config.effectiveAccess = config.effectiveAccess; validatePolicies(this.config) }
     this.providers.get('console')?.[0]?.validateConsole?.(this.config)
     for (const command of userLinkCommands(this.config)) {
       commands.push(command)
@@ -65,6 +73,7 @@ export class KernelRegistry {
     }
     this.commands = createCommandRegistry(commands)
     this.workflows = createWorkflowRegistry(workflows)
+    if (this.config.effectiveAccess) this.config.effectiveAccess = accessGuards(this.config.effectiveAccess, this.config.commands, [...this.commands.values()], this.plugins)
     // migrations: append hooks to the supplied chain. Applying D1 migrations remains an operator action.
     this.migrations = Object.freeze([...(options.migrations ?? []), ...this.plugins.flatMap(plugin => (plugin.migrations ?? []).map(migration => ({ ...migration, name: `${plugin.name}/${migration.name}` })))])
     if (new Set(this.migrations.map(migration => migration.name)).size !== this.migrations.length) throw new Error('Duplicate plugin migration')
@@ -143,9 +152,9 @@ export class KernelRegistry {
       return actor
     })
   }
-  tableFilter(entity: string, scope: Scope): TableFilter {
+  tableFilter(entity: string, scope: Scope, operation: Operation = 'read'): TableFilter {
     if (!this.trust && !this.hasAuthorization) return { kind: 'none' }
-    const filters = this.plugins.flatMap(plugin => plugin.tableFilter ? [plugin.tableFilter.call(this, entity, scope)] : [])
+    const filters = this.plugins.flatMap(plugin => plugin.tableFilter ? [this.config.effectiveAccess && isBuiltinPlugin(plugin) && plugin.authorization && plugin.policyInConfig ? policyFilter(this.config, entity, scope, operation) : plugin.tableFilter.call(this, entity, scope)] : [])
     if (!filters.length) return { kind: this.trust ? 'all' : 'none' }
     // A denying provider may erase row selection, but never request authority
     // needed by an enclosing policy that negates this source's existence.
@@ -169,7 +178,21 @@ export class KernelRegistry {
     if (!internal && !this.trust && !this.hasAuthorization) throw new ApiError(403, 'permission_denied')
     // Credential restrictions and entity-scope provenance survive provider removal and trust.
     if (scope.actor.type === 'agent' || command.kind === 'entity') authorizeOperation(scope, operationName(command))
+    if (this.config.effectiveAccess && !internal) {
+      const policy = this.config.effectiveAccess
+      const roles = rbacRoles(scope)
+      const primary = command.permission
+      if (command.kind === 'command') {
+        const guard = policy.guards.find(guard => guard.name === command.name)
+        if (!guard?.permission && !('system' in primary)) throw new ApiError(405, 'unsupported_command')
+        const requirements = guard?.permission ? [guard.permission, ...guard.additionalPermissions] : []
+        for (const grant of requirements) if ('system' in grant ? !effectiveSystemGrant(policy, roles, grant.system) : !effectiveEntityGrants(policy, roles, grant.entity, grant.operation).length) throw new ApiError(403, 'permission_denied')
+      }
+      if ('system' in primary ? !effectiveSystemGrant(policy, roles, primary.system) : !effectiveEntityGrants(policy, roles, primary.entity, primary.operation).length) throw new ApiError(403, 'permission_denied')
+      for (const grant of command.additionalPermissions ?? []) if (!effectiveEntityGrants(policy, roles, grant.entity, grant.operation).length) throw new ApiError(403, 'permission_denied')
+    }
     for (const plugin of this.plugins) {
+      if (this.config.effectiveAccess && isBuiltinPlugin(plugin) && plugin.authorization && plugin.policyInConfig) continue
       const result = plugin.commandGuard?.call(this, command, scope, input)
       if (result && !result.allow) throw new ApiError(403, result.code)
     }

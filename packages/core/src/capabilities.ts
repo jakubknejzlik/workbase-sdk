@@ -32,7 +32,7 @@ export function capabilities(kernel: KernelRegistry, scope: Scope) {
       permits(() => { kernel.resourcePermission(scope, action); organizationPermission(kernel.config, scope, action) }),
     ])),
     'workflows.read': permits(() => kernel.resourcePermission(scope, 'workflows.read')),
-    'audit.read': !!kernel.audit && hasOwnerRole(scope) && permits(() => kernel.resourcePermission(scope, 'audit.read')),
+    'audit.read': !!kernel.audit && hasOwnerRole(scope, kernel.config) && permits(() => kernel.resourcePermission(scope, 'audit.read')),
   }
   return { revision: kernel.config.revision, entities, commands, workflows, resources, organization: { role: scope.role } }
 }

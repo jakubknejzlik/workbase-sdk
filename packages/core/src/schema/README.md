@@ -51,7 +51,8 @@ The new entry requires an explicit, nonempty list of unique roles and an owner
 role from that list. SDK permission-provider configuration must agree with those
 values. It adds no implicit `owner` or `member`, and supplies no implicit
 organization grants. Existing permissions/policies may be supplied in their core
-form; the entity access compiler is a separate change.
+form for schema-only tooling. Executing a canonical configuration requires
+the explicit access declaration described below.
 
 `languages` is a nonempty ordered list of unique language tags; its first item is
 the Instance default. The loader validates and retains that order. This entry
@@ -103,5 +104,86 @@ Runtime declarations validate values on their own; source syntax checking requir
 
 The existing `defineInstance` entry retains inline/shorthand declarations and its
 legacy role/default-grant normalization. Import those modules through the legacy
-entry; `loadConfig` accepts only canonical `defineConfig` modules. No access compiler, lock/planner, migration changes or UI are introduced
-by the declaration entry.
+entry; `loadConfig` accepts only canonical `defineConfig` modules. Access locks and check:access are the following slice; no lock/planner, migration
+changes or UI are introduced here.
+
+## Authored access (option C)
+
+Declare domain access inside `defineEntity`, next to its fields and relations.
+This keeps schema and policy edits together and reuses the same literal validator
+and source map. Import a direct `defineAccess({...})` export from `./access.ts`
+as the config's `access` property. This shared declaration has three required maps:
+
+- `roles`: every configured role, each with `system`, an explicit action-to-decision
+  map. `accessSystemActions` exported from `@workbasehq/core/schema` lists its keys.
+- `entities`: every SDK/system entity in the exported `accessEntities` list,
+  including `users`. Each value is a complete role matrix, as for domain access.
+- `predicates`: named literal query filters, referenced using `{ use: 'name' }`.
+
+The exports enumerate required keys for authoring/check tools. Source declarations
+must spell out their entries: generated maps, spreads and helper calls are outside
+the literal boundary. `access.ts` uses the same unambiguous direct-file resolution
+as entity modules, including rejecting competing extensions and extra code.
+
+An entity's access entry for each role is either `deny`, `none`, or an object
+with all four operations: `read`, `create`, `update`, `delete`. List uses `read`.
+Every operation is `allow`, `none`, `deny`, or `{ where: <filter> }`. Read also
+accepts `fields`, an explicit projection mask (id is retained for nonempty masks).
+An omitted mask grants nonsensitive schema fields; sensitive fields require an
+explicit mask. No role name grants sensitive fields automatically. SDK entities
+without a schema projection accept decisions only, enforced at resource ports;
+row predicates and masks require a schema projection such as `users`.
+
+```ts
+// Inside schema/worker.ts's defineEntity literal:
+access: {
+  admin: { read: 'allow', create: 'allow', update: 'allow', delete: 'allow' },
+  staff: {
+    read: { where: { use: 'linked_worker' }, fields: ['id', 'name'] },
+    create: 'deny', update: 'deny', delete: 'deny',
+  },
+}
+// Inside access.ts's predicates map:
+linked_worker: { user: { eq: '$actor.id' } }
+```
+
+These synthetic roles illustrate the mechanism; they do not select a product
+policy. Missing role/entity/operation/action entries are errors. `none` contributes
+no grant; held roles contribute a union of grants and field masks, with any
+explicit `deny` winning for that operation. Unknown roles fail closed. Credential
+operation allowlists are independently enforced. Writes never grant read access,
+and create/update/delete predicates are checked independently of the read filter.
+Existing organization scoping and protected account-link writes still apply.
+
+System actions require both an authored action grant and the corresponding entity
+operation grant: for example `members.read` also requires `memberships.read`, and
+`invitations.revoke` requires `invitations.delete`. `tokens` maps to `access_tokens`,
+`audit` to `audit_events`, and `workflows` to `workflow_runs`. Default privileges
+and built-in role names cannot bypass either denial. Compatibility permission
+maps and SQL issuer guards are derived from these same decisions. Authored access
+cannot be mixed with legacy `permissions`, `policies` or `organizationPermissions`.
+
+Named predicates expand at build time with a maximum depth of 16 and 512 visited
+values per expansion. Unused predicates are also checked. Named cycles and
+operation-specific relation-policy cycles fail with their cycle path. Invalid
+filters, references, masks and expansion budgets map back to file:line diagnostics.
+
+`config.effectiveAccess` is the exported `EffectiveAccessPolicy`, available from
+`@workbasehq/core/schema`. It contains canonically ordered entity/role/operation
+rules with expanded filters, masks, named references, relation dependencies,
+explicit decisions and system actions with their required entity/operation targets.
+Masks are null for mutations and SDK resources without a schema projection. Its `source` fields are stable source-map
+keys; the loader's `sources` supplies exact locations without making policy equality
+depend on declaration order or machine paths. Execution consumes this representation;
+slice 2b will serialize it to access locks. There is no second audit policy compiler.
+The same type includes registered command permissions/additional permissions, opaque
+command markers, and opaque plugin-hook names. The kernel resolves code-registered
+commands during composition; serialize `kernel.config.effectiveAccess` for the
+complete registry. Unresolved command names have null permissions and cannot run.
+Executable prepare/plan and custom plugin checks remain enforced and marked opaque.
+
+`loadConfig` also returns `configHash`, a SHA-256 of the config, imported entity
+and shared access source paths/bytes. Policy-only edits change this hash without
+altering `config.revision` or physical schema SQL. The lock-based schema revision
+planner remains a later slice. Slice-1 declarations without access remain readable
+by schema tools; the kernel refuses to execute them with legacy defaults.

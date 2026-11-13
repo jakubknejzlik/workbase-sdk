@@ -19,7 +19,7 @@ const valueBudget = 600
 export function auditRoutes(app: App, config: InstanceConfig, env: RuntimeEnv) {
   app.get('/audit/events', scopeMiddleware(env, config, kernelFor(config)), async c => {
     const scope = c.get('scope')
-    if (!hasOwnerRole(scope)) throw new ApiError(403, 'owner_required')
+    if (!hasOwnerRole(scope, config)) throw new ApiError(403, 'owner_required')
     kernelFor(config).resourcePermission(scope, 'audit.read')
     let entity = c.req.query('entity')
     if (entity && !config.entities[entity] && config.entities[`${entity}s`]) entity += 's'

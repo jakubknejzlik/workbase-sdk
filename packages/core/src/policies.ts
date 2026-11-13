@@ -1,3 +1,4 @@
+import { effectiveEntityGrants, effectiveSystemGrant } from './access-evaluator'
 import { constantQuantifier } from './config-shorthand'
 import { z } from 'zod'
 import { baseFields, type Field, type InstanceConfig } from './config'
@@ -44,7 +45,8 @@ export function validatePolicies(config: InstanceConfig) {
       } else if (config.entities[entity].fields[field]?.computed) throw new Error(`Row policy cannot depend on computed field: ${entity}.${field}. Fix: use stored fields to establish row access before computing values.`)
     }
   }
-  for (const [entity, roles] of Object.entries(config.policies)) {
+  const policies = config.effectiveAccess ? config.effectiveAccess.entities.filter(rule => config.entities[rule.entity] && rule.decision === 'allow').map(rule => [rule.entity, { [rule.role]: { where: rule.where, fields: rule.fields ?? undefined } }] as const) : Object.entries(config.policies)
+  for (const [entity, roles] of policies) {
     if (!Object.hasOwn(config.entities, entity)) throw new Error(`Unknown policy entity: ${entity}`)
     for (const [role, policy] of Object.entries(roles)) {
       if (!config.roles.includes(role)) throw new Error(`Unknown policy role: ${role}`)
@@ -53,7 +55,7 @@ export function validatePolicies(config: InstanceConfig) {
       storedPolicyFields(entity, policy.where)
       // Validate references separately: a string operand must not accept an unknown actor name as a literal.
       filterSchema(config, false, 4, actorValue)(entity, 0).parse(policy.where)
-      if (policy.fields?.some(field => !fieldsFor(config, entity).includes(field))) throw new Error(`Unknown policy field: ${entity}`)
+      if (policy.fields?.some((field: string) => !fieldsFor(config, entity).includes(field))) throw new Error(`Unknown policy field: ${entity}`)
     }
   }
   protectedByConfig.set(config, protectedFields)
@@ -115,11 +117,11 @@ function policyGraphUsesActorLinks(config: InstanceConfig, entity: string, roles
   }
   return policy(entity)
 }
-function rolePolicyFilter(config: InstanceConfig, entity: string, scope: Scope, role: string): TableFilter {
+function rolePolicyFilter(config: InstanceConfig, entity: string, scope: Scope, role: string, authored?: InstanceConfig['policies'][string][string]): TableFilter {
   if (scope.actor.type === 'service' && scope.role === 'SYSTEM') return { kind: 'all' }
   const actor = projections.get(scope)
   if ((config.account || scope.actor.type === 'agent') && !actor) return { kind: 'none' }
-  const policy = config.policies[entity]?.[role] ?? 'none'
+  const policy = authored ?? config.policies[entity]?.[role] ?? 'none'
   if (policy === 'all') return { kind: 'all' }
   if (policy === 'none') return { kind: 'none' }
   if (!Object.keys(policy.where).length && policy.deny !== 'forbidden') return { kind: 'all' }
@@ -187,11 +189,22 @@ export function rbacRoles(scope: Scope): string[] {
   return principal && principal !== scope.role ? [scope.role, String(principal)] : [scope.role]
 }
 /** System audit access requires an owner credential and a live owner issuer. */
-export function hasOwnerRole(scope: Scope): boolean {
+export function hasOwnerRole(scope: Scope, config?: InstanceConfig): boolean {
+  if (config?.effectiveAccess) return (scope.actor.type !== 'agent' || projections.has(scope)) && effectiveSystemGrant(config.effectiveAccess, rbacRoles(scope), 'audit.read')
   return (scope.actor.type !== 'agent' || projections.has(scope)) && rbacRoles(scope).every(role => roleNamePrivileges(role).has('audit.read'))
 }
-export function policyFilter(config: InstanceConfig, entity: string, scope: Scope): TableFilter {
+export function policyFilter(config: InstanceConfig, entity: string, scope: Scope, operation: import('./config').Operation = 'read'): TableFilter {
   const roles = rbacRoles(scope)
+  if (config.effectiveAccess) {
+    if (scope.actor.type === 'service' && scope.role === 'SYSTEM') return { kind: 'all' }
+    const rules = effectiveEntityGrants(config.effectiveAccess, roles, entity, operation)
+    const filters = rules.map(rule => rolePolicyFilter(config, entity, scope, rule.role, { where: rule.where }))
+    const authority = actorLinkProjection(scope)
+    const actorAuthorities = authority ? [authority] : []
+    if (filters.some(filter => filter.kind === 'all')) return { kind: 'all', actorAuthorities }
+    const predicates = filters.flatMap(filter => filter.kind === 'where' ? [filter.predicate] : [])
+    return predicates.length ? { kind: 'where', predicate: { any: predicates }, actorAuthorities } : { kind: 'none', actorAuthorities }
+  }
   const filters = roles.map(role => rolePolicyFilter(config, entity, scope, role))
   const where = filters.filter((filter): filter is Extract<TableFilter, { kind: 'where' }> => filter.kind === 'where')
   const result: TableFilter = filters.some(filter => filter.kind === 'none')
@@ -205,6 +218,7 @@ export function policyFilter(config: InstanceConfig, entity: string, scope: Scop
   return authority && policyGraphUsesActorLinks(config, entity, roles) ? { ...result, actorAuthorities: [authority] } : result
 }
 export function readableFields(config: InstanceConfig, entity: string, scope: Scope): string[] {
+  if (config.effectiveAccess) return [...new Set(effectiveEntityGrants(config.effectiveAccess, rbacRoles(scope), entity, 'read').flatMap(rule => rule.fields ?? []))].sort()
   return [...baseFields, ...Object.keys(config.entities[entity].fields)].filter(field => rbacRoles(scope).every(role => {
     const policy = config.policies[entity]?.[role]
     const allow = typeof policy === 'object' ? policy.fields : undefined

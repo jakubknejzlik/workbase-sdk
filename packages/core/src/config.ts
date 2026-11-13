@@ -119,11 +119,11 @@ const schema = z.object({
   if (config.plugins?.length && typeof config.interactive !== 'boolean') ctx.addIssue({ code: 'custom', path: ['interactive'], message: 'interactive must be an explicit boolean when plugins are installed' })
 })
 export type Field = z.infer<typeof fieldSchema>
-export type InstanceConfig = z.infer<typeof schema>
+export type InstanceConfig = z.infer<typeof schema> & { effectiveAccess?: import('./access').EffectiveAccessPolicy }
 export type InstanceInput = z.input<typeof schema>
 export type Operation = 'read' | 'create' | 'update' | 'delete'
 export const baseFields = ['id', 'organization_id', 'created_at', 'updated_at', 'version']
-const reserved = new Set(['users', 'organizations', 'memberships', 'sessions', 'invitations', 'email_outbox', 'audit_outbox', 'security_log', 'idempotency_keys', 'instance_meta', 'webhook_deliveries', 'audit_events', 'd1_migrations', 'identities', 'access_tokens', 'user', 'session', 'account', 'verification', 'rateLimit', 'identity_link_grants', '_plugin_migrations'])
+export const reservedEntities = new Set(['users', 'organizations', 'memberships', 'sessions', 'invitations', 'email_outbox', 'audit_outbox', 'security_log', 'idempotency_keys', 'instance_meta', 'webhook_deliveries', 'audit_events', 'd1_migrations', 'identities', 'access_tokens', 'user', 'session', 'account', 'verification', 'rateLimit', 'identity_link_grants', '_plugin_migrations'])
 type InstanceDefinitionInput = Omit<ShorthandInput, 'roles' | 'entities' | 'permissions'> & { roles?: string[]; entities?: ShorthandInput['entities']; permissions?: ShorthandInput['permissions'] }
 export function defineInstance(input: InstanceDefinitionInput): InstanceConfig {
   return normalizeInstance(input)
@@ -171,7 +171,7 @@ export function normalizeInstance(input: InstanceDefinitionInput, exactRoles = f
   for (const [name, entity] of Object.entries(config.entities)) {
     let path: (string | number)[] = ['entities', name]
     try {
-      if ((reserved.has(name) && !(name === 'users' && config.account?.entity === name)) || name === 'atomic_assert' || name.startsWith('sqlite_') || name.startsWith('d1_')) throw new Error(`Reserved entity: ${name}`)
+      if ((reservedEntities.has(name) && !(name === 'users' && config.account?.entity === name)) || name === 'atomic_assert' || name.startsWith('sqlite_') || name.startsWith('d1_')) throw new Error(`Reserved entity: ${name}`)
       path = ['entities', name, 'fields']
       if (Object.keys(entity.fields).length > 90) throw new Error('Entity exceeds the supported field/parameter budget')
       for (const [key, field] of Object.entries(entity.fields)) {

@@ -12,7 +12,7 @@ import { assertUnprotectedFields, userLinkWriter, userLinkPolicyFilter } from '.
 export type WriteGuard = PolicyWriteGuard
 export const writeGuard = (statement: GuardedStatement) => Object.hasOwn(statement, 'policyGuard') ? statement.policyGuard : undefined
 /** Same structured predicate semantics as query table sources, including scoped EXISTS. */
-export function writeFilter(kernel: KernelRegistry, scope: Scope, entity: string, alias = entity): SqlStatement {
+export function writeFilter(kernel: KernelRegistry, scope: Scope, entity: string, alias = entity, operation: import('../config').Operation = 'read'): SqlStatement {
   const bindings: SqlValue[] = []; let references = 0
   const bind = (value: string | number | boolean) => { bindings.push(typeof value === 'boolean' ? Number(value) : value); return '?' }
   function render(filter: TableFilter, table: string): string {
@@ -21,7 +21,8 @@ export function writeFilter(kernel: KernelRegistry, scope: Scope, entity: string
   }
   function relation(node: PredicateRelation, parent: string, negated: boolean): string {
     const child = `write_policy_${references}`
-    const explicit = render({ kind: 'where', predicate: node.predicate }, child)
+    let explicit = render({ kind: 'where', predicate: node.predicate }, child)
+    if (kernel.config.effectiveAccess) { explicit = `${explicit} AND ${quote(child)}.organization_id=?`; bindings.push(scope.organizationId) }
     // Put policy expressions inside the derived source, as the read compiler does.
     // SQLite's expression-depth cap then does not accumulate the complete target
     // policy tree at every correlation along a four-relation path.
@@ -29,9 +30,10 @@ export function writeFilter(kernel: KernelRegistry, scope: Scope, entity: string
     return `${negated ? 'NOT ' : ''}EXISTS(SELECT 1 FROM (SELECT ${quote(child)}.${quote(node.field)} AS ${quote('policy_key')} FROM ${quote(node.entity)} AS ${quote(child)} WHERE ${explicit}) AS ${quote(visible)} WHERE ${quote(visible)}.${quote('policy_key')}=${quote(parent)}.${quote(node.parentField)})`
   }
   let filter: TableFilter
-  try { filter = expandPolicyFilter(entity, child => kernel.tableFilter(child, scope), 128) }
+  try { filter = expandPolicyFilter(entity, child => kernel.tableFilter(child, scope, operation), 128) }
   catch { throw new ApiError(403, 'policy_violation') }
-  const sql = render(filter, alias)
+  let sql = render(filter, alias)
+  if (kernel.config.effectiveAccess) { sql = `(${sql}) AND ${quote(alias)}.organization_id=?`; bindings.push(scope.organizationId) }
   if (bindings.length > 100 || sql.length > 64_000) throw new ApiError(403, 'policy_violation')
   return { sql, bindings }
 }
@@ -116,13 +118,14 @@ export function enforcePlan(kernel: KernelRegistry, scope: Scope, plan: AtomicPl
     // Existing system writers retain their narrowly authorized paths.
     if (!domain && !member) return original
     const liveFilter = userLinkPolicyFilter(original)
-    if (!liveFilter && domain && kernel.tableFilter(entity, scope).kind === 'none') throw new ApiError(403, 'policy_violation')
+    const authoredOperation = operation!.toLowerCase() === 'insert' ? 'create' : operation!.toLowerCase() as 'update' | 'delete'
+    if (!liveFilter && domain && kernel.tableFilter(entity, scope, authoredOperation).kind === 'none') throw new ApiError(403, 'policy_violation')
     const protect = account || member
     if (!domain && !protect) return original
     if (ts.some((token, i) => token.text === '?' && ts[i + 1]?.start === token.end && /^\d/.test(ts[i + 1].text)) || ts.some(token => [':', '@', '$'].includes(token.text))) throw new UnsupportedAtomicOperation('Policy SQL uses plain positional bindings')
     const bindings = original.bindings ?? []
     const statement = { ...original }
-    const guard: WriteGuard = { entity, operation: operation!, requireRow: original.expectRows !== undefined, filter: liveFilter ?? (domain ? writeFilter(kernel, scope, entity) : { sql: `${quote(entity)}.${quote('organization_id')}=?`, bindings: [scope.organizationId] }) }
+    const guard: WriteGuard = { entity, operation: operation!, requireRow: original.expectRows !== undefined, filter: liveFilter ?? (domain ? writeFilter(kernel, scope, entity, entity, authoredOperation) : { sql: `${quote(entity)}.${quote('organization_id')}=?`, bindings: [scope.organizationId] }) }
     if (operation === 'UPDATE' || operation === 'DELETE') {
       const where = top.find(t => t.text.toUpperCase() === 'WHERE')
       const set = top.find(t => t.text.toUpperCase() === 'SET')
