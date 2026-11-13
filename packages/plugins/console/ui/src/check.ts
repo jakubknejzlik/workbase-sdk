@@ -35,6 +35,7 @@ const propSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('boolean'), default: z.boolean().optional() }),
   z.strictObject({ kind: z.literal('when') }),
   z.strictObject({ kind: z.literal('key') }),
+  z.strictObject({ kind: z.literal('access') }),
 ])
 const slotsSchema = z.record(id, z.strictObject({ contexts: z.array(z.enum(['record', 'form', 'row'])).min(1), props: z.record(id, propSchema) }))
 export type Schema = Record<string, { displayField?: string; actions?: Record<string, unknown>; fields: Record<string, { type: string; required?: boolean; readOnly?: boolean; computed?: unknown; userLink?: boolean; values?: string[]; entity?: string }> }>
@@ -149,6 +150,7 @@ export function normalise(sources: Sources, values: Record<string, unknown>, sch
         for (const key of Object.keys(node.props)) if (!Object.hasOwn(definition.props, key)) throw new Error(`Unknown slot prop ${key}`)
         for (const [key, spec] of Object.entries(definition.props)) {
           const value = node.props[key] ?? ('default' in spec ? spec.default : undefined)
+          if (spec.kind === 'access' && (Object.hasOwn(node.props, key) || context !== 'record' || !page.entity)) throw new Error(`Access prop ${key} is implicit and requires a record entity context`)
           if (spec.kind === 'field') { if (typeof value !== 'string') throw new Error(`Invalid field prop ${key}`); field(value, spec.type) }
           if (spec.kind === 'key' && (typeof value !== 'string' || !title.safeParse(value).success)) throw new Error(`Invalid key prop ${key}`)
           if (spec.kind === 'boolean' && typeof value !== 'boolean' || spec.kind === 'when' && !['create', 'edit'].includes(String(value))) throw new Error(`Invalid slot prop ${key}`)

@@ -16,7 +16,7 @@ concurrency:
 jobs:
   release:
     if: github.event_name != 'pull_request' && github.event_name != 'pull_request_target'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
       id-token: write
@@ -42,6 +42,7 @@ jobs:
           tar -xzf "$tools/gitleaks.tar.gz" -C "$tools" gitleaks
           echo "$tools" >> "$GITHUB_PATH"
       - run: bun install --frozen-lockfile
+      - run: bun x --no-install playwright install --with-deps chromium
       - run: bun run lint
       - run: bun run typecheck
       - run: bun run check:ci-invariants

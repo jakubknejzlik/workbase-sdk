@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs'
+import { readFileSync, readdirSync } from 'node:fs'
 import { expect, test } from 'vitest'
 import { scanTSX } from '../src/scan'
 const sdkImport = "import { t } from '@workbasehq/plugins/console/ui/i18n';\n"
@@ -28,7 +28,8 @@ test('SDK import aliases work; documented data-flow exclusions and punctuation p
   expect(result.findings).toEqual([]); expect([...result.keys.keys()]).toEqual(['ui:hello', 'sdk:save'])
 })
 test('same authored-text rule accepts the SDK renderer', () => {
-  const file = 'packages/plugins/console/ui/src/react/index.ts'
-  // The renderer uses createElement; parsing as TSX applies the exact same rule.
-  expect(scanTSX(new Map([[file + 'x', readFileSync(file, 'utf8')]]), {}).findings).toEqual([])
+  const directory = 'packages/plugins/console/ui/src/react/'
+  // SDK renderers use createElement; parse every source as TSX with the same rule.
+  const sources = new Map(readdirSync(directory).map(file => [directory + file + 'x', readFileSync(directory + file, 'utf8')]))
+  expect(scanTSX(sources, {}).findings).toEqual([])
 })

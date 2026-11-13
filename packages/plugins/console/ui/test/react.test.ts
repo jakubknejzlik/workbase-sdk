@@ -2,6 +2,7 @@
 import { createElement as h } from 'react'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, expect, test, vi } from 'vitest'
+import { grants } from './grants'
 import { ConsoleProvider, PageView } from '../src/react'
 import { entityCreatePage, entityDetailPage, entityEditPage, entityListPage, type Node, page, list } from '../src/index'
 import type { Manifest } from '../src/check'
@@ -19,7 +20,7 @@ const json = (value: unknown, status = 200) => new Response(JSON.stringify(value
 const t = (key: string) => key
 const navigate = vi.fn()
 function view(fetch: (url: string, init: ClientRequestInit) => Promise<Response>, mode: Parameters<typeof route>[0] = 'detail', options: { orgId?: string; id?: string; layout?: Node[]; metadata?: typeof meta } = {}) {
-  return h(ConsoleProvider, { identity: { actorId: 'a', orgId: options.orgId ?? 'one' }, t, fetch }, h(PageView, { definition: route(mode, options.layout), route: route(mode, options.layout), entities: { probe: options.metadata ?? meta }, params: { itemId: options.id ?? 'x' }, search: {}, navigate }))
+  return h(ConsoleProvider, { caps: grants({ probe: options.metadata ?? meta }), identity: { actorId: 'a', orgId: options.orgId ?? 'one' }, t, fetch }, h(PageView, { definition: route(mode, options.layout), route: route(mode, options.layout), entities: { probe: options.metadata ?? meta }, params: { itemId: options.id ?? 'x' }, search: {}, navigate }))
 }
 afterEach(() => { cleanup(); vi.restoreAllMocks(); navigate.mockReset() })
 test.each([['notFound', 404], ['forbidden', 403], ['network', 500]] as const)('renders %s from HTTP status', async (state, status) => {
@@ -101,7 +102,7 @@ test('conflict retains draft; explicit reload and resave diffs against fresh ser
   conflict = false
   fireEvent.change(screen.getByLabelText('domain:field.probe.name'), { target: { value: 'Resaved' } }); fireEvent.click(screen.getByText('sdk:save'))
   await waitFor(() => expect(navigate).toHaveBeenCalledWith('/items/x'))
-  const init = fetch.mock.calls.at(-1)![1]
+  const init = fetch.mock.calls.filter(([, init]) => init.method === 'PATCH').at(-1)![1]
   expect(JSON.parse(String(init.body))).toEqual({ name: 'Resaved' }); expect(new Headers(init.headers).get('If-Match')).toBe('"2"')
 })
 test('create keeps one idempotency key through retry; cancel/back confirm dirty drafts', async () => {
@@ -157,18 +158,19 @@ test('field table renders all supported editable types and read-only computed va
   render(view(async () => json(row), 'edit', { metadata: { ...meta, fields: { ...fields, extra: { ...fields.extra, computed: true } } } }))
   expect(await screen.findByText('set')).toBeTruthy(); expect(screen.queryByLabelText('domain:field.probe.extra')).toBeNull()
 })
-test('slots receive declared field values and injected identity; titles use injected t', async () => {
+test('slots receive only declared field values and t; titles use injected t', async () => {
   const component = vi.fn((props: { label: string }) => h('strong', null, props.label))
   const slots = { card: { contexts: ['record' as const], props: { label: { kind: 'field' as const, type: 'string' } }, component } }
   const page = route('detail', [{ kind: 'slot', id: 'card', props: { label: 'name' } }])
-  render(h(ConsoleProvider, { identity: { actorId: 'a', orgId: 'one' }, t: key => 'translated:' + key, slots, fetch: async () => json(row) }, h(PageView, { definition: page, route: page, entities: { probe: meta }, params: { itemId: 'x' }, search: {}, navigate })))
+  render(h(ConsoleProvider, { caps: grants({ probe: meta }), identity: { actorId: 'a', orgId: 'one' }, t: key => 'translated:' + key, slots, fetch: async () => json(row) }, h(PageView, { definition: page, route: page, entities: { probe: meta }, params: { itemId: 'x' }, search: {}, navigate })))
   expect(await screen.findByText('Server')).toBeTruthy(); expect(screen.getByText('translated:ui:probe.detail')).toBeTruthy()
-  expect(component.mock.calls[0][0]).toMatchObject({ label: 'Server', identity: { actorId: 'a', orgId: 'one' } })
+  expect(Object.keys(component.mock.calls[0][0]).sort()).toEqual(['label', 't'])
+  expect(component.mock.calls[0][0]).toMatchObject({ label: 'Server' })
   expect(Object.hasOwn(component.mock.calls[0][0], 'user')).toBe(false)
 })
 test('create entry and dirty edit back follow declared paths', async () => {
   const list = route('list', [])
-  render(h(ConsoleProvider, { identity: { actorId: 'a', orgId: 'one' }, t, fetch: async () => json({ data: [], next_cursor: null }) }, h(PageView, { definition: list, route: list, routes: [list, route('create')], entities: { probe: meta }, params: {}, search: {}, navigate })))
+  render(h(ConsoleProvider, { caps: grants({ probe: meta }), identity: { actorId: 'a', orgId: 'one' }, t, fetch: async () => json({ data: [], next_cursor: null }) }, h(PageView, { definition: list, route: list, routes: [list, route('create')], entities: { probe: meta }, params: {}, search: {}, navigate })))
   fireEvent.click(screen.getByText('sdk:create')); expect(navigate).toHaveBeenCalledWith('/items/new')
   cleanup(); navigate.mockReset()
   const confirm = vi.spyOn(globalThis as typeof globalThis & { confirm(message: string): boolean }, 'confirm').mockReturnValue(true)
@@ -180,11 +182,11 @@ test('create entry and dirty edit back follow declared paths', async () => {
 test('page primitive infers list binding and renders static layout slots without fetching', async () => {
   const definition = page({ title: 'probe.list', data: { results: list('probe') } })
   const listed = { ...route('list', []), ...definition }
-  render(h(ConsoleProvider, { identity: { actorId: 'a', orgId: 'one' }, t, fetch: async () => json({ data: [row], next_cursor: null }) }, h(PageView, { definition, route: listed, entities: { probe: meta }, params: {}, search: {}, navigate })))
+  render(h(ConsoleProvider, { caps: grants({ probe: meta }), identity: { actorId: 'a', orgId: 'one' }, t, fetch: async () => json({ data: [row], next_cursor: null }) }, h(PageView, { definition, route: listed, entities: { probe: meta }, params: {}, search: {}, navigate })))
   expect(await screen.findByText('Server')).toBeTruthy()
   cleanup()
   const staticPage = page({ title: 'static.title', layout: [{ kind: 'slot', id: 'static', props: {} }] }), fetch = vi.fn()
-  render(h(ConsoleProvider, { identity: { actorId: 'a', orgId: 'one' }, t, fetch, slots: { static: { contexts: ['record'], props: {}, component: () => h('p', null, 'Static slot') } } }, h(PageView, { definition: staticPage, route: { ...route('detail'), ...staticPage }, entities: {}, params: {}, search: {}, navigate })))
+  render(h(ConsoleProvider, { caps: grants({ probe: meta }), identity: { actorId: 'a', orgId: 'one' }, t, fetch, slots: { static: { contexts: ['record'], props: {}, component: () => h('p', null, 'Static slot') } } }, h(PageView, { definition: staticPage, route: { ...route('detail'), ...staticPage }, entities: {}, params: {}, search: {}, navigate })))
   expect(screen.getByText('Static slot')).toBeTruthy(); expect(fetch).not.toHaveBeenCalled()
 })
 test('returning to an earlier search starts at page one, including after a host rerender', async () => {

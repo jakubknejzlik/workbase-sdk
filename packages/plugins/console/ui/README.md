@@ -66,9 +66,9 @@ The `/react` entry exports `ConsoleProvider`, `RouteView`, `PageView`, `useRecor
 `useList`, and the recursive `renderNode`. The host injects identity and `t`:
 
 ```tsx
-<ConsoleProvider identity={{ actorId, orgId }} t={t} baseURL="">
+<Session orgId={orgId} t={t} baseURL="">
   <RouterProvider router={router} />
-</ConsoleProvider>
+</Session>
 ```
 
 Use the generated route tree with TanStack Router. `PageView` also accepts an
@@ -151,3 +151,50 @@ shadowed imports fail. There are no disable comments.
 Not covered: text via variables or helpers, other prop names, `.ts` files,
 `confirm`/`alert`/`document.title`, CSS content, third-party components, record content.
 This guards accidental bare text in authored files; it is not a sandbox.
+
+The `Session` shell boots `/me` and live capabilities in parallel. Only a ready
+session mounts its children, including `Shell` and the router. Failed boot offers
+retry; unauthenticated and removed membership states show a generic message.
+`Shell` takes the built manifest, hides unauthorized nav targets, and supplies an
+accessible mobile disclosure. Parameterized nav targets require its `params`.
+
+The pure `gate(caps, manifest)` is shared by routes, navigation and fields.
+Missing grants deny. `ConsoleProvider` is available for custom hosts, which must
+supply `caps` and handle `onAuthorizationFailure`; omitting caps grants no data
+access in the renderer. Session drops to loading on a data 403, refetches on tab
+visibility, and replaces the client, query cache and drafts whenever canonical
+`[actorId, orgId, caps]` changes. No capability data persists outside that scope.
+Slots receive only declared authorized props and `t`. Action nodes consume only
+the owning detail's `actions` entries, and use `ui:actions.<name>` labels.
+
+Register the SDK access card in `ui/-slots.ts` with an explicit dependency on the
+account-link field. The extractor stubs this exact SDK component import; it does
+not admit other React exports into data modules.
+
+```ts
+import { defineSlots, p } from '@workbasehq/plugins/console/ui'
+import { AccessCard } from '@workbasehq/plugins/console/ui/react'
+export default defineSlots({
+  accessCard: {
+    contexts: ['record'],
+    props: { account: p.field('userLink'), access: p.access() },
+    component: AccessCard,
+  },
+})
+```
+
+Place `slot('accessCard', { account: 'user' })` in the detail layout (`user` is the
+Instance's account-link field). `p.access()` is implicit; authored values and form
+or row placement fail validation. The renderer passes projected state/actions,
+a bound `run()` using `actWith()`, and a lazy `candidates()` only with the
+`members.read` grant. The card receives no entity, ID, client or identity. A masked
+field omits the whole slot, and absent access state renders nothing.
+
+Invitation links appear only from the mutation result, in component state until
+unmount. They never enter either detail cache or GET state. Unlinking removes the
+record/account link and leaves organization membership intact. SDK reasons use
+`access.*`; other action reasons use the Instance's `ui:` namespace.
+
+The full pack gate runs `test/browser/acceptance.test.ts` against local Worker/D1
+and Chromium, including cookie sessions and the 390px interaction matrix. The
+SDK CI and release workflows install the lockfile-pinned Chromium version first.

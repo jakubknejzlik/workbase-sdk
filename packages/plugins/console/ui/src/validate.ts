@@ -3,6 +3,7 @@ export { sourceAt } from './locations'
 import { existsSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { scanTSX } from './scan'
+import { actionReasonKeys } from '@workbasehq/core/schema'
 import { loadConfig, SourceError } from '@workbasehq/core/schema/load'
 import type { Manifest, Schema } from './check'
 import { checkSources, type Sources } from './sources'
@@ -17,6 +18,10 @@ export const breakpoints = ['xs', 'sm', 'md', 'lg', 'xl'] as const
 export function effectiveSpans(span: Span): number[] {
   let previous = 12
   return breakpoints.map(bp => previous = typeof span === 'number' ? span : span[bp] ?? previous)
+}
+/** Record reasons consume authored dynamic families just like TSX t() calls. */
+export function actionFamilies(reasons: readonly string[], families: Manifest['keys']): string[] {
+  return Object.keys(families).filter(family => reasons.some(reason => !reason.startsWith('access.') && reason.startsWith(family + '.') && families[family].includes(reason.slice(family.length + 1))))
 }
 /** Inventory is derived from schema and declarations, never from Instance dictionaries. */
 export function requiredKeys(config: { entities: Schema }, manifest: Manifest, scan: Scan, sdkCatalog: Record<string, string>, sources?: Sources, schemaSources: Record<string, { file: string; line: number; column: number }> = {}): Map<string, KeySource[]> {
@@ -43,6 +48,7 @@ export function requiredKeys(config: { entities: Schema }, manifest: Manifest, s
     function walk(nodes: Node[]) {
       for (const node of nodes) if (typeof node !== 'string') {
         if ('title' in node && node.title) add('ui:' + node.title, at(file, node.title))
+        if (node.kind === 'action') add('ui:actions.' + node.name, at(file, node.name))
         if (node.kind === 'slot') for (const [prop, spec] of Object.entries(manifest.slots[node.id].props)) {
           if (spec.kind === 'key') add('ui:' + node.props[prop], at(file, String(node.props[prop])))
         } else if (node.kind !== 'action') walk(node.children)
@@ -55,6 +61,7 @@ export function requiredKeys(config: { entities: Schema }, manifest: Manifest, s
   for (const family of scan.families) for (const suffix of manifest.keys[family] ?? []) {
     add('ui:' + family + '.' + suffix, at(resolve(sources?.root ?? '.', 'ui/keys.ts'), family))
   }
+  for (const key of actionReasonKeys(config as Parameters<typeof actionReasonKeys>[0])) add((key.startsWith('access.') ? 'sdk:' : 'ui:') + key, schemaAt('access'))
   for (const key of Object.keys(sdkCatalog)) add('sdk:' + key, at('SDK catalog', key))
   return keys
 }
@@ -109,6 +116,7 @@ export async function validateInstance(root: string): Promise<Finding[]> {
   try { manifest = await (await import('./vite')).extractManifest(root) }
   catch (error) { caught(error); return findings }
   const scan = scanTSX(sources.modules, manifest.keys)
+  for (const family of actionFamilies(actionReasonKeys(loaded.config), manifest.keys)) scan.families.add(family)
   findings.push(...scan.findings)
   findings.push(...checkStructure(manifest, root))
   if (!loaded.config.languages?.length) findings.push({ code: 'missing-languages', file: resolve(root, 'config.ts'), line: 1, col: 1 })

@@ -122,6 +122,7 @@
         "@tanstack/router-generator": "1.146.2",
         "@testing-library/react": "16.3.3",
         "@types/react": "19.2.18",
+        "@types/react-dom": "19.2.4",
         "@workbasehq/core": "workspace:*",
         "@workbasehq/test-support": "workspace:*",
         "es-module-lexer": "2.3.2",

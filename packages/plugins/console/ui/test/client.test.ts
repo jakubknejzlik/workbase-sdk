@@ -120,3 +120,38 @@ test('actWith returns the command result and fresh detail, without caching the i
   expect(JSON.stringify(await client.one('worker', { id: 'x' }, signal()))).not.toContain('accept_url')
   expect(fetch).toHaveBeenCalledTimes(2)
 })
+test('authorization failures notify even for non-JSON bodies, but an aborted old scope cannot notify', async () => {
+  const onAuthorizationFailure = vi.fn(), abort = new AbortController()
+  let release: (response: Response) => void = () => {}
+  const fetch = vi.fn(() => new Promise<Response>(resolve => { release = resolve }))
+  const client = createClient({ baseURL: '', orgId: 'one', actorId: 'a', fetch, onAuthorizationFailure })
+  const old = client.one('test', { id: 'old' }, abort.signal).catch(error => error)
+  abort.abort(); release(new Response('expired', { status: 401 })); await old
+  expect(onAuthorizationFailure).not.toHaveBeenCalled()
+  const current = client.one('test', { id: 'current' }, signal()).catch(error => error)
+  release(new Response('denied', { status: 403 })); await current
+  expect(onAuthorizationFailure).toHaveBeenCalledWith(403)
+})
+test('list projection excludes unreadable fields, sorts and searches even when forged into bindings', async () => {
+  const fetch = vi.fn(async (_url: string, _init: ClientRequestInit) => response({ data: [], next_cursor: null }))
+  const client = createClient({ baseURL: '', orgId: 'one', actorId: 'a', fetch })
+  await client.list('test', meta, ['id', 'extra']).load({ sort: 'user', search: 'secret' }, signal())
+  const body = JSON.parse(String(fetch.mock.calls[0][1].body))
+  expect(body.select).toEqual(['id', 'extra']); expect(body.orderBy).toEqual([{ field: 'id', dir: 'asc' }]); expect(body.search).toBeUndefined()
+})
+test('native-style transport receives no client-options receiver', async () => {
+  const fetch = async function(this: unknown, _url: string, _init: ClientRequestInit) {
+    expect(this).toBeUndefined()
+    return response({ id: 'x', version: 1 })
+  }
+  const client = createClient({ baseURL: '', orgId: 'one', actorId: 'a', fetch })
+  await client.one('test', { id: 'x' }, signal())
+})
+test('renderer detail mode refetches a bare mutation response while ordinary one() keeps its cache contract', async () => {
+  const fetch = vi.fn(async (_url: string, init: ClientRequestInit) => response({ id: 'x', version: 1, ...(init.method === 'GET' ? { actions: {}, access: { state: 'no_account' } } : {}) }))
+  const client = createClient({ baseURL: '', orgId: 'one', actorId: 'a', fetch })
+  await client.create('test', { name: 'New' }, 'draft', signal())
+  expect(await client.one('test', { id: 'x' }, signal())).not.toHaveProperty('actions'); expect(fetch).toHaveBeenCalledTimes(1)
+  expect(await client.one('test', { id: 'x' }, signal(), true)).toHaveProperty('actions')
+  await client.one('test', { id: 'x' }, signal(), true); expect(fetch).toHaveBeenCalledTimes(2)
+})

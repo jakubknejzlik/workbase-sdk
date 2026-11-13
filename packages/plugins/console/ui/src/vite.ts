@@ -24,6 +24,7 @@ function componentStubs(sources: Sources): Plugin {
   return {
     name: 'workbase-ui-extraction-stubs', enforce: 'pre',
     async resolveId(id, importer) {
+      if (id === '@workbasehq/plugins/console/ui/react' && importer && sources.modules.has(clean(importer))) return '\0workbase-ui-access-card'
       if (id.startsWith(prefix)) { requireChecked(id.slice(prefix.length)); return id }
       const fromUI = importer && sources.modules.has(clean(importer))
       const result = await this.resolve(id, importer, { skipSelf: true })
@@ -37,6 +38,7 @@ function componentStubs(sources: Sources): Plugin {
       if (!result && (fromUI || requested.startsWith(ui))) throw new Error(`Module not in the checked UI graph: ${id}`)
     },
     async load(id) {
+      if (id === '\0workbase-ui-access-card') return 'export const AccessCard = () => null;'
       // Evaluate the exact text whose complete graph passed checkSources.
       if (!id.startsWith(prefix)) {
         const file = clean(id)
@@ -59,7 +61,7 @@ export async function extractManifest(root: string): Promise<Manifest> {
   const server = await createServer({
     root, configFile: false, logLevel: 'silent', appType: 'custom',
     plugins: [componentStubs(sources)],
-    resolve: { alias: { '@workbasehq/plugins/console/ui': fileURLToPath(new URL('./index.ts', import.meta.url)) } },
+    resolve: { alias: [{ find: /^@workbasehq\/plugins\/console\/ui$/, replacement: fileURLToPath(new URL('./index.ts', import.meta.url)) }] },
     server: { middlewareMode: true, watch: null, ws: false },
     ssr: { noExternal: ['@workbasehq/plugins'] },
   })
