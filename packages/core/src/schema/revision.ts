@@ -5,7 +5,7 @@ import type { InstanceConfig } from '../config'
 export function bindSchemaLock<T extends InstanceConfig>(config: T, lock: unknown): T {
   if (config.baseline !== 'workbase-sdk') throw new Error('Schema locks require a workbase-sdk config')
   const value = lock as { lockVersion: number; revision: number; parent: unknown; tables: unknown[] }
-  if (!value || value.lockVersion !== 1 || !Number.isSafeInteger(value.revision) || value.revision < 1 || value.parent !== null || !Array.isArray(value.tables)) throw new Error('Invalid schema.lock.json')
+  if (!value || value.lockVersion !== 1 || !Number.isSafeInteger(value.revision) || value.revision < 1 || (value.parent !== null && (typeof value.parent !== 'string' || !/^[a-f0-9]{64}$/.test(value.parent))) || !Array.isArray(value.tables)) throw new Error('Invalid schema.lock.json')
   Object.defineProperty(config, 'revision', { value: value.revision, enumerable: true, configurable: true, writable: false })
   return config
 }
