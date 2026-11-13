@@ -60,6 +60,20 @@ async function invitation(email?: string, row?: string) {
 const accept = (id: string) => request(app, `/invitations/${id}/accept`, 'POST', {}, 'member-a')
 const status = () => request(app, '/orgs/org-a/row-access/people/p1')
 
+it('legacy row-access retains the pending invitation after manual account linking', async () => {
+  const i = await invitation()
+  const before = await status()
+  expect(before.status).toBe(200)
+  const pending = await json(before)
+  expect(pending).toEqual({ can_cancel: true, state: 'invited', invitation: { id: i.id, email: i.email, expires_at: i.expires_at }, can_invite: true })
+  const response = await request(app, '/commands/people/link_account', 'POST', { rowId: 'p1', userId: 'member-a' })
+  expect(response.status, await response.clone().text()).toBe(200)
+  const after = await status()
+  expect(after.status).toBe(200)
+  expect(await after.text()).toBe(JSON.stringify({ ...pending, state: 'signed_in' }))
+  expect(await env.DB.prepare('SELECT revoked_at FROM invitations WHERE id=?').bind(i.id).first('revoked_at')).toBeNull()
+})
+
 it('176 existing member confirms: invitation and resolve do not link; acceptance links atomically without changing membership role', async () => {
   await env.DB.prepare("UPDATE memberships SET role='owner' WHERE user_id='member-a'").run()
   const i = await invitation()

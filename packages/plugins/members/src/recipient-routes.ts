@@ -1,3 +1,4 @@
+import { invitationRole } from '../../../core/src/worker-access'
 import { rowInvitationGuard } from './row-invitations'
 import { loadActorProjection } from '../../../core/src/policies'
 import { z } from 'zod'
@@ -224,7 +225,7 @@ export function recipientRoutes(app: App, config: InstanceConfig, env: RuntimeEn
     let grant: { sql: string; values: import("../../../core/src/execution/types").SqlValue[] } = action === 'accept' ? issuerGuard(config, { ...scope, actor: { type: 'user', id: row.inviter_id } }, undefined, row.role) : { sql: '1', values: [] }
     if (action === 'accept' && row.target_entity) {
       const membership = await env.DB.prepare('SELECT role FROM memberships WHERE organization_id=? AND user_id=?').bind(row.organization_id, row.inviter_id).first<{ role: string }>()
-      if (!membership || row.role !== 'member') throw new ApiError(403, 'permission_denied')
+      if (!membership || row.role !== invitationRole(config, row.target_entity)) throw new ApiError(403, 'permission_denied')
       const issuerScope = { ...scope, actor: { type: 'user' as const, id: row.inviter_id }, role: membership.role }
       await loadActorProjection(config, issuerScope, (sql, bindings) => env.DB.prepare(sql).bind(...bindings).first())
       grant = rowInvitationGuard(config, issuerScope, { entity: row.target_entity, row: row.target_row! })

@@ -198,7 +198,7 @@ export function normalizeInstance(input: InstanceDefinitionInput, exactRoles = f
         }
         if (name === 'users' && ['email', 'password_hash', 'salt'].includes(key)) throw new Error(`Account identity field is private: ${key}`)
         if (field.computed) field.readOnly = true
-        if (baseFields.includes(key) || config.baseline === 'workbase-sdk' && key === 'actions') throw new Error(`Reserved field: ${key}`)
+        if (baseFields.includes(key) || config.baseline === 'workbase-sdk' && ['actions', 'access'].includes(key)) throw new Error(`Reserved field: ${key}`)
         path = ['entities', name, 'fields', key, 'min']
         if (field.min !== undefined && !['int', 'float'].includes(field.type)) throw new Error('min requires a numeric field')
         path = ['entities', name, 'fields', key, 'default']
@@ -223,7 +223,7 @@ export function normalizeInstance(input: InstanceDefinitionInput, exactRoles = f
       }
       for (const [relationName, r] of Object.entries(entity.relations)) {
         path = ['entities', name, 'relations', relationName]
-        if (config.baseline === 'workbase-sdk' && relationName === 'actions') throw new Error('Reserved relation: actions')
+        if (config.baseline === 'workbase-sdk' && ['actions', 'access'].includes(relationName)) throw new Error(`Reserved relation: ${relationName}`)
         path.push('field')
         const target = r.many ? config.entities[r.entity]?.fields[r.field] : entity.fields[r.field]
         if (!target || target.type !== 'ref' || target.entity !== (r.many ? name : r.entity)) throw new Error(`Invalid relation on ${name}`)

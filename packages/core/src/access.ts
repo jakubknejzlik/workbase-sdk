@@ -1,4 +1,7 @@
+import { accountActions, type AccountCondition } from './account-action-conditions'
+import { workerAccessCommands } from './worker-access-actions'
 import { accessGuards } from './access-guards'
+import { userLinks } from './user-link-fields'
 import { userLinkCommands } from './user-links'
 import type { AtomicOperation } from './execution/types'
 import { systemAccessTarget } from './access-evaluator'
@@ -21,6 +24,7 @@ const sharedSchema = z.strictObject({
   roles: z.record(z.string(), z.strictObject({ system: z.record(z.string(), decision) })),
   entities: z.record(z.string(), entityAccessSchema),
   predicates: z.record(z.string(), z.record(z.string(), z.unknown())),
+  accountLinks: z.record(z.string(), z.strictObject({ invitationRole: z.string() })).optional(),
 })
 export type EntityAccess = z.input<typeof entityAccessSchema>
 export type AccessInput = z.input<typeof sharedSchema>
@@ -51,13 +55,14 @@ export interface EffectiveEntityPolicy {
  */
 export interface EffectiveRecordAction {
   entity: string; name: string; command: string
-  conditions: { when: Filter; reason: string }[]
+  conditions: ({ when: Filter; reason: string } | AccountCondition)[]
   dependencies: string[]
   source: string
 }
 export interface EffectiveAccessPolicy {
   version: 1
   roles: string[]
+  accountLinks?: Record<string, { invitationRole: string }>
   actions: EffectiveRecordAction[]
   entities: EffectiveEntityPolicy[]
   guards: { name: string; permission: AtomicOperation['permission'] | null; additionalPermissions: AtomicOperation['permission'][]; opaque: true }[]
@@ -183,5 +188,22 @@ export function compileAccess(config: InstanceConfig, declarations: Record<strin
     })
     result.actions.push({ entity, name, command: action.command, conditions, dependencies: sorted(dependencies), source })
   }
-  return accessGuards(result, config.commands, [...(config.plugins ?? []).flatMap(plugin => [...(plugin.commands ?? [])]), ...userLinkCommands(config)], config.plugins ?? [])
+  for (const [entity, mapping] of Object.entries(input.accountLinks ?? {}).sort(([a], [b]) => a.localeCompare(b))) {
+    const source = `access.accountLinks.${entity}.invitationRole`
+    if (!userLinks(config).some(link => link.entity === entity)) error(source, `Account link required: ${entity}`)
+    if (!roles.includes(mapping.invitationRole)) error(source, `Unknown invitation role: ${mapping.invitationRole}`)
+    if (mapping.invitationRole === config.organizationOwnerRole) error(source, 'Invitation role cannot be organizationOwnerRole')
+    if (!result.entities.some(rule => rule.entity === entity && rule.role === mapping.invitationRole && rule.operation === 'read' && rule.decision === 'allow')) error(source, `Invitation role requires read on ${entity}`)
+    ;(result.accountLinks ??= {})[entity] = { ...mapping }
+  }
+  const reservedCommands = Object.keys(result.accountLinks ?? {}).flatMap(entity => accountActions(entity).map(action => action.command))
+  for (const action of result.actions) if (reservedCommands.includes(action.command)) error(action.source, 'Account commands require their core registered action')
+  for (const entity of Object.keys(result.accountLinks ?? {})) {
+    for (const action of accountActions(entity)) {
+      if (result.actions.some(existing => existing.entity === entity && existing.name === action.name)) error(action.source, `Reserved account action: ${action.name}`)
+      result.actions.push(action)
+    }
+  }
+  const builtins = workerAccessCommands({ ...config, effectiveAccess: result })
+  return accessGuards(result, [...config.commands, ...builtins.map(command => command.name)], [...(config.plugins ?? []).flatMap(plugin => [...(plugin.commands ?? [])]), ...userLinkCommands(config), ...builtins], config.plugins ?? [])
 }

@@ -1,4 +1,5 @@
 import { commandPreflight } from './commands'
+import { accountConditionSql } from './account-action-conditions'
 import type { EffectiveAccessPolicy } from './access'
 import { ApiError } from './errors'
 import { kernelFor } from './kernel/registry'
@@ -36,7 +37,7 @@ export function actionGuardSql(policy: EffectiveAccessPolicy, scope: Scope, enti
   const read = writeFilter(kernel, scope, entity)
   const write = writeFilter(kernel, scope, entity, entity, operation.permission.operation)
   const conditions = action.conditions.map(condition => ({ ...condition,
-    ...writeFilter(kernel, scope, entity, entity, 'read', rolePolicyFilter(config, entity, scope, scope.role, { where: condition.when })),
+    ...('opaque' in condition ? accountConditionSql(config, entity, condition) : writeFilter(kernel, scope, entity, entity, 'read', rolePolicyFilter(config, entity, scope, scope.role, { where: condition.when }))),
   }))
   const allowed: SqlStatement = { sql: [read, write, ...conditions].map(part => `(${part.sql})`).join(' AND '), bindings: [read, write, ...conditions].flatMap(part => [...(part.bindings ?? [])]) }
   const reason: SqlStatement = { sql: `CASE ${conditions.map(part => `WHEN NOT COALESCE((${part.sql}),0) THEN ?`).join(' ')} ELSE NULL END`,

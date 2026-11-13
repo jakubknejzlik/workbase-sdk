@@ -109,3 +109,14 @@ test('act refetches detail after a command response without a returned row', asy
   expect(await client.one('record', { id: 'x' }, signal())).toMatchObject({ version: 2 })
   expect(fetch.mock.calls.map(([url]) => url)).toEqual(['/api/record/x/actions/close', '/api/record/x'])
 })
+test('actWith returns the command result and fresh detail, without caching the invitation credential', async () => {
+  const result = { invitation_id: 'inv', expires_at: '2099', accept_url: 'https://example.test/invitations/accept?token=synthetic' }
+  const record = { id: 'x', version: 1, access: { state: 'invited' }, actions: {} }
+  const fetch = vi.fn().mockResolvedValueOnce(response(result)).mockResolvedValueOnce(response(record))
+  const client = createClient({ baseURL: '', actorId: 'a', orgId: 'one', fetch })
+  expect(await client.actWith('worker', 'x', 'invite', { email: 'a@example.test' }, signal())).toEqual({ record, result })
+  expect(fetch.mock.calls[0][1].body).toBe('{"email":"a@example.test"}')
+  expect(await client.one('worker', { id: 'x' }, signal())).toEqual(record)
+  expect(JSON.stringify(await client.one('worker', { id: 'x' }, signal()))).not.toContain('accept_url')
+  expect(fetch).toHaveBeenCalledTimes(2)
+})

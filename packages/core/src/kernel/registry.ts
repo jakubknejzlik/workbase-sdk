@@ -1,4 +1,5 @@
 import { assertSchemaLockBound } from '../schema/revision'
+import { workerAccessCommands } from '../worker-access-actions'
 import { bindActionPolicy } from '../record-actions'
 import { accessGuards } from '../access-guards'
 import { isBuiltinPlugin } from './builtin-source'
@@ -71,7 +72,7 @@ export class KernelRegistry {
       ...(config.pluginConfig || Object.keys(pluginConfig).length ? { pluginConfig } : {}) })
     if (config.effectiveAccess) { this.config.effectiveAccess = config.effectiveAccess; validatePolicies(this.config) }
     this.providers.get('console')?.[0]?.validateConsole?.(this.config)
-    for (const command of userLinkCommands(this.config)) {
+    for (const command of [...userLinkCommands(this.config), ...workerAccessCommands(this.config, env)]) {
       commands.push(command)
       if (!this.config.commands.includes(command.name)) this.config.commands.push(command.name)
     }
