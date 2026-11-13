@@ -1,7 +1,8 @@
 declare const location: { pathname: string; search: string; replace(path: string): void }
 declare const history: { replaceState(state: unknown, unused: string, url: string): void }
-declare const window: { addEventListener(event: string, listener: () => void): void; removeEventListener(event: string, listener: () => void): void }
+declare const window: { addEventListener(event: string, listener: (event: { persisted: boolean }) => void): void; removeEventListener(event: string, listener: (event: { persisted: boolean }) => void): void }
 import { createElement as h, useCallback, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
+import { flushSync } from 'react-dom'
 import type { Manifest } from '../check'
 import { initI18n, type I18n } from '../i18n'
 import { ApiFailure, type ClientRequestInit } from '../client'
@@ -137,6 +138,23 @@ export type AuthShellProps = { manifest: Manifest; i18n: I18n; children?: ReactN
 /** Mount outside RouterProvider so reserved auth paths never mount Instance data. */
 export function AuthShell({ manifest, i18n, children, fetch: transport = globalThis.fetch, navigate }: AuthShellProps) {
   const [initial, setEntry] = useState(entry), [org, setOrg] = useState(() => authStorage.org.read()), [memberships, setMemberships] = useState<Membership[]>(), [inbox, setInbox] = useState<Invitation[]>(), [failed, setFailed] = useState(false), [retry, setRetry] = useState(0)
+  const [suspended, setSuspended] = useState(false), [boot, setBoot] = useState(0)
+  const dropPrivateView = useCallback(() => {
+    // Commit before the browser freezes this document or sign-out navigates away.
+    flushSync(() => { setSuspended(true); setMemberships(undefined); setInbox(undefined); setFailed(false) })
+  }, [])
+  useEffect(() => {
+    const resume = (event: { persisted: boolean }) => {
+      if (!event.persisted) return
+      // Re-read preferences and remount every private observer behind a fresh boot.
+      flushSync(() => {
+        setMemberships(undefined); setInbox(undefined); setFailed(false)
+        setOrg(authStorage.org.read()); setBoot(value => value + 1); setSuspended(false)
+      })
+    }
+    window.addEventListener('pagehide', dropPrivateView); window.addEventListener('pageshow', resume)
+    return () => { window.removeEventListener('pagehide', dropPrivateView); window.removeEventListener('pageshow', resume) }
+  }, [dropPrivateView])
   const logoutBusy = useRef(false), drafts = useRef(new Set<symbol>()), watcher = useRef<ReturnType<typeof browserBuild> | null>(null)
   const reportDirty = useCallback((owner: symbol, dirty: boolean) => { if (dirty) drafts.current.add(owner); else drafts.current.delete(owner); watcher.current?.flush() }, [])
   useEffect(() => { const current = browserBuild(transport, () => drafts.current.size > 0); watcher.current = current; return () => { current.stop(); watcher.current = null } }, [transport])
@@ -151,15 +169,20 @@ export function AuthShell({ manifest, i18n, children, fetch: transport = globalT
     logoutBusy.current = true
     try { await request('/auth/logout', {}) }
     catch (error) { if (!(error instanceof ApiFailure && error.status === 401)) { setFailed(true); logoutBusy.current = false; return } }
-    authStorage.org.write(); authStorage.returnTo.write(); location.replace('/sign-in')
+    dropPrivateView(); authStorage.org.write(); authStorage.returnTo.write(); location.replace('/sign-in')
   }
   const auth = { request, i18n, signOut }
   const sessionState = useCallback((kind: SessionState['kind']) => {
-    if (kind === 'unauthenticated') { authStorage.returnTo.write(authReturnTo(location.pathname + location.search, manifest.routes)); void go('/sign-in') }
+    if (kind === 'unauthenticated') {
+      authStorage.returnTo.write(authReturnTo(location.pathname + location.search, manifest.routes))
+      // A restored document has no mounted private router to complete navigation.
+      if (boot) location.replace('/sign-in')
+      else void go('/sign-in')
+    }
     if (kind === 'removed') { authStorage.org.write(); setOrg(null); setMemberships(undefined); setRetry(value => value + 1) }
-  }, [go, manifest.routes])
+  }, [go, manifest.routes, boot])
   useEffect(() => {
-    if (initial.path === '/sign-in' || initial.path === '/invitation' || org && initial.path !== '/auth/complete') return
+    if (suspended || initial.path === '/sign-in' || initial.path === '/invitation' || org && initial.path !== '/auth/complete') return
     let active = true
     void (async () => {
       try {
@@ -180,7 +203,8 @@ export function AuthShell({ manifest, i18n, children, fetch: transport = globalT
       } catch (error) { if (active) { if (error instanceof ApiFailure && error.status === 401) sessionState('unauthenticated'); else setFailed(true) } }
     })()
     return () => { active = false }
-  }, [request, initial.path, org, retry, go, manifest.routes, sessionState])
+  }, [request, initial.path, org, retry, go, manifest.routes, sessionState, suspended, boot])
+  if (suspended) return status(i18n, 'loading')
   let content: ReactNode
   if (initial.path === '/sign-in') content = h(SignIn, { auth, returnTo: authReturnTo(authStorage.returnTo.read(), manifest.routes) })
   else if (initial.path === '/invitation') content = h(InvitationFlow, { key: initial.key, auth, initial, go, select })
@@ -189,5 +213,5 @@ export function AuthShell({ manifest, i18n, children, fetch: transport = globalT
   else if (memberships?.length) content = h('div', null, status(i18n, 'chooseOrg'), ...memberships.map(value => h('button', { key: value.organization_id, type: 'button', onClick: () => select(value.organization_id) }, value.organization_name ?? value.organization_id)))
   else if (inbox) content = h('div', null, status(i18n, inbox.length ? 'invitations' : 'noInvitations'), ...inbox.map(value => h('button', { key: value.id, type: 'button', onClick: () => { void go(authReturnTo(value.navigation_target ?? '/', manifest.routes)) } }, i18n.t('sdk:auth.openInvitation'))))
   else content = status(i18n, 'loading')
-  return h(AuthDirtyContext.Provider, { value: reportDirty }, h('div', null, h(LanguageSwitcher, { i18n }), h(Logout, { auth }), failed && h('div', null, status(i18n, 'failed'), h('button', { type: 'button', onClick: () => { setFailed(false); setRetry(value => value + 1) } }, i18n.t('sdk:retry'))), content))
+  return h(AuthDirtyContext.Provider, { value: reportDirty }, h('div', { key: boot }, h(LanguageSwitcher, { i18n }), h(Logout, { auth }), failed && h('div', null, status(i18n, 'failed'), h('button', { type: 'button', onClick: () => { setFailed(false); setRetry(value => value + 1) } }, i18n.t('sdk:retry'))), content))
 }

@@ -1,11 +1,11 @@
 declare const history: { state: unknown; pushState(state: unknown, unused: string, url: string): void; replaceState(state: unknown, unused: string, url: string): void }
 declare const location: { pathname: string; search: string }
-declare const window: { location: typeof location; localStorage: Storage; sessionStorage: Storage }
+declare const window: { location: typeof location; localStorage: Storage; sessionStorage: Storage; dispatchEvent(event: Event): void }
 // @vitest-environment jsdom
-import { createElement as h, StrictMode } from 'react'
+import { createElement as h, StrictMode, type ReactNode } from 'react'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, afterEach, expect, test, vi } from 'vitest'
-import { AuthShell, authReturnTo, createAuthI18n, Session } from '../src/react'
+import { AuthShell, authReturnTo, createAuthI18n, Session, useRuntime } from '../src/react'
 import type { Manifest } from '../src/check'
 import type { ClientRequestInit } from '../src/client'
 import { grants } from './grants'
@@ -17,10 +17,10 @@ const invitation = { id: 'invite-A', state: 'pending', account_match: null }
 const navigate = vi.fn(async (path: string) => { history.pushState(null, '', path) })
 const originalLocation = window.location
 const replace = vi.fn()
-function view(fetch: (path: string, init: ClientRequestInit) => Promise<Response>, strict = false) {
+function view(fetch: (path: string, init: ClientRequestInit) => Promise<Response>, strict = false, children: ReactNode = h('p', null, 'APP')) {
   const i18n = createAuthI18n({ languages: ['en', 'cs'], catalogs: {} })
   const transport = (path: string, init: ClientRequestInit) => path === '/build.json' ? Promise.resolve(json({ sha: 'unbuilt' })) : fetch(path, init)
-  const content = h(AuthShell, { manifest, i18n, fetch: transport, navigate }, h('p', null, 'APP'))
+  const content = h(AuthShell, { manifest, i18n, fetch: transport, navigate }, children)
   return { i18n, element: strict ? h(StrictMode, null, content) : content }
 }
 function storage() { const values = new Map<string, string>(); return { getItem: (key: string) => values.get(key) ?? null, setItem: vi.fn((key: string, value: string) => { values.set(key, value) }), removeItem: (key: string) => { values.delete(key) }, clear: () => values.clear(), key: (index: number) => [...values.keys()][index] ?? null, get length() { return values.size } } }
@@ -121,4 +121,69 @@ test.each([204, 401])('sign-out %s is JSON POST, clears org, replaces location',
 test('Session optional onState observes existing states', async () => {
   const onState = vi.fn(); render(h(Session, { orgId: 'one', t: key => key, onState, fetch: async () => json({}, 401) }))
   await waitFor(() => expect(onState).toHaveBeenCalledWith('unauthenticated')); expect(onState).toHaveBeenCalledWith('loading')
+})
+
+function transition(type: 'pagehide' | 'pageshow', persisted: boolean) {
+  window.dispatchEvent(Object.assign(new Event(type), { persisted }))
+}
+test.each([false, true])('pagehide synchronously removes the private subtree before history can save it (persisted: %s)', async persisted => {
+  localStorage.setItem('workbase.org', 'one')
+  render(view(appFetch(complete)).element); await screen.findByText('APP')
+  act(() => {
+    transition('pagehide', persisted)
+    expect(screen.queryByText('APP')).toBeNull()
+    expect(screen.getByRole('status')).toBe(screen.getByText('Loading…'))
+  })
+})
+test.each([false, true])('persisted pageshow boots afresh before rendering the current account (signed out: %s)', async signedOut => {
+  vi.stubGlobal('location', { get pathname() { return originalLocation.pathname }, get search() { return originalLocation.search }, replace })
+  localStorage.setItem('workbase.org', 'one')
+  let restored = false, releaseMe!: (response: Response) => void, releaseCaps!: (response: Response) => void
+  const nextMe = new Promise<Response>(resolve => { releaseMe = resolve }), nextCaps = new Promise<Response>(resolve => { releaseCaps = resolve })
+  const fetch = vi.fn(async (path: string) => {
+    if (path === '/me') return restored ? nextMe : json(me)
+    if (path.endsWith('/capabilities')) return restored ? nextCaps : json(grants({}))
+    return json(complete)
+  })
+  function Account() { return h('p', null, 'Account ' + useRuntime().identity.actorId) }
+  render(view(fetch, false, h(Account)).element); await screen.findByText('Account A')
+  restored = true
+  // Exercise persisted pageshow directly as well as the pagehide path above.
+  act(() => {
+    transition('pageshow', true)
+    expect(screen.queryByText('Account A')).toBeNull()
+    expect(screen.getByRole('status')).toBe(screen.getByText('Loading…'))
+  })
+  await waitFor(() => expect(fetch.mock.calls.filter(([path]) => path === '/me')).toHaveLength(2))
+  await act(async () => { releaseMe(signedOut ? json({}, 401) : json({ ...me, actor: { id: 'B' } })) })
+  expect(screen.queryByText('Account A')).toBeNull()
+  expect(screen.queryByText('Account B')).toBeNull()
+  if (signedOut) await waitFor(() => expect(replace).toHaveBeenCalledWith('/sign-in'))
+  else {
+    await act(async () => { releaseCaps(json(grants({}))) })
+    await screen.findByText('Account B')
+    expect(navigate).not.toHaveBeenCalled()
+    expect(replace).not.toHaveBeenCalled()
+  }
+})
+test.each([204, 401])('sign-out %s removes private DOM before replacing the document', async code => {
+  vi.stubGlobal('location', { get pathname() { return originalLocation.pathname }, get search() { return originalLocation.search }, replace })
+  localStorage.setItem('workbase.org', 'one')
+  const fetch = appFetch(complete)
+  render(view(async (path, init) => path === '/auth/logout' ? code === 204 ? new Response(null, { status: code }) : json({}, code) : fetch(path, init)).element)
+  await screen.findByText('APP')
+  let privateAtNavigation = true
+  replace.mockImplementation(() => { privateAtNavigation = !!screen.queryByText('APP') })
+  fireEvent.click(screen.getByRole('button', { name: 'Sign out' }))
+  await waitFor(() => expect(replace).toHaveBeenCalledWith('/sign-in'))
+  expect(privateAtNavigation).toBe(false)
+  expect(screen.queryByText('APP')).toBeNull()
+})
+test('ordinary pageshow leaves the current boot intact', async () => {
+  localStorage.setItem('workbase.org', 'one')
+  const fetch = appFetch(complete)
+  render(view(fetch).element); await screen.findByText('APP')
+  act(() => transition('pageshow', false))
+  expect(screen.getByText('APP')).toBeTruthy()
+  expect(fetch.mock.calls.filter(([path]) => path === '/me')).toHaveLength(1)
 })
