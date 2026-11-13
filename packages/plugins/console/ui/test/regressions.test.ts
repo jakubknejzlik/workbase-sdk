@@ -1,5 +1,5 @@
-import { mkdirSync, rmSync, symlinkSync } from 'node:fs'
-import { dirname, join, relative, resolve } from 'node:path'
+import { rmSync } from 'node:fs'
+import { join, relative, resolve } from 'node:path'
 import ts from 'typescript'
 import { afterEach, expect, test } from 'vitest'
 import { checkSources, normalise, canonicalJSON } from '../src/check'
@@ -79,12 +79,7 @@ for (const key of ['constructor', 'prototype']) {
 }
 
 test('component-real-packages are checked and stubbed', async () => {
-  const { root, put } = setup()
-  for (const name of ['react', '@tanstack/react-router']) {
-    const target = join(root, 'node_modules', name)
-    mkdirSync(dirname(target), { recursive: true })
-    symlinkSync(resolve('packages/frontend-console/node_modules', name), target, 'dir')
-  }
+  const { root, put } = setup() // fixture links real react + @tanstack/react-router
   put('ui/-components/Widget.tsx', `import React from 'react'; import {Link} from '@tanstack/react-router'; import {page} from '${sdk}'; const browser=window; throw new Error('COMPONENT_EXECUTED'); export default function Widget(){return <Link to="/">{page({title:'sample.title'}).title}</Link>}`)
   put('ui/index.ts', `import {customPage} from '${sdk}'; import Widget from './-components/Widget'; export default customPage({title:'sample.title',uses:[],component:Widget})`)
   expect((await extractManifest(root)).routes[0].kind).toBe('customPage')
