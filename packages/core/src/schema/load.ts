@@ -1,8 +1,8 @@
 /** Build-time source validation only: keep Node and the TS compiler out of runtime imports. */
 import { readFileSync, realpathSync, readdirSync } from 'node:fs'
-import { basename, dirname, extname, resolve } from 'node:path'
+import { dirname, resolve } from 'node:path'
 import { pathToFileURL, fileURLToPath, URL } from 'node:url'
-import { execFileSync } from 'node:child_process'
+import * as nodeModule from 'node:module'
 import ts from 'typescript'
 import { accountLink, DeclarationError, defineConfig, defineEntity, isSchemaConfig } from '../schema'
 import type { InstanceConfig } from '../config'
@@ -64,15 +64,18 @@ function imports(file: ts.SourceFile, statements: readonly ts.Statement[] = file
   }
   return bindings
 }
-/** Resolve without loading user code, using the current host's import resolver. */
+/** Resolve SDK imports in-process without loading user code or replaying preloads. */
 function resolved(module: string, file: string): string {
   const host = globalThis as typeof globalThis & { Bun?: { resolveSync(module: string, parent: string): string } }
   if (host.Bun) return realpathSync(host.Bun.resolveSync(module, dirname(file)))
-  // Node only honors import.meta.resolve's parent argument with this flag. Preserve
-  // the runner's hooks (notably tsx); the child resolves but never imports the target.
-  const url = execFileSync(process.execPath, [...process.execArgv, '--experimental-import-meta-resolve', '--input-type=module', '--eval',
-    'console.log(import.meta.resolve(process.argv[1], process.argv[2]))', module, pathToFileURL(file).href], { encoding: 'utf8' }).trim()
-  return realpathSync(fileURLToPath(url))
+  // Supply the consumer's parent URL without Node's experimental parent-argument
+  // flag. Keep the host's ESM conditions and runner hooks (including tsx).
+  // The hook exists only for this synchronous resolution; no module is loaded.
+  const hook = nodeModule.registerHooks({ resolve(specifier, context, nextResolve) {
+    return nextResolve(specifier, { ...context, parentURL: pathToFileURL(file).href })
+  } })
+  try { return realpathSync(fileURLToPath(import.meta.resolve(module))) }
+  finally { hook.deregister() }
 }
 function sdkBinding(binding: Binding | undefined, file: string, name: string) {
   if (binding?.imported !== name) return false
@@ -80,7 +83,22 @@ function sdkBinding(binding: Binding | undefined, file: string, name: string) {
   const allowed = ['@workbasehq/core/schema']
   if (!allowed.includes(binding.module) && !binding.module.startsWith('.') && !binding.module.startsWith('/')) return false
   try { return resolved(binding.module, file) === realpathSync(fileURLToPath(new URL(target, import.meta.url))) }
-  catch { return false }
+  catch { return fail(binding.node, `Cannot resolve SDK import: ${binding.module}`) }
+}
+/** Entity resolution is deliberately independent of host extension/index precedence. */
+function entityPath(binding: Binding, entry: string, name: string): string {
+  if (![`./schema/${name}`, `./schema/${name}.ts`].includes(binding.module) || /[/\\]/.test(name)) fail(binding.node, 'Entity import must match schema/<entity>.ts')
+  try {
+    const schema = realpathSync(resolve(dirname(entry), 'schema'))
+    // Reject every competing sibling, including an extensionless file or directory.
+    if (readdirSync(schema).some(candidate => candidate === name || (candidate.startsWith(name + '.') && candidate !== `${name}.ts`))) fail(binding.node, 'Ambiguous entity import: competing schema candidate')
+    const path = realpathSync(resolve(schema, `${name}.ts`))
+    if (dirname(path) !== schema) fail(binding.node, 'Resolved entity import must match schema/<entity>.ts inside the schema directory')
+    return path
+  } catch (error) {
+    if (error instanceof SourceError) throw error
+    return fail(binding.node, 'Cannot resolve entity import')
+  }
 }
 /** Only these statements and imports can reach module evaluation. */
 function moduleBoundary(file: ts.SourceFile, declaration: ts.Expression, helpers: string[], entityImports = new Set<string>()) {
@@ -89,6 +107,8 @@ function moduleBoundary(file: ts.SourceFile, declaration: ts.Expression, helpers
       const clause = statement.importClause
       if (!clause || !ts.isStringLiteral(statement.moduleSpecifier) || statement.attributes) fail(statement, 'Expected a direct named SDK or entity import')
       if (clause.isTypeOnly) continue
+      if (!clause.name && clause.namedBindings && ts.isNamedImports(clause.namedBindings)
+        && clause.namedBindings.elements.length > 0 && clause.namedBindings.elements.every(item => item.isTypeOnly)) continue
       if (clause.namedBindings && ts.isNamespaceImport(clause.namedBindings)) fail(statement, 'Expected direct named imports')
       const names = [...imports(file, [statement]).entries()]
       if (!names.length) fail(statement, 'Expected a direct named SDK or entity import')
@@ -202,13 +222,7 @@ export async function loadConfig(file: string): Promise<{ config: InstanceConfig
     const binding = bindings.get(ref.text)
     if (!binding?.module.startsWith('./schema/')) fail(ref, 'Entity must be imported from schema/<entity>.ts')
     if (![`./schema/${name}`, `./schema/${name}.ts`].includes(binding.module)) fail(ref, 'Entity import must match schema/<entity>.ts')
-    if (!extname(binding.module)) {
-      const base = resolve(dirname(entry), binding.module)
-      if (readdirSync(dirname(base)).filter(candidate => candidate.startsWith(basename(base) + '.')).length > 1) fail(binding.node, 'Ambiguous extensionless entity import')
-    }
-    let path: string
-    try { path = resolved(binding.module, entry) } catch { fail(binding.node, 'Cannot resolve entity import') }
-    if (path !== resolve(dirname(entry), `schema/${name}.ts`)) fail(binding.node, 'Resolved entity import must match schema/<entity>.ts')
+    const path = entityPath(binding, entry, name)
     const entitySource = read(path)
     const entityBindings = imports(entitySource)
     const expression = exported(entitySource, binding.imported)
