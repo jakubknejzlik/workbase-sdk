@@ -1,9 +1,10 @@
 /** Build-time source validation only: keep Node and the TS compiler out of runtime imports. */
-import { readFileSync, realpathSync } from 'node:fs'
-import { dirname, resolve } from 'node:path'
+import { readFileSync, realpathSync, readdirSync } from 'node:fs'
+import { basename, dirname, extname, resolve } from 'node:path'
 import { pathToFileURL, fileURLToPath, URL } from 'node:url'
+import { execFileSync } from 'node:child_process'
 import ts from 'typescript'
-import { accountLink, DeclarationError, defineEntity, isSchemaConfig } from '../schema'
+import { accountLink, DeclarationError, defineConfig, defineEntity, isSchemaConfig } from '../schema'
 import type { InstanceConfig } from '../config'
 
 export interface SourceLocation { file: string; line: number; column: number }
@@ -34,7 +35,9 @@ function properties(node: ts.ObjectLiteralExpression) {
   const entries = new Map<string, ts.ObjectLiteralElementLike>()
   for (const property of node.properties) {
     if (!property.name) fail(property, 'Spread is outside the literal boundary')
-    entries.set(key(property.name), property)
+    const name = key(property.name)
+    if (entries.has(name)) fail(property, `Duplicate literal property: ${name}`)
+    entries.set(name, property)
   }
   return entries
 }
@@ -44,23 +47,63 @@ function value(node: ts.ObjectLiteralElementLike | undefined): ts.Expression | u
   if (ts.isShorthandPropertyAssignment(node)) return node.name
   return fail(node, 'Expected a property assignment')
 }
-interface Binding { module: string; imported: string }
-function imports(file: ts.SourceFile) {
+interface Binding { module: string; imported: string; node: ts.StringLiteral }
+function imports(file: ts.SourceFile, statements: readonly ts.Statement[] = file.statements) {
   const bindings = new Map<string, Binding>()
-  for (const statement of file.statements) {
+  const add = (name: string, binding: Binding) => {
+    if (bindings.has(name)) fail(binding.node, `Duplicate import binding: ${name}`)
+    bindings.set(name, binding)
+  }
+  for (const statement of statements) {
     if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier) || statement.importClause?.isTypeOnly) continue
     const clause = statement.importClause
-    if (clause?.name) bindings.set(clause.name.text, { module: statement.moduleSpecifier.text, imported: 'default' })
+    if (clause?.name) add(clause.name.text, { node: statement.moduleSpecifier, module: statement.moduleSpecifier.text, imported: 'default' })
     if (clause?.namedBindings && ts.isNamedImports(clause.namedBindings)) for (const item of clause.namedBindings.elements) {
-      if (!item.isTypeOnly) bindings.set(item.name.text, { module: statement.moduleSpecifier.text, imported: (item.propertyName ?? item.name).text })
+      if (!item.isTypeOnly) add(item.name.text, { node: statement.moduleSpecifier, module: statement.moduleSpecifier.text, imported: (item.propertyName ?? item.name).text })
     }
   }
   return bindings
 }
+/** Resolve without loading user code, using the current host's import resolver. */
+function resolved(module: string, file: string): string {
+  const host = globalThis as typeof globalThis & { Bun?: { resolveSync(module: string, parent: string): string } }
+  if (host.Bun) return realpathSync(host.Bun.resolveSync(module, dirname(file)))
+  // Node only honors import.meta.resolve's parent argument with this flag. Preserve
+  // the runner's hooks (notably tsx); the child resolves but never imports the target.
+  const url = execFileSync(process.execPath, [...process.execArgv, '--experimental-import-meta-resolve', '--input-type=module', '--eval',
+    'console.log(import.meta.resolve(process.argv[1], process.argv[2]))', module, pathToFileURL(file).href], { encoding: 'utf8' }).trim()
+  return realpathSync(fileURLToPath(url))
+}
 function sdkBinding(binding: Binding | undefined, file: string, name: string) {
   if (binding?.imported !== name) return false
-  return binding.module === '@workbasehq/core/schema' || (binding.module.startsWith('.') || binding.module.startsWith('/'))
-    && resolve(dirname(file), binding.module) === fileURLToPath(new URL('../schema.ts', import.meta.url))
+  const target = '../schema.ts'
+  const allowed = ['@workbasehq/core/schema']
+  if (!allowed.includes(binding.module) && !binding.module.startsWith('.') && !binding.module.startsWith('/')) return false
+  try { return resolved(binding.module, file) === realpathSync(fileURLToPath(new URL(target, import.meta.url))) }
+  catch { return false }
+}
+/** Only these statements and imports can reach module evaluation. */
+function moduleBoundary(file: ts.SourceFile, declaration: ts.Expression, helpers: string[], entityImports = new Set<string>()) {
+  for (const statement of file.statements) {
+    if (ts.isImportDeclaration(statement)) {
+      const clause = statement.importClause
+      if (!clause || !ts.isStringLiteral(statement.moduleSpecifier) || statement.attributes) fail(statement, 'Expected a direct named SDK or entity import')
+      if (clause.isTypeOnly) continue
+      if (clause.namedBindings && ts.isNamespaceImport(clause.namedBindings)) fail(statement, 'Expected direct named imports')
+      const names = [...imports(file, [statement]).entries()]
+      if (!names.length) fail(statement, 'Expected a direct named SDK or entity import')
+      for (const [local, binding] of names) {
+        if (entityImports.has(local)) continue
+        if (!helpers.some(name => sdkBinding(binding, file.fileName, name))) fail(statement, 'Expected a direct named SDK or entity import')
+      }
+      continue
+    }
+    if (ts.isExportAssignment(statement) && !statement.isExportEquals && unwrap(statement.expression) === declaration) continue
+    if (ts.isVariableStatement(statement) && statement.modifiers?.length === 1 && statement.modifiers[0].kind === ts.SyntaxKind.ExportKeyword
+      && statement.declarationList.flags === ts.NodeFlags.Const && statement.declarationList.declarations.length === 1
+      && statement.declarationList.declarations[0].initializer && unwrap(statement.declarationList.declarations[0].initializer!) === declaration) continue
+    fail(statement, 'Expected only imports and one direct declaration export')
+  }
 }
 function exported(file: ts.SourceFile, name: string): ts.Expression | undefined {
   if (name === 'default') {
@@ -73,16 +116,15 @@ function exported(file: ts.SourceFile, name: string): ts.Expression | undefined 
   }
 }
 function index(node: ts.Expression, path: string, sources: SourceMap) {
+  node = unwrap(node)
   sources[path] = location(node)
   if (ts.isObjectLiteralExpression(node)) for (const [name, property] of properties(node)) {
+    const child = [path, name].filter(Boolean).join('.')
     const expression = value(property)
-    sources[[path, name].filter(Boolean).join('.')] = location(property)
-    if (expression && ts.isObjectLiteralExpression(expression)) {
-      index(expression, [path, name].filter(Boolean).join('.'), sources)
-      sources[[path, name].filter(Boolean).join('.')] = location(property)
-    }
+    if (expression) index(expression, child, sources)
+    sources[child] = location(property)
   }
-  if (ts.isArrayLiteralExpression(node)) node.elements.forEach((element, i) => { sources[`${path}.${i}`] = location(element) })
+  if (ts.isArrayLiteralExpression(node)) node.elements.forEach((element, i) => index(element, `${path}.${i}`, sources))
 }
 function nearest(sources: SourceMap, path: string): SourceLocation {
   while (!sources[path] && path) path = path.split('.').slice(0, -1).join('.')
@@ -90,7 +132,7 @@ function nearest(sources: SourceMap, path: string): SourceLocation {
 }
 function remap(error: unknown, sources: SourceMap, prefix = ''): never {
   if (error instanceof SourceError) throw error
-  if (error instanceof DeclarationError) throw new SourceError(nearest(sources, [prefix, ...error.path].filter(Boolean).join('.')), error.message)
+  if (error instanceof DeclarationError) throw new SourceError(nearest(sources, [prefix, ...error.path].filter(part => part !== '').join('.')), error.message)
   throw new SourceError(nearest(sources, prefix), error instanceof Error ? error.message : String(error))
 }
 /** Evaluate only literal syntax already accepted by the boundary, never JavaScript code. */
@@ -126,7 +168,7 @@ function literal(node: ts.Expression, bindings: Map<string, Binding>, path: stri
  * Validate the new-era source before importing it, then return the one kernel schema.
  * config.ts must default-export defineConfig({...}); its entity map explicitly imports
  * default or named defineEntity({...}) exports from schema/<entity>.ts.
- * Legacy defineInstance modules remain importable with their existing normalization.
+ * Legacy defineInstance remains available through its existing runtime entry.
  * Use the host TS runner (Bun or tsx), as with the existing infra config loader.
  */
 export async function loadConfig(file: string): Promise<{ config: InstanceConfig; sources: SourceMap }> {
@@ -135,41 +177,56 @@ export async function loadConfig(file: string): Promise<{ config: InstanceConfig
   const sources: SourceMap = { '': location(source) }
   const bindings = imports(source)
   const declaration = exported(source, 'default')
-  const newEra = declaration && ts.isCallExpression(declaration) && ts.isIdentifier(declaration.expression)
-    && sdkBinding(bindings.get(declaration.expression.text), entry, 'defineConfig')
-  if (newEra) {
-    const arg = declaration.arguments[0]
-    if (declaration.arguments.length !== 1 || !arg || !ts.isObjectLiteralExpression(unwrap(arg))) fail(declaration, 'defineConfig requires a literal object')
-    const config = unwrap(arg) as ts.ObjectLiteralExpression
-    index(config, '', sources)
-    const props = properties(config)
-    const entityMap = value(props.get('entities'))
-    if (!entityMap || !ts.isObjectLiteralExpression(entityMap)) fail(entityMap ?? config, 'entities must explicitly import schema/<entity>.ts declarations')
-    for (const [name, property] of properties(entityMap)) {
-      if (name === 'users') fail(property, 'users is SDK-owned; use accountLink()')
-      const ref = value(property)
-      if (!ref || !ts.isIdentifier(ref)) fail(ref ?? property, 'Entity must be an explicit schema import')
-      const binding = bindings.get(ref.text)
-      if (!binding?.module.startsWith('./schema/')) fail(ref, 'Entity must be imported from schema/<entity>.ts')
-      const path = resolve(dirname(entry), binding.module.replace(/\.ts$/, '') + '.ts')
-      if (path !== resolve(dirname(entry), `schema/${name}.ts`)) fail(ref, 'Entity import must match schema/<entity>.ts')
-      const entitySource = read(path)
-      const expression = exported(entitySource, binding.imported)
-      if (!expression || !ts.isCallExpression(expression) || !ts.isIdentifier(expression.expression)
-        || !sdkBinding(imports(entitySource).get(expression.expression.text), path, 'defineEntity')) fail(entitySource, 'Expected an exported defineEntity({...}) declaration')
-      const entity = expression.arguments[0]
-      if (expression.arguments.length !== 1 || !entity || !ts.isObjectLiteralExpression(unwrap(entity))) fail(expression, 'defineEntity requires a literal object')
-      const prefix = `entities.${name}`
-      // Check the boundary before indexing: indexing must never hide a spread/accessor.
-      const data = literal(entity, imports(entitySource))
-      index(unwrap(entity), prefix, sources)
-      try { defineEntity(data as Parameters<typeof defineEntity>[0]) } catch (error) { remap(error, sources, prefix) }
-    }
+  if (!declaration || !ts.isCallExpression(declaration) || !ts.isIdentifier(declaration.expression)) fail(source, 'Config must default-export a direct SDK defineConfig({...}) call')
+  if (!sdkBinding(bindings.get(declaration.expression.text), entry, 'defineConfig')) fail(declaration, 'Expected a direct named SDK defineConfig import')
+  const arg = declaration.arguments[0]
+  if (declaration.arguments.length !== 1 || !arg || !ts.isObjectLiteralExpression(unwrap(arg))) fail(declaration, 'defineConfig requires a literal object')
+  const config = unwrap(arg) as ts.ObjectLiteralExpression
+  index(config, '', sources)
+  const props = properties(config)
+  const entityMap = value(props.get('entities'))
+  if (!entityMap || !ts.isObjectLiteralExpression(entityMap)) fail(entityMap ?? config, 'entities must explicitly import schema/<entity>.ts declarations')
+  const entityImports = new Set<string>()
+  for (const property of properties(entityMap).values()) {
+    const ref = value(property)
+    if (!ref || !ts.isIdentifier(ref)) fail(ref ?? property, 'Entity must be an explicit schema import')
+    entityImports.add(ref.text)
   }
+  moduleBoundary(source, declaration, ['defineConfig'], entityImports)
+  const data: Record<string, unknown> = Object.create(null)
+  for (const [name, property] of props) if (name !== 'entities') data[name] = literal(value(property)!, new Map())
+  const entities: Record<string, ReturnType<typeof defineEntity>> = Object.create(null)
+  for (const [name, property] of properties(entityMap)) {
+    if (name === 'users') fail(property, 'users is SDK-owned; use accountLink()')
+    const ref = value(property) as ts.Identifier
+    const binding = bindings.get(ref.text)
+    if (!binding?.module.startsWith('./schema/')) fail(ref, 'Entity must be imported from schema/<entity>.ts')
+    if (![`./schema/${name}`, `./schema/${name}.ts`].includes(binding.module)) fail(ref, 'Entity import must match schema/<entity>.ts')
+    if (!extname(binding.module)) {
+      const base = resolve(dirname(entry), binding.module)
+      if (readdirSync(dirname(base)).filter(candidate => candidate.startsWith(basename(base) + '.')).length > 1) fail(binding.node, 'Ambiguous extensionless entity import')
+    }
+    let path: string
+    try { path = resolved(binding.module, entry) } catch { fail(binding.node, 'Cannot resolve entity import') }
+    if (path !== resolve(dirname(entry), `schema/${name}.ts`)) fail(binding.node, 'Resolved entity import must match schema/<entity>.ts')
+    const entitySource = read(path)
+    const entityBindings = imports(entitySource)
+    const expression = exported(entitySource, binding.imported)
+    if (!expression || !ts.isCallExpression(expression) || !ts.isIdentifier(expression.expression)
+      || !sdkBinding(entityBindings.get(expression.expression.text), path, 'defineEntity')) fail(entitySource, 'Expected an exported defineEntity({...}) declaration')
+    const entity = expression.arguments[0]
+    if (expression.arguments.length !== 1 || !entity || !ts.isObjectLiteralExpression(unwrap(entity))) fail(expression, 'defineEntity requires a literal object')
+    const prefix = `entities.${name}`
+    const entityData = literal(entity, entityBindings)
+    moduleBoundary(entitySource, expression, ['defineEntity', 'accountLink'])
+    index(unwrap(entity), prefix, sources)
+    try { entities[name] = defineEntity(entityData as Parameters<typeof defineEntity>[0]) } catch (error) { remap(error, sources, prefix) }
+  }
+  // Run the same normalization before executing any consumer module.
+  try { defineConfig({ ...data, entities } as Parameters<typeof defineConfig>[0]) } catch (error) { remap(error, sources) }
   try {
     const config: unknown = (await import(pathToFileURL(entry).href)).default
-    if (newEra && !isSchemaConfig(config)) fail(source, 'Expected a defineConfig result')
-    if (!newEra && isSchemaConfig(config)) fail(source, 'New-era config must default-export defineConfig({...}) with explicit schema imports')
+    if (!isSchemaConfig(config)) fail(source, 'Expected a branded defineConfig result')
     if (!config || typeof config !== 'object' || !('entities' in config) || !('roles' in config)) fail(source, 'Expected an instance config default export')
     return { config: config as InstanceConfig, sources }
   } catch (error) { return remap(error, sources) }

@@ -105,10 +105,25 @@ export function defineConfig(input: ConfigInput): SchemaConfig {
   for (const plugin of input.plugins ?? []) {
     if (Object.keys(plugin.model?.entities ?? {}).length || Object.keys(plugin.entities ?? {}).length || plugin.model?.account) throw new DeclarationError(['plugins'], `Plugin ${plugin.name}: new-era domain entities must be imported explicitly`)
   }
-  const config = normalizeInstance({ ...input, roles, languages,
-    entities: { ...domain, users: accountEntity(roles) }, account: { entity: 'users' },
-    permissions: input.permissions ?? {},
-  }, true) as SchemaConfig
+  let config: SchemaConfig
+  try {
+    config = normalizeInstance({ ...input, roles, languages,
+      entities: { ...domain, users: accountEntity(roles) }, account: { entity: 'users' },
+      permissions: input.permissions ?? {},
+    }, true, (error, path) => { throw new DeclarationError(path, error instanceof Error ? error.message : String(error)) }) as SchemaConfig
+  } catch (error) {
+    if (error instanceof DeclarationError) throw error
+    if (error instanceof z.ZodError) {
+      const issue = error.issues[0]
+      throw new DeclarationError(issue.path.map(key => typeof key === 'symbol' ? String(key) : key), issue.message)
+    }
+    // Kernel expression/display diagnostics already identify their owning entity.
+    if (error instanceof Error && 'errors' in error && Array.isArray(error.errors)) {
+      const issue = error.errors[0] as { entity?: string; field?: string }
+      if (issue?.entity) throw new DeclarationError(['entities', issue.entity, ...(issue.field && domain[issue.entity]?.fields[issue.field] ? ['fields', issue.field, 'computed'] : ['displayField'])], error.message)
+    }
+    throw error
+  }
   configs.add(config)
   return config
 }

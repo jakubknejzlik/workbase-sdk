@@ -61,6 +61,12 @@ adds no translation runtime. Entity, field and enum labels belong in
 Each entity map entry must explicitly import a default or named `defineEntity`
 export from its matching `./schema/<entity>.ts` file. The config default export
 is a direct `defineConfig({...})` call. Named SDK imports may use local aliases.
+The loader resolves imports with its runtime host, validates that exact file,
+and rejects ambiguous extensionless imports. Use explicit `.ts` specifiers.
+Only direct SDK/entity imports and the declaration export may execute; side-effect
+imports, helper wrappers, extra exports and top-level code are rejected before
+evaluation. Config options are literal data, except for imported entity identifiers.
+The returned default export must retain the SDK's defineConfig identity brand.
 The entity argument is an object literal with object/array/scalar literals inside
 it. Spreads, identifier values, shorthand properties, methods, accessors, computed
 keys, duplicate properties and arbitrary calls are rejected, including inside
@@ -89,6 +95,6 @@ Runtime declarations validate values on their own; source syntax checking requir
 `loadConfig`, which should run before a build executes the config normally.
 
 The existing `defineInstance` entry retains inline/shorthand declarations and its
-legacy role/default-grant normalization. `loadConfig` can also load those legacy
-modules. No access compiler, lock/planner, migration changes or UI are introduced
+legacy role/default-grant normalization. Import those modules through the legacy
+entry; `loadConfig` accepts only canonical `defineConfig` modules. No access compiler, lock/planner, migration changes or UI are introduced
 by the declaration entry.

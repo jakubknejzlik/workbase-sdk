@@ -1,4 +1,4 @@
-import { mkdtempSync, realpathSync, symlinkSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
+import { mkdtempSync, realpathSync, symlinkSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { spawnSync } from 'node:child_process'
@@ -138,10 +138,134 @@ it('loads legacy inline config through its unchanged entry', () => {
   const { root, run } = consumer()
   writeFileSync(join(root, 'config.ts'), `import { defineInstance } from ${JSON.stringify(resolve('packages/core/src/config.ts'))}
 export default defineInstance({ id: 'sample', revision: 1, roles: ['owner'], entities: { worker: { fields: { name: { type: 'text', required: true } } } }, permissions: {} })`)
+  writeFileSync(join(root, 'run.ts'), `import config from './config.ts'; console.log(JSON.stringify({ config }))`)
   const result = run()
   expect(result.status).toBe(0)
   const { config } = JSON.parse(result.stdout)
   expect(config.roles).toEqual(['owner', 'member'])
   expect(config.entities.worker.fields.name).toEqual({ type: 'text', required: true })
   expect(config).not.toHaveProperty('languages')
+})
+
+// Review regressions: each sentinel must remain unexecuted when preflight fails.
+const executed = `(() => { console.log('ENTITY_CALL_EXECUTED'); return { type: 'text', required: true } })()`
+it('rejects ambiguous extensionless imports before Bun executes a shadow module', () => {
+  const { root, run } = consumer()
+  writeFileSync(join(root, 'schema/worker.tsx'), readFileSync(join(root, 'schema/worker.ts'), 'utf8').replace("{ type: 'text', required: true }", executed))
+  const result = run()
+  expect(result.status).toBe(1)
+  expect(result.stderr).toContain('config.ts:2:')
+  expect(result.stdout).not.toContain('EXECUTED')
+})
+
+it.each([
+  ['wrapped default', (s: string) => s.replace('export default defineConfig(', 'const result = defineConfig(') + '\nexport default result'],
+  ['local helper alias', (s: string) => s.replace('export default defineConfig(', 'const make = defineConfig; export default make(')],
+  ['namespace helper', (s: string) => s.replace('{ defineConfig }', '* as sdk').replace('defineConfig({', 'sdk.defineConfig({')],
+  ['re-export', () => "export { default } from './actual-config.ts'"],
+  ['default helper import', (s: string) => s.replace("{ defineConfig } from \"@workbasehq/core/schema\"", "defineConfig from './helper.ts'")],
+  ['spread copy', (s: string) => s.replace('export default defineConfig(', 'const result = defineConfig(') + '\nexport default { ...result }'],
+  ['extra export', (s: string) => s + "\nexport const extra = console.log('CONFIG_EXECUTED')"],
+  ['side-effect import', (s: string) => "import './side-effect.ts'\n" + s],
+  ['top-level expression', (s: string) => "console.log('CONFIG_EXECUTED')\n" + s],
+  ['unused imported helper', (s: string) => "import { helper } from './side-effect.ts'\n" + s],
+  ['config property call', (s: string) => s.replace("id: 'sample'", "id: (() => { console.log('CONFIG_EXECUTED'); return 'sample' })()")],
+])('rejects noncanonical config before executing imports: %s', (_name, transform) => {
+  const { root, run } = consumer(declaration.replace("{ type: 'text', required: true }", executed))
+  const configFile = join(root, 'config.ts')
+  const original = readFileSync(configFile, 'utf8')
+  writeFileSync(join(root, 'actual-config.ts'), original)
+  writeFileSync(join(root, 'helper.ts'), "export { defineConfig as default } from '@workbasehq/core/schema'")
+  writeFileSync(join(root, 'side-effect.ts'), "console.log('IMPORT_EXECUTED'); export const helper = 1")
+  writeFileSync(configFile, transform(original))
+  const result = run()
+  expect(result.status).toBe(1)
+  expect(result.stderr).toContain('config.ts:')
+  expect(result.stdout).not.toContain('EXECUTED')
+})
+
+it.each([
+  ['numeric constraint', declaration.replace("name: { type: 'text', required: true }", "name: {\n      type: 'text',\n      min: 0\n    }"), 6, 7, 'min requires a numeric field'],
+  ['relation field', declaration.replace("displayField: 'name',", "relations: {\n    other: {\n      field: 'absent',\n      entity: 'users'\n    }\n  },"), 9, 7, 'Invalid relation'],
+  ['array descendant', declaration.replace("displayField: 'name',", "checks: [\n    {\n      left: 'name',\n      op: '==',\n      right: 'name'\n    }\n  ],"), 10, 7, 'op'],
+])('maps %s to the exact entity property', (_name, entity, line, column, message) => {
+  const { root, run } = consumer(entity)
+  const result = run()
+  expect(result.status).toBe(1)
+  expect(result.stderr).toContain(join(root, `schema/worker.ts:${line}:${column}:`))
+  expect(result.stderr).toContain(message)
+})
+
+it('indexes object properties inside arrays in the returned source map', () => {
+  const { root, run } = consumer(declaration.replace("displayField: 'name',", "checks: [\n    {\n      left: 'name',\n      op: '<=',\n      right: 'name'\n    }\n  ],"))
+  const result = run()
+  expect(result.status).toBe(0)
+  expect(JSON.parse(result.stdout).sources['entities.worker.checks.0.op']).toEqual({ file: join(root, 'schema/worker.ts'), line: 10, column: 7 })
+})
+
+it('rejects legacy calls in the canonical loader before evaluation', () => {
+  const { root, run } = consumer()
+  writeFileSync(join(root, 'config.ts'), `import { defineInstance } from '@workbasehq/core/config'
+export default defineInstance((() => { console.log('LEGACY_EXECUTED'); return {} })())`)
+  const result = run()
+  expect(result.status).toBe(1)
+  expect(result.stderr).toContain('config.ts:2:')
+  expect(result.stdout).not.toContain('EXECUTED')
+})
+
+it('accepts parenthesized as/satisfies wrappers around direct declarations', () => {
+  const { root, run } = consumer(declaration.replace('defineEntity({', '(defineEntity({').replace('})', '}) as const)'))
+  const path = join(root, 'config.ts')
+  writeFileSync(path, readFileSync(path, 'utf8').replace('export default defineConfig({', 'export default (defineConfig({').replace('})', '}) satisfies unknown)'))
+  expect(run().status).toBe(0)
+})
+
+it.each(['expression', 'side-effect import', 'extra export'])('rejects executable entity module statements: %s', kind => {
+  const { root, run } = consumer()
+  const file = join(root, 'schema/worker.ts')
+  const extra = kind === 'side-effect import' ? "import '../side-effect.ts'" : kind === 'extra export' ? "export const extra = console.log('ENTITY_EXECUTED')" : "console.log('ENTITY_EXECUTED')"
+  writeFileSync(join(root, 'side-effect.ts'), "console.log('IMPORT_EXECUTED')")
+  writeFileSync(file, readFileSync(file, 'utf8') + '\n' + extra)
+  const result = run()
+  expect(result.status).toBe(1)
+  expect(result.stderr).toContain('schema/worker.ts:')
+  expect(result.stdout).not.toContain('EXECUTED')
+})
+
+it('rejects a resolved entity outside the canonical schema path', () => {
+  const { root, run } = consumer()
+  const file = join(root, 'schema/worker.ts')
+  writeFileSync(join(root, 'actual.ts'), readFileSync(file, 'utf8').replace("{ type: 'text', required: true }", executed))
+  rmSync(file)
+  symlinkSync(join(root, 'actual.ts'), file)
+  const result = run()
+  expect(result.status).toBe(1)
+  expect(result.stderr).toContain('Resolved entity import must match')
+  expect(result.stdout).not.toContain('EXECUTED')
+})
+
+it('maps errors in the second entity to that entity rather than the config root', () => {
+  const { root, run } = consumer()
+  writeFileSync(join(root, 'schema/probe.ts'), readFileSync(join(root, 'schema/worker.ts'), 'utf8').replace("name: { type: 'text', required: true }", "name: {\n      type: 'text',\n      min: 0\n    }"))
+  const file = join(root, 'config.ts')
+  writeFileSync(file, readFileSync(file, 'utf8').replace("import worker", "import probe from './schema/probe.ts'\nimport worker").replace('entities: { worker }', 'entities: { worker, probe }'))
+  const result = run()
+  expect(result.status).toBe(1)
+  expect(result.stderr).toContain(join(root, 'schema/probe.ts:6:7:'))
+})
+
+it('maps kernel expression errors to the computed property', () => {
+  const { root, run } = consumer(declaration.replace("name: { type: 'text', required: true }", "name: {\n      type: 'text',\n      computed: 'invalid'\n    }"))
+  const result = run()
+  expect(result.status).toBe(1)
+  expect(result.stderr).toContain(join(root, 'schema/worker.ts:6:7:'))
+})
+
+it('maps signed-field semantics to the entity metadata property', () => {
+  const { root, run } = consumer(declaration.replace("name: { type: 'text', required: true }", "name: { type: 'text', required: true,\n      ui: { signedBy: {\n        field: 'missing',\n        negativeValue: 'negative'\n      } }\n    }"))
+  const file = join(root, 'config.ts')
+  writeFileSync(file, readFileSync(file, 'utf8').replace("  entities:", "  ui: { entities: { worker: {} } },\n  entities:"))
+  const result = run()
+  expect(result.status).toBe(1)
+  expect(result.stderr).toContain(join(root, 'schema/worker.ts:6:9:'))
 })

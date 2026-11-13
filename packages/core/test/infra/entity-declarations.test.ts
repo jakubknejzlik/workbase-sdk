@@ -1,5 +1,5 @@
 import { describe, expect, expectTypeOf, it } from 'vitest'
-import { defineConfig, defineEntity, accountLink, type ConfigInput } from '../../src/schema'
+import { defineConfig, defineEntity, accountLink, isSchemaConfig, type ConfigInput } from '../../src/schema'
 import { bodyValidator, defineInstance, Fn, Q } from '../../src/config'
 import { permissions } from '@workbasehq/plugins/permissions'
 import { publicSchema } from '../../src/public-schema'
@@ -136,3 +136,9 @@ function invalidDeclarationTypes() {
   defineConfig({ id: 'sample', revision: 1, roles: ['admin'], organizationOwnerRole: 'admin', entities: {} })
 }
 void invalidDeclarationTypes
+
+it('requires the defineConfig identity brand rather than a spread copy', () => {
+  const config = defineConfig(input())
+  expect(isSchemaConfig(config)).toBe(true)
+  expect(isSchemaConfig({ ...config })).toBe(false)
+})
