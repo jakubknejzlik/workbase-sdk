@@ -1,3 +1,4 @@
+import { assertResetEra, usesSdkBaseline } from '../migrations/reset-era'
 import { MigrationDiagnostic } from './diagnostics'
 import { CORE_VERSION } from '../config'
 import { hashMigrationRows } from '../schema-compatibility'
@@ -50,21 +51,24 @@ function supportedCoreVersion(value: unknown) {
 
 export async function migrateInstance(query: D1Query, files: readonly Migration[], kernel: KernelRegistry) {
   const db = queryDatabase(query)
+  const sdk = usesSdkBaseline(kernel.config)
+  if (sdk) await assertResetEra(db)
   const metaSQL = 'SELECT revision,core_version FROM instance_meta ORDER BY revision DESC LIMIT 1'
   // Check an existing database before even creating a ledger or applying SQL:
   // a pending SQL file could otherwise overwrite an unsupported SDK stamp.
   const existing = await db.prepare("SELECT name FROM sqlite_master WHERE name='instance_meta'").first()
   if (existing) {
     const stored = await db.prepare(metaSQL).first<{ core_version: string }>()
-    if (!supportedCoreVersion(stored?.core_version)) throw new MigrationDiagnostic({ code: 'migration_instance_revision_mismatch' })
+    if ((stored || !sdk) && !supportedCoreVersion(stored?.core_version)) throw new MigrationDiagnostic({ code: 'migration_instance_revision_mismatch' })
   }
-  const legacy = await migrateD1(query, files)
+  if (sdk) await kernel.applyMigrations(db)
+  const domain = await migrateD1(query, files)
   const rows = await db.prepare('SELECT filename,checksum FROM _migrations ORDER BY filename').all<{ filename: string; checksum: string }>()
   const expectedRows = [...files].sort((a, b) => a.filename < b.filename ? -1 : a.filename > b.filename ? 1 : 0)
   if (await hashMigrationRows(rows.results) !== await hashMigrationRows(expectedRows)) throw new MigrationDiagnostic({ code: 'migration_instance_verification_failed' })
   const meta = await db.prepare(metaSQL).first<{ revision: number; core_version: string }>()
   if (meta?.revision !== kernel.config.revision || !supportedCoreVersion(meta.core_version)) throw new MigrationDiagnostic({ code: 'migration_instance_revision_mismatch' })
-  await kernel.applyMigrations(db)
+  if (!sdk) await kernel.applyMigrations(db)
   const status = await pluginMigrationStatus(db, kernel.plugins, kernel.config)
   if (status.expected !== status.applied) throw new MigrationDiagnostic({ code: 'migration_plugin_verification_failed' })
   // A release can change CORE_VERSION without adding SQL or a config revision.
@@ -72,5 +76,5 @@ export async function migrateInstance(query: D1Query, files: readonly Migration[
   if (meta.core_version !== CORE_VERSION) await db.prepare(coreVersionSQL(kernel.config.revision)).run()
   const applied = await db.prepare(metaSQL).first<{ revision: number; core_version: string }>()
   if (applied?.revision !== kernel.config.revision || applied.core_version !== CORE_VERSION) throw new MigrationDiagnostic({ code: 'migration_instance_revision_mismatch' })
-  return { ...legacy, pluginMigrations: status.applied }
+  return { ...domain, pluginMigrations: status.applied }
 }

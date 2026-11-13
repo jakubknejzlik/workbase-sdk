@@ -102,13 +102,37 @@ a webhook receiver/landing Worker. All physical names and Pulumi logical names
 include the prefix/stage identity; long names retain a deterministic tuple hash.
 Worker names fit SST's 54-character workers.dev limit; other names fit 63 characters.
 
-The packaged `workbase-migrate` entry runs SQL and plugin migrations/verification
+The packaged `workbase-migrate` entry runs SDK, plugin and domain migrations/verification
 before the Worker component **and** the underlying script upload. Inputs travel
 through quoted environment variables; credentials are inherited by the subprocess.
 SQL-chain hash, expected schema, package sources and config source fingerprint the
 migration command; use `migrationTriggers` when imported application verifier code
 changes independently. The migration command is unprotected so trigger changes can
 replace it, while production D1 and other primary resources remain protected.
+New `defineConfig` Instances (the normalized `languages` contract) apply
+`workbase-sdk` first, installed plugin namespaces next, then `migrations/`.
+The SDK and plugins share `_plugin_migrations`, including append-only names,
+positions, SQL checksums and retained uninstall receipts. Each file's SQL and
+receipt commit in one D1 batch; a failed SDK/plugin file stops before domain SQL.
+Verification, including plugin `checkSchema`, runs after the domain ledger.
+A retry with no pending work executes only reads. SDK-only changes add SDK
+receipts without changing the Instance revision or domain migration files.
+
+The SDK baseline owns system/auth/workflow/operational tables, `instance_meta`
+and the `users` account projection before any plugin or domain FK uses them.
+Its SQL is independent of application roles and other Instance configuration;
+the runtime validates roles. New-era `initialSchema(config)` emits domain DDL
+and a domain revision insert only. Use `workbase-migrate ... --config ...` to
+orchestrate all namespaces; applying domain SQL alone cannot bootstrap an Instance.
+
+Existing tables or receipts without the new SDK baseline, or a legacy
+`workbase-core` receipt, produce `migration_unsupported_history` with the found
+tables/namespaces and an explicit unsupported/reset explanation. Preflight is
+read-only: history is never copied, adopted or rewritten. A failed first SDK
+file can leave an empty `_plugin_migrations` table and can be retried. The inline
+`defineInstance` path retains its previous mixed baseline and deploy behavior
+while its consumers are retired; it cannot serve as new-era migration history.
+
 The Worker receives the corresponding `SCHEMA_EXPECTED`.
 Migration failure blocks upload. A stable prefix/stage reuses resource addresses
 and receipts; changing either creates a separate instance.

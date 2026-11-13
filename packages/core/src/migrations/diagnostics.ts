@@ -14,6 +14,7 @@ const messages = {
 } as const
 
 type Diagnostic = { code: keyof typeof messages }
+  | { code: 'migration_unsupported_history'; found: string[] }
   | { code: 'd1_http_status'; status: number }
   | { code: 'migration_blocked'; reason: 'multiple_organizations' | 'account_organization_mismatch' | 'required_account_field'; userIds: string[]; field?: string }
   | { code: 'migration_blocked'; reason: 'incoming_foreign_key_actions'; table: string; referencingTables: string[] }
@@ -26,7 +27,10 @@ const diagnostics = new WeakMap<object, string>()
 export class MigrationDiagnostic extends Error {
   constructor(diagnostic: Diagnostic) {
     let message: string
-    if (diagnostic.code === 'migration_blocked') {
+    if (diagnostic.code === 'migration_unsupported_history') {
+      const found = diagnostic.found.map(name => /^[a-zA-Z0-9_-]{1,128}$/.test(name) ? name : '[nonstandard table]')
+      message = `migration_unsupported_history:found ${found.join(', ')} without a compatible SDK baseline; old-era or mixed history is unsupported; reset the database explicitly (history was not changed)`
+    } else if (diagnostic.code === 'migration_blocked') {
       message = `migration_blocked:${diagnostic.reason}:${JSON.stringify(diagnostic.reason === 'incoming_foreign_key_actions' ? { table: diagnostic.table, referencingTables: diagnostic.referencingTables } : { field: diagnostic.field, userIds: diagnostic.userIds })}`
     } else if (diagnostic.code === 'd1_http_status') {
       const status = diagnostic.status

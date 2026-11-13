@@ -15,7 +15,7 @@ async function migrationRevision(db: D1Database) {
 // Full validation for health, deployment verification and explicit diagnostic callers.
 // Ordinary request handling never checks schema compatibility.
 // SCHEMA_EXPECTED is injected by SST for every deployed Worker. Local workerd/Wrangler uses its own migration ledger.
-export async function schemaStatus(env: SchemaEnvironment & { DB: D1Database; AUDIT_KV?: KVNamespace }, config?: Pick<InstanceConfig, 'revision'> & Partial<Pick<InstanceConfig, 'plugins' | 'interactive' | 'entities'>>): Promise<SchemaStatus> {
+export async function schemaStatus(env: SchemaEnvironment & { DB: D1Database; AUDIT_KV?: KVNamespace }, config?: Pick<InstanceConfig, 'revision'> & Partial<Pick<InstanceConfig, 'plugins' | 'interactive' | 'entities' | 'languages'>>): Promise<SchemaStatus> {
   if (!env.SCHEMA_EXPECTED) return { enabled: false, compatible: !env.STAGE || env.STAGE === 'local', expected: null, applied: null }
   let expected: SchemaRevision | null = null
   try {
@@ -28,7 +28,7 @@ export async function schemaStatus(env: SchemaEnvironment & { DB: D1Database; AU
       if (!config?.plugins || !/^[a-f0-9]{64}$/.test(expected.pluginMigrations ?? '')) throw new Error('missing_plugin_revision')
       const plugins = resolvePlugins(config.plugins, config.interactive).plugins
       if (!config.entities) throw new Error('missing_instance_schema')
-      const pluginStatus = await pluginMigrationStatus(env.DB, plugins, { entities: config.entities })
+      const pluginStatus = await pluginMigrationStatus(env.DB, plugins, { entities: config.entities, languages: config.languages })
       for (const plugin of plugins) await plugin.checkEnvironment?.(env)
       applied.pluginMigrations = pluginStatus.applied
       pluginsCompatible = expected.pluginMigrations === pluginStatus.expected && pluginStatus.applied === pluginStatus.expected

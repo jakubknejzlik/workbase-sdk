@@ -76,7 +76,7 @@ const languageList = z.array(z.string().min(1).refine(value => {
   try { return new Set(Intl.getCanonicalLocales(values)).size === values.length } catch { return false }
 }, 'Duplicate languages')
 
-/** Minimal Model B account projection. SDK DDL ownership changes in a later slice. */
+/** Minimal Model B account descriptor; physical DDL belongs to the SDK baseline. */
 function accountEntity(roles: string[]): InstanceInput['entities'][string] {
   return { fields: {
     name: { type: 'string', required: true },

@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Fresh `defineConfig` Instances apply SDK system/auth/account DDL in the reserved
+  `workbase-sdk` namespace of `_plugin_migrations`, then plugins, then domain SQL.
+  Verification follows the domain ledger; SDK/plugin failure blocks domain SQL
+  and Worker upload. SDK-only migrations do not create domain revisions.
+- New-era deployments reject old or mixed database history with
+  `migration_unsupported_history`; an explicit reset is required. No deployed
+  history is copied or mutated. Legacy inline `defineInstance` behavior remains.
+
 ## 0.2.15 — 2026-11-11
 
 - Row invitations follow-up: invitations unaccepted for 7 days show as expired and cannot be accepted (resend issues a fresh token), console filter by access state, copy-link action for actors allowed to invite, member navigation limited to entities their policies allow, and documented complete token operation allowlists with constrained-token tests. (#176)
