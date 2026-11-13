@@ -6,6 +6,27 @@ expanded predicates, field masks, system/account privileges and command guards.
 Executable hooks and command plans are marked opaque; generation never executes
 them. Unresolved command names retain their null permission and opaque marker.
 
+## Scope
+
+The lock records the compiled grant policy (`effectiveAccess`) and the inputs listed
+under `enforcementInputs`. It is a review aid, not a complete model of authorization.
+A passing `check:access` means these artifacts are unchanged; it does **not** mean
+effective access is unchanged.
+
+**Not covered** (changes here can alter access outcomes without lock drift):
+
+- Computed-field dependency resolution: `displayField`, label/display expressions and
+  expression dependency hops that decide whether a computed field is readable or
+  projected as `NULL`.
+- Workflow registry: step operation `permission`/`additionalPermissions` and the
+  resulting `start` capability.
+- Executable bodies: hooks, command plans, named predicates and whatever config they read.
+- Runtime data: credentials, memberships, actor attributes, rows.
+- Any SDK enforcement read not listed below; the list is curated, not derived.
+
+Completeness by construction is tracked in
+[workbase-sdk#20](https://github.com/jakubknejzlik/workbase-sdk/issues/20).
+
 For this repository's synthetic config-era fixture:
 
 ```sh
@@ -47,7 +68,7 @@ or derive grants again. Relation bindings retain the exact `entity`, `field` and
 the changed input path and values. Opaque hook bodies remain opaque, including
 their arbitrary application-specific config reads.
 
-Inventory of SDK access enforcement inputs (paths under `packages/core/src`):
+Covered inputs (not exhaustive; see Scope above). Read sites as of this change, under `packages/core/src`:
 
 | Reads (file:line) | Representation in the lock |
 | --- | --- |

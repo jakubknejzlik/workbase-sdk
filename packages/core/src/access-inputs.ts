@@ -2,7 +2,8 @@ import type { KernelRegistry } from './kernel/registry'
 import { isBuiltinPlugin } from './kernel/builtin-source'
 
 export type AccessKernel = Pick<KernelRegistry, 'config' | 'plugins' | 'providers' | 'permissionsActive' | 'authorizationTrust'>
-/** Snapshot declarative inputs from the same composed objects enforcement reads.
+/** Snapshot selected declarative inputs from the same composed objects enforcement reads.
+ * Curated, not exhaustive: see docs/sdk/access-lock.md § Scope for what is not covered.
  * Account/issuer helpers and opaque plugin ports retain their existing contracts;
  * moving those into the grant compiler would change its execution boundary.
  * No grants or predicates are recompiled here. Executable bodies remain opaque.

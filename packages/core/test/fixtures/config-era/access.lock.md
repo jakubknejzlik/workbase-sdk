@@ -129,7 +129,7 @@ None used.
 
 ## Enforcement inputs
 
-Resolved kernel/config inputs used alongside the compiled grants. Executable bodies remain opaque.
+Selected resolved kernel/config inputs used alongside the compiled grants (curated, not exhaustive; see docs/sdk/access-lock.md § Scope). Executable bodies remain opaque.
 
 | Input | Resolved value |
 | --- | --- |

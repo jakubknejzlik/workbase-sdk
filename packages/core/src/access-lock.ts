@@ -1,4 +1,5 @@
-/** Build-time audit only. The kernel's composed policy is the sole policy input. */
+/** Build-time audit only. Records the composed policy plus selected enforcement inputs;
+ * not a complete model of authorization (see docs/sdk/access-lock.md § Scope). */
 import { realpathSync } from 'node:fs'
 import { readFile, writeFile } from 'node:fs/promises'
 import { isAbsolute, relative, resolve, sep } from 'node:path'
@@ -63,7 +64,7 @@ export function serializeAccessLock(kernel: AccessKernel, options: AccessLockOpt
   const predicates = [...new Set(policy.entities.flatMap(rule => rule.predicates))].sort()
   for (const name of predicates) lines.push(`- ${cell(name)}: ${cell(locate(`access.predicates.${name}`))}`)
   if (!predicates.length) lines.push('None used.')
-  lines.push('', '## Enforcement inputs', '', 'Resolved kernel/config inputs used alongside the compiled grants. Executable bodies remain opaque.', '', '| Input | Resolved value |', '| --- | --- |')
+  lines.push('', '## Enforcement inputs', '', 'Selected resolved kernel/config inputs used alongside the compiled grants (curated, not exhaustive; see docs/sdk/access-lock.md § Scope). Executable bodies remain opaque.', '', '| Input | Resolved value |', '| --- | --- |')
   for (const [key, value] of Object.entries(canonical(inputs) as Record<string, unknown>)) {
     if (key === 'entities') for (const [entity, definition] of Object.entries(value as Record<string, Record<string, unknown>>)) {
       for (const [part, data] of Object.entries(definition)) lines.push(`| ${cell(`${entity} / ${part}`)} | ${cell(json(data))} |`)
@@ -126,7 +127,7 @@ export async function syncAccessLock(options: AccessLockOptions & {
   const missing = names.filter((_, i) => previous[i] === undefined)
   if (missing.length) return { ok: false, message: `check:access: missing ${missing.join(', ')}; run bun run access:lock` }
   const stale = names.filter((_, i) => previous[i] !== [files.json, files.md][i])
-  if (!stale.length) return { ok: true, message: 'check:access: access locks are current' }
+  if (!stale.length) return { ok: true, message: 'check:access: lock files match the compiled policy and listed inputs' }
   return { ok: false, message: [`check:access: stale ${stale.join(', ')}; run bun run access:lock`,
     ...(previous[0] !== files.json ? diff(previous[0]!, files.json) : [])].join('\n') }
 }
