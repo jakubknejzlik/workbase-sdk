@@ -1,9 +1,10 @@
+import { schemaLock } from '../../../src/migrations/schema-lock'
 import { afterEach, expect, it, vi } from 'vitest'
 import * as sdk from '../../../src/migrations/sdk-baseline'
 import { expectedPluginMigrations, pluginMigrationStatus } from '../../../src/kernel/migrations'
 import { CORE_VERSION, defineInstance } from '../../../src/config'
 import { hashMigrationRows, schemaStatus } from '../../../src/schema-compatibility'
-import { defineConfig, defineEntity, accountLink, defineAccess, accessEntities, accessSystemActions } from '../../../src/schema'
+import { defineConfig as unboundConfig, bindSchemaLock, defineEntity, accountLink, defineAccess, accessEntities, accessSystemActions } from '../../../src/schema'
 import { KernelRegistry } from '../../../src/kernel/registry'
 import { plan } from '../../../src/migrations/planner'
 import { initialSchema } from '../../../src/migrations/schema'
@@ -14,6 +15,10 @@ import type { WorkbasePlugin } from '../../../src/kernel/plugin'
 import { identity } from '../../../../plugins/identity/src'
 import { members } from '../../../../plugins/members/src'
 import { permissions } from '../../../../plugins/permissions/src'
+
+const defineConfig = (input: Parameters<typeof unboundConfig>[0]) => {
+  const config = unboundConfig(input); return bindSchemaLock(config, schemaLock(config))
+}
 
 export interface BaselineDatabase { db: D1Database; query: D1Query; calls: string[] }
 export function composition(extra: WorkbasePlugin[] = [], roles = ['admin', 'staff']) {

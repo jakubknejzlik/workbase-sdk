@@ -1,3 +1,4 @@
+import { assertSchemaLockBound } from '../schema/revision'
 import { assertResetEra, usesSdkBaseline } from '../migrations/reset-era'
 import { MigrationDiagnostic } from './diagnostics'
 import { CORE_VERSION } from '../config'
@@ -50,6 +51,7 @@ function supportedCoreVersion(value: unknown) {
 }
 
 export async function migrateInstance(query: D1Query, files: readonly Migration[], kernel: KernelRegistry) {
+  assertSchemaLockBound(kernel.config)
   const db = queryDatabase(query)
   const sdk = usesSdkBaseline(kernel.config)
   if (sdk) await assertResetEra(db)

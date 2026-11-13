@@ -67,7 +67,13 @@ export function checkSchema(config: InstanceConfig, lock: SchemaLock, sources: S
     const column = table.columns.find(c => !lock.tables.find(b => b.name === table.name)?.columns.some(b => equal(b, c)))
     located(new SpecError(table.name, column?.name, 'schema differs from schema.lock.json; regenerate the schema lock'), sources)
   }
-  if (!equal(current.tables, lock.tables)) throw new Error('schema.lock.json: table/column order differs from the canonical physical schema')
+  for (const [i, table] of physicalTables(config).entries()) {
+    const previous = lock.tables.find(t => t.name === table.name)!
+    const column = table.columns.find((column, i) => column.implicit && column.name !== previous.columns[i]?.name)
+    if (lock.tables[i]?.name !== table.name || column) {
+      located(new SpecError(table.name, column?.name, 'table/column order differs from the canonical physical schema'), sources)
+    }
+  }
 }
 /** SDK dependencies are derived, never versioned lock metadata. */
 export function sdkDependencies(tables: readonly TableSpec[]) {

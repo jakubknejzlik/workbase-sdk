@@ -1,3 +1,5 @@
+import { assertSchemaLockBound } from './schema/revision'
+export { bindSchemaLock } from './schema/revision'
 import { effectiveSystemGrant } from './access-evaluator'
 import { entityAccessSchema, compileAccess, defineAccess, type AccessInput } from './access'
 import { validatePolicies } from './policies'
@@ -113,7 +115,7 @@ export function defineConfig(input: ConfigInput): SchemaConfig {
   }
   let config: SchemaConfig
   try {
-    config = normalizeInstance({ ...input, revision: 1, roles, languages,
+    config = normalizeInstance({ ...input, revision: undefined as never, roles, languages,
       entities: { ...domain, users: accountEntity(roles) }, account: { entity: 'users' },
       permissions: input.permissions ?? {},
     }, true, (error, path) => { throw new DeclarationError(path, error instanceof Error ? error.message : String(error)) }) as SchemaConfig
@@ -148,6 +150,9 @@ export function defineConfig(input: ConfigInput): SchemaConfig {
     validatePolicies(config)
   }
   config.baseline = 'workbase-sdk'
+  Object.defineProperty(config, 'revision', { configurable: true, get() {
+    assertSchemaLockBound({ baseline: 'workbase-sdk' })
+  } })
   return config
 }
 

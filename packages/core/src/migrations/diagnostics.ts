@@ -1,4 +1,5 @@
 const messages = {
+  schema_lock_not_bound: 'schema lock not bound: bindSchemaLock(config, lock) before use',
   usage: 'usage: workbase-migrate migrate <database-id> <migration-directory> [--config <module-path>]; requires CLOUDFLARE_DEFAULT_ACCOUNT_ID and CLOUDFLARE_API_TOKEN',
   invalid_config_default_export: 'invalid_config_default_export',
   invalid_cloudflare_ids: 'invalid_cloudflare_ids',

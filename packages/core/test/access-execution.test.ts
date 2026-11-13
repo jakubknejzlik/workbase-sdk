@@ -1,8 +1,9 @@
+import { schemaLock } from '../src/migrations/schema-lock'
 import { effectiveEntityGrants } from '../src/access-evaluator'
 import { env } from 'cloudflare:workers'
 import { reset } from 'cloudflare:test'
 import { beforeEach, expect, it } from 'vitest'
-import { defineConfig, defineEntity, accountLink, defineAccess } from '../src/schema'
+import { defineConfig as unboundConfig, bindSchemaLock, defineEntity, accountLink, defineAccess } from '../src/schema'
 import { accessEntities, accessSystemActions, type EntityAccess } from '../src/access'
 import { bootstrap } from '@workbasehq/test-support/bootstrap'
 import { createApp } from '../src/app'
@@ -18,6 +19,10 @@ import { legacyPermissions } from '@workbasehq/plugins/permissions'
 import { members } from '@workbasehq/plugins/members'
 import { organizations } from '@workbasehq/plugins/organizations'
 import { mailOutbox } from '@workbasehq/plugins/mail-outbox'
+
+const defineConfig = (input: Parameters<typeof unboundConfig>[0]) => {
+  const config = unboundConfig(input); return bindSchemaLock(config, schemaLock(config))
+}
 
 const all = { read: 'allow', create: 'allow', update: 'allow', delete: 'allow' } as const
 const self = { where: { use: 'self' }, fields: ['id', 'name', 'version'] }

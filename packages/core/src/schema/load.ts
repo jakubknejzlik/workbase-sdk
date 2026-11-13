@@ -4,7 +4,7 @@ import { readFileSync, existsSync, realpathSync, readdirSync, statSync } from 'n
 import { dirname, extname, isAbsolute, resolve, relative } from 'node:path'
 import { fileURLToPath, URL } from 'node:url'
 import ts from 'typescript'
-import { accountLink, DeclarationError, defineConfig, defineEntity, defineAccess } from '../schema'
+import { accountLink, DeclarationError, defineConfig, defineEntity, defineAccess, bindSchemaLock } from '../schema'
 import type { InstanceConfig } from '../config'
 import { parseLock } from '../migrations/schema-lock'
 
@@ -212,7 +212,9 @@ export function configSources(file: string): SourceMap {
   const entry = realpathSync(resolve(file))
   const source = readSource(entry)
   const sources: SourceMap = { '': location(source) }
-  const declaration = exported(source, 'default')
+  let declaration = exported(source, 'default')
+  if (declaration && ts.isCallExpression(declaration) && ts.isIdentifier(declaration.expression)
+    && sdkBinding(imports(source).get(declaration.expression.text), entry, 'bindSchemaLock')) declaration = declaration.arguments[0]
   if (!declaration || !ts.isCallExpression(declaration) || !declaration.arguments[0]) return sources
   // Code registrations may contain methods, calls and spreads. Index their
   // enclosing declarations without applying the data-only literal validator.
@@ -267,7 +269,17 @@ export async function loadConfig(file: string): Promise<{ config: InstanceConfig
   const source = read(entry)
   const sources: SourceMap = { '': location(source) }
   const bindings = imports(source)
-  const declaration = exported(source, 'default')
+  const exportedConfig = exported(source, 'default')
+  let declaration = exportedConfig
+  let lockImport: string | undefined
+  if (declaration && ts.isCallExpression(declaration) && ts.isIdentifier(declaration.expression)
+    && sdkBinding(bindings.get(declaration.expression.text), entry, 'bindSchemaLock')) {
+    const [inner, lock] = declaration.arguments
+    const binding = lock && ts.isIdentifier(lock) ? bindings.get(lock.text) : undefined
+    if (declaration.arguments.length !== 2 || !inner || binding?.module !== './schema.lock.json' || binding.imported !== 'default') fail(declaration, 'bindSchemaLock requires defineConfig({...}) and an imported ./schema.lock.json')
+    lockImport = (lock as ts.Identifier).text
+    declaration = unwrap(inner)
+  }
   if (!declaration || !ts.isCallExpression(declaration) || !ts.isIdentifier(declaration.expression)) fail(source, 'Config must default-export a direct SDK defineConfig({...}) call')
   if (!sdkBinding(bindings.get(declaration.expression.text), entry, 'defineConfig')) fail(declaration, 'Expected a direct named SDK defineConfig import')
   const arg = declaration.arguments[0]
@@ -288,7 +300,8 @@ export async function loadConfig(file: string): Promise<{ config: InstanceConfig
     if (!ts.isIdentifier(accessRef)) fail(accessRef, 'access must be imported from ./access.ts')
     entityImports.add(accessRef.text)
   }
-  moduleBoundary(source, declaration, ['defineConfig'], entityImports)
+  if (lockImport) entityImports.add(lockImport)
+  moduleBoundary(source, exportedConfig!, ['defineConfig', 'bindSchemaLock'], entityImports)
   const data: Record<string, unknown> = Object.create(null)
   for (const [name, property] of props) if (name !== 'entities' && name !== 'access') data[name] = literal(value(property)!, new Map())
   if (accessRef && ts.isIdentifier(accessRef)) {
@@ -334,7 +347,7 @@ export async function loadConfig(file: string): Promise<{ config: InstanceConfig
       hash.update(JSON.stringify([relative(dirname(entry), file), text]))
     }
     const lockPath = resolve(dirname(entry), 'schema.lock.json')
-    if (existsSync(lockPath)) config.revision = parseLock(readFileSync(lockPath, 'utf8')).revision
+    if (existsSync(lockPath)) bindSchemaLock(config, parseLock(readFileSync(lockPath, 'utf8')))
     return { config, sources, configHash: hash.digest('hex') }
   } catch (error) { return remap(error, sources) }
 }

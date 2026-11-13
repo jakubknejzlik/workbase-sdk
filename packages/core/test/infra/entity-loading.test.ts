@@ -18,6 +18,7 @@ function consumer(entity = declaration, config = '') {
   roots.push(root)
   writeFileSync(join(root, 'package.json'), '{"type":"module"}')
   mkdirSync(join(root, 'schema'))
+  writeFileSync(join(root, 'schema.lock.json'), JSON.stringify({ lockVersion: 1, revision: 1, parent: null, tables: [] }))
   mkdirSync(join(root, 'node_modules/@workbasehq'), { recursive: true })
   symlinkSync(resolve('packages/core'), join(root, 'node_modules/@workbasehq/core'), 'dir')
   const schema = '@workbasehq/core/schema'
@@ -418,9 +419,10 @@ describe.each(['bun', 'node'])('literal interpretation equivalence under %s', ho
     }
     writeFileSync(join(root, 'run.ts'), `import { deepStrictEqual, strictEqual } from 'node:assert'
 import { loadConfig } from '@workbasehq/core/schema/load'
-import { isSchemaConfig } from '@workbasehq/core/schema'
+import { isSchemaConfig, bindSchemaLock } from '@workbasehq/core/schema'
+import lock from './schema.lock.json'
 const { config } = await loadConfig(${JSON.stringify(config)})
-const actual = (await import('./config.ts')).default
+const actual = bindSchemaLock((await import('./config.ts')).default, lock)
 deepStrictEqual(config, actual)
 strictEqual(isSchemaConfig(config), true)
 strictEqual(isSchemaConfig(actual), true)

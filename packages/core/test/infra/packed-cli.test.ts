@@ -68,6 +68,7 @@ void schema
     expect(JSON.stringify([installed.exports, installed.bin, installed.dependencies])).not.toContain('packages/core')
     // The canonical loader must resolve its compiler from installed SDK dependencies.
     mkdirSync(join(consumer, 'schema'))
+    writeFileSync(join(consumer, 'schema.lock.json'), JSON.stringify({ lockVersion: 1, revision: 1, parent: null, tables: [] }))
     writeFileSync(join(consumer, 'schema/worker.ts'), `import { defineEntity, accountLink } from '@workbasehq/core/schema'
 export default defineEntity({ fields: { name: { type: 'text', required: true }, user: accountLink() }, displayField: 'name' })
 `)

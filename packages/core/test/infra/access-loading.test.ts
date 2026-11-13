@@ -16,6 +16,7 @@ function shared(): AccessInput {
 function consumer(access = shared(), worker: unknown = { admin: operations, staff: { read: { where: { use: 'self' }, fields: ['id', 'name'] }, create: 'deny', update: 'deny', delete: 'deny' } }) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'workbase-access-'))); roots.push(root)
   mkdirSync(join(root, 'schema'))
+  writeFileSync(join(root, 'schema.lock.json'), JSON.stringify({ lockVersion: 1, revision: 1, parent: null, tables: [] }))
   writeFileSync(join(root, 'config.ts'), `import { defineConfig } from '@workbasehq/core/schema'
 import worker from './schema/worker.ts'
 import access from './access.ts'

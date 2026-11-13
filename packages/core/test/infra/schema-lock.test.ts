@@ -12,7 +12,7 @@ import { instanceConfigSchema, fieldSchema, defineInstance, type InstanceConfig 
 import { sdkDependencies } from '../../src/migrations/schema-lock'
 import { initialSchema } from '../../src/migrations/schema'
 import { vi } from 'vitest'
-import { defineConfig, declarationSchema } from '../../src/schema'
+import { defineConfig, bindSchemaLock, declarationSchema } from '../../src/schema'
 import fixture from '../fixtures/config-era/config'
 
 const roots: string[] = []
@@ -210,7 +210,7 @@ it('runner stamps each filename revision with its receipt outside domain SQL', a
     }
     const base = schemaLock(fixture), next = structuredClone(fixture)
     next.entities.worker.fields.extra = { type: 'text', required: false }
-    const lock = schemaLock(next, base); next.revision = lock.revision
+    const lock = schemaLock(next, base); bindSchemaLock(next, lock)
     const files = [initialSchema(fixture), diffSpecs(base.tables, lock.tables)].map((sql, i) => ({
       filename: `000${i + 1}_r${i + 1}.sql`, sql, checksum: createHash('sha256').update(sql).digest('hex'),
     }))

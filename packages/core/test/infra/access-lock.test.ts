@@ -19,6 +19,7 @@ const all = { read: 'allow', create: 'allow', update: 'allow', delete: 'allow' }
 function consumer(shuffled = false) {
   const root = mkdtempSync(join(tmpdir(), 'workbase-lock-')); roots.push(root)
   mkdirSync(join(root, 'schema'))
+  writeFileSync(join(root, 'schema.lock.json'), JSON.stringify({ lockVersion: 1, revision: 1, parent: null, tables: [] }))
   const order = (entries: [string, unknown][]) => Object.fromEntries(shuffled ? entries.reverse() : entries)
   const access = {
     predicates: { self: { user: { eq: '$actor.id' } } },
@@ -31,6 +32,7 @@ function consumer(shuffled = false) {
   const worker = () => `import { defineEntity, accountLink } from '@workbasehq/core/schema'\nexport default defineEntity({ fields: { name: { type: 'text' }, user: accountLink() }, access: ${JSON.stringify(matrix)} })\n`
   writeFileSync(join(root, 'schema/worker.ts'), worker())
   writeFileSync(join(root, 'config.ts'), `import { defineConfig } from '@workbasehq/core/schema'\nimport worker from './schema/worker'\nimport access from './access'\nexport default defineConfig({ id: 'lock_probe', interactive: false, languages: ['en'], roles: ${JSON.stringify(shuffled ? ['worker', 'staff', 'admin'] : ['admin', 'staff', 'worker'])}, organizationOwnerRole: 'admin', entities: { worker }, access })\n`)
+  writeFileSync(join(root, 'config.ts'), readFileSync(join(root, 'config.ts'), 'utf8').replace('{ defineConfig }', '{ defineConfig, bindSchemaLock }').replace("import worker", "import lock from './schema.lock.json'\nimport worker").replace('export default defineConfig(', 'export default bindSchemaLock(defineConfig(').replace('access })', 'access }), lock)'))
   return { root, matrix, worker, load: async () => {
     const { config, sources } = await loadConfig(join(root, 'config.ts'))
     return { kernel: new KernelRegistry(config), sources, root }

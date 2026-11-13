@@ -1,5 +1,5 @@
 import { describe, expect, expectTypeOf, it } from 'vitest'
-import { defineConfig, defineEntity, accountLink, isSchemaConfig, type ConfigInput } from '../../src/schema'
+import { defineConfig, defineEntity, accountLink, isSchemaConfig, bindSchemaLock, type ConfigInput } from '../../src/schema'
 import { bodyValidator, defineInstance, Fn, Q } from '../../src/config'
 import { permissions } from '@workbasehq/plugins/permissions'
 import { publicSchema } from '../../src/public-schema'
@@ -38,7 +38,7 @@ it('uses core scalar, enum, computed and display normalization for public metada
   expect(bodyValidator(config.entities.probe).safeParse({ name: 'Sample', active: true, amount: 2.5, count: 1 }).success).toBe(true)
   expect(bodyValidator(config.entities.probe).safeParse({ name: 'Sample', amount: '2' }).success).toBe(false)
   // The public metadata projection consumes this normalized schema, including computed fields.
-  const metadata = publicSchema(config, {}).entities.probe
+  const metadata = publicSchema(bindSchemaLock(config, { lockVersion: 1, revision: 1, parent: null, tables: [] }), {}).entities.probe
   expect(metadata.displayField).toBe('name')
   expect(metadata.fields.amount.type).toBe('float')
   expect(metadata.fields.active.type).toBe('bool')
@@ -141,5 +141,7 @@ it('recognizes SDK era on the config value and its spread copy', () => {
   const config = defineConfig(input())
   expect(isSchemaConfig(config)).toBe(true)
   // This is an era check, not a claim about the copy's provenance or access.
+  expect(() => ({ ...config })).toThrow('schema lock not bound')
+  bindSchemaLock(config, { lockVersion: 1, revision: 1, parent: null, tables: [] })
   expect(isSchemaConfig({ ...config })).toBe(true)
 })
