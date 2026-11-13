@@ -23,17 +23,20 @@ export function createCommandRegistry(definitions: readonly CommandDefinition<an
   }
   return registry
 }
+/** Shared entity-grant preflight. Atomic authorization follows with the actual input. */
+export function commandPreflight(config: InstanceConfig, scope: Scope, operation: CommandDefinition) {
+  if (!config.commands.includes(operation.name) || 'system' in operation.permission) throw new ApiError(405, 'unsupported_command')
+  const kernel = kernelFor(config)
+  for (const grant of [operation.permission, ...(operation.additionalPermissions ?? [])]) {
+    kernel.commandGuard({ name: operationName(operation), kind: 'entity', permission: grant }, scope, undefined)
+  }
+  userLinkActionPermission(config, scope, operation)
+}
 /** Internal/trusted adapter compatibility. Never accept this context from request JSON. */
 export async function executeCommand(ctx: CommandContext, name: string, input: unknown): Promise<AtomicResult> {
   const operation = ctx.commands.get(name)
-  if (!ctx.config.commands.includes(name) || !operation) throw new ApiError(405, 'unsupported_command')
-  if ('system' in operation.permission) throw new ApiError(405, 'unsupported_command')
-  // Entity grants preflight the named command; the token must allow that actual command,
-  // independently of any operation previously checked by requireScope.
-  for (const grant of [operation.permission, ...(operation.additionalPermissions ?? [])]) {
-    kernelFor(ctx.config).commandGuard({ name: operationName(operation), kind: 'entity', permission: grant }, ctx.scope, undefined)
-  }
-  userLinkActionPermission(ctx.config, ctx.scope, operation)
+  if (!operation) throw new ApiError(405, 'unsupported_command')
+  commandPreflight(ctx.config, ctx.scope, operation)
   const raw = z.record(z.string(), z.unknown()).parse(typeof input === 'function' ? await input() : input)
   const { idempotencyKey, ...payload } = raw
   const key = z.string().min(1).max(128).optional().parse(idempotencyKey)

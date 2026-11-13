@@ -1,3 +1,4 @@
+import { readRecord } from './record-read'
 import { z } from 'zod'
 import { ApiError } from './errors'
 import type { InstanceConfig } from './config'
@@ -17,12 +18,12 @@ export function recordActionRoutes(app: App, config: InstanceConfig, env: Runtim
   app.post('/api/:entity/:id/actions/:name', async c => {
     const entity = c.req.param('entity'), id = c.req.param('id'), name = c.req.param('name')
     const scope = c.get('scope'), policy = config.effectiveAccess!
+    // Establish GET's complete read authority before any ID-dependent callback.
+    await readRecord(config, scope, env, entity, id)
     const action = policy.actions.find(action => action.entity === entity && action.name === name)
     const operation = action && kernel.commands.get(action.command)
     if (!action || !operation) throw new ApiError(404, 'not_found')
-    // Role/credential checks precede record reads and command callbacks.
-    kernel.atomicPermission(scope, operation)
-    const guard = actionGuardSql(policy, scope, entity, name)
+    const guard = actionGuardSql(policy, scope, entity, name, 'throw')
     if (!guard) throw new ApiError(404, 'not_found')
     z.strictObject({}).parse(await c.req.json())
     const diagnose: SqlStatement = {
@@ -40,6 +41,8 @@ export function recordActionRoutes(app: App, config: InstanceConfig, env: Runtim
       const result = await executeAtomic(operation, { id }, coreExecutionContext(config, scope, guarded, reader))
       return c.json(result.body, result.status as any)
     } catch (error) {
+      // Prepare/planning errors must not outlive the record's visibility.
+      await readRecord(config, scope, env, entity, id)
       if (!(error instanceof RuleFailed)) throw error
       // Diagnosis is read-only and runs only after atomic rollback. It cannot
       // authorize a commit; hidden rows have precisely GET's error body.

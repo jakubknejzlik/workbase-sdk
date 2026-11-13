@@ -1,26 +1,13 @@
 import { env } from 'cloudflare:workers'
 import { reset } from 'cloudflare:test'
 import { beforeEach, expect, it } from 'vitest'
-import { bootstrap } from '@workbasehq/test-support/bootstrap'
 import { actionFixture } from './fixtures/record-actions'
-import { createApp } from '../src/app'
-import { sha256 } from '../src/crypto'
+import { recordActionApp } from './fixtures/record-actions-app'
+import { recordActionSecurityTests } from './fixtures/record-actions-security'
 
-const runtime = () => ({ DB: env.DB, AUDIT_KV: env.AUDIT_KV, INTERNAL_TOKEN: 'synthetic-actions-internal', IDENTITY: { baseURL: 'http://localhost', secret: 'synthetic-actions-secret-at-least-32', localPassword: true } })
 async function setup(selected = actionFixture()) {
-  await reset(); await bootstrap(env.DB, selected)
-  await env.DB.exec("INSERT INTO organizations VALUES ('org-a','A'),('org-b','B')")
-  for (const role of ['admin', 'staff', 'viewer']) {
-    await env.DB.prepare('INSERT INTO users (id,email,password_hash,salt,organization_id,name,role,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)').bind(role, `${role}@example.test`, 'x', 'x', 'org-a', role, role, 'now', 'now').run()
-    await env.DB.prepare('INSERT INTO "user" (id,name,email,"emailVerified","createdAt","updatedAt") VALUES (?,?,?,1,?,?)').bind(role, role, `${role}@example.test`, 'now', 'now').run()
-    await env.DB.prepare('INSERT INTO memberships VALUES (?,?,?)').bind(role, 'org-a', role).run()
-    await env.DB.prepare('INSERT INTO sessions VALUES (?,?,?)').bind(await sha256(`synthetic-${role}`), role, new Date(Date.now() + 86400000).toISOString()).run()
-  }
-  for (const [id, org, state, user] of [['open', 'org-a', 'open', 'staff'], ['closed', 'org-a', 'closed', 'staff'], ['locked', 'org-a', 'locked', 'staff'], ['null', 'org-a', null, 'staff'], ['filtered', 'org-a', 'open', 'admin'], ['foreign', 'org-b', 'open', null]]) {
-    await env.DB.prepare('INSERT INTO record (id,organization_id,state,secret,user,created_at,updated_at) VALUES (?,?,?,?,?,?,?)').bind(id, org, state, 'yes', user, 'now', 'now').run()
-  }
-  await env.DB.exec("INSERT INTO worker (id,organization_id,name,created_at,updated_at) VALUES ('worker','org-a','Worker','now','now')")
-  return createApp(selected, runtime())
+  await reset()
+  return recordActionApp(env.DB, selected, env.AUDIT_KV)
 }
 function request(path: string, role = 'staff', method = 'GET', body?: object) {
   return new Request(`http://localhost${path}`, { method, headers: { Authorization: `Bearer synthetic-${role}`, 'X-Organization-Id': 'org-a', 'Content-Type': 'application/json' }, ...(body ? { body: JSON.stringify(body) } : {}) })
@@ -122,3 +109,5 @@ it('D1 guard runs after prepare, before all command writes, and rechecks the rea
   expect(await env.DB.prepare("SELECT state,version FROM record WHERE id='open'").first()).toEqual({ state: 'open', version: 1 })
   expect(await env.DB.prepare('SELECT count(*) AS n FROM audit_outbox').first('n')).toBe(0)
 })
+
+recordActionSecurityTests(async config => ({ app: await setup(config), db: env.DB }))

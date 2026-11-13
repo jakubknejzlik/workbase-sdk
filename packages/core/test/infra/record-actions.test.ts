@@ -43,3 +43,41 @@ if (false) {
     { when: { absent: { eq: 'open' } }, reason: 'record.closed' },
   ] } } })
 }
+
+// Node's SQLite adapter runs the same route invariants as native D1.
+import { DatabaseSync } from 'node:sqlite'
+import { afterEach } from 'vitest'
+import { recordActionApp } from '../fixtures/record-actions-app'
+import { recordActionSecurityTests } from '../fixtures/record-actions-security'
+const databases: DatabaseSync[] = []
+afterEach(() => { for (const db of databases.splice(0)) db.close() })
+function database(): D1Database {
+  const sqlite = new DatabaseSync(':memory:'); databases.push(sqlite)
+  sqlite.exec('PRAGMA foreign_keys=ON')
+  const prepare = (sql: string) => {
+    let values: (string | number | null)[] = []
+    const statement = {
+      bind(...bindings: typeof values) { values = bindings; return statement },
+      async all() { return { success: true, meta: { changes: 0 }, results: sqlite.prepare(sql).all(...values) } },
+      async first(column?: string) { const row = sqlite.prepare(sql).get(...values); return column ? row?.[column] ?? null : row ?? null },
+      async run() {
+        if (/^\s*(SELECT|PRAGMA)\b/i.test(sql)) return statement.all()
+        const result = sqlite.prepare(sql).run(...values)
+        return { success: true, meta: { changes: Number(result.changes) }, results: [] }
+      },
+    }
+    return statement
+  }
+  return { prepare, async exec(sql: string) { sqlite.exec(sql) }, async batch(statements: ReturnType<typeof prepare>[]) {
+    sqlite.exec('BEGIN')
+    try {
+      const results = []
+      for (const statement of statements) results.push(await statement.run())
+      sqlite.exec('COMMIT'); return results
+    } catch (error) { sqlite.exec('ROLLBACK'); throw error }
+  } } as unknown as D1Database
+}
+recordActionSecurityTests(async config => {
+  const db = database()
+  return { app: await recordActionApp(db, config), db }
+})

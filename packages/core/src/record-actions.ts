@@ -1,3 +1,4 @@
+import { commandPreflight } from './commands'
 import type { EffectiveAccessPolicy } from './access'
 import { ApiError } from './errors'
 import { kernelFor } from './kernel/registry'
@@ -15,15 +16,18 @@ export type ActionState = { enabled: true } | { enabled: false; reason: string }
 /** One SQL definition shared by detail availability and the atomic dispatcher.
  * False/NULL conditions both disable; CASE preserves authored reason order.
  */
-export function actionGuardSql(policy: EffectiveAccessPolicy, scope: Scope, entity: string, name: string) {
+export function actionGuardSql(policy: EffectiveAccessPolicy, scope: Scope, entity: string, name: string, denial: 'omit' | 'throw' = 'omit') {
   const config = bindings.get(policy)!
   const kernel = kernelFor(config)
   const action = policy.actions.find(action => action.entity === entity && action.name === name)
   if (!action) return undefined
   const operation = kernel.commands.get(action.command)
   if (!operation) return undefined
-  try { kernel.atomicPermission(scope, operation) }
-  catch (error) { if (error instanceof ApiError && [403, 405].includes(error.status)) return undefined; throw error }
+  try {
+    commandPreflight(config, scope, operation)
+    kernel.atomicPermission(scope, operation)
+  }
+  catch (error) { if (denial === 'omit' && error instanceof ApiError && [403, 405].includes(error.status)) return undefined; throw error }
   if (action.dependencies.some(path => {
     const [target, field] = path.split('.')
     return !kernel.fieldMask(target, scope).includes(field)
