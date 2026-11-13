@@ -51,7 +51,9 @@ it.each(['admin', 'staff'])('enabled iff 2xx: %s × four states × four access a
     if (role === 'admin') expect(row.actions).toEqual(({ invited, expired, linked, no_account: noAccount } as any)[value].actions)
     const response = await act('local', name, bodyFor(name), role)
     expect(response.ok, `${role}/${value}/${name}: ${await response.clone().text()}`).toBe(row.actions?.[name]?.enabled === true)
-    if (role === 'staff') expect(response.status).toBe(403)
+    // Slice 10 establishes GET's read authority first: a row staff cannot read
+    // answers exactly like GET (no oracle); a readable row denies with 403.
+    if (role === 'staff') expect(response.status).toBe(get.ok ? 403 : get.status)
     else if (!response.ok) expect(await response.json()).toEqual({ error: 'action_unavailable', reason: row.actions[name].reason })
   }
 })
