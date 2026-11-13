@@ -73,7 +73,7 @@ export default defineEntity({ fields: { name: { type: 'text', required: true }, 
 `)
     writeFileSync(join(consumer, 'canonical-config.ts'), `import { defineConfig } from '@workbasehq/core/schema'
 import worker from './schema/worker.ts'
-export default defineConfig({ id: 'sample', revision: 1, roles: ['admin', 'staff'], organizationOwnerRole: 'admin', languages: ['cs', 'en'], entities: { worker } })
+export default defineConfig({ id: 'sample', roles: ['admin', 'staff'], organizationOwnerRole: 'admin', languages: ['cs', 'en'], entities: { worker } })
 `)
     writeFileSync(join(consumer, 'canonical-check.ts'), `import { loadConfig } from '@workbasehq/core/schema/load'
 const { config, sources } = await loadConfig('./canonical-config.ts')

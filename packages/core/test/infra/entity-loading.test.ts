@@ -25,7 +25,7 @@ function consumer(entity = declaration, config = '') {
   let configSource = `import { defineConfig } from ${JSON.stringify(schema)}
 import worker from './schema/worker'
 export default defineConfig({
-  id: 'sample', revision: 1,
+  id: 'sample',
   roles: ['admin', 'staff'], organizationOwnerRole: 'admin',
   languages: ['cs', 'en'],
   entities: { worker },
@@ -123,7 +123,7 @@ it('accepts named entity exports and imported SDK helper aliases', () => {
   const config = join(root, 'config.ts')
   writeFileSync(config, `import { defineConfig as config } from ${JSON.stringify(resolve('packages/core/src/schema.ts'))}
 import { worker as sample } from './schema/worker.ts'
-export default config({ id: 'sample', revision: 1, roles: ['admin'], organizationOwnerRole: 'admin', languages: ['en'], entities: { worker: sample } })`)
+export default config({ id: 'sample', roles: ['admin'], organizationOwnerRole: 'admin', languages: ['en'], entities: { worker: sample } })`)
   const result = run()
   expect(result.stderr).toBe('')
   expect(result.status).toBe(0)

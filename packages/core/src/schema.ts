@@ -15,7 +15,7 @@ const relationSchema = z.strictObject({
 })
 // Field validation and normalized field types are shared with the kernel.
 // Strict objects prevent inline labels and plugin lifecycle hooks from being silently stripped.
-const declarationSchema = z.strictObject({
+export const declarationSchema = z.strictObject({
   fields: z.record(identifier, fieldSchema.strict()),
   relations: z.record(identifier, relationSchema).optional(),
   displayField: z.union([serializedExpressionSchema, z.literal(false)]).optional(),
@@ -60,7 +60,7 @@ export function accountLink() {
   return { type: 'ref', entity: 'users', userLink: true, readOnly: true } as const
 }
 
-export type ConfigInput = Omit<InstanceInput, 'entities' | 'roles' | 'organizationOwnerRole' | 'permissions' | 'account' | 'languages' | 'enumLabels' | 'locale' | 'baseline'> & {
+export type ConfigInput = Omit<InstanceInput, 'entities' | 'roles' | 'organizationOwnerRole' | 'permissions' | 'account' | 'languages' | 'enumLabels' | 'locale' | 'baseline' | 'revision'> & {
   entities: Record<string, EntityDeclaration>
   roles: string[]
   organizationOwnerRole: string
@@ -86,6 +86,7 @@ function accountEntity(roles: string[]): InstanceInput['entities'][string] {
 
 /** Explicit application roles and SDK accounts; no domain plugin or inline labels. */
 export function defineConfig(input: ConfigInput): SchemaConfig {
+  if ('revision' in input) throw new DeclarationError(['revision'], 'revision is bound from schema.lock.json; omit caller-supplied revision')
   const languages = parse(languageList, input.languages, ['languages'])
   const roles = parse(z.array(identifier).min(1).refine(value => new Set(value).size === value.length, 'Duplicate roles'), input.roles, ['roles'])
   if (!roles.includes(input.organizationOwnerRole)) throw new DeclarationError(['organizationOwnerRole'], 'organizationOwnerRole must be in roles')
@@ -112,7 +113,7 @@ export function defineConfig(input: ConfigInput): SchemaConfig {
   }
   let config: SchemaConfig
   try {
-    config = normalizeInstance({ ...input, roles, languages,
+    config = normalizeInstance({ ...input, revision: 1, roles, languages,
       entities: { ...domain, users: accountEntity(roles) }, account: { entity: 'users' },
       permissions: input.permissions ?? {},
     }, true, (error, path) => { throw new DeclarationError(path, error instanceof Error ? error.message : String(error)) }) as SchemaConfig

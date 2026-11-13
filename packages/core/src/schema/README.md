@@ -30,7 +30,6 @@ import worker from './schema/worker.ts'
 
 export default defineConfig({
   id: 'sample',
-  revision: 1,
   roles: ['admin', 'staff'],
   organizationOwnerRole: 'admin',
   languages: ['cs', 'en'],
@@ -104,8 +103,7 @@ Runtime declarations validate values on their own; source syntax checking requir
 
 The existing `defineInstance` entry retains inline/shorthand declarations and its
 legacy role/default-grant normalization. Import those modules through the legacy
-entry; `loadConfig` accepts only canonical `defineConfig` modules. Access locks and check:access are the following slice; no lock/planner, migration
-changes or UI are introduced here.
+entry; `loadConfig` accepts only canonical `defineConfig` modules. Schema and access locks are checked by their SDK CLIs.
 
 ## Authored access (option C)
 
@@ -184,6 +182,20 @@ Executable prepare/plan and custom plugin checks remain enforced and marked opaq
 
 `loadConfig` also returns `configHash`, a SHA-256 of the config, imported entity
 and shared access source paths/bytes. Policy-only edits change this hash without
-altering `config.revision` or physical schema SQL. The lock-based schema revision
-planner remains a later slice. Slice-1 declarations without access remain readable
+altering `config.revision` or physical schema SQL. The loader binds `config.revision` from `schema.lock.json` (r1 before initialization);
+`defineConfig` rejects an authored revision. Slice-1 declarations without access remain readable
 by schema tools; the kernel refuses to execute them with legacy defaults.
+
+
+## Physical schema lock (slice 4a)
+
+Run `bun run migrate:plan --init` with no lock or domain SQL to write
+`schema.lock.json` and `migrations/0001_r1.sql`. The bundle has empty pre-data and
+post-data regions around generated domain DDL; SDK/plugin DDL stays in SDK ledgers.
+Run the command without `--init` to verify an unchanged plan. A repeated `--init`
+rejects existing state without writing. Planning changes against a base arrives in 4b.
+`bun run check:schema` checks config against the lock without writing.
+Both commands accept `--config`, `--root`, `--directory` and `--migrations`.
+Installed consumers can invoke `@workbasehq/core/migrations/schema-cli` with `plan`
+or `check`; repository scripts only supply paths. Runtime builds should consume
+loader-bound config; direct `defineConfig` declarations start at r1.

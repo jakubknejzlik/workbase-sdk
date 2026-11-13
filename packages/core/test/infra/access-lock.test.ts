@@ -30,7 +30,7 @@ function consumer(shuffled = false) {
   writeFileSync(join(root, 'access.ts'), `import { defineAccess } from '@workbasehq/core/schema'\nexport default defineAccess(${JSON.stringify(access)})\n`)
   const worker = () => `import { defineEntity, accountLink } from '@workbasehq/core/schema'\nexport default defineEntity({ fields: { name: { type: 'text' }, user: accountLink() }, access: ${JSON.stringify(matrix)} })\n`
   writeFileSync(join(root, 'schema/worker.ts'), worker())
-  writeFileSync(join(root, 'config.ts'), `import { defineConfig } from '@workbasehq/core/schema'\nimport worker from './schema/worker'\nimport access from './access'\nexport default defineConfig({ id: 'lock_probe', revision: 1, interactive: false, languages: ['en'], roles: ${JSON.stringify(shuffled ? ['worker', 'staff', 'admin'] : ['admin', 'staff', 'worker'])}, organizationOwnerRole: 'admin', entities: { worker }, access })\n`)
+  writeFileSync(join(root, 'config.ts'), `import { defineConfig } from '@workbasehq/core/schema'\nimport worker from './schema/worker'\nimport access from './access'\nexport default defineConfig({ id: 'lock_probe', interactive: false, languages: ['en'], roles: ${JSON.stringify(shuffled ? ['worker', 'staff', 'admin'] : ['admin', 'staff', 'worker'])}, organizationOwnerRole: 'admin', entities: { worker }, access })\n`)
   return { root, matrix, worker, load: async () => {
     const { config, sources } = await loadConfig(join(root, 'config.ts'))
     return { kernel: new KernelRegistry(config), sources, root }

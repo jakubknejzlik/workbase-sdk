@@ -38,6 +38,8 @@
     "./schema": "./src/schema.ts",
     "./access/lock": "./src/access-lock.ts",
     "./access/lock/cli": "./src/access-lock/cli.ts",
+    "./migrations/schema-lock": "./src/migrations/schema-lock.ts",
+    "./migrations/schema-cli": "./src/migrations/schema-cli.ts",
     "./schema/load": "./src/schema/load.ts"
   },
   "dependencies": {

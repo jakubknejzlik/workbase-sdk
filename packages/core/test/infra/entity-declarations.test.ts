@@ -5,7 +5,7 @@ import { permissions } from '@workbasehq/plugins/permissions'
 import { publicSchema } from '../../src/public-schema'
 
 const worker = () => defineEntity({ fields: { name: { type: 'text', required: true }, user: accountLink() }, displayField: 'name' })
-const input = (): ConfigInput => ({ id: 'sample', revision: 1, roles: ['admin', 'staff'], organizationOwnerRole: 'admin', languages: ['cs', 'en'], entities: { worker: worker() } })
+const input = (): ConfigInput => ({ id: 'sample', roles: ['admin', 'staff'], organizationOwnerRole: 'admin', languages: ['cs', 'en'], entities: { worker: worker() } })
 
 it('keeps required nonempty text and protected account writes in core validators', () => {
   const config = defineConfig(input())
@@ -131,9 +131,9 @@ function invalidDeclarationTypes() {
   // @ts-expect-error Field labels also belong to dictionaries.
   defineEntity({ fields: { name: { type: 'text', label: 'Sample' } } })
   // @ts-expect-error Roles and organizationOwnerRole are mandatory on this path.
-  defineConfig({ id: 'sample', revision: 1, languages: ['en'], entities: {} })
+  defineConfig({ id: 'sample', languages: ['en'], entities: {} })
   // @ts-expect-error Languages are mandatory on this path.
-  defineConfig({ id: 'sample', revision: 1, roles: ['admin'], organizationOwnerRole: 'admin', entities: {} })
+  defineConfig({ id: 'sample', roles: ['admin'], organizationOwnerRole: 'admin', entities: {} })
 }
 void invalidDeclarationTypes
 

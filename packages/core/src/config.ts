@@ -119,6 +119,8 @@ const schema = z.object({
 }).superRefine((config, ctx) => {
   if (config.plugins?.length && typeof config.interactive !== 'boolean') ctx.addIssue({ code: 'custom', path: ['interactive'], message: 'interactive must be an explicit boolean when plugins are installed' })
 })
+/** Shared schema for source-derived audits and property checks. */
+export const instanceConfigSchema = schema
 export type Field = z.infer<typeof fieldSchema>
 export type InstanceConfig = z.infer<typeof schema> & { effectiveAccess?: import('./access').EffectiveAccessPolicy }
 export type InstanceInput = z.input<typeof schema>

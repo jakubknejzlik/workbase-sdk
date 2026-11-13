@@ -2,7 +2,7 @@ import { assertResetEra, usesSdkBaseline } from '../migrations/reset-era'
 import { MigrationDiagnostic } from './diagnostics'
 import { CORE_VERSION } from '../config'
 import { hashMigrationRows } from '../schema-compatibility'
-import { coreVersionSQL, literal } from '../migrations/schema'
+import { coreVersionSQL, revisionSQL, literal } from '../migrations/schema'
 import { pluginMigrationStatus } from '../kernel/migrations'
 import type { KernelRegistry } from '../kernel/registry'
 import { migrateD1, type D1Query, type Migration } from './d1-migrations'
@@ -62,7 +62,12 @@ export async function migrateInstance(query: D1Query, files: readonly Migration[
     if ((stored || !sdk) && !supportedCoreVersion(stored?.core_version)) throw new MigrationDiagnostic({ code: 'migration_instance_revision_mismatch' })
   }
   if (sdk) await kernel.applyMigrations(db)
-  const domain = await migrateD1(query, files)
+  const domain = await migrateD1(query, files, migration => {
+    if (!sdk) return ''
+    const match = /^\d+_r([1-9]\d*)\.sql$/.exec(migration.filename)
+    if (!match || !Number.isSafeInteger(Number(match[1]))) throw new MigrationDiagnostic({ code: 'migration_instance_revision_mismatch' })
+    return revisionSQL(Number(match[1])) + '\n'
+  })
   const rows = await db.prepare('SELECT filename,checksum FROM _migrations ORDER BY filename').all<{ filename: string; checksum: string }>()
   const expectedRows = [...files].sort((a, b) => a.filename < b.filename ? -1 : a.filename > b.filename ? 1 : 0)
   if (await hashMigrationRows(rows.results) !== await hashMigrationRows(expectedRows)) throw new MigrationDiagnostic({ code: 'migration_instance_verification_failed' })

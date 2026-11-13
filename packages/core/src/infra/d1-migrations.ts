@@ -4,7 +4,7 @@ export interface Migration { filename: string; sql: string; checksum: string }
 export interface QueryResult { success: boolean; results?: Record<string, unknown>[] }
 export type D1Query = (sql: string) => Promise<QueryResult[]>
 const literal = (value: string) => `'${value.replaceAll("'", "''")}'`
-export async function migrateD1(query: D1Query, input: readonly Migration[]) {
+export async function migrateD1(query: D1Query, input: readonly Migration[], receiptSQL: (migration: Migration) => string = () => '') {
   const migrations = [...input].sort((a, b) => a.filename < b.filename ? -1 : a.filename > b.filename ? 1 : 0)
   if (new Set(migrations.map(m => m.filename)).size !== migrations.length) throw new MigrationDiagnostic({ code: 'duplicate_migration_filename' })
   const execute: D1Query = async sql => {
@@ -25,7 +25,7 @@ export async function migrateD1(query: D1Query, input: readonly Migration[]) {
   for (const migration of migrations) {
     if (done.has(migration.filename)) continue
     if (last && migration.filename < last) throw new MigrationDiagnostic({ code: 'migration_out_of_order', filename: migration.filename })
-    await execute(`${migration.sql}\n;\nINSERT INTO _migrations (filename,applied_at,checksum) VALUES (${literal(migration.filename)},strftime('%Y-%m-%dT%H:%M:%fZ','now'),${literal(migration.checksum)});`)
+    await execute(`${migration.sql}\n;\n${receiptSQL(migration)}INSERT INTO _migrations (filename,applied_at,checksum) VALUES (${literal(migration.filename)},strftime('%Y-%m-%dT%H:%M:%fZ','now'),${literal(migration.checksum)});`)
   }
   return { applied: migrations.length - done.size, total: migrations.length }
 }

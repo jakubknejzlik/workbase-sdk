@@ -18,7 +18,7 @@ import { permissions } from '../../../../plugins/permissions/src'
 export interface BaselineDatabase { db: D1Database; query: D1Query; calls: string[] }
 export function composition(extra: WorkbasePlugin[] = [], roles = ['admin', 'staff']) {
   return new KernelRegistry(defineConfig({
-    id: 'baseline', revision: 1, interactive: false, languages: ['en'],
+    id: 'baseline', interactive: false, languages: ['en'],
     roles, organizationOwnerRole: 'admin', plugins: [identity, permissions({ roles, ownerRole: 'admin' }), members, ...extra],
     entities: { worker: defineEntity({ fields: { name: { type: 'text', required: true }, user: accountLink() },
       access: Object.fromEntries(roles.map(role => [role, 'deny'])),
