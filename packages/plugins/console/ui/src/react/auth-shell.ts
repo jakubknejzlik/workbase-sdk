@@ -7,6 +7,8 @@ import { initI18n, type I18n } from '../i18n'
 import { ApiFailure, type ClientRequestInit } from '../client'
 import { LanguageSwitcher, useRuntime } from './index'
 import { Session, type SessionState } from './session'
+import { AuthDirtyContext, useAuthDirty } from './auth-dirty'
+import { browserBuild } from '../build-reload'
 import { authStorage } from '../auth-storage'
 /** Only concrete built routes and the recipient inbox destination are admissible. */
 export function authReturnTo(raw: string | null, routes: Manifest['routes']): string {
@@ -54,6 +56,7 @@ type Auth = { request: Request; i18n: I18n; signOut: () => Promise<void> }
 function status(i18n: I18n, key: string) { return h('p', { role: 'status' }, i18n.t('sdk:auth.' + key)) }
 function SignIn({ auth, returnTo }: { auth: Auth; returnTo: string }) {
   const [email, setEmail] = useState(''), [sent, setSent] = useState(false), pending = useRef(false)
+  useAuthDirty(!sent && !!email)
   async function submit() {
     if (pending.current) return
     pending.current = true; authStorage.returnTo.write(returnTo)
@@ -74,6 +77,7 @@ function ProfileGate({ auth, required = false, children }: { auth: Auth; require
     void auth.request<Profile>('/me/profile').then(value => { if (active) { setProfile(value); setFirst(value.firstName ?? ''); setLast(value.lastName ?? '') } }, () => { if (active) setFailed(true) })
     return () => { active = false }
   }, [auth.request, attempt])
+  useAuthDirty(!!profile && !profile.completeness.complete && profile.capabilities.canEditNames && (firstName !== (profile.firstName ?? '') || lastName !== (profile.lastName ?? '')))
   async function submit() {
     if (busy.current) return
     busy.current = true; setSaving(true); setFailed(false)
@@ -133,7 +137,9 @@ export type AuthShellProps = { manifest: Manifest; i18n: I18n; children?: ReactN
 /** Mount outside RouterProvider so reserved auth paths never mount Instance data. */
 export function AuthShell({ manifest, i18n, children, fetch: transport = globalThis.fetch, navigate }: AuthShellProps) {
   const [initial, setEntry] = useState(entry), [org, setOrg] = useState(() => authStorage.org.read()), [memberships, setMemberships] = useState<Membership[]>(), [inbox, setInbox] = useState<Invitation[]>(), [failed, setFailed] = useState(false), [retry, setRetry] = useState(0)
-  const logoutBusy = useRef(false)
+  const logoutBusy = useRef(false), drafts = useRef(new Set<symbol>()), watcher = useRef<ReturnType<typeof browserBuild> | null>(null)
+  const reportDirty = useCallback((owner: symbol, dirty: boolean) => { if (dirty) drafts.current.add(owner); else drafts.current.delete(owner); watcher.current?.flush() }, [])
+  useEffect(() => { const current = browserBuild(transport, () => drafts.current.size > 0); watcher.current = current; return () => { current.stop(); watcher.current = null } }, [transport])
   const request = useCallback(requestWith(transport), [transport])
   useSyncExternalStore(i18n.subscribe, i18n.language, i18n.language)
   useEffect(() => i18n.subscribe(() => authStorage.language.write(i18n.language())), [i18n])
@@ -183,5 +189,5 @@ export function AuthShell({ manifest, i18n, children, fetch: transport = globalT
   else if (memberships?.length) content = h('div', null, status(i18n, 'chooseOrg'), ...memberships.map(value => h('button', { key: value.organization_id, type: 'button', onClick: () => select(value.organization_id) }, value.organization_name ?? value.organization_id)))
   else if (inbox) content = h('div', null, status(i18n, inbox.length ? 'invitations' : 'noInvitations'), ...inbox.map(value => h('button', { key: value.id, type: 'button', onClick: () => { void go(authReturnTo(value.navigation_target ?? '/', manifest.routes)) } }, i18n.t('sdk:auth.openInvitation'))))
   else content = status(i18n, 'loading')
-  return h('div', null, h(LanguageSwitcher, { i18n }), h(Logout, { auth }), failed && h('div', null, status(i18n, 'failed'), h('button', { type: 'button', onClick: () => { setFailed(false); setRetry(value => value + 1) } }, i18n.t('sdk:retry'))), content)
+  return h(AuthDirtyContext.Provider, { value: reportDirty }, h('div', null, h(LanguageSwitcher, { i18n }), h(Logout, { auth }), failed && h('div', null, status(i18n, 'failed'), h('button', { type: 'button', onClick: () => { setFailed(false); setRetry(value => value + 1) } }, i18n.t('sdk:retry'))), content))
 }

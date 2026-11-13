@@ -8,6 +8,7 @@ import { unstable_dev, type Unstable_DevWorker } from 'wrangler'
 import { chromium, type Browser, type BrowserContext, type Page } from 'playwright'
 import type { ClientRequestInit } from '../../src/client'
 import { afterAll, beforeAll, expect, test } from 'vitest'
+const forbiddenRequests: string[] = []
 let vite: ViteDevServer, worker: Unstable_DevWorker, browser: Browser, origin: string, scratch: string
 const control = { 'X-Test-Control': 'synthetic-ui-control' }
 beforeAll(async () => {
@@ -16,17 +17,22 @@ beforeAll(async () => {
   writeFileSync(config, JSON.stringify({ name: 'synthetic-live-ui', main: resolve(import.meta.dirname, 'worker.ts'), compatibility_date: '2026-08-01', compatibility_flags: ['nodejs_compat'], d1_databases: [{ binding: 'DB', database_name: 'live-ui', database_id: '00000000-0000-0000-0000-000000000012' }], kv_namespaces: [{ binding: 'AUDIT_KV', id: '00000000000000000000000000000000' }] }))
   worker = await unstable_dev(resolve(import.meta.dirname, 'worker.ts'), { config, local: true, ip: '127.0.0.1', port: 0, inspectorPort: 0, persist: false, logLevel: 'error', experimental: { disableExperimentalWarning: true, disableDevRegistry: true, watch: false } })
   const target = `http://${worker.address}:${worker.port}`
-  vite = await createServer({ root: import.meta.dirname, configFile: false, server: { host: '127.0.0.1', port: 0, headers: { 'Referrer-Policy': 'no-referrer' }, proxy: Object.fromEntries(['/api', '/query', '/me', '/o/', '/orgs', '/invitations', '/auth', '/__test'].map(path => [path, { target, changeOrigin: true, bypass: (request: { url?: string }) => request.url?.startsWith('/auth/complete') ? '/index.html' : undefined }])) } })
+  vite = await createServer({ root: import.meta.dirname, configFile: false, define: { __WORKBASE_BUILD_SHA__: JSON.stringify('a'.repeat(40)) }, server: { host: '127.0.0.1', port: 0, headers: { 'Referrer-Policy': 'no-referrer' }, proxy: Object.fromEntries(['/build.json', '/api', '/query', '/me', '/o/', '/orgs', '/invitations', '/auth', '/__test'].map(path => [path, { target, changeOrigin: true, bypass: (request: { url?: string }) => request.url?.startsWith('/auth/complete') ? '/index.html' : undefined }])) } })
   await vite.listen(); const address = vite.httpServer!.address() as { port: number }; origin = 'http://127.0.0.1:' + address.port
   // The test Worker consumes its trusted loopback origin from a control request.
   const seeded = await fetch(target + '/__test/seed', { headers: { ...control, 'X-Test-Origin': origin } })
   expect(seeded.status, await seeded.text()).toBe(200)
   browser = await chromium.launch(process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH } : {})
 }, 60000)
-afterAll(async () => { await browser?.close(); await vite?.close(); await worker?.stop(); if (scratch) rmSync(scratch, { recursive: true, force: true }) })
+afterAll(async () => { await browser?.close(); await vite?.close(); await worker?.stop(); if (scratch) rmSync(scratch, { recursive: true, force: true }); expect(forbiddenRequests).toEqual([]) })
 let sessionIP = 0
+async function newContext(options: Parameters<Browser['newContext']>[0]) {
+  const context = await browser.newContext(options)
+  context.on('request', request => { const path = new URL(request.url()).pathname; if (/(?:^|\/)(?:console-model|console-info|bootstrap|schema)(?:\/|$)/.test(path)) forbiddenRequests.push(path) })
+  return context
+}
 async function session(role: string): Promise<BrowserContext> {
-  const context = await browser.newContext({ baseURL: origin, viewport: { width: 390, height: 844 }, hasTouch: true, extraHTTPHeaders: { 'cf-connecting-ip': '192.0.2.' + (++sessionIP) } })
+  const context = await newContext({ baseURL: origin, viewport: { width: 390, height: 844 }, hasTouch: true, extraHTTPHeaders: { 'cf-connecting-ip': '192.0.2.' + (++sessionIP) } })
   const sent = await context.request.post('/auth/sign-in/magic-link', { headers: { Origin: origin }, data: { email: role + '@example.test', callbackURL: '/me' } })
   expect(sent.status(), await sent.text()).toBe(200)
   const mail = await context.request.get('/__test/mail?email=' + role + '@example.test', { headers: control })
@@ -143,6 +149,7 @@ test('auth shell: wrong accounts cannot bind; sign-out, inline magic link, profi
     expect(patches).toBe(1); expect(new URL(page.url()).pathname).toBe(path)
     await page.getByRole('button', { name: 'Accept invitation', exact: true }).click(); await page.waitForURL(origin + '/')
     expect(await page.evaluate(() => localStorage.getItem('workbase.org'))).toBe('org-a')
+    await page.goto('/workers/' + invited.workerId); await page.getByText('Auth recipient', { exact: true }).waitFor()
     const replay = await b.request.post('/invitations/' + invited.invitation_id + '/accept', { headers: await cookieHeaders(b), data: {} })
     expect(replay.status()).toBe(200); expect(await replay.json()).toMatchObject({ replayed: true })
     const csrf = await b.request.post('/auth/logout', { headers: { ...await cookieHeaders(b), Origin: 'https://cross-site.example', 'Sec-Fetch-Site': 'cross-site' }, form: {} })
@@ -162,10 +169,28 @@ test('expired/revoked invitation terminal screens on real D1', async () => {
       const page = await admin.newPage(); await page.goto('/invitation?token=' + new URL(invited.accept_url).searchParams.get('token'))
       // Mismatch wins over metadata for an authenticated different account.
       await page.getByText('This invitation belongs to another account', { exact: true }).waitFor(); await page.close()
-      const anonymous = await browser.newContext({ baseURL: origin }), tab = await anonymous.newPage()
+      const anonymous = await newContext({ baseURL: origin }), tab = await anonymous.newPage()
       await tab.goto('/invitation?token=' + new URL(invited.accept_url).searchParams.get('token'))
       await tab.getByText(state === 'expired' ? 'Invitation expired' : 'Invitation revoked', { exact: true }).waitFor(); expect(await tab.getByRole('button', { name: 'Continue' }).count()).toBe(0)
       await anonymous.close()
     }
   } finally { await admin.close() }
+}, 60000)
+
+test('persistent SHA mismatch reloads exactly once and waits for a dirty real form', async () => {
+  const context = await session('admin'), page = await context.newPage(), sha = 'b'.repeat(40)
+  let release!: () => void, first = true, reloads = -1
+  const ready = new Promise<void>(resolve => { release = resolve })
+  page.on('request', request => { if (request.isNavigationRequest() && request.frame() === page.mainFrame()) reloads++ })
+  await page.route('**/build.json', async route => { if (first) { first = false; await ready } await route.fulfill({ json: { sha } }) })
+  try {
+    await page.goto('/workers/own/edit'); const field = page.getByLabel('Name', { exact: true }); await field.waitFor(); const original = await field.inputValue()
+    await field.fill('Unsaved SHA probe'); const response = page.waitForResponse('**/build.json'); release(); await response; await page.waitForTimeout(100)
+    expect(await field.inputValue()).toBe('Unsaved SHA probe'); expect(reloads).toBe(0)
+    await Promise.all([page.waitForRequest(request => request.isNavigationRequest()), field.fill(original)]); await page.getByLabel('Name', { exact: true }).waitFor()
+    expect(reloads).toBe(1)
+    for (let i = 0; i < 3; i++) await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')))
+    await page.waitForTimeout(100); expect(reloads).toBe(1)
+    expect(await page.evaluate(key => sessionStorage.getItem(key), 'workbase.reload.' + sha)).toBe('1')
+  } finally { release(); await context.close() }
 }, 60000)

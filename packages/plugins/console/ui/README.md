@@ -249,3 +249,48 @@ PATCH failures retain the form, and each submit sends at most one PATCH.
 Sign-out POSTs JSON, accepts 204/401, clears the org, and replaces the location
 with `/sign-in`. Language persists across accounts on the same browser by design;
 no identity or profile data is stored alongside either preference.
+
+`consoleUI()` production builds define `__WORKBASE_BUILD_SHA__` in the browser
+bundle and emit `dist/build-meta.json` with `{ sha, builtAt }`. SHA precedence is
+`WORKBASE_BUILD_SHA`, then `GITHUB_SHA`, then `git rev-parse HEAD` from the
+**consumer root**. A supplied invalid value fails the build instead of silently
+falling back. SHAs must be exactly 40 hex characters and are emitted lowercase.
+Development builds use `unbuilt`. Build the Instance with `vite build`, then pass
+`assetsDir: './dist'` to provision (or match a customized Vite outDir). These are
+the Instance's assets; do not use the legacy `consoleAssetsDir()`.
+
+The Instance deployment wrapper must refuse a dirty repository before building:
+
+```ts
+import { assertCleanDeploy } from '@workbasehq/plugins/console/ui/vite'
+assertCleanDeploy(process.cwd())
+// Run vite build, then provision/deploy the resulting dist/.
+```
+
+The guard includes untracked files. Ignore `node_modules/`, `dist/` and
+`.workbase-ui*`; commit authored layout changes before deployment so they get a
+new SHA even when schema revision is unchanged. This slice supplies and tests
+the guard; template deployment wiring belongs to slice 16. Keep any explicit
+server BUILD_SHA/BUILD_AT bindings consistent with the emitted metadata.
+
+`AuthShell` fetches `/build.json` separately at boot and on visibility. On a valid
+SHA mismatch it records `sessionStorage['workbase.reload.' + serverSHA]` **before**
+reloading. The latch survives remounts and stays set for that tab's session, so a
+persistent mismatch reloads once. `unbuilt` and other non-hex values cannot
+trigger reload. Metadata failures leave the app usable. Disabled storage skips
+a reload because a persistent latch cannot be guaranteed.
+
+SDK record forms, sign-in and profile-gate forms register dirty state with their
+owning shell. Reload waits until all registrations are clean or unmounted.
+Custom forms can call the additive `useAuthDirty(dirty)` export from `/react`.
+No draft values enter the reload watcher or browser storage. The latch is public
+build state, independent of accounts and orgs. Navigation and session caches
+retain their existing scope and recovery behavior.
+
+The `console/ui/react` and `console/ui/vite` source subpaths are included by the
+plugins package file list and producer staging, including the UI README. The
+staged-tarball regression verifies the actual React/Vite exports. The standard `bash scripts/sdk-pack.sh` gate also
+requires the private vocabulary input; a missing secret prevents a release
+archive from being certified. The built HTML probe rejects inline script/style
+and verifies the no-referrer meta tag. Browser acceptance records every flow and
+fails if it requests console-model, console-info, bootstrap or `/schema`.

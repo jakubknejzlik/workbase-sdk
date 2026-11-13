@@ -19,7 +19,8 @@ const originalLocation = window.location
 const replace = vi.fn()
 function view(fetch: (path: string, init: ClientRequestInit) => Promise<Response>, strict = false) {
   const i18n = createAuthI18n({ languages: ['en', 'cs'], catalogs: {} })
-  const content = h(AuthShell, { manifest, i18n, fetch, navigate }, h('p', null, 'APP'))
+  const transport = (path: string, init: ClientRequestInit) => path === '/build.json' ? Promise.resolve(json({ sha: 'unbuilt' })) : fetch(path, init)
+  const content = h(AuthShell, { manifest, i18n, fetch: transport, navigate }, h('p', null, 'APP'))
   return { i18n, element: strict ? h(StrictMode, null, content) : content }
 }
 function storage() { const values = new Map<string, string>(); return { getItem: (key: string) => values.get(key) ?? null, setItem: vi.fn((key: string, value: string) => { values.set(key, value) }), removeItem: (key: string) => { values.delete(key) }, clear: () => values.clear(), key: (index: number) => [...values.keys()][index] ?? null, get length() { return values.size } } }
