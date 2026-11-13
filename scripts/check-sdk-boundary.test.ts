@@ -5,9 +5,10 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { execFileSync } from 'node:child_process'
 import catalog from '../packages/core/src/query/enum-labels.json'
+import pluginsManifest from '../packages/plugins/package.json'
 import { assertCoreEnumLabels } from './check-core-enum-labels'
 import { sdkPackageNames } from './sdk-provenance'
-import { checkSdkBoundary as checkBoundary } from './check-sdk-boundary'
+import { checkSdkBoundary as checkBoundary, uiOptionalPeers } from './check-sdk-boundary'
 import { instanceNames as baseInstanceNames } from './lib/public-vocabulary'
 import { assertGeneratedMcpContent } from './lib/check-generated-mcp'
 
@@ -200,7 +201,7 @@ it('scans generated MCP template content and paths with ordinary regexes', () =>
   expect(() => assertGeneratedMcpContent(path, '{{SDK_VERSION}}', instanceNames)).toThrow('Unresolved placeholder')
 })
 
-it('requires UI build dependencies to be declared as optional peers', () => {
+it.each(uiOptionalPeers.flatMap(name => ['dependency', 'metadata', 'required'].map(mutation => ({ name, mutation }))))('requires optional peer $name ($mutation)', ({ name, mutation }) => {
   scratch = registerTempDir(mkdtempSync(join(tmpdir(), 'sdk-ui-peers-')))
   vi.spyOn(console, 'log').mockImplementation(() => {})
   const errors = vi.spyOn(console, 'error').mockImplementation(() => {})
@@ -208,15 +209,27 @@ it('requires UI build dependencies to be declared as optional peers', () => {
   mkdirSync(join(scratch, 'packages/plugins'), { recursive: true })
   writeFileSync(join(scratch, 'package.json'), JSON.stringify({ workspaces: ['packages/core', 'packages/plugins'] }))
   const path = join(scratch, 'packages/plugins/package.json')
-  const peers = ['vite', '@tanstack/router-generator', 'es-module-lexer']
-  const manifest = { name: '@workbasehq/plugins', exports: { './console/ui/vite': './console/ui/src/vite.ts' }, peerDependencies: Object.fromEntries(peers.map(name => [name, '*'])), peerDependenciesMeta: Object.fromEntries(peers.map(name => [name, { optional: true }])) }
+  const manifest: { peerDependencies: Record<string, string>; peerDependenciesMeta: Record<string, { optional?: boolean }> } = structuredClone(pluginsManifest)
   writeFileSync(path, JSON.stringify(manifest))
   expect(checkBoundary(scratch, true, instanceNames)).toBe(0)
-  for (const name of peers) {
-    const changed = structuredClone(manifest)
-    delete changed.peerDependencies[name]
-    writeFileSync(path, JSON.stringify(changed))
-    expect(checkBoundary(scratch, true, instanceNames)).toBe(1)
-    expect(errors.mock.calls.flat().join('\n')).toContain(`UI build dependency must be an optional peer: packages/plugins/package.json: ${name}`)
-  }
+  if (mutation === 'dependency') delete manifest.peerDependencies[name]
+  else if (mutation === 'metadata') delete manifest.peerDependenciesMeta[name]
+  else manifest.peerDependenciesMeta[name].optional = false
+  writeFileSync(path, JSON.stringify(manifest))
+  expect(checkBoundary(scratch, true, instanceNames)).toBe(1)
+  expect(errors.mock.calls.flat().join('\n')).toContain(`UI build dependency must be an optional peer: packages/plugins/package.json: ${name}`)
+})
+
+it('rejects an undeclared extra UI peer outside the guard inventory', () => {
+  scratch = registerTempDir(mkdtempSync(join(tmpdir(), 'sdk-ui-peers-')))
+  vi.spyOn(console, 'log').mockImplementation(() => {})
+  const errors = vi.spyOn(console, 'error').mockImplementation(() => {})
+  mkdirSync(join(scratch, 'packages/core/src'), { recursive: true })
+  mkdirSync(join(scratch, 'packages/plugins'), { recursive: true })
+  writeFileSync(join(scratch, 'package.json'), JSON.stringify({ workspaces: ['packages/core', 'packages/plugins'] }))
+  const manifest: { peerDependencies: Record<string, string> } = structuredClone(pluginsManifest)
+  manifest.peerDependencies['left-pad'] = '^1.0.0'
+  writeFileSync(join(scratch, 'packages/plugins/package.json'), JSON.stringify(manifest))
+  expect(checkBoundary(scratch, true, instanceNames)).toBe(1)
+  expect(errors.mock.calls.flat().join('\n')).toContain('UI peer not in guard inventory: packages/plugins/package.json: left-pad')
 })

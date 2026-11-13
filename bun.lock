@@ -117,22 +117,35 @@
         "zod": "4.6.7"
       },
       "devDependencies": {
+        "@tanstack/react-query": "5.90.21",
+        "@tanstack/react-router": "1.170.41",
         "@tanstack/router-generator": "1.146.2",
+        "@testing-library/react": "16.3.3",
+        "@types/react": "19.2.18",
         "@workbasehq/core": "workspace:*",
         "@workbasehq/test-support": "workspace:*",
         "es-module-lexer": "2.3.2",
+        "jsdom": "30.1.2",
+        "react": "19.2.8",
+        "react-dom": "19.2.8",
         "vite": "7.3.1"
       },
       "peerDependencies": {
+        "@tanstack/react-query": "^5.90.21",
+        "@tanstack/react-router": "^1.170.41",
         "@tanstack/router-generator": "^1.146.2",
         "@workbasehq/core": "0.2.15",
         "es-module-lexer": "^2.3.2",
+        "react": "^19.2.8",
         "typescript": ">=5.7.2 <7",
         "vite": "^7.3.1"
       },
       "optionalPeers": [
+        "@tanstack/react-query",
+        "@tanstack/react-router",
         "@tanstack/router-generator",
         "es-module-lexer",
+        "react",
         "typescript",
         "vite"
       ]

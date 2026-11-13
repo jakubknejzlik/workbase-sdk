@@ -1,5 +1,7 @@
 import { createHash } from 'node:crypto'
 import { z } from 'zod'
+import { canonicalJSON, type EntityMeta } from './client'
+export { canonicalJSON } from './client'
 import { buildPath, type Page, type Node, type Target } from './index'
 import { assertChecked, SourceError, type Sources, type Entry } from './sources'
 export { checkSources, routePath, SourceError } from './sources'
@@ -30,9 +32,12 @@ const propSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('when') }),
 ])
 const slotsSchema = z.record(id, z.strictObject({ contexts: z.array(z.enum(['record', 'form', 'row'])).min(1), props: z.record(id, propSchema) }))
-export type Schema = Record<string, { fields: Record<string, { type: string; userLink?: boolean }> }>
+export type Schema = Record<string, { displayField?: string; fields: Record<string, { type: string; required?: boolean; readOnly?: boolean; computed?: unknown; userLink?: boolean; values?: string[]; entity?: string }> }>
+const entitySchema = z.strictObject({ displayField: z.string(), fields: z.record(id, z.strictObject({
+  type: z.string(), required: z.boolean(), readOnly: z.boolean(), computed: z.boolean(), userLink: z.boolean(), values: z.array(z.string()).optional(), ref: id.optional(),
+})) })
 export type ResolvedLink = { to: string; bind: Record<string, string> }
-export type Manifest = { version: 1; configHash: string; routes: (Omit<Page, 'component'> & { source: string; path: string; links: Partial<Record<'list' | 'detail' | 'edit', ResolvedLink>> })[]; nav: { title: string; link: ResolvedLink }[]; slots: z.infer<typeof slotsSchema> }
+export type Manifest = { version: 2; configHash: string; entities: Record<string, EntityMeta>; routes: (Omit<Page, 'component'> & { source: string; path: string; links: Partial<Record<'list' | 'detail' | 'edit', ResolvedLink>> })[]; nav: { title: string; link: ResolvedLink }[]; slots: z.infer<typeof slotsSchema> }
 /** Reject values JSON would silently coerce, drop, invoke, or reorder semantically. */
 function jsonData(value: unknown, seen = new Set<object>()): void {
   if (value === null || typeof value === 'string' || typeof value === 'boolean' || typeof value === 'number' && Number.isFinite(value) && !Object.is(value, -0)) return
@@ -76,11 +81,6 @@ function strictParse<T>(schema: z.ZodType<T>, input: unknown): T {
   if (canonicalJSON(parsed) !== canonicalJSON(input)) throw new Error('Manifest parse dropped or changed an own key')
   return nullObjects(parsed)
 }
-export function canonicalJSON(value: unknown): string {
-  if (Array.isArray(value)) return '[' + value.map(canonicalJSON).join(',') + ']'
-  if (value && typeof value === 'object') return '{' + Object.keys(value).sort().map(key => JSON.stringify(key) + ':' + canonicalJSON((value as Record<string, unknown>)[key])).join(',') + '}'
-  return JSON.stringify(value)
-}
 export const manifestHash = (manifest: Manifest): string => createHash('sha256').update(canonicalJSON(manifest)).digest('hex')
 export function normalise(sources: Sources, values: Record<string, unknown>, schema: Schema, configHash: string): Manifest {
   assertChecked(sources)
@@ -120,6 +120,7 @@ export function normalise(sources: Sources, values: Record<string, unknown>, sch
       if (extra || !Object.hasOwn(schema, entity) || !Object.hasOwn(schema[entity].fields, field)) throw new Error(`Unknown uses ${use}`)
     }
     for (const binding of Object.values(page.data)) {
+      if (binding.kind === 'list' && Object.keys(binding.bind).some(key => !['search', 'sort', 'dir'].includes(key))) throw new Error('Unknown list bind key')
       if (!Object.hasOwn(schema, binding.entity)) throw new Error(`Unknown data entity ${binding.entity}`)
       for (const ref of Object.values(binding.bind)) if (!Object.hasOwn(page.params, ref.name) && !Object.hasOwn(page.search, ref.name)) throw new Error(`Unknown binding param ${ref.name}`)
     }
@@ -165,5 +166,16 @@ export function normalise(sources: Sources, values: Record<string, unknown>, sch
     jsonData(values[navEntry.source])
     return strictParse(navSchema, values[navEntry.source]).map(item => ({ title: item.title, link: resolveLink(item.target) })).sort((a, b) => compare(a.link.to, b.link.to) || compare(a.title, b.title))
   }) : []
-  return nullObjects({ version: 1, configHash, routes, nav, slots })
+  const referenced = new Set(routes.flatMap(route => [
+    ...(route.entity ? [route.entity] : []), ...Object.values(route.data).map(binding => binding.entity),
+    ...route.uses.map(use => use.split('.')[0]), ...[...Object.values(route.params), ...Object.values(route.search)].flatMap(spec => spec.kind === 'id' ? [spec.entity] : []),
+  ]))
+  const entities = Object.fromEntries([...referenced].sort(compare).map(name => {
+    const entity = schema[name]
+    return [name, entitySchema.parse({ displayField: entity.displayField ?? Object.keys(entity.fields)[0] ?? '', fields: Object.fromEntries(Object.keys(entity.fields).sort(compare).map(key => {
+      const f = entity.fields[key]
+      return [key, { type: f.type, required: !!f.required, readOnly: !!f.readOnly, computed: !!f.computed, userLink: !!f.userLink, ...(f.values ? { values: f.values } : {}), ...(f.entity ? { ref: f.entity } : {}) }]
+    })) })]
+  }))
+  return nullObjects({ version: 2, configHash, entities, routes, nav, slots })
 }

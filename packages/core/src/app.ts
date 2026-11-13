@@ -81,7 +81,7 @@ function buildApp(input: InstanceInput, env: RuntimeEnv, options: RuntimeOptions
       }])
       else await securityLog(env.DB, { ...c.get('scope'), correlationId: c.get('correlationId') }, `${c.req.method} ${routePath(c, -1)}`, status)
     }
-    return c.json({ error: known ? error.code : status === 400 ? 'validation_error' : constraint ? 'constraint_conflict' : 'internal_error', ...(error instanceof QueryError ? { path: error.path, ...(error.cost ? { cost: error.cost } : {}) } : {}), ...(known && error.hint ? { hint: error.hint } : {}), ...(known && error.detail ? { detail: error.detail } : {}), ...(error instanceof RuleFailed && error.code === 'rule_failed' ? { rule: error.rule, diagnosis: error.diagnosis } : {}) }, status as any)
+    return c.json({ error: known ? error.code : status === 400 ? 'validation_error' : constraint ? 'constraint_conflict' : 'internal_error', ...(error instanceof ZodError && c.req.path.startsWith('/api/') ? { issues: error.issues.map(({ path, code }) => ({ path, code })) } : {}), ...(error instanceof QueryError ? { path: error.path, ...(error.cost ? { cost: error.cost } : {}) } : {}), ...(known && error.hint ? { hint: error.hint } : {}), ...(known && error.detail ? { detail: error.detail } : {}), ...(error instanceof RuleFailed && error.code === 'rule_failed' ? { rule: error.rule, diagnosis: error.diagnosis } : {}) }, status as any)
   })
   app.get('/health', async c => {
     const schema = await schemaStatus(env, config)
