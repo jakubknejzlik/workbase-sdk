@@ -38,9 +38,9 @@ export default defineConfig({
   writeFileSync(join(root, 'run.ts'), `import { loadConfig } from ${JSON.stringify('@workbasehq/core/schema/load')}
 try { console.log(JSON.stringify(await loadConfig(${JSON.stringify(join(root, 'config.ts'))}))) }
 catch (error) { console.error(error.message); process.exit(1) }`)
-  const run = (host = 'bun', preloads: string[] = []) => spawnSync(host, [
+  const run = (host = 'bun') => spawnSync(host, [
     ...(host === 'node' ? ['--import', resolve('node_modules/tsx/dist/esm/index.mjs')] : []),
-    ...preloads.flatMap(preload => ['--import', preload]), join(root, 'run.ts'),
+    join(root, 'run.ts'),
   ], { encoding: 'utf8' })
   return { root, run }
 }
@@ -287,24 +287,6 @@ describe.each(['bun', 'node'])('in-process loader under %s', host => {
     expect(JSON.parse(result.stdout).config.entities.worker).toBeDefined()
   })
 
-  it.each(['silent', 'logging', 'invalid entity'])('executes a %s preload exactly once', kind => {
-    const { root, run } = consumer(kind === 'invalid entity' ? declaration.replace("{ type: 'text', required: true }", executed) : declaration)
-    const count = join(root, 'preload-count.txt')
-    const preload = join(root, 'preload.mjs')
-    writeFileSync(preload, `import { appendFileSync } from 'node:fs'; appendFileSync(${JSON.stringify(count)}, 'executed\\n'); ${kind === 'logging' ? "console.log('PRELOAD_LOG')" : ''}`)
-    const result = run(host, [preload])
-    expect(readFileSync(count, 'utf8')).toBe('executed\n')
-    expect(result.status).toBe(kind === 'invalid entity' ? 1 : 0)
-    if (kind === 'invalid entity') {
-      expect(result.stderr).toContain('schema/worker.ts:4:')
-      expect(result.stdout).not.toContain('ENTITY_CALL_EXECUTED')
-    } else {
-      expect(result.stderr).toBe('')
-      expect(JSON.parse(result.stdout.trim().split('\n').at(-1)!).config.entities.worker).toBeDefined()
-      if (kind === 'logging') expect(result.stdout).toContain('PRELOAD_LOG')
-    }
-  })
-
   it.each(['', '.ts'])('resolves relative SDK paths with suffix %j in-process', suffix => {
     const { root, run } = consumer()
     for (const name of ['config.ts', 'schema/worker.ts']) {
@@ -317,21 +299,57 @@ describe.each(['bun', 'node'])('in-process loader under %s', host => {
     expect(result.status).toBe(0)
   })
 
-  it.each(['missing relative SDK', 'missing package SDK'])('source-locates a %s resolution failure', kind => {
+  it('source-locates an unresolved relative SDK import', () => {
     const { root, run } = consumer()
-    if (kind === 'missing package SDK') rmSync(join(root, 'node_modules/@workbasehq/core'))
     const config = join(root, 'config.ts')
-    // Load the validator directly so removing the consumer's SDK link tests its import.
-    const runner = join(root, 'run.ts')
-    writeFileSync(runner, readFileSync(runner, 'utf8').replace('@workbasehq/core/schema/load', resolve('packages/core/src/schema/load.ts')))
-    if (kind === 'missing relative SDK') writeFileSync(config, readFileSync(config, 'utf8').replace('@workbasehq/core/schema', './missing-sdk.ts'))
+    writeFileSync(config, readFileSync(config, 'utf8').replace('@workbasehq/core/schema', './missing-sdk.ts'))
     const result = run(host)
     expect(result.status).toBe(1)
     expect(result.stderr).toContain('config.ts:1:')
     expect(result.stderr).toContain('Cannot resolve SDK import:')
   })
 
-  it.each(['import', 'require', 'node'])('checks SDK package exports using host import conditions: %s', condition => {
+  it('accepts the bare SDK syntax without a consumer package installation', () => {
+    const { root, run } = consumer()
+    rmSync(join(root, 'node_modules/@workbasehq/core'))
+    const runner = join(root, 'run.ts')
+    writeFileSync(runner, readFileSync(runner, 'utf8').replace('@workbasehq/core/schema/load', resolve('packages/core/src/schema/load.ts')))
+    const result = run(host)
+    expect(result.stderr).toBe('')
+    expect(result.status).toBe(0)
+  })
+
+  it('rejects a dot-prefixed bare SDK specifier even if a local file matches', () => {
+    const { root, run } = consumer()
+    symlinkSync(resolve('packages/core/src/schema.ts'), join(root, '.sdk'))
+    const file = join(root, 'config.ts')
+    writeFileSync(file, readFileSync(file, 'utf8').replace('@workbasehq/core/schema', '.sdk'))
+    const result = run(host)
+    expect(result.status).toBe(1)
+    expect(result.stderr).toContain('config.ts:3:')
+    expect(result.stderr).toContain('Expected a direct named SDK')
+  })
+
+  it.each(['ambiguous', 'wrong file', 'directory'])('rejects a local SDK import identifying a %s', kind => {
+    const { root, run } = consumer()
+    const sdk = join(root, 'sdk')
+    if (kind === 'directory') {
+      mkdirSync(sdk)
+      symlinkSync(resolve('packages/core/src/schema.ts'), join(sdk, 'index.ts'))
+    } else {
+      writeFileSync(sdk, "throw new Error('SDK_EXECUTED')")
+      if (kind === 'ambiguous') symlinkSync(resolve('packages/core/src/schema.ts'), sdk + '.ts')
+    }
+    const file = join(root, 'config.ts')
+    writeFileSync(file, readFileSync(file, 'utf8').replace('@workbasehq/core/schema', './sdk'))
+    const result = run(host)
+    expect(result.status).toBe(1)
+    expect(result.stderr).toContain(kind === 'wrong file' ? 'config.ts:3:' : 'config.ts:1:')
+    expect(result.stderr).toContain(kind === 'ambiguous' ? 'Ambiguous SDK import' : kind === 'directory' ? 'Cannot resolve SDK import' : 'Expected a direct named SDK')
+    expect(result.stdout + result.stderr).not.toContain('SDK_EXECUTED')
+  })
+
+  it.each(['import', 'require', 'node'])('ignores host package export conditions without executing SDK decoys: %s', condition => {
     const { root, run } = consumer()
     const pkg = join(root, 'node_modules/@workbasehq/core')
     rmSync(pkg)
@@ -343,27 +361,80 @@ describe.each(['bun', 'node'])('in-process loader under %s', host => {
       './schema': { [condition]: './evil.ts', default: './schema.ts' }, './schema/load': './load.ts',
     } }))
     const result = run(host)
-    expect(result.status).toBe(condition === 'require' ? 0 : 1)
-    if (condition !== 'require') expect(result.stderr).toContain('config.ts:3:')
+    expect(result.status).toBe(0)
+    expect(result.stderr).toBe('')
     expect(result.stdout + result.stderr).not.toContain('SDK_DECOY_EXECUTED')
   })
 
-  it.each(['extensionless file', '.js', '.tsx', '.d.ts', 'directory', 'escaping symlink'].flatMap(kind => ['', '.ts'].map(suffix => [kind, suffix])))('rejects a competing entity candidate before execution: %s (import suffix %j)', (kind, suffix) => {
+  it.each(['extensionless file', '.js', '.tsx', '.d.ts', 'directory', 'escaping symlink', 'Worker.tsx', 'WORKER.mts', 'Worker', 'WORKER directory', 'WORKER.ts'].flatMap(kind => ['', '.ts'].map(suffix => [kind, suffix])))('rejects a competing entity candidate before execution: %s (import suffix %j)', (kind, suffix) => {
     const { root, run } = consumer()
     const config = join(root, 'config.ts')
     writeFileSync(config, readFileSync(config, 'utf8').replace('./schema/worker', `./schema/worker${suffix}`))
     const sentinel = "console.log('DECOY_EXECUTED'); throw new Error('DECOY_EXECUTED')"
-    if (kind === 'directory') {
-      mkdirSync(join(root, 'schema/worker'))
-      writeFileSync(join(root, 'schema/worker/index.ts'), sentinel)
+    if (kind === 'directory' || kind === 'WORKER directory') {
+      const directory = join(root, 'schema', kind === 'directory' ? 'worker' : 'WORKER')
+      mkdirSync(directory)
+      writeFileSync(join(directory, 'index.ts'), sentinel)
     } else if (kind === 'escaping symlink') {
       rmSync(join(root, 'schema/worker.ts'))
       writeFileSync(join(root, 'outside.ts'), sentinel)
       symlinkSync(join(root, 'outside.ts'), join(root, 'schema/worker.ts'))
-    } else writeFileSync(join(root, `schema/worker${kind === 'extensionless file' ? '' : kind}`), sentinel)
+    } else if (kind === 'WORKER.ts') {
+      // A differently cased sole filename must reject on case-sensitive hosts too.
+      rmSync(join(root, 'schema/worker.ts'))
+      writeFileSync(join(root, 'schema/WORKER.ts'), sentinel)
+    } else writeFileSync(join(root, 'schema', /^[A-Z]/.test(kind) ? kind : `worker${kind === 'extensionless file' ? '' : kind}`), sentinel)
     const result = run(host)
     expect(result.status).toBe(1)
     expect(result.stderr).toContain('config.ts:2:')
     expect(result.stdout + result.stderr).not.toContain('DECOY_EXECUTED')
+  })
+})
+
+// Compare actual objects in one process, including the SDK's WeakSet brand (which
+// JSON snapshots cannot observe). The explicit import belongs only to this test.
+describe.each(['bun', 'node'])('literal interpretation equivalence under %s', host => {
+  it.each(['default', 'named and aliased', 'wrappers', 'relative SDK', 'absolute SDK', 'array descendants', 'literal values'])('deep-equals the module default export including brand: %s', kind => {
+    const entity = kind === 'array descendants'
+      ? declaration.replace("displayField: 'name',", "checks: [{ left: 'name', op: '<=', right: 'name' }],")
+      : kind === 'literal values'
+        ? declaration.replace("name: { type: 'text', required: true }", "name: { type: `text`, required: true, default: 'sample' },\n    note: { type: 'text', default: null },\n    amount: { type: 'int', min: -2, default: +10 },\n    active: { type: 'bool', default: false }")
+        : declaration
+    const { root, run } = consumer(entity)
+    const config = join(root, 'config.ts'), schema = join(root, 'schema/worker.ts')
+    if (kind === 'named and aliased') {
+      writeFileSync(schema, readFileSync(schema, 'utf8').replace('defineEntity, accountLink', 'defineEntity as entity, accountLink as link').replace('export default defineEntity(', 'export const worker = entity(').replace('accountLink()', 'link()'))
+      writeFileSync(config, readFileSync(config, 'utf8').replace('import worker', 'import { worker as sample }').replace('entities: { worker }', 'entities: { worker: sample }'))
+    }
+    if (kind === 'wrappers') for (const file of [config, schema]) {
+      writeFileSync(file, readFileSync(file, 'utf8').replace('export default ', 'export default (').replace(/}\)\s*$/, '}) as const) satisfies unknown'))
+    }
+    if (kind === 'relative SDK' || kind === 'absolute SDK') for (const file of [config, schema]) {
+      const sdk = kind === 'absolute SDK' ? resolve('packages/core/src/schema.ts') : relative(resolve(file, '..'), resolve('packages/core/src/schema'))
+      writeFileSync(file, readFileSync(file, 'utf8').replace('@workbasehq/core/schema', sdk))
+    }
+    writeFileSync(join(root, 'run.ts'), `import { deepStrictEqual, strictEqual } from 'node:assert'
+import { loadConfig } from '@workbasehq/core/schema/load'
+import { isSchemaConfig } from '@workbasehq/core/schema'
+const { config } = await loadConfig(${JSON.stringify(config)})
+const actual = (await import('./config.ts')).default
+deepStrictEqual(config, actual)
+strictEqual(isSchemaConfig(config), true)
+strictEqual(isSchemaConfig(actual), true)
+console.log('EQUIVALENT_WITH_BRAND')`)
+    const result = run(host)
+    expect(result.stderr).toBe('')
+    expect(result.status).toBe(0)
+    expect(result.stdout.trim()).toBe('EQUIVALENT_WITH_BRAND')
+  })
+
+  it.each(['config.ts', 'schema/worker.ts'])('never executes a consumer module sentinel in %s', name => {
+    const { root, run } = consumer()
+    const file = join(root, name)
+    writeFileSync(file, readFileSync(file, 'utf8') + "\nconsole.log('CONSUMER_SENTINEL_EXECUTED')")
+    const result = run(host)
+    expect(result.status).toBe(1)
+    expect(result.stderr).toContain(name + ':')
+    expect(result.stdout + result.stderr).not.toContain('CONSUMER_SENTINEL_EXECUTED')
   })
 })

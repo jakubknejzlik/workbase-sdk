@@ -1,10 +1,9 @@
 /** Build-time source validation only: keep Node and the TS compiler out of runtime imports. */
-import { readFileSync, realpathSync, readdirSync } from 'node:fs'
-import { dirname, resolve } from 'node:path'
-import { pathToFileURL, fileURLToPath, URL } from 'node:url'
-import * as nodeModule from 'node:module'
+import { readFileSync, realpathSync, readdirSync, statSync } from 'node:fs'
+import { dirname, extname, isAbsolute, resolve } from 'node:path'
+import { fileURLToPath, URL } from 'node:url'
 import ts from 'typescript'
-import { accountLink, DeclarationError, defineConfig, defineEntity, isSchemaConfig } from '../schema'
+import { accountLink, DeclarationError, defineConfig, defineEntity } from '../schema'
 import type { InstanceConfig } from '../config'
 
 export interface SourceLocation { file: string; line: number; column: number }
@@ -64,26 +63,30 @@ function imports(file: ts.SourceFile, statements: readonly ts.Statement[] = file
   }
   return bindings
 }
-/** Resolve SDK imports in-process without loading user code or replaying preloads. */
-function resolved(module: string, file: string): string {
-  const host = globalThis as typeof globalThis & { Bun?: { resolveSync(module: string, parent: string): string } }
-  if (host.Bun) return realpathSync(host.Bun.resolveSync(module, dirname(file)))
-  // Supply the consumer's parent URL without Node's experimental parent-argument
-  // flag. Keep the host's ESM conditions and runner hooks (including tsx).
-  // The hook exists only for this synchronous resolution; no module is loaded.
-  const hook = nodeModule.registerHooks({ resolve(specifier, context, nextResolve) {
-    return nextResolve(specifier, { ...context, parentURL: pathToFileURL(file).href })
-  } })
-  try { return realpathSync(fileURLToPath(import.meta.resolve(module))) }
-  finally { hook.deregister() }
-}
+/** Bare SDK imports are syntax; local SDK imports must identify the canonical file. */
 function sdkBinding(binding: Binding | undefined, file: string, name: string) {
   if (binding?.imported !== name) return false
-  const target = '../schema.ts'
-  const allowed = ['@workbasehq/core/schema']
-  if (!allowed.includes(binding.module) && !binding.module.startsWith('.') && !binding.module.startsWith('/')) return false
-  try { return resolved(binding.module, file) === realpathSync(fileURLToPath(new URL(target, import.meta.url))) }
-  catch { return fail(binding.node, `Cannot resolve SDK import: ${binding.module}`) }
+  if (binding.module === '@workbasehq/core/schema') return true
+  if (!binding.module.startsWith('./') && !binding.module.startsWith('../') && !isAbsolute(binding.module)) return false
+  const path = resolve(dirname(file), binding.module)
+  const candidates = extname(path) ? [path] : [path, `${path}.ts`]
+  const files: string[] = []
+  try {
+    for (const candidate of candidates) {
+      try {
+        // Direct files only: directories never imply an index or package lookup.
+        if (statSync(candidate).isFile()) files.push(realpathSync(candidate))
+      } catch (error) {
+        if (!['ENOENT', 'ENOTDIR'].includes((error as NodeJS.ErrnoException).code ?? '')) throw error
+      }
+    }
+    if (files.length > 1) fail(binding.node, `Ambiguous SDK import: ${binding.module}`)
+    if (!files.length) fail(binding.node, `Cannot resolve SDK import: ${binding.module}`)
+    return files[0] === realpathSync(fileURLToPath(new URL('../schema.ts', import.meta.url)))
+  } catch (error) {
+    if (error instanceof SourceError) throw error
+    return fail(binding.node, `Cannot resolve SDK import: ${binding.module}`)
+  }
 }
 /** Entity resolution is deliberately independent of host extension/index precedence. */
 function entityPath(binding: Binding, entry: string, name: string): string {
@@ -91,7 +94,9 @@ function entityPath(binding: Binding, entry: string, name: string): string {
   try {
     const schema = realpathSync(resolve(dirname(entry), 'schema'))
     // Reject every competing sibling, including an extensionless file or directory.
-    if (readdirSync(schema).some(candidate => candidate === name || (candidate.startsWith(name + '.') && candidate !== `${name}.ts`))) fail(binding.node, 'Ambiguous entity import: competing schema candidate')
+    const lower = name.toLowerCase()
+    if (readdirSync(schema).some(candidate => candidate !== `${name}.ts`
+      && (candidate.toLowerCase() === lower || candidate.toLowerCase().startsWith(lower + '.')))) fail(binding.node, 'Ambiguous entity import: competing schema candidate')
     const path = realpathSync(resolve(schema, `${name}.ts`))
     if (dirname(path) !== schema) fail(binding.node, 'Resolved entity import must match schema/<entity>.ts inside the schema directory')
     return path
@@ -100,7 +105,7 @@ function entityPath(binding: Binding, entry: string, name: string): string {
     return fail(binding.node, 'Cannot resolve entity import')
   }
 }
-/** Only these statements and imports can reach module evaluation. */
+/** Only these statements and imports belong to the declaration syntax. */
 function moduleBoundary(file: ts.SourceFile, declaration: ts.Expression, helpers: string[], entityImports = new Set<string>()) {
   for (const statement of file.statements) {
     if (ts.isImportDeclaration(statement)) {
@@ -185,11 +190,11 @@ function literal(node: ts.Expression, bindings: Map<string, Binding>, path: stri
 }
 
 /**
- * Validate the new-era source before importing it, then return the one kernel schema.
+ * Interpret literal declarations and return the one kernel schema without executing
+ * consumer modules or asking the host runtime to resolve their imports.
  * config.ts must default-export defineConfig({...}); its entity map explicitly imports
  * default or named defineEntity({...}) exports from schema/<entity>.ts.
  * Legacy defineInstance remains available through its existing runtime entry.
- * Use the host TS runner (Bun or tsx), as with the existing infra config loader.
  */
 export async function loadConfig(file: string): Promise<{ config: InstanceConfig; sources: SourceMap }> {
   const entry = realpathSync(resolve(file))
@@ -236,12 +241,8 @@ export async function loadConfig(file: string): Promise<{ config: InstanceConfig
     index(unwrap(entity), prefix, sources)
     try { entities[name] = defineEntity(entityData as Parameters<typeof defineEntity>[0]) } catch (error) { remap(error, sources, prefix) }
   }
-  // Run the same normalization before executing any consumer module.
-  try { defineConfig({ ...data, entities } as Parameters<typeof defineConfig>[0]) } catch (error) { remap(error, sources) }
   try {
-    const config: unknown = (await import(pathToFileURL(entry).href)).default
-    if (!isSchemaConfig(config)) fail(source, 'Expected a branded defineConfig result')
-    if (!config || typeof config !== 'object' || !('entities' in config) || !('roles' in config)) fail(source, 'Expected an instance config default export')
-    return { config: config as InstanceConfig, sources }
+    const config = defineConfig({ ...data, entities } as Parameters<typeof defineConfig>[0])
+    return { config, sources }
   } catch (error) { return remap(error, sources) }
 }
