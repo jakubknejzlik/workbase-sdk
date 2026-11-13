@@ -113,7 +113,7 @@ export function checkSources(root: string): Sources {
     function visit(node: ts.Node) {
       if (ts.isImportTypeNode(node)) {
         if (!ts.isLiteralTypeNode(node.argument) || !ts.isStringLiteral(node.argument.literal)) fail(node, 'Unclassified type import')
-        edge(node, node.argument.literal.text, false)
+        edge(node, node.argument.literal.text, true)
       }
       if (ts.isMetaProperty(node) && node.keywordToken === ts.SyntaxKind.ImportKeyword) fail(node, 'Unclassified import.meta (including glob) is prohibited')
       if (ts.isImportEqualsDeclaration(node)) fail(node, 'import = require is unclassified')

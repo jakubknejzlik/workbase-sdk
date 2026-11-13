@@ -10,7 +10,7 @@ export function fixture() {
   mkdirSync(join(root, 'node_modules/@workbasehq'), { recursive: true })
   for (const name of ['core', 'plugins']) symlinkSync(resolve('packages', name), join(root, 'node_modules/@workbasehq', name), 'dir')
   put('schema/worker.ts', `import { defineEntity } from '@workbasehq/core/schema'\nexport default defineEntity({ fields: { name: { type: 'text' } } })`)
-  put('config.ts', `import { defineConfig } from '@workbasehq/core/schema'\nimport worker from './schema/worker'\nexport default defineConfig({ id: 'sample', revision: 1, roles: ['admin'], organizationOwnerRole: 'admin', languages: ['en'], entities: { worker } })`)
+  put('config.ts', `import { defineConfig } from '@workbasehq/core/schema'\nimport worker from './schema/worker'\nexport default defineConfig({ id: 'sample', roles: ['admin'], organizationOwnerRole: 'admin', languages: ['en'], entities: { worker } })`)
   put('ui/index.ts', declaration)
   return { root, put }
 }

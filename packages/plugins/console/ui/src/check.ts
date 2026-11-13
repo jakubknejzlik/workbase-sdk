@@ -39,7 +39,7 @@ function jsonData(value: unknown, seen = new Set<object>()): void {
   if (!value || typeof value !== 'object' || seen.has(value) || ![Object.prototype, Array.prototype, null].includes(Object.getPrototypeOf(value))) throw new Error('Expected JSON data equal to its round-trip')
   seen.add(value)
   for (const key of Reflect.ownKeys(value)) {
-    if (typeof key === 'string' && ['__proto__', 'constructor', 'prototype'].includes(key)) throw new Error(`Forbidden manifest key: ${key}`)
+    if (key === '__proto__') throw new Error(`Forbidden manifest key: ${key}`)
     if (Array.isArray(value) && key === 'length') continue
     if (Array.isArray(value) && (typeof key !== 'string' || !/^(0|[1-9]\d*)$/.test(key))) throw new Error('Expected JSON array indices')
     const descriptor = Object.getOwnPropertyDescriptor(value, key)!
@@ -52,18 +52,29 @@ function jsonData(value: unknown, seen = new Set<object>()): void {
 }
 function stripComponent(value: unknown, required: boolean) {
   if (!value || typeof value !== 'object') throw new Error('Expected a declaration object')
+  if (![Object.prototype, null].includes(Object.getPrototypeOf(value))) throw new Error('Expected a plain declaration object')
   const descriptor = Object.getOwnPropertyDescriptor(value, 'component')
   if (descriptor && !required) throw new Error('component is only allowed on custom pages and slots')
   if (descriptor && (!('value' in descriptor) || typeof descriptor.value !== 'function') || required && !descriptor) throw new Error('component must be a function')
-  const clone = Object.create(Object.getPrototypeOf(value), Object.getOwnPropertyDescriptors(value))
+  const clone = Object.create(null, Object.getOwnPropertyDescriptors(value))
   delete clone.component
   jsonData(clone)
   return clone
 }
+/** Keep identifier records as own data, including constructor and prototype. */
+function nullObjects<T>(value: T): T {
+  if (Array.isArray(value)) return value.map(nullObjects) as T
+  if (value && typeof value === 'object') {
+    const result = Object.create(null)
+    for (const [key, item] of Object.entries(value)) result[key] = nullObjects(item)
+    return result
+  }
+  return value
+}
 function strictParse<T>(schema: z.ZodType<T>, input: unknown): T {
   const parsed = schema.parse(input)
   if (canonicalJSON(parsed) !== canonicalJSON(input)) throw new Error('Manifest parse dropped or changed an own key')
-  return parsed
+  return nullObjects(parsed)
 }
 export function canonicalJSON(value: unknown): string {
   if (Array.isArray(value)) return '[' + value.map(canonicalJSON).join(',') + ']'
@@ -80,16 +91,17 @@ export function normalise(sources: Sources, values: Record<string, unknown>, sch
     const raw = values[slotEntry.source]
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('Expected slots object')
     // Check the registry itself before reading its values, excluding only leaf components.
-    const clean = Object.create(Object.getPrototypeOf(raw))
+    if (![Object.prototype, null].includes(Object.getPrototypeOf(raw))) throw new Error('Expected a plain slots object')
+    const clean = Object.create(null)
     for (const key of Reflect.ownKeys(raw)) {
-      if (typeof key === 'string' && ['__proto__', 'constructor', 'prototype'].includes(key)) throw new Error(`Forbidden manifest key: ${key}`)
+      if (key === '__proto__') throw new Error(`Forbidden manifest key: ${key}`)
       const d = Object.getOwnPropertyDescriptor(raw, key)!
       if (typeof key !== 'string' || !d.enumerable || !('value' in d)) throw new Error('Expected JSON slot registry')
       Object.defineProperty(clean, key, { value: stripComponent(d.value, true), enumerable: true })
     }
     jsonData(clean)
     return strictParse(slotsSchema, clean)
-  }) : {}
+  }) : Object.create(null) as Manifest['slots']
   const paths = new Map<string, Entry>()
   const routes = sources.entries.filter(e => e.path !== undefined).map(entry => at(entry, () => {
     const raw = values[entry.source]
@@ -105,14 +117,15 @@ export function normalise(sources: Sources, values: Record<string, unknown>, sch
     if (page.entity && !Object.hasOwn(schema, page.entity)) throw new Error(`Unknown entity ${page.entity}`)
     for (const use of page.uses) {
       const [entity, field, extra] = use.split('.')
-      if (extra || !schema[entity] || !Object.hasOwn(schema[entity].fields, field)) throw new Error(`Unknown uses ${use}`)
+      if (extra || !Object.hasOwn(schema, entity) || !Object.hasOwn(schema[entity].fields, field)) throw new Error(`Unknown uses ${use}`)
     }
     for (const binding of Object.values(page.data)) {
       if (!Object.hasOwn(schema, binding.entity)) throw new Error(`Unknown data entity ${binding.entity}`)
       for (const ref of Object.values(binding.bind)) if (!Object.hasOwn(page.params, ref.name) && !Object.hasOwn(page.search, ref.name)) throw new Error(`Unknown binding param ${ref.name}`)
     }
     const field = (name: string, type?: string) => {
-      const spec = page.entity && schema[page.entity].fields[name]
+      const fields = page.entity ? schema[page.entity].fields : undefined
+      const spec = fields && Object.hasOwn(fields, name) ? fields[name] : undefined
       if (!spec || type && (type === 'userLink' ? !spec.userLink : spec.type !== type)) throw new Error(`Unknown or wrong field ${name}`)
     }
     function walk(nodes: Node[]) {
@@ -152,5 +165,5 @@ export function normalise(sources: Sources, values: Record<string, unknown>, sch
     jsonData(values[navEntry.source])
     return strictParse(navSchema, values[navEntry.source]).map(item => ({ title: item.title, link: resolveLink(item.target) })).sort((a, b) => compare(a.link.to, b.link.to) || compare(a.title, b.title))
   }) : []
-  return { version: 1, configHash, routes, nav, slots }
+  return nullObjects({ version: 1, configHash, routes, nav, slots })
 }

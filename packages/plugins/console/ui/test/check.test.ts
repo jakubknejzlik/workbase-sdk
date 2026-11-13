@@ -104,10 +104,10 @@ test('inline-type-only-verbatim is a runtime schema edge', () => {
   put('ui/index.ts', `import { type x } from '../schema/unchecked'\n${declaration}`)
   expect(() => checkSources(root)).toThrow(/index.ts:1:.*Value import outside ui/)
 })
-test('import type expressions are conservatively runtime edges', () => {
+test('import type expressions are erased schema edges', () => {
   const { root, put } = setup()
   put('ui/index.ts', `type Worker = import('../schema/worker').default\n${declaration}`)
-  expect(() => checkSources(root)).toThrow(/index.ts:1:.*Value import outside ui/)
+  expect(checkSources(root).modules.has(`${root}/schema/worker.ts`)).toBe(false)
 })
 test('inline type specifiers include a local runtime target in the checked graph', () => {
   const { root, put } = setup()
@@ -123,7 +123,7 @@ test('case and trailing-slash route collisions name both source locations', () =
   expect(() => normalise(sources, Object.fromEntries(sources.entries.map(e => [e.source, page({ title: 'sample.title' })])), schema, 'hash'))
     .toThrow(/foo\/index.ts:2:16: Route collision:.*Foo.ts:2:16/)
 })
-test.each(['__proto__', 'constructor', 'prototype'])('forbidden own key %s is rejected throughout manifest input', key => {
+test.each(['__proto__'])('forbidden own key %s is rejected throughout manifest input', key => {
   const { root, put } = setup()
   put('ui/nav.ts', `import { defineNav } from '${sdk}'; export default defineNav([])`)
   put('ui/-slots.ts', `import { defineSlots } from '${sdk}'; export default defineSlots({})`)
