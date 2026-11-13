@@ -1,3 +1,4 @@
+import { invitationRole, accountAccessState } from '../../../core/src/worker-access'
 import { actorAccountId } from '../../../core/src/policies'
 import { rowTargetSchema, rowLink, rowInvitationGuard } from './row-invitations'
 import { quote } from '../../../core/src/migrations/schema'
@@ -69,9 +70,8 @@ export function memberRoutes(app: App, config: InstanceConfig, env: RuntimeEnv) 
       inviter: { display_name: await inviterDisplay(env.DB, inviter_id) },
       actions: [...(can('invitations.create') && canGrantRole(config, scope.role, row.role) ? ['copy-link', 'resend', 'delivery', 'retry-delivery'] : []), ...(can('invitations.revoke') && canGrantRole(config, scope.role, row.role) ? ['revoke'] : [])],
     })))
-    // UI hints are computed here, never by reproducing the role policy in a client.
-    // Keep member hidden until the #177 upgrade has run on every instance.
-    const roleOptions = config.roles.filter(role => role !== 'member' && canGrantRole(config, scope.role, role)).map(id => ({ id, administrator: isOrganizationAdministrator(config, id) }))
+    // The configured application roles, filtered by the issuer's grant authority.
+    const roleOptions = config.roles.filter(role => (config.baseline === 'workbase-sdk' || role !== 'member') && canGrantRole(config, scope.role, role)).map(id => ({ id, administrator: isOrganizationAdministrator(config, id) }))
     const breadth = (role: string) => Object.values(config.permissions[role] ?? {}).reduce((n, grants) => n + grants.length, 0) + (config.organizationPermissions[role]?.length ?? 0)
     const defaultRole = [...roleOptions].sort((a, b) => breadth(a.id) - breadth(b.id) || a.id.localeCompare(b.id))[0]?.id
     const administrators = members.results.filter(row => row.role === config.organizationOwnerRole).length
@@ -119,23 +119,22 @@ export function memberRoutes(app: App, config: InstanceConfig, env: RuntimeEnv) 
     const row = await env.DB.prepare(`SELECT ${quote(link.field)} AS user FROM ${quote(target.entity)} WHERE organization_id=? AND id=? AND ${filter.sql}`)
       .bind(scope.organizationId, target.row, ...(filter.bindings ?? [])).first<{ user: string | null }>()
     if (!row) throw new ApiError(404, 'not_found')
-    const latest = await env.DB.prepare(`SELECT id,email,expires_at,expired_at,accepted_at,revoked_at,declined_at FROM invitations WHERE organization_id=? AND target_entity=? AND target_row=?
-      ORDER BY created_at DESC,id DESC LIMIT 1`).bind(scope.organizationId, target.entity, target.row).first<{ id: string; email: string; expires_at: string; expired_at: string | null; accepted_at: string | null; revoked_at: string | null; declined_at: string | null }>()
-    const invitation = latest && !latest.accepted_at && !latest.revoked_at && !latest.declined_at ? latest : null
+    const access = await accountAccessState(config, scope, env.DB, target.entity, target.row)
+    const invitation = access.invitation
     const guard = rowInvitationGuard(config, scope, target, false)
     let invitePermission = false
     try { kernelFor(config).resourcePermission(scope, 'invitations.create'); organizationPermission(config, scope, 'invitations.create'); invitePermission = true } catch {}
     const canInvite = invitePermission && kernelFor(config).can(scope, target.entity, 'create') && !!await env.DB.prepare(`SELECT 1 WHERE ${guard.sql}`).bind(...guard.values).first()
     let canCancel = false
     try { kernelFor(config).resourcePermission(scope, 'invitations.revoke'); organizationPermission(config, scope, 'invitations.revoke'); canCancel = true } catch {}
-    return c.json({ can_cancel: canCancel, state: row.user ? 'signed_in' : invitation ? invitation.expired_at || invitation.expires_at <= nowISO() ? 'expired' : 'invited' : 'no_account',
+    return c.json({ can_cancel: canCancel, state: access.state === 'linked' ? 'signed_in' : access.state,
       ...(invitation && (canInvite || canCancel) ? { invitation: { id: invitation.id, email: invitation.email, expires_at: invitation.expires_at } } : {}), can_invite: canInvite })
   })
   app.post('/orgs/:orgId/invitations', scoped, async c => {
     const scope = scopeFor(c, 'invitations.create')
     const parsed = z.strictObject({ email: z.string().trim().pipe(emailSchema), role: roleSchema.optional(), target: rowTargetSchema.optional(), profile_prefill: profileNamesSchema.optional() }).parse(await c.req.json())
-    if (parsed.target && parsed.role !== undefined && parsed.role !== 'member') throw new ApiError(400, 'invalid_invitation_role')
-    const body = { ...parsed, role: parsed.target ? 'member' : roleSchema.parse(parsed.role) }
+    if (parsed.target && parsed.role !== undefined && parsed.role !== invitationRole(config, parsed.target.entity)) throw new ApiError(400, 'invalid_invitation_role')
+    const body = { ...parsed, role: parsed.target ? invitationRole(config, parsed.target.entity) : roleSchema.parse(parsed.role) }
     if (body.target) {
       const link = rowLink(config, body.target)
       kernelFor(config).permission(scope, body.target.entity, 'create')

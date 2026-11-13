@@ -1,3 +1,4 @@
+import { invitationRole } from '../../../core/src/worker-access'
 import { z } from 'zod'
 import type { InstanceConfig } from '@workbasehq/core/config'
 import type { Scope } from '../../../core/src/types'
@@ -20,7 +21,7 @@ export function rowLink(config: InstanceConfig, target: RowTarget) {
 export function rowInvitationGuard(config: InstanceConfig, scope: Scope, target: RowTarget, available = true) {
   const link = rowLink(config, target)
   const policy = writeFilter(kernelFor(config), scope, target.entity, target.entity, 'create')
-  const issuer = issuerGuard(config, scope, 'invitations.create', 'member', role => (scope.actor.type === 'agent' || role === scope.role) && !!config.permissions[role]?.[target.entity]?.includes('create'))
+  const issuer = issuerGuard(config, scope, 'invitations.create', invitationRole(config, target.entity), role => (scope.actor.type === 'agent' || role === scope.role) && !!config.permissions[role]?.[target.entity]?.includes('create'))
   return {
     sql: `${issuer.sql} AND EXISTS (SELECT 1 FROM ${quote(target.entity)} WHERE organization_id=? AND id=? ${available ? `AND ${quote(link.field)} IS NULL` : ''} AND ${policy.sql})`,
     values: [...issuer.values, scope.organizationId, target.row, ...(policy.bindings ?? [])],

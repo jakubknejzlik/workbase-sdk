@@ -55,6 +55,10 @@ export function serializeAccessLock(kernel: AccessKernel, options: AccessLockOpt
   }
   lines.push('', '## System and account privileges', '', '| Role | Action | Decision | Target | Source |', '| --- | --- | --- | --- | --- |')
   for (const rule of policy.system) lines.push(`| ${cell(rule.role)} | ${cell(rule.action)} | ${rule.decision} | ${cell(json(rule.target))} | ${cell(locate(rule.source))} |`)
+  if (policy.accountLinks) {
+    lines.push('', '## Account link invitation roles', '')
+    for (const [entity, mapping] of Object.entries(policy.accountLinks)) lines.push(`- ${cell(entity)}: ${cell(mapping.invitationRole)} (${cell(locate(`access.accountLinks.${entity}.invitationRole`))})`)
+  }
   lines.push('', '## Record actions', '', '| Entity | Action | Command | Conditions | Dependencies | Source |', '| --- | --- | --- | --- | --- | --- |')
   for (const action of policy.actions) lines.push(`| ${cell(action.entity)} | ${cell(action.name)} | ${cell(action.command)} | ${cell(json(action.conditions))} | ${cell(json(action.dependencies))} | ${cell(locate(action.source))} |`)
   lines.push('', '## Registered command guards', '', '| Command | Permission | Additional permissions | Executable checks | Registration source |', '| --- | --- | --- | --- | --- |')
@@ -100,6 +104,7 @@ function diff(previous: string, current: string): string[] {
     }
     if (json(before.effectiveAccess.opaqueHooks) !== json(after.effectiveAccess.opaqueHooks)) changes.push('~ opaque executable hooks')
     if (json(before.effectiveAccess.roles) !== json(after.effectiveAccess.roles)) changes.push('~ configured roles')
+    inputs(before.effectiveAccess.accountLinks, after.effectiveAccess.accountLinks, 'account link invitation roles')
     inputs(before.enforcementInputs, after.enforcementInputs, 'enforcement inputs')
     if (json(before.sources) !== json(after.sources)) changes.push('~ source locations')
     return changes.slice(0, 12).concat(changes.length > 12 ? [`… ${changes.length - 12} more changes`] : [])

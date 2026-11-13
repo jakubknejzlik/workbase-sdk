@@ -1,4 +1,5 @@
 import { readRecord } from './record-read'
+import { accountAccessState, canReadAccountAccess } from './worker-access'
 import { recordActionRoutes } from './record-action-routes'
 import { recordActions } from './record-actions'
 import { assertActorFields } from './policies'
@@ -86,6 +87,7 @@ export function crudRoutes(app: App, config: InstanceConfig, env: RuntimeEnv) {
     const name = c.req.param('entity')!, scope = c.get('scope')
     const row = await readRecord(config, scope, env, name, c.req.param('id')!, c.req.query(), writeLog)
     if (config.baseline === 'workbase-sdk') row.actions = await recordActions(config, scope, env.DB, name, c.req.param('id')!)
+    if (config.baseline === 'workbase-sdk' && canReadAccountAccess(config, scope, name)) row.access = await accountAccessState(config, scope, env.DB, name, c.req.param('id')!)
     return c.json(row)
   }))
   app.post('/api/:entity', async c => {

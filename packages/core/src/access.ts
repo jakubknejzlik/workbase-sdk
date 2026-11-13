@@ -1,4 +1,5 @@
 import { accessGuards } from './access-guards'
+import { userLinks } from './user-link-fields'
 import { userLinkCommands } from './user-links'
 import type { AtomicOperation } from './execution/types'
 import { systemAccessTarget } from './access-evaluator'
@@ -21,6 +22,7 @@ const sharedSchema = z.strictObject({
   roles: z.record(z.string(), z.strictObject({ system: z.record(z.string(), decision) })),
   entities: z.record(z.string(), entityAccessSchema),
   predicates: z.record(z.string(), z.record(z.string(), z.unknown())),
+  accountLinks: z.record(z.string(), z.strictObject({ invitationRole: z.string() })).optional(),
 })
 export type EntityAccess = z.input<typeof entityAccessSchema>
 export type AccessInput = z.input<typeof sharedSchema>
@@ -58,6 +60,7 @@ export interface EffectiveRecordAction {
 export interface EffectiveAccessPolicy {
   version: 1
   roles: string[]
+  accountLinks?: Record<string, { invitationRole: string }>
   actions: EffectiveRecordAction[]
   entities: EffectiveEntityPolicy[]
   guards: { name: string; permission: AtomicOperation['permission'] | null; additionalPermissions: AtomicOperation['permission'][]; opaque: true }[]
@@ -182,6 +185,14 @@ export function compileAccess(config: InstanceConfig, declarations: Record<strin
       return { when, reason: condition.reason }
     })
     result.actions.push({ entity, name, command: action.command, conditions, dependencies: sorted(dependencies), source })
+  }
+  for (const [entity, mapping] of Object.entries(input.accountLinks ?? {}).sort(([a], [b]) => a.localeCompare(b))) {
+    const source = `access.accountLinks.${entity}.invitationRole`
+    if (!userLinks(config).some(link => link.entity === entity)) error(source, `Account link required: ${entity}`)
+    if (!roles.includes(mapping.invitationRole)) error(source, `Unknown invitation role: ${mapping.invitationRole}`)
+    if (mapping.invitationRole === config.organizationOwnerRole) error(source, 'Invitation role cannot be organizationOwnerRole')
+    if (!result.entities.some(rule => rule.entity === entity && rule.role === mapping.invitationRole && rule.operation === 'read' && rule.decision === 'allow')) error(source, `Invitation role requires read on ${entity}`)
+    ;(result.accountLinks ??= {})[entity] = { ...mapping }
   }
   return accessGuards(result, config.commands, [...(config.plugins ?? []).flatMap(plugin => [...(plugin.commands ?? [])]), ...userLinkCommands(config)], config.plugins ?? [])
 }
