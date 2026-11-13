@@ -42,7 +42,13 @@ export function recordActionRoutes(app: App, config: InstanceConfig, env: Runtim
       return c.json(result.body, result.status as any)
     } catch (error) {
       // Prepare/planning errors must not outlive the record's visibility.
-      await readRecord(config, scope, env, entity, id)
+      // Confirmed GET denials (403/404) conceal the command error; an inconclusive
+      // recheck (e.g. D1 outage surfacing as query_invalid) is an opaque 5xx.
+      try { await readRecord(config, scope, env, entity, id) }
+      catch (recheck) {
+        if (recheck instanceof ApiError && (recheck.status === 403 || recheck.status === 404)) throw recheck
+        throw new Error('record action visibility recheck failed', { cause: { recheck, error } })
+      }
       if (!(error instanceof RuleFailed)) throw error
       // Diagnosis is read-only and runs only after atomic rollback. It cannot
       // authorize a commit; hidden rows have precisely GET's error body.

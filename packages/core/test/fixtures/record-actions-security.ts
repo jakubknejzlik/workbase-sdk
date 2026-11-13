@@ -74,6 +74,21 @@ export function recordActionSecurityTests(setup: Setup) {
     expect(await snapshot(db)).toEqual(before)
   })
 
+  it('security prepare: an inconclusive visibility recheck is an opaque 5xx, not a client error', async () => {
+    let db: D1Database
+    const command = { ...closeRecord, prepare: async () => {
+      // Make the post-error GET-authority read fail as an infrastructure fault would.
+      await db.exec('ALTER TABLE record RENAME TO record_unavailable')
+      throw new ApiError(503, 'backend_unavailable')
+    } }
+    const fixture = await setup(actionFixture(undefined, [command])); db = fixture.db
+    const post = await fixture.app.fetch(request('/api/record/open/actions/close', true))
+    await db.exec('ALTER TABLE record_unavailable RENAME TO record')
+    expect([post.status, await post.text()]).toEqual([500, '{"error":"internal_error"}'])
+    expect((await fixture.app.fetch(request('/api/record/open'))).status).toBe(200)
+    expect(await snapshot(db)).toMatchObject({ audits: 0 })
+  })
+
   it.each(['prepare', 'plan'] as const)('security prepare: visibility is rechecked after a %s error', async phase => {
     let db: D1Database
     const command = { ...closeRecord, prepare: async () => {
