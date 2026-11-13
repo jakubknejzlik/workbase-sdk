@@ -120,11 +120,19 @@ Source locations identify the rule or its enclosing registration declaration. Ex
 
 | Entity | Action | Command | Conditions | Dependencies | Source |
 | --- | --- | --- | --- | --- | --- |
+| worker | invite | worker/access_invite | [{"kind":"unlinked","opaque":true,"reason":"access.already_linked"},{"kind":"clear","opaque":true,"reason":"access.invitation_pending"}] | ["worker.user"] | packages/core/test/fixtures/worker-access.ts:1 |
+| worker | cancel_invite | worker/access_cancel_invite | [{"kind":"pending","opaque":true,"reason":"access.no_invitation"}] | ["worker.user"] | packages/core/test/fixtures/worker-access.ts:1 |
+| worker | link_account | worker/access_link_account | [{"kind":"unlinked","opaque":true,"reason":"access.already_linked"}] | ["worker.user"] | packages/core/test/fixtures/worker-access.ts:1 |
+| worker | unlink_account | worker/access_unlink_account | [{"kind":"linked","opaque":true,"reason":"access.not_linked"}] | ["worker.user"] | packages/core/test/fixtures/worker-access.ts:1 |
 
 ## Registered command guards
 
 | Command | Permission | Additional permissions | Executable checks | Registration source |
 | --- | --- | --- | --- | --- |
+| worker/access_cancel_invite | {"entity":"worker","operation":"update"} | [] | opaque | packages/core/test/fixtures/worker-access.ts:1 |
+| worker/access_invite | {"entity":"worker","operation":"create"} | [] | opaque | packages/core/test/fixtures/worker-access.ts:1 |
+| worker/access_link_account | {"entity":"worker","operation":"update"} | [] | opaque | packages/core/test/fixtures/worker-access.ts:1 |
+| worker/access_unlink_account | {"entity":"worker","operation":"update"} | [] | opaque | packages/core/test/fixtures/worker-access.ts:1 |
 | worker/link_account | {"entity":"worker","operation":"update"} | [] | opaque | packages/core/test/fixtures/worker-access.ts:1 |
 | worker/remove_access | {"entity":"worker","operation":"update"} | [] | opaque | packages/core/test/fixtures/worker-access.ts:1 |
 

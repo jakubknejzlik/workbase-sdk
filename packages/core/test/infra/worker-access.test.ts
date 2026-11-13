@@ -29,3 +29,17 @@ it('the committed worker access locks match the compiled policy and source locat
   const { runAccessCli } = await import('../../src/access-lock/cli')
   expect(await runAccessCli(['--config', 'packages/core/test/fixtures/worker-access.ts', '--root', '.', '--directory', 'packages/core/test/fixtures/worker-access'])).toBe(0)
 })
+it('account conditions stay opaque serializable data, cannot be authored, and contain no credentials', () => {
+  const config = workerAccessFixture()
+  const cloned = { ...config, effectiveAccess: structuredClone(config.effectiveAccess) }
+  const kernel = new KernelRegistry(cloned)
+  const lock = serializeAccessLock(kernel, { root: process.cwd(), sources: { '': { file: 'packages/core/test/fixtures/worker-access.ts', line: 1, column: 1 } } })
+  const actions = JSON.parse(lock.json).effectiveAccess.actions
+  expect(actions.map((action: any) => action.name)).toEqual(['invite', 'cancel_invite', 'link_account', 'unlink_account'])
+  expect(actions.every((action: any) => action.conditions.every((condition: any) => condition.opaque === true))).toBe(true)
+  expect(lock.json).not.toMatch(/accept_url|token_hash|invitations\/accept/)
+  expect(() => defineEntity({ fields: { name: { type: 'text' } }, actions: { forged: { command: 'worker/access_invite', available: [{ opaque: true, kind: 'clear', reason: 'access.pending' } as any] } } })).toThrow()
+})
+it('authored aliases cannot call a card adapter without its core SQL conditions', () => {
+  expect(() => workerAccessFixture('staff', true, { alias: { command: 'worker/access_unlink_account' } })).toThrow('core registered action')
+})

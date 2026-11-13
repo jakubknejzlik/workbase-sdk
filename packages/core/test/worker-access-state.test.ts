@@ -35,7 +35,7 @@ it('detail supplies all four access states and a public account projection; staf
     expect(response.status, await response.clone().text()).toBe(200)
     const row = await response.json() as any
     expect(row.access.state).toBe(state)
-    expect(row.actions).toEqual({})
+    expect(row.actions).toHaveProperty('invite')
     if (state === 'linked') expect(row.access).toEqual({ state, account: { id: 'staff', display_name: 'staff', email: 'staff@example.test' }, invitation: null })
     else expect(row.access.account).toBeNull()
     expect(JSON.stringify(row.access)).not.toMatch(/token|accept_url|inviter_id/)

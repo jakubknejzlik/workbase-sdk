@@ -8,10 +8,10 @@ import { members } from '@workbasehq/plugins/members'
 import { mailOutbox } from '@workbasehq/plugins/mail-outbox'
 
 const all = { read: 'allow', create: 'allow', update: 'allow', delete: 'allow' } as const
-export function workerAccessFixture(invitationRole = 'staff', staffRead = true) {
+export function workerAccessFixture(invitationRole = 'staff', staffRead = true, authoredActions?: any) {
   const config = defineConfig({ id: 'worker_access', roles: ['admin', 'staff'], organizationOwnerRole: 'admin', languages: ['en'],
     plugins: [identity, localAuth, legacyPermissions, members, createOrganizations(), mailOutbox()], interactive: false,
-    entities: { worker: defineEntity({ fields: { name: { type: 'text', required: true }, user: accountLink() },
+    entities: { worker: defineEntity({ fields: { name: { type: 'text', required: true }, user: accountLink() }, actions: authoredActions,
       access: { admin: all, staff: { read: staffRead ? { where: { user: { eq: '$actor.id' } } } : 'deny', create: 'deny', update: 'deny', delete: 'deny' } },
     }) },
     access: defineAccess({ accountLinks: { worker: { invitationRole } }, predicates: {},

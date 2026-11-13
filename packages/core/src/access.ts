@@ -1,3 +1,5 @@
+import { accountActions, type AccountCondition } from './account-action-conditions'
+import { workerAccessCommands } from './worker-access-actions'
 import { accessGuards } from './access-guards'
 import { userLinks } from './user-link-fields'
 import { userLinkCommands } from './user-links'
@@ -53,7 +55,7 @@ export interface EffectiveEntityPolicy {
  */
 export interface EffectiveRecordAction {
   entity: string; name: string; command: string
-  conditions: { when: Filter; reason: string }[]
+  conditions: ({ when: Filter; reason: string } | AccountCondition)[]
   dependencies: string[]
   source: string
 }
@@ -194,5 +196,14 @@ export function compileAccess(config: InstanceConfig, declarations: Record<strin
     if (!result.entities.some(rule => rule.entity === entity && rule.role === mapping.invitationRole && rule.operation === 'read' && rule.decision === 'allow')) error(source, `Invitation role requires read on ${entity}`)
     ;(result.accountLinks ??= {})[entity] = { ...mapping }
   }
-  return accessGuards(result, config.commands, [...(config.plugins ?? []).flatMap(plugin => [...(plugin.commands ?? [])]), ...userLinkCommands(config)], config.plugins ?? [])
+  const reservedCommands = Object.keys(result.accountLinks ?? {}).flatMap(entity => accountActions(entity).map(action => action.command))
+  for (const action of result.actions) if (reservedCommands.includes(action.command)) error(action.source, 'Account commands require their core registered action')
+  for (const entity of Object.keys(result.accountLinks ?? {})) {
+    for (const action of accountActions(entity)) {
+      if (result.actions.some(existing => existing.entity === entity && existing.name === action.name)) error(action.source, `Reserved account action: ${action.name}`)
+      result.actions.push(action)
+    }
+  }
+  const builtins = workerAccessCommands({ ...config, effectiveAccess: result })
+  return accessGuards(result, [...config.commands, ...builtins.map(command => command.name)], [...(config.plugins ?? []).flatMap(plugin => [...(plugin.commands ?? [])]), ...userLinkCommands(config), ...builtins], config.plugins ?? [])
 }

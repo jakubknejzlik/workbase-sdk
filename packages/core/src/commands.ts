@@ -1,3 +1,4 @@
+import { isAccountAccessCommand } from './worker-access-actions'
 import { z } from 'zod'
 import type { InstanceConfig } from './config'
 import type { App, RuntimeEnv, Scope } from './types'
@@ -34,6 +35,8 @@ export function commandPreflight(config: InstanceConfig, scope: Scope, operation
 }
 /** Internal/trusted adapter compatibility. Never accept this context from request JSON. */
 export async function executeCommand(ctx: CommandContext, name: string, input: unknown): Promise<AtomicResult> {
+  // Card adapters require the record dispatcher's bound atomic guard.
+  if (isAccountAccessCommand(ctx.config, name)) throw new ApiError(405, 'unsupported_command')
   const operation = ctx.commands.get(name)
   if (!operation) throw new ApiError(405, 'unsupported_command')
   commandPreflight(ctx.config, ctx.scope, operation)

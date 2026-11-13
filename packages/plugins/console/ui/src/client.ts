@@ -80,6 +80,15 @@ export function createClient(options: { baseURL: string; orgId: string; actorId:
     invalidate(entity, row)
     return row
   }
+  async function actWith(entity: string, id: string, name: string, body: Record<string, unknown>, signal: AbortSignal): Promise<{ record: RecordData; result: Record<string, unknown> }> {
+    const detail = entityPath(entity) + '/' + encodeURIComponent(id)
+    const result = await wire(detail + '/actions/' + encodeURIComponent(name), signal, 'POST', body)
+    invalidate()
+    const row = result.id === id && Number.isSafeInteger(result.version) && result.actions && typeof result.actions === 'object'
+      ? result as RecordData : await wire(detail, signal) as RecordData
+    invalidate(entity, row)
+    return { record: row, result }
+  }
   return {
     scope: { actorId: options.actorId, orgId: options.orgId },
     subscribe(listener: () => void) { listeners.add(listener); return () => { listeners.delete(listener) } },
@@ -109,14 +118,9 @@ export function createClient(options: { baseURL: string; orgId: string; actorId:
       return { load: (input: ListBind, signal: AbortSignal) => page(input, signal, false), more: (signal: AbortSignal) => page(bind, signal, true) }
     },
     async act(entity: string, id: string, name: string, signal: AbortSignal): Promise<RecordData> {
-      const detail = entityPath(entity) + '/' + encodeURIComponent(id)
-      const result = await wire(detail + '/actions/' + encodeURIComponent(name), signal, 'POST', {})
-      invalidate()
-      const row = result.id === id && Number.isSafeInteger(result.version) && result.actions && typeof result.actions === 'object'
-        ? result as RecordData : await wire(detail, signal) as RecordData
-      invalidate(entity, row)
-      return row
+      return (await actWith(entity, id, name, {}, signal)).record
     },
+    actWith,
     create: (entity: string, body: unknown, draftKey: string, signal: AbortSignal) => mutate(entity, entityPath(entity), 'POST', body, { 'Idempotency-Key': draftKey }, signal),
     update: (entity: string, id: string, version: number, body: unknown, signal: AbortSignal) => {
       if (!Number.isSafeInteger(version) || version < 1) throw new ApiFailure(400, 'version_required')

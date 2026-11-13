@@ -78,11 +78,16 @@ export function invitationAccountLink(ctx: LinkContext, invitation: { entity?: s
   return invitation.entity && invitation.row ? [linkAccountRow(ctx, invitation.entity, invitation.row, userId, true)] : []
 }
 
-const actions = new WeakSet<object>()
+const actions = new WeakMap<object, 'invitations.create' | 'invitations.revoke'>()
+export function registerUserLinkAction<T extends AtomicOperation<any>>(operation: T, permission: 'invitations.create' | 'invitations.revoke' = 'invitations.create'): T {
+  actions.set(operation.plan, permission)
+  return operation
+}
 export function userLinkActionPermission(config: InstanceConfig, scope: Scope, operation: AtomicOperation<any>) {
-  if (!actions.has(operation.plan)) return
-  kernelFor(config).resourcePermission(scope, 'invitations.create')
-  organizationPermission(config, scope, 'invitations.create')
+  const permission = actions.get(operation.plan)
+  if (!permission) return
+  kernelFor(config).resourcePermission(scope, permission)
+  organizationPermission(config, scope, permission)
 }
 interface PreparedIssuer { role: string; filter: SqlStatement }
 export function userLinkCommands(config: InstanceConfig): AtomicOperation<any>[] {
@@ -125,7 +130,6 @@ export function userLinkCommands(config: InstanceConfig): AtomicOperation<any>[]
         result: { status: 200, body: { id: input.rowId } } }
       },
     }
-    actions.add(operation.plan)
-    return operation
+    return registerUserLinkAction(operation)
   }))
 }
