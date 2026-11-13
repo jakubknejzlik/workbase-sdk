@@ -128,7 +128,8 @@
         "jsdom": "30.1.2",
         "react": "19.2.8",
         "react-dom": "19.2.8",
-        "vite": "7.3.1"
+        "vite": "7.3.1",
+        "i18next": "25.10.10"
       },
       "peerDependencies": {
         "@tanstack/react-query": "^5.90.21",
@@ -138,13 +139,15 @@
         "es-module-lexer": "^2.3.2",
         "react": "^19.2.8",
         "typescript": ">=5.7.2 <7",
-        "vite": "^7.3.1"
+        "vite": "^7.3.1",
+        "i18next": "^25.10.10"
       },
       "optionalPeers": [
         "@tanstack/react-query",
         "@tanstack/react-router",
         "@tanstack/router-generator",
         "es-module-lexer",
+        "i18next",
         "react",
         "typescript",
         "vite"

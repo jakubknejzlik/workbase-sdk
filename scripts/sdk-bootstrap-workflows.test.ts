@@ -150,3 +150,10 @@ describe('exported public bootstrap workflow policy', () => {
     expect(existsSync(join(process.cwd(), '.github/workflows/release.yml'))).toBe(false)
   })
 })
+
+it('CI reaches the single UI validator through root invariants', () => {
+  const manifest = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
+  expect(manifest.scripts['check:ci-invariants']).toContain('&& bun run check:ui')
+  expect(manifest.scripts['check:ui']).toBe('bun packages/plugins/console/ui/src/cli.ts')
+  expect(workflow('ci').parsed.jobs.check.steps.some(step => step.run === 'bun run check:ci-invariants')).toBe(true)
+})
