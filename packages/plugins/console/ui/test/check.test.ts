@@ -163,3 +163,8 @@ if (false) {
   // @ts-expect-error action names are checked against the entity declaration
   action<RecordEntity>('missing')
 }
+
+test.each(['sign-in', 'invitation', 'auth'])('reserved SDK route: %s', name => {
+  const { root, put } = setup(); put('ui/' + name + '/index.ts', declaration)
+  expect(() => checkSources(root)).toThrow(/Reserved SDK route/)
+})

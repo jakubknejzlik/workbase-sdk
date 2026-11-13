@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { statSync, existsSync, readFileSync } from 'node:fs'
 import { mergeCatalogs, type Catalogs } from './catalogs'
@@ -130,13 +131,34 @@ async function stage(root: string, output: string): Promise<{ result: Generation
     } }
   } catch (error) { await discard(); throw error }
 }
+/** Resolve from the consumer repository, never the SDK package location. */
+export function resolveBuildSHA(root: string): string {
+  let sha = process.env.WORKBASE_BUILD_SHA ?? process.env.GITHUB_SHA
+  if (sha === undefined) {
+    try { sha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim() }
+    catch { throw new Error('Build SHA must be 40 hex characters; provide WORKBASE_BUILD_SHA or build in a git repository') }
+  }
+  if (!/^[a-f0-9]{40}$/i.test(sha)) throw new Error('Build SHA must be 40 hex characters')
+  return sha.toLowerCase()
+}
+/** Invoke before building/deploying an Instance so layout edits cannot reuse HEAD. */
+export function assertCleanDeploy(root: string): void {
+  const dirty = execFileSync('git', ['status', '--porcelain', '--untracked-files=normal'], { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
+  if (dirty.trim()) throw new Error('Deployment requires a clean git worktree, including untracked files')
+}
 export interface UIOptions { directory?: string }
 export type UIPlugin = Plugin & { idle(): Promise<void>; generation?: Generation; error?: Error }
 export function consoleUI(options: UIOptions = {}): UIPlugin {
+  let sha: string | undefined
   let root: string, output: string, server: ViteDevServer | undefined
   let requested = 0, completed = 0, running: Promise<void> | undefined, closed = false
   const plugin: UIPlugin = {
     name: 'workbase-console-ui', enforce: 'pre',
+    config(config, environment) {
+      sha = environment.command === 'build' ? resolveBuildSHA(resolve(config.root ?? process.cwd())) : undefined
+      return { define: { __WORKBASE_BUILD_SHA__: JSON.stringify(sha ?? 'unbuilt') } }
+    },
+    generateBundle() { if (sha) this.emitFile({ type: 'asset', fileName: 'build-meta.json', source: JSON.stringify({ sha, builtAt: new Date().toISOString() }) + '\n' }) },
     // Keep generated IDs at the stable pointer. Vite's module graph otherwise
     // retains realpaths into deleted generations even after invalidateAll().
     resolveId(id, importer) {
@@ -151,6 +173,7 @@ export function consoleUI(options: UIOptions = {}): UIPlugin {
         try { if (statSync(file).isFile()) return file + query } catch { /* Let Vite report a missing generated import. */ }
       }
     },
+    transformIndexHtml() { return [{ tag: 'meta', attrs: { name: 'referrer', content: 'no-referrer' }, injectTo: 'head-prepend' }] },
     configResolved(config) { root = config.root; output = resolve(root, options.directory ?? '.workbase-ui') },
     async buildStart() { if (!requested) request(); await plugin.idle(); if (plugin.error && !server) throw plugin.error },
     configureServer(value) {

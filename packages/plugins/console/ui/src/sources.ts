@@ -19,6 +19,7 @@ function fail(node: ts.Node, message: string): never { throw new SourceError(loc
 export function routePath(source: string): string {
   const parts = source.replace(/^ui\//, '').replace(/\.ts$/, '').split('/')
   if (parts.some(part => !/^(?:[a-zA-Z][a-zA-Z0-9-]*|\$[a-zA-Z][a-zA-Z0-9]*)$/.test(part) || part === 'route') || parts.slice(0, -1).includes('index')) throw new Error(`Unsupported route filename: ${source}`)
+  if (['sign-in', 'invitation', 'auth'].includes(parts[0])) throw new Error(`Reserved SDK route: ${source}`)
   return '/' + parts.filter(part => part !== 'index').join('/')
 }
 function files(dir: string): string[] {

@@ -2,14 +2,15 @@ import { spawnSync } from 'node:child_process'
 import { readFileSync, rmSync, unlinkSync, readdirSync, symlinkSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { createServer, build, type ViteDevServer } from 'vite'
-import { afterEach, expect, test, vi } from 'vitest'
-import { consoleUI, extractManifest } from '../src/vite'
+import { beforeEach, afterEach, expect, test, vi } from 'vitest'
+import { consoleUI, extractManifest, resolveBuildSHA, assertCleanDeploy } from '../src/vite'
 import { canonicalJSON, manifestHash, SourceError } from '../src/check'
 import * as sourceChecks from '../src/sources'
 import { buildPath } from '../src/index'
 import { fixture, declaration, sdk, forbidden } from './fixture'
 const roots: string[] = [], servers: ViteDevServer[] = []
-afterEach(async () => { await Promise.all(servers.splice(0).map(s => s.close())); roots.splice(0).forEach(root => rmSync(root, { recursive: true, force: true })) })
+beforeEach(() => vi.stubEnv('WORKBASE_BUILD_SHA', 'a'.repeat(40)))
+afterEach(async () => { vi.unstubAllEnvs(); await Promise.all(servers.splice(0).map(s => s.close())); roots.splice(0).forEach(root => rmSync(root, { recursive: true, force: true })) })
 function setup() { const f = fixture(); roots.push(f.root); return f }
 async function start(root: string) {
   const plugin = consoleUI()
@@ -220,4 +221,52 @@ test('build bundles partial SDK overrides with the remaining SDK catalog', async
   expect(plugin.error).toBeUndefined()
   const catalogs = JSON.parse(readFileSync(join(root, '.workbase-ui/locales.json'), 'utf8'))
   expect(catalogs.en.sdk.save).toBe('Store'); expect(catalogs.en.sdk.cancel).toBe('Cancel')
+})
+
+test('built HTML sets no-referrer and contains no inline script or style', async () => {
+  const { root, put } = setup()
+  put('index.html', '<!doctype html><html><head></head><body><script type="module" src="/entry.ts"></script></body></html>')
+  put('entry.ts', 'console.log("built")')
+  await build({ root, configFile: false, plugins: [consoleUI()], logLevel: 'silent' })
+  const html = readFileSync(join(root, 'dist/index.html'), 'utf8')
+  expect(html).toContain('<meta name="referrer" content="no-referrer">')
+  expect(html).not.toMatch(/<style|style=|<script(?![^>]*src=)/)
+})
+
+test('layout-only git commit changes bundle/build metadata SHA with identical config', async () => {
+  const { root, put } = setup()
+  put('index.html', '<html><head></head><body><script type="module" src="/entry.ts"></script></body></html>')
+  put('entry.ts', 'console.log(__WORKBASE_BUILD_SHA__)')
+  put('.gitignore', 'node_modules/\n.workbase-ui*\ndist/\n')
+  const git = (...args: string[]) => { const result = spawnSync('git', ['-C', root, ...args], { encoding: 'utf8' }); expect(result.status, result.stderr).toBe(0); return result.stdout.trim() }
+  vi.stubEnv('WORKBASE_BUILD_SHA', undefined); vi.stubEnv('GITHUB_SHA', undefined)
+  git('init'); const config = readFileSync(join(root, 'config.ts'), 'utf8'), configHash = (await extractManifest(root)).configHash, shas: string[] = []
+  for (const title of ['sample.title', 'sample.layout']) {
+    put('ui/index.ts', declaration.replace('sample.title', title)); git('add', '.'); git('-c', 'user.name=Synthetic', '-c', 'user.email=synthetic@example.test', 'commit', '-m', title)
+    await build({ root, configFile: false, plugins: [consoleUI()], logLevel: 'silent' })
+    const metadata = JSON.parse(readFileSync(join(root, 'dist/build-meta.json'), 'utf8')); shas.push(metadata.sha)
+    expect(metadata.sha).toBe(git('rev-parse', 'HEAD')); expect(Number.isFinite(Date.parse(metadata.builtAt))).toBe(true)
+    const script = readdirSync(join(root, 'dist/assets')).find(file => file.endsWith('.js'))!
+    expect(readFileSync(join(root, 'dist/assets', script), 'utf8')).toContain(metadata.sha)
+    expect(readFileSync(join(root, 'config.ts'), 'utf8')).toBe(config); expect((await extractManifest(root)).configHash).toBe(configHash)
+  }
+  expect(shas[0]).not.toBe(shas[1])
+})
+test.each(['unbuilt', '123', '', 'g'.repeat(40)])('build rejects invalid SHA %s', async sha => {
+  const { root, put } = setup(); put('index.html', '<html></html>'); vi.stubEnv('WORKBASE_BUILD_SHA', sha)
+  await expect(build({ root, configFile: false, plugins: [consoleUI()], logLevel: 'silent' })).rejects.toThrow(/40 hex/)
+})
+test('SHA precedence, consumer git fallback, and clean deployment guard', () => {
+  const { root, put } = setup()
+  const git = (...args: string[]) => { const result = spawnSync('git', ['-C', root, ...args], { encoding: 'utf8' }); expect(result.status, result.stderr).toBe(0); return result.stdout.trim() }
+  put('.gitignore', 'node_modules/\n.workbase-ui*\ndist/\n')
+  git('init'); git('add', '.'); git('-c', 'user.name=Synthetic', '-c', 'user.email=synthetic@example.test', 'commit', '-m', 'initial')
+  vi.stubEnv('WORKBASE_BUILD_SHA', undefined); vi.stubEnv('GITHUB_SHA', undefined)
+  const first = resolveBuildSHA(root); expect(first).toBe(git('rev-parse', 'HEAD')); expect(() => assertCleanDeploy(root)).not.toThrow()
+  put('ui/index.ts', declaration.replace('sample.title', 'sample.layout'))
+  expect(() => assertCleanDeploy(root)).toThrow(/clean/)
+  git('add', '.'); git('-c', 'user.name=Synthetic', '-c', 'user.email=synthetic@example.test', 'commit', '-m', 'layout only')
+  const second = resolveBuildSHA(root); expect(second).not.toBe(first); expect(() => assertCleanDeploy(root)).not.toThrow()
+  vi.stubEnv('GITHUB_SHA', 'c'.repeat(40)); expect(resolveBuildSHA(root)).toBe('c'.repeat(40))
+  vi.stubEnv('WORKBASE_BUILD_SHA', 'D'.repeat(40)); expect(resolveBuildSHA(root)).toBe('d'.repeat(40))
 })

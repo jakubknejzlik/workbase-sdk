@@ -10,7 +10,10 @@ import type { AccessBinding } from './access-card'
 export { AccessCard, type AccessBinding, type AccessState } from './access-card'
 import { gate, type Capabilities } from '../gate'
 export { gate, type Capabilities } from '../gate'
+import { useAuthDirty } from './auth-dirty'
+export { useAuthDirty } from './auth-dirty'
 export { Session } from './session'
+export { AuthShell, authReturnTo, createAuthI18n, type AuthShellProps } from './auth-shell'
 export { Shell } from './shell'
 export type State<T> = { kind: 'loading' | 'empty' | 'notFound' | 'forbidden' | 'network' } | { kind: 'ready'; data: T } | { kind: 'validation'; issues: Issue[] }
 export function failureState(error: unknown): State<never> {
@@ -138,6 +141,7 @@ function Form({ props, metadata, initial, reload }: { props: ViewProps; metadata
   const [base, setBase] = useState(initial), [draft, setDraft] = useState(initial), [failure, setFailure] = useState<unknown>(), [saving, setSaving] = useState(false)
   const [draftKey] = useState(() => crypto.randomUUID()), controller = useRef<AbortController | null>(null)
   const dirty = canonicalJSON(base) !== canonicalJSON(draft)
+  useAuthDirty(dirty)
   useEffect(() => { onDirty?.(dirty); return () => onDirty?.(false) }, [dirty, onDirty])
   useEffect(() => () => controller.current?.abort(), [])
   const destination = (id?: string) => path(route.links.detail, id) ?? path(route.links.list)

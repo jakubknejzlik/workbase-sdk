@@ -10,10 +10,10 @@ function parseActor(value: unknown): ActorDocument {
   return actor as ActorDocument
 }
 export type SessionState = { kind: 'loading' | 'unauthenticated' | 'removed' | 'failed' } | { kind: 'ready'; actorId: string; caps: Capabilities }
-type Props = Omit<ProviderProps, 'identity' | 'caps' | 'onAuthorizationFailure'> & { orgId: string; timeoutMs?: number }
+type Props = Omit<ProviderProps, 'identity' | 'caps' | 'onAuthorizationFailure'> & { orgId: string; timeoutMs?: number; onState?: (kind: SessionState['kind']) => void }
 const environment = globalThis as typeof globalThis & { document?: { visibilityState: string; addEventListener(event: string, fn: () => void): void; removeEventListener(event: string, fn: () => void): void } }
 /** Only a successful parallel boot may mount any data observer or navigation. */
-export function Session({ orgId, timeoutMs = 10000, ...props }: Props) {
+export function Session({ orgId, timeoutMs = 10000, onState, ...props }: Props) {
   const transport = props.fetch ?? globalThis.fetch, baseURL = props.baseURL ?? ''
   const scope = canonicalJSON([baseURL, orgId]), generation = useRef(0), controller = useRef<AbortController | null>(null)
   // Session owns this latch so dropping the provider and both caches cannot rearm it.
@@ -69,6 +69,7 @@ export function Session({ orgId, timeoutMs = 10000, ...props }: Props) {
     return () => { generation.current++; controller.current?.abort(); environment.document?.removeEventListener('visibilitychange', visible) }
   }, [refresh])
   const state = snapshot.scope === scope ? snapshot.state : { kind: 'loading' as const }
+  useEffect(() => { onState?.(state.kind) }, [onState, state.kind])
   const readyScope = state.kind === 'ready' ? canonicalJSON([baseURL, state.actorId, orgId, state.caps]) : null
   const authorizationFailure = useCallback((status: 401 | 403) => {
     if (status === 403) {

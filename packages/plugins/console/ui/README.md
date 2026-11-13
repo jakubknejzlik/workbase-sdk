@@ -29,7 +29,6 @@ components live in `-` directories; only custom pages and slot registries import
 them. They are replaced with functions only in the extraction server.
 
 - No `/me`, capabilities, hiding, action registry or access card (slice 12). `action` nodes are rejected.
-- No auth shell or boot (slice 13).
 - No `query()` grammar, MCP AST editing, `access.lock` consumption, legacy `frontend-console` changes or packaging proof (slice 18).
 
 Use `consoleUI()` from `/vite` in the Instance's Vite plugins. It loads config
@@ -110,7 +109,6 @@ must provide the required keys, plural forms and matching interpolation variable
 Non-goals:
 - No action nodes or reason keys (slice 10).
 - No `/me`, profile storage, capability hiding or access card (slice 12).
-- No auth shell or switcher persistence (slice 13).
 - No template or Instance script wiring (slice 16).
 - No MCP translation operations, `CustomTypeOptions` typing, ICU, nested keys or contexts.
 - No languages beyond cs/en, no date/number formatting helpers, no visual/axe checks.
@@ -198,3 +196,111 @@ record/account link and leaves organization membership intact. SDK reasons use
 The full pack gate runs `test/browser/acceptance.test.ts` against local Worker/D1
 and Chromium, including cookie sessions and the 390px interaction matrix. The
 SDK CI and release workflows install the lockfile-pinned Chromium version first.
+
+
+Mount `AuthShell` from `@workbasehq/plugins/console/ui/react` outside the
+Instance `RouterProvider`. Create its runtime once with
+`createAuthI18n({ languages, catalogs })`; this feeds `workbase.language` from
+localStorage through the existing profile-language seam. Pass `{ manifest, i18n,
+navigate: path => router.navigate({ to: path }) }` and the router as children.
+The shell intercepts `/sign-in`, `/auth/complete`, and `/invitation` before
+mounting the Instance router. Those first route segments are reserved.
+
+Sign-in requests always use `/auth/complete`. The validated return destination
+is consumed once from `sessionStorage['workbase.returnTo']`; only built manifest
+routes and `/invitation?id=…` are accepted. Tokens are scrubbed with
+`history.replaceState` immediately and retained only in the mounted invitation
+component. Refreshing a token page discards the token; use the original link or
+sign in and open the invitations inbox. All invitation requests use JSON POST
+bodies and no referrer. `consoleUI()` injects the no-referrer HTML meta tag;
+existing Worker responses also set the header on the SPA and invitation redirect.
+The initial incoming link necessarily transports its token in the document URL;
+no subsequent request URL, history entry, storage or console output retains it.
+
+Slice-11 copy links carry **no mailbox proof**. On staging without an EMAIL
+binding, the recipient clicks Continue and submits the inline magic-link form.
+An operator reads that second link directly from D1, using the query shape in
+`scripts/identity-session.mjs`:
+
+```sql
+SELECT body FROM email_outbox
+WHERE recipient=? AND subject='Workbase sign-in'
+ORDER BY rowid DESC LIMIT 1;
+```
+
+Bind the recipient email. Open the returned link in that recipient's browser
+within **10 minutes**. There is no outbox HTTP endpoint. The callback consumes a
+safe destination, or uses the recipient inbox when there are no memberships.
+Account mismatch screens reveal no invited email and offer a sign-out button.
+The server remains the authority for resolving and accepting an invitation.
+
+`localStorage['workbase.org']` stores the selected org only. One membership is
+selected automatically, several offer a chooser, and none show the invitation
+inbox. `Session` still validates membership and boots exactly `/me` and
+capabilities in parallel; its optional `onState(kind)` reports existing states.
+An unauthenticated state returns to sign-in; removal clears the org and offers
+selection again. Identity and capability caches remain owned by `Session`.
+
+The profile gate renders in place after a ready session, keyed by actor, or
+before invitation acceptance. Only `completeness.complete` releases it. Names
+owned by an IdP produce terminal copy with sign-out. A profile GET failure leaves
+the normal app shell usable; invitation acceptance remains gated with retry.
+PATCH failures retain the form, and each submit sends at most one PATCH.
+Sign-out POSTs JSON, accepts 204/401, clears the org, and replaces the location
+with `/sign-in`. Language persists across accounts on the same browser by design;
+no identity or profile data is stored alongside either preference.
+
+`consoleUI()` production builds define `__WORKBASE_BUILD_SHA__` in the browser
+bundle and emit `dist/build-meta.json` with `{ sha, builtAt }`. SHA precedence is
+`WORKBASE_BUILD_SHA`, then `GITHUB_SHA`, then `git rev-parse HEAD` from the
+**consumer root**. A supplied invalid value fails the build instead of silently
+falling back. SHAs must be exactly 40 hex characters and are emitted lowercase.
+Development builds use `unbuilt`. Build the Instance with `vite build`, then pass
+`assetsDir: './dist'` to provision (or match a customized Vite outDir). These are
+the Instance's assets; do not use the legacy `consoleAssetsDir()`.
+
+The Instance deployment wrapper must refuse a dirty repository before building:
+
+```ts
+import { assertCleanDeploy } from '@workbasehq/plugins/console/ui/vite'
+assertCleanDeploy(process.cwd())
+// Run vite build, then provision/deploy the resulting dist/.
+```
+
+The guard includes untracked files. Ignore `node_modules/`, `dist/` and
+`.workbase-ui*`; commit authored layout changes before deployment so they get a
+new SHA even when schema revision is unchanged. This slice supplies and tests
+the guard; template deployment wiring belongs to slice 16. Keep any explicit
+server BUILD_SHA/BUILD_AT bindings consistent with the emitted metadata.
+
+`AuthShell` fetches `/build.json` separately at boot and on visibility. On a valid
+SHA mismatch it records `sessionStorage['workbase.reload.' + serverSHA]` **before**
+reloading. The latch survives remounts and stays set for that tab's session, so a
+persistent mismatch reloads once. `unbuilt` and other non-hex values cannot
+trigger reload. Metadata failures leave the app usable. Disabled storage skips
+a reload because a persistent latch cannot be guaranteed.
+
+SDK record forms, sign-in and profile-gate forms register dirty state with their
+owning shell. Reload waits until all registrations are clean or unmounted.
+Custom forms can call the additive `useAuthDirty(dirty)` export from `/react`.
+No draft values enter the reload watcher or browser storage. The latch is public
+build state, independent of accounts and orgs.
+
+On `pagehide` (including sign-out) the shell synchronously unmounts every private
+view so the back/forward cache never stores account data. Unmounting a dirty form
+during that teardown does **not** release a deferred reload: the departing
+document is not reloaded, so the user's navigation completes and the destination
+document loads the new build. A `persisted` `pageshow` re-boots the shell and then
+releases a still-pending reload for the restored document. Compatibility note:
+because the restored document re-boots from fresh `/me` and capabilities, unsaved
+in-memory form drafts do not survive leaving the document and returning with
+Back/Forward (as with reload or tab close). Navigation and session caches
+retain their existing scope and recovery behavior.
+
+The `console/ui/react` and `console/ui/vite` source subpaths are included by the
+plugins package file list and producer staging, including the UI README. The
+staged-tarball regression verifies the actual React/Vite exports. The standard `bash scripts/sdk-pack.sh` gate also
+requires the private vocabulary input; a missing secret prevents a release
+archive from being certified. The built HTML probe rejects inline script/style
+and verifies the no-referrer meta tag. Browser acceptance records every flow and
+fails if it requests console-model, console-info, bootstrap or `/schema`.
