@@ -136,3 +136,14 @@ test.each(['__proto__'])('forbidden own key %s is rejected throughout manifest i
     { 'ui/-slots.ts': bad },
   ]) expect(() => normalise(checkSources(root), { ...values, ...patch }, schema, 'hash')).toThrow(new RegExp(`Forbidden.*${key}`))
 })
+test('manifest v2 contains only referenced entity metadata and rejects extra list bind keys', () => {
+  const { root } = setup(), sources = checkSources(root)
+  const values = { 'ui/index.ts': entityListPage('worker', { title: 'worker.list' }) }
+  const input = { worker: { displayField: 'name', fields: { name: { type: 'text', required: true }, extra: { type: 'enum', values: ['a', 'b'] }, user: { type: 'ref', entity: 'users', userLink: true } } }, unused: schema.worker }
+  const a = normalise(sources, values, input, 'hash'), b = normalise(sources, values, input, 'hash')
+  expect(a.version).toBe(2); expect(Object.keys(a.entities)).toEqual(['worker'])
+  expect(a.entities.worker.fields.user).toEqual({ type: 'ref', required: false, computed: false, readOnly: false, userLink: true, ref: 'users' })
+  expect(a.entities.worker.fields.extra.values).toEqual(['a', 'b'])
+  expect(canonicalJSON(a)).toBe(canonicalJSON(b)); expect(manifestHash(a)).toBe(manifestHash(b))
+  expect(() => normalise(sources, { 'ui/index.ts': entityListPage('worker', { title: 'worker.list', search: { n: param.string() }, data: { records: { kind: 'list', entity: 'worker', bind: { filter: param('n') } } } }) }, input, 'hash')).toThrow(/list bind/)
+})

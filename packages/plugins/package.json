@@ -27,7 +27,8 @@
     },
     "./console/ui": "./console/ui/src/index.ts",
     "./console/ui/check": "./console/ui/src/check.ts",
-    "./console/ui/vite": "./console/ui/src/vite.ts"
+    "./console/ui/vite": "./console/ui/src/vite.ts",
+    "./console/ui/client": "./console/ui/src/client.ts"
   },
   "dependencies": {
     "zod": "4.6.7",

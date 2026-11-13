@@ -50,3 +50,18 @@ regeneration invalidates modules and sends a full reload. The plugin exposes
 `idle()`, `generation` (manifest, hash and paths), and `error` for tooling/tests.
 An unused new schema file triggers regeneration without changing the manifest
 hash; it is never imported or evaluated by extraction.
+
+Manifest v2 includes field type/editability metadata for entities referenced by
+pages. `/client` exports the framework-free `createClient` and pure `diff` body
+builder. Create one client per injected `{actorId, orgId}`; replace it on scope
+change. Pass an `AbortSignal` to each request. `client.list(entity, metadata)`
+creates a forward-only cursor session: `load({search, sort, dir}, signal)` resets
+it and `more(signal)` advances it. Queries always use a root limit of 25.
+Entity `/api/` validation errors include only issue paths and codes; existing
+profile error envelopes remain unchanged. Writes use same-origin cookies, JSON, per-draft idempotency keys and quoted
+versions; browsers supply Origin/Sec-Fetch-Site. Never inject Bearer credentials.
+
+Known gap: the server validator still accepts whitespace-only names. The generic
+form builder trims strings and blocks empty required values; this slice does not
+change global validation. Browser/Worker restart means persisted D1 data;
+drafts are intentionally not persisted.
