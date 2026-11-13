@@ -35,8 +35,9 @@ export function buildPath(to: string, params: Record<string, string | number>): 
 }
 export type EntityShape = { fields: Record<string, { type: string; userLink?: boolean }>; actions?: Record<string, unknown> }
 export type Field<E extends EntityShape> = keyof E['fields'] & string
-export type PropSpec = { kind: 'field'; type: string } | { kind: 'boolean'; default?: boolean } | { kind: 'when' } | { kind: 'key' }
+export type PropSpec = { kind: 'field'; type: string } | { kind: 'boolean'; default?: boolean } | { kind: 'when' } | { kind: 'key' } | { kind: 'access' }
 export const p = {
+  access: (): PropSpec => ({ kind: 'access' }),
   key: (): PropSpec => ({ kind: 'key' }),
   field: (type: string): PropSpec => ({ kind: 'field', type }),
   boolean: (options: { default?: boolean } = {}): PropSpec => ({ kind: 'boolean', ...options }),

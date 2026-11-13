@@ -87,6 +87,7 @@ export function checkSources(root: string): Sources {
     const tree = read(file)
     function edge(node: ts.Node, id: string, typeOnly: boolean) {
       if (id === sdk) return
+      if (id === sdk + '/react' && (allowComponent || isBrowser)) return
       if (!id.startsWith('.')) {
         if (isBrowser && ts.resolveModuleName(id, file, { moduleResolution: ts.ModuleResolutionKind.Bundler }, ts.sys).resolvedModule) return
         fail(node, `Unresolved or unclassified package import: ${id}`)
@@ -126,6 +127,9 @@ export function checkSources(root: string): Sources {
         if (!typeOnly && node.moduleSpecifier.text === sdk) {
           if (clause.name || !names || !ts.isNamedImports(names)) fail(node, 'Expected named SDK imports')
           for (const item of names.elements) if (!item.isTypeOnly && ![...helpers, 'defineNav', 'defineSlots', 'defineKeys', 'col', 'param', 'one', 'list', 'p', 'layout', 'slot', 'action', 'link', 'buildPath', 'parseParams'].includes((item.propertyName ?? item.name).text)) fail(item, `${(item.propertyName ?? item.name).text} is not in slice 7`)
+        }
+        if (!typeOnly && node.moduleSpecifier.text === sdk + '/react' && !isBrowser) {
+          if (!allowComponent || clause.name || !names || !ts.isNamedImports(names) || names.elements.some(item => !item.isTypeOnly && (item.propertyName ?? item.name).text !== 'AccessCard')) fail(node, 'Only the SDK AccessCard is allowed as a registered component')
         }
         edge(node.moduleSpecifier, node.moduleSpecifier.text, typeOnly)
       }

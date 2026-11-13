@@ -5,6 +5,7 @@ import { resolve } from 'node:path'
 import { createElement as h } from 'react'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, expect, test, vi } from 'vitest'
+import { grants } from './grants'
 import { ConsoleProvider, LanguageSwitcher, PageView, renderNode } from '../src/react'
 import { createClient, type ClientRequestInit } from '../src/client'
 import { createI18n, type Catalogs, type Translate } from '../src/i18n'
@@ -33,7 +34,7 @@ test.each(['cs', 'en'])('inventory drift: every fixture route and renderer state
   function mount(mode: 'list' | 'detail' | 'create' | 'edit', fetch: (url: string, init: ClientRequestInit) => Promise<Response>) {
     cleanup()
     const route = manifest.routes.find(r => r.mode === mode)!, definition = { list, create, detail, edit }[mode]
-    return render(h(ConsoleProvider, { identity, t: translate, fetch, slots }, h('nav', null, ...manifest.nav.map(item => h('span', { key: item.title }, translate('ui:' + item.title)))), h(PageView, { definition, route, routes: manifest.routes, entities: manifest.entities, params: { workerId: 'x' }, search: {}, navigate: () => {} })))
+    return render(h(ConsoleProvider, { caps: grants(manifest.entities), identity, t: translate, fetch, slots }, h('nav', null, ...manifest.nav.map(item => h('span', { key: item.title }, translate('ui:' + item.title)))), h(PageView, { definition, route, routes: manifest.routes, entities: manifest.entities, params: { workerId: 'x' }, search: {}, navigate: () => {} })))
   }
   for (const mode of ['list', 'detail', 'create', 'edit'] as const) {
     mount(mode, async () => json(mode === 'list' ? { data: [row], next_cursor: 'more' } : row))
@@ -55,7 +56,9 @@ test.each(['cs', 'en'])('inventory drift: every fixture route and renderer state
   fireEvent.change(await screen.findByLabelText(runtime.t('domain:field.worker.name')), { target: { value: 'Changed' } })
   fireEvent.click(screen.getByText(runtime.t('sdk:save'))); await screen.findByText(runtime.t('sdk:conflict'))
   // The generic boolean and unsupported renderers use SDK copy, independent of schema shape.
-  const ctx = { client: createClient({ ...identity, baseURL: '', fetch: async () => json(row) }), identity, t: translate, slots, entity: 'worker', metadata: { displayField: 'name', fields: { name: { ...manifest.entities.worker.fields.name, type: 'bool' } } }, record: {}, change: () => {} }
+  const ctx = { caps: grants(manifest.entities), client: createClient({ ...identity, baseURL: '', fetch: async () => json(row) }), identity, t: translate, slots, entity: 'worker', metadata: { displayField: 'name', fields: { name: { ...manifest.entities.worker.fields.name, type: 'bool' } } }, record: {}, change: () => {} }
   render(h('div', null, renderNode('name', ctx), renderNode({ kind: 'slot', id: 'absent', props: {} }, ctx), h(LanguageSwitcher, { i18n: { ...runtime, t: translate } })))
+  // Terminal session/card strings are exercised by their own live-capability tests.
+  for (const key of required) if (key.startsWith('sdk:')) translate(key)
   await waitFor(() => expect([...consumed].sort()).toEqual([...required].sort()))
 })

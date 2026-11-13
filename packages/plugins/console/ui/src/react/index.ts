@@ -6,36 +6,43 @@ import { buildPath, type Node, type Page, type Slot } from '../index'
 import type { Manifest, ResolvedLink } from '../check'
 import type { I18n, Translate } from '../i18n'
 import { TranslationContext } from '../i18n-context'
+import type { AccessBinding } from './access-card'
+export { AccessCard, type AccessBinding, type AccessState } from './access-card'
+import { gate, type Capabilities } from '../gate'
+export { gate, type Capabilities } from '../gate'
+export { Session } from './session'
+export { Shell } from './shell'
 export type State<T> = { kind: 'loading' | 'empty' | 'notFound' | 'forbidden' | 'network' } | { kind: 'ready'; data: T } | { kind: 'validation'; issues: Issue[] }
 export function failureState(error: unknown): State<never> {
   return error instanceof ApiFailure && error.status === 404 ? { kind: 'notFound' } : error instanceof ApiFailure && error.status === 403 ? { kind: 'forbidden' }
     : error instanceof ApiFailure && error.issues ? { kind: 'validation', issues: error.issues } : { kind: 'network' }
 }
-type Runtime = { client: Client; identity: { actorId: string; orgId: string }; t: Translate; slots: Record<string, Slot> }
+type Runtime = { client: Client; identity: { actorId: string; orgId: string }; t: Translate; slots: Record<string, Slot>; caps?: Capabilities }
 const browser = globalThis as typeof globalThis & { confirm(message: string): boolean }
 const Context = createContext<Runtime | null>(null)
-export type ProviderProps = { identity: Runtime['identity']; t: Runtime['t']; baseURL?: string; fetch?: (url: string, init: ClientRequestInit) => Promise<Response>; slots?: Record<string, Slot>; i18n?: I18n; children?: ReactNode }
+export type ProviderProps = { caps?: Capabilities; onAuthorizationFailure?: (status: 401 | 403) => void; identity: Runtime['identity']; t: Runtime['t']; baseURL?: string; fetch?: (url: string, init: ClientRequestInit) => Promise<Response>; slots?: Record<string, Slot>; i18n?: I18n; children?: ReactNode }
 /** Scope replacement remounts observers and drafts, and discards both caches. */
-export function ConsoleProvider({ identity, t, baseURL = '', fetch: transport = globalThis.fetch, slots = {}, i18n, children }: ProviderProps) {
+export function ConsoleProvider({ identity, t, baseURL = '', fetch: transport = globalThis.fetch, slots = {}, i18n, caps, onAuthorizationFailure, children }: ProviderProps) {
   const language = useSyncExternalStore(i18n?.subscribe ?? (() => () => {}), i18n?.language ?? (() => ''), i18n?.language ?? (() => ''))
   // A fresh translator identity per language makes memoized authored consumers re-render on language change.
   const translate = useMemo<Translate>(() => t.bind(null), [t, language])
-  const client = useMemo(() => createClient({ baseURL, ...identity, fetch: transport }), [baseURL, identity.actorId, identity.orgId, transport])
+  const scopeKey = canonicalJSON([identity.actorId, identity.orgId, caps ?? null])
+  const client = useMemo(() => createClient({ baseURL, ...identity, fetch: transport, onAuthorizationFailure }), [baseURL, scopeKey, transport, onAuthorizationFailure])
   const queries = useMemo(() => new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity, refetchOnWindowFocus: false } } }), [client])
   useEffect(() => client.subscribe(() => { void queries.invalidateQueries() }), [client, queries])
   useEffect(() => () => queries.clear(), [queries])
-  return h(Context.Provider, { value: { client, identity, t, slots }, key: canonicalJSON([baseURL, identity]) }, h(TranslationContext.Provider, { value: translate }, h(QueryClientProvider, { client: queries }, children)))
+  return h(Context.Provider, { value: { client, identity, t: translate, slots, caps }, key: canonicalJSON([baseURL, scopeKey]) }, h(TranslationContext.Provider, { value: translate }, h(QueryClientProvider, { client: queries }, children)))
 }
-function useRuntime() { const runtime = useContext(Context); if (!runtime) throw new Error('ConsoleProvider is required'); return runtime }
+export function useRuntime() { const runtime = useContext(Context); if (!runtime) throw new Error('ConsoleProvider is required'); return runtime }
 export function useRecord(entity: string, id: string) {
   const { client } = useRuntime()
-  const query = useQuery({ queryKey: [cacheKey('one', entity, { id })], queryFn: ({ signal }) => client.one(entity, { id }, signal) })
+  const query = useQuery({ queryKey: [cacheKey('one', entity, { id })], queryFn: ({ signal }) => client.one(entity, { id }, signal, true) })
   const state: State<RecordData> = query.data ? { kind: 'ready', data: query.data } : query.isPending ? { kind: 'loading' } : failureState(query.error)
   return { state, reload: async () => { client.invalidate(); const result = await query.refetch(); if (result.error) throw result.error; return result.data! } }
 }
 export function useList(entity: string, metadata: EntityMeta, bind: Record<string, string>) {
-  const { client } = useRuntime(), queries = useQueryClient(), key = canonicalJSON(bind), metaKey = canonicalJSON(metadata)
-  const session = useMemo(() => client.list(entity, metadata), [client, entity, metaKey, key])
+  const { client, caps } = useRuntime(), queries = useQueryClient(), key = canonicalJSON(bind), metaKey = canonicalJSON(metadata)
+  const session = useMemo(() => client.list(entity, metadata, caps?.entities[entity]?.readable ?? []), [client, entity, metaKey, key])
   const queryKey = cacheKey('list', entity, { bind, metadata })
   const query = useInfiniteQuery({ queryKey: [queryKey], initialPageParam: false,
     queryFn: ({ signal, pageParam }) => pageParam ? session.more(signal) : session.load(bind, signal),
@@ -59,8 +66,9 @@ const fieldRenderers: Record<string, (props: FieldProps) => ReactNode> = {
 export type RenderContext = Runtime & { metadata: EntityMeta; entity: string; mode?: Page['mode']; record: Record<string, unknown>; draft?: Record<string, unknown>; change?: (name: string, value: unknown) => void; issues?: Issue[] }
 /** Every structural node shares this traversal; fields dispatch solely by metadata type. */
 export function renderNode(node: Node, ctx: RenderContext): ReactNode {
+  const permission = gate(ctx.caps, { entities: { [ctx.entity]: ctx.metadata } })
   if (typeof node !== 'string') {
-    if (node.kind === 'action') return null // Live action rendering belongs to the capabilities slice.
+    if (node.kind === 'action') return h(RecordAction, { ctx, name: node.name })
     if (node.kind === 'tabs') return h(Tabs, { node, ctx })
     if (node.kind !== 'slot') return h(node.kind === 'section' || node.kind === 'tab' ? 'section' : 'div', { 'data-layout': node.kind, style: structuralStyle[node.kind as keyof typeof structuralStyle] }, 'title' in node && node.title && h('h2', null, ctx.t('ui:' + node.title)), ...node.children.map((child, i) => h('div', { key: i }, renderNode(child, ctx))))
     const slot = ctx.slots[node.id]
@@ -69,15 +77,48 @@ export function renderNode(node: Node, ctx: RenderContext): ReactNode {
     for (const [key, spec] of Object.entries(slot.props)) {
       const value = node.props[key] ?? ('default' in spec ? spec.default : undefined)
       if (spec.kind === 'when' && value !== ctx.mode) return null
+      if (spec.kind === 'field' && !permission.readable(ctx.entity, String(value))) return null
       props[key] = spec.kind === 'field' ? (ctx.draft ?? ctx.record)[String(value)] : spec.kind === 'key' ? ctx.t('ui:' + value) : value
     }
-    return h(slot.component, { ...props, t: ctx.t, identity: ctx.identity })
+    return h(ResolvedSlot, { slot, props, ctx })
   }
+  if (!permission.readable(ctx.entity, node)) return null
   const field = ctx.metadata.fields[node], renderer = field && fieldRenderers[field.type]
-  const editable = !!ctx.change && field && !field.readOnly && !field.computed && !field.userLink
+  const editable = permission.writable(ctx.entity, node) && !!ctx.change && field && !field.readOnly && !field.computed && !field.userLink
   if (!renderer || editable && field.type === 'ref') return h('p', { role: 'alert' }, ctx.t('sdk:unsupported') + ': ' + (field?.type ?? node))
   const error = ctx.issues?.filter(issue => issue.path[0] === node).map(issue => issue.code).join(', ')
   return h('div', null, h('label', null, ctx.t('domain:field.' + ctx.entity + '.' + node)), editable ? renderer({ field, name: ctx.t('domain:field.' + ctx.entity + '.' + node), t: ctx.t, enumKey: 'domain:enum.' + ctx.entity + '.' + node + '.', value: ctx.draft?.[node], change: value => ctx.change!(node, value), error }) : h('span', null, field.type === 'enum' && ctx.record[node] != null ? ctx.t('domain:enum.' + ctx.entity + '.' + node + '.' + ctx.record[node]) : String(ctx.record[node] ?? '')), error && h('span', { role: 'alert' }, ctx.t(error === 'required' ? 'sdk:required' : 'sdk:validation')))
+}
+function ResolvedSlot({ slot, props, ctx }: { slot: Slot; props: Record<string, unknown>; ctx: RenderContext }) {
+  const [controller] = useState(() => new AbortController())
+  useEffect(() => () => controller.abort(), [controller])
+  const resolved = { ...props }
+  for (const [key, spec] of Object.entries(slot.props)) if (spec.kind === 'access') {
+    resolved[key] = Object.hasOwn(ctx.record, 'access') && ctx.record.access ? {
+      state: ctx.record.access, actions: ctx.record.actions ?? {},
+      run: async (name: string, input: Record<string, unknown>) => (await ctx.client.actWith(ctx.entity, String(ctx.record.id), name, input, controller.signal)).result,
+      ...(gate(ctx.caps, { entities: {} }).resource('members.read') ? { candidates: () => ctx.client.members(controller.signal) } : {}),
+    } as AccessBinding : undefined
+  }
+  return h(slot.component, { ...resolved, t: ctx.t })
+}
+export function reasonKey(reason: string) { return (reason.startsWith('access.') ? 'sdk:' : 'ui:') + reason }
+function RecordAction({ ctx, name }: { ctx: RenderContext; name: string }) {
+  const [pending, setPending] = useState(false), [failure, setFailure] = useState<unknown>()
+  const controller = useRef<AbortController | null>(null)
+  useEffect(() => () => controller.current?.abort(), [])
+  const actions = ctx.record.actions as Record<string, { enabled: boolean; reason?: string }> | undefined
+  if (!actions || !Object.hasOwn(actions, name)) return null
+  const action = actions[name]
+  async function run() {
+    if (pending || !action.enabled) return
+    controller.current = new AbortController(); setPending(true); setFailure(undefined)
+    try { await ctx.client.act(ctx.entity, String(ctx.record.id), name, controller.current.signal) }
+    catch (error) { if (!controller.current.signal.aborted) setFailure(error) }
+    finally { if (!controller.current.signal.aborted) setPending(false) }
+  }
+  return h('div', null, h('button', { type: 'button', disabled: pending || !action.enabled, onClick: () => { void run() } }, ctx.t('ui:actions.' + name)),
+    !action.enabled && action.reason && h('span', null, ctx.t(reasonKey(action.reason))), !!failure && message(failureState(failure), ctx.t))
 }
 function Tabs({ node, ctx }: { node: Exclude<Node, string | { kind: 'slot' } | { kind: 'action' }>; ctx: RenderContext }) {
   const [active, setActive] = useState(0)
@@ -108,7 +149,7 @@ function Form({ props, metadata, initial, reload }: { props: ViewProps; metadata
     if (saving) return
     setFailure(undefined)
     try {
-      const body = diff(metadata, definition.layout, base, draft)
+      const body = diff(metadata, definition.layout, base, draft, runtime.caps?.entities[definition.entity!]?.writable ?? [])
       if (!Object.keys(body).length) { if (definition.mode === 'edit') leave(destination(String(base.id)), false); return }
       controller.current?.abort(); controller.current = new AbortController(); const signal = controller.current.signal
       setSaving(true)
@@ -140,20 +181,20 @@ function RecordView({ props, metadata, id }: { props: ViewProps; metadata: Entit
   if (props.definition.mode === 'edit') return h(Form, { props, metadata, initial: state.data, reload })
   const ctx = { ...runtime, slots: props.slots ?? runtime.slots, metadata, entity: props.definition.entity!, record: state.data, mode: props.definition.mode }
   return h('div', null, ...props.definition.layout.map((node, i) => h('div', { key: i }, renderNode(node, ctx))),
-    props.route.links.edit && h('button', { onClick: () => props.navigate(path(props.route.links.edit, state.data.id)!) }, runtime.t('sdk:edit')))
+    props.route.links.edit && gate(runtime.caps, { entities: props.entities }).allows({ ...props.definition, mode: 'edit' }) && h('button', { onClick: () => props.navigate(path(props.route.links.edit, state.data.id)!) }, runtime.t('sdk:edit')))
 }
 function ListView({ props, metadata }: { props: ViewProps; metadata: EntityMeta }) {
   const runtime = useRuntime(), { t: translate } = runtime, binding = Object.values(props.definition.data).find(binding => binding.kind === 'list')
   const resolved = Object.fromEntries(Object.entries(binding?.bind ?? {}).map(([key, ref]) => [key, String(props.search[ref.name] ?? props.params[ref.name] ?? '')]))
   const [bind, setBind] = useState(resolved), { state, more, hasMore, loadingMore } = useList(props.definition.entity!, metadata, bind)
-  const create = props.routes?.filter(route => route.entity === props.definition.entity && route.mode === 'create')
+  const create = props.routes?.filter(route => route.entity === props.definition.entity && route.mode === 'create' && gate(runtime.caps, { entities: props.entities }).allows(route))
   const createPath = create?.length === 1 && !Object.keys(create[0].params).length ? buildPath(create[0].path, {}) : undefined
   useEffect(() => setBind(resolved), [canonicalJSON(resolved)])
   return h('div', null,
     h('p', null, translate('domain:entity.' + props.definition.entity, { count: state.kind === 'ready' ? state.data.length : 0 })),
     createPath && h('button', { onClick: () => props.navigate(createPath) }, translate('sdk:create')),
-    h('input', { 'aria-label': translate('sdk:search'), value: bind.search ?? '', onChange: (e: { target: { value: string } }) => setBind(current => ({ ...current, search: e.target.value })) }),
-    h('select', { 'aria-label': translate('sdk:sort'), value: bind.sort || metadata.displayField, onChange: (e: { target: { value: string } }) => setBind(current => ({ ...current, sort: e.target.value })) }, ...Object.keys(metadata.fields).map(field => h('option', { key: field, value: field }, translate('domain:field.' + props.definition.entity + '.' + field)))),
+    metadata.displayField !== 'id' && h('input', { 'aria-label': translate('sdk:search'), value: bind.search ?? '', onChange: (e: { target: { value: string } }) => setBind(current => ({ ...current, search: e.target.value })) }),
+    h('select', { 'aria-label': translate('sdk:sort'), value: bind.sort || metadata.displayField, onChange: (e: { target: { value: string } }) => setBind(current => ({ ...current, sort: e.target.value })) }, ...[...new Set(['id', ...Object.keys(metadata.fields)])].map(field => h('option', { key: field, value: field }, field === 'id' ? translate('sdk:identifier') : translate('domain:field.' + props.definition.entity + '.' + field)))),
     h('select', { 'aria-label': translate('sdk:direction'), value: bind.dir || 'asc', onChange: (e: { target: { value: string } }) => setBind(current => ({ ...current, dir: e.target.value })) }, ...['asc', 'desc'].map(dir => h('option', { key: dir, value: dir }, translate('sdk:' + dir)))),
     message(state, translate), state.kind === 'ready' && h('ul', null, ...state.data.map(record => h('li', { key: record.id },
       props.route.links.detail && h('button', { onClick: () => props.navigate(path(props.route.links.detail, record.id)!) }, String(record[metadata.displayField] ?? record.id)),
@@ -165,7 +206,9 @@ export function PageView(input: ViewProps) {
   const runtime = useRuntime(), { t: translate } = runtime, primary = Object.values(input.definition.data)[0]
   const definition = { ...input.definition, entity: input.definition.entity ?? primary?.entity, mode: input.definition.mode ?? (primary?.kind === 'list' ? 'list' : primary ? 'detail' : undefined) }
   const props = { ...input, definition }, { route } = props
-  const metadata = definition.entity && props.entities[definition.entity]
+  const permission = gate(runtime.caps, { entities: props.entities })
+  if (!permission.allows(definition)) return message({ kind: 'forbidden' }, translate)
+  const metadata = definition.entity && props.entities[definition.entity] && permission.metadata(definition.entity)
   const binding = Object.values(definition.data).find(binding => binding.kind === 'one')
   const id = binding?.bind.id && String(props.params[binding.bind.id.name] ?? props.search[binding.bind.id.name] ?? '')
   const back = path(route.links.list)

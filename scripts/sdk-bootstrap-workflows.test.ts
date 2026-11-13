@@ -45,7 +45,7 @@ function workflow(name: string): { source: string; parsed: Workflow } {
   const source = readFileSync(join(root, `.github/workflows/${name}.yml`), 'utf8')
   return { source, parsed: JSON.parse(execFileSync('bun', ['--no-install', '--eval', 'console.log(JSON.stringify(Bun.YAML.parse(await Bun.stdin.text())))'], { input: source, encoding: 'utf8' })) }
 }
-const ciCommands = ['bun install --frozen-lockfile', 'bun run lint', 'bun run typecheck', 'bun run check:ci-invariants', 'bun run test', 'bun run test:mcp', 'bash scripts/sdk-pack.sh', 'bun scripts/check-sdk-boundary.ts', 'bun scripts/scan-sdk-public.ts']
+const ciCommands = ['bun install --frozen-lockfile', 'bun x --no-install playwright install --with-deps chromium', 'bun run lint', 'bun run typecheck', 'bun run check:ci-invariants', 'bun run test', 'bun run test:mcp', 'bash scripts/sdk-pack.sh', 'bun scripts/check-sdk-boundary.ts', 'bun scripts/scan-sdk-public.ts']
 describe('exported public bootstrap workflow policy', () => {
   it('contains exactly the two public workflows and SDK root documentation', () => {
     expect(readdirSync(join(root, '.github'))).toEqual(['workflows'])
@@ -66,7 +66,7 @@ describe('exported public bootstrap workflow policy', () => {
     expect(Object.keys(parsed.on)).not.toContain('pull_request_target')
     expect(source.replaceAll('${{ secrets.WORKBASE_PRIVATE_TERMS }}', '')).not.toMatch(/secrets\s*[.\[]|self-hosted|CLOUDFLARE_|git clone|instances\/|upload-artifact|download-artifact/)
     for (const job of Object.values(parsed.jobs)) {
-      expect(job['runs-on']).toBe('ubuntu-latest')
+      expect(job['runs-on']).toBe('ubuntu-24.04')
       expect(job.needs).toBeUndefined()
       for (const step of job.steps) {
         if (step.uses) expect(step.uses).toMatch(/^[\w-]+\/[\w-]+@[a-f0-9]{40}$/)

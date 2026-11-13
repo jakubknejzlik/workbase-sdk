@@ -3,6 +3,7 @@ import { createElement as h } from 'react'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { createBrowserHistory, createRootRoute, createRoute, createRouter, Outlet, RouterProvider } from '@tanstack/react-router'
 import { afterEach, expect, test, vi } from 'vitest'
+import { grants } from './grants'
 import { ConsoleProvider, RouteView } from '../src/react'
 import { entityEditPage } from '../src/index'
 const histories: ReturnType<typeof createBrowserHistory>[] = []
@@ -20,7 +21,7 @@ test('real router back guards dirty draft and confirms before leaving', async ()
   const history = createBrowserHistory(); histories.push(history)
   history.push('/items/x/edit'); history.flush()
   const router = createRouter({ routeTree: root.addChildren([list, edit]), history })
-  render(h(ConsoleProvider, { identity: { actorId: 'a', orgId: 'o' }, t: key => key, fetch: async () => new Response(JSON.stringify({ id: 'x', version: 1, name: 'Server' })) }, h(RouterProvider, { router })))
+  render(h(ConsoleProvider, { caps: grants({ probe: { fields } }), identity: { actorId: 'a', orgId: 'o' }, t: key => key, fetch: async () => new Response(JSON.stringify({ id: 'x', version: 1, name: 'Server' })) }, h(RouterProvider, { router })))
   fireEvent.change(await screen.findByLabelText('domain:field.probe.name'), { target: { value: 'Dirty' } })
   history.back(); await waitFor(() => expect(confirm).toHaveBeenCalledTimes(1))
   expect(history.location.pathname).toBe('/items/x/edit')
