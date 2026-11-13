@@ -10,10 +10,19 @@ import { assertCoreEnumLabels } from './check-core-enum-labels'
 import { sdkWorkspaceDirectories } from './lib/sdk-workspaces'
 import { assertSdkPackageNames, sdkPackageNames } from './sdk-provenance'
 import { consolePublicContent, checkConsolePublic } from './check-console-public'
-import pluginsManifest from '../packages/plugins/package.json'
 
-// Core is the required runtime peer; every other declared peer is optional tooling or UI.
-const optionalPeers = Object.keys(pluginsManifest.peerDependencies).filter(name => name !== '@workbasehq/core')
+// Independent inventory: the guard must not derive its required list from the manifest it checks,
+// otherwise deleting a peer from the manifest also deletes it from the assertion.
+export const uiOptionalPeers = [
+  'typescript',
+  'vite',
+  '@tanstack/router-generator',
+  'es-module-lexer',
+  'react',
+  '@tanstack/react-query',
+  '@tanstack/react-router',
+] as const
+const requiredRuntimePeers = new Set(['@workbasehq/core'])
 
 export { instanceNames } from './lib/public-vocabulary'
 import { instanceNames } from './lib/public-vocabulary'
@@ -23,8 +32,11 @@ export function checkSdkBoundary(root: string, sourceOnly = false, vocabulary: R
   const failures: string[] = []
   function uiPeers(manifest: { exports?: Record<string, unknown>; peerDependencies?: Record<string, string>; peerDependenciesMeta?: Record<string, { optional?: boolean }> }, where: string) {
     if (!manifest.exports?.['./console/ui/vite']) return
-    for (const name of optionalPeers) {
+    for (const name of uiOptionalPeers) {
       if (!manifest.peerDependencies?.[name] || manifest.peerDependenciesMeta?.[name]?.optional !== true) failures.push(`UI build dependency must be an optional peer: ${where}: ${name}`)
+    }
+    for (const name of Object.keys(manifest.peerDependencies ?? {})) {
+      if (!requiredRuntimePeers.has(name) && !(uiOptionalPeers as readonly string[]).includes(name)) failures.push(`UI peer not in guard inventory: ${where}: ${name}`)
     }
   }
   for (const directory of sdkWorkspaceDirectories(root)) {
