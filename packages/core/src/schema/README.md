@@ -2,8 +2,8 @@
 
 `@workbasehq/core/schema` supplies runtime declarations and core schema types.
 `@workbasehq/core/schema/load` is a separate build-time entry: it reads source with
-TypeScript's compiler API, checks the literal boundary before importing config,
-and returns `{ config, sources }`. Keeping the loader separate prevents Node file
+TypeScript's compiler API, interprets the accepted literal declarations without
+importing or executing consumer modules, and returns `{ config, sources }`. Keeping the loader separate prevents Node file
 APIs and the TypeScript compiler from entering the runtime declaration graph.
 
 Use a TypeScript-capable host such as Bun or tsx for loading, as with the existing
@@ -61,12 +61,19 @@ adds no translation runtime. Entity, field and enum labels belong in
 Each entity map entry must explicitly import a default or named `defineEntity`
 export from its matching `./schema/<entity>.ts` file. The config default export
 is a direct `defineConfig({...})` call. Named SDK imports may use local aliases.
-The loader resolves imports with its runtime host, validates that exact file,
-and rejects ambiguous extensionless imports. Use explicit `.ts` specifiers.
-Only direct SDK/entity imports and the declaration export may execute; side-effect
-imports, helper wrappers, extra exports and top-level code are rejected before
-evaluation. Config options are literal data, except for imported entity identifiers.
-The returned default export must retain the SDK's defineConfig identity brand.
+The loader reads exactly `schema/<entity>.ts` and rejects competing candidates
+(other extensions, extensionless files, directories, case variants). Use explicit
+`.ts` specifiers. Only direct SDK/entity imports and the declaration export are
+accepted; side-effect imports, helper wrappers, extra exports and top-level code
+are rejected. Files with syntax errors are rejected. Config options are literal
+data, except for imported entity identifiers. The returned config is the branded
+`defineConfig` result of that literal data, equal to the module's default export.
+
+Scope: the loader validates the declaration *shape* that agents and authors write.
+It is not a sandbox against the consumer repository's own toolchain configuration.
+Module redirection configured by the repository itself (tsconfig `paths`, package
+`imports`/self-reference aliases, symlinked SDK copies, `verbatimModuleSyntax`
+keeping type-only imports) is trusted, as is everything else in that repository.
 The entity argument is an object literal with object/array/scalar literals inside
 it. Spreads, identifier values, shorthand properties, methods, accessors, computed
 keys, duplicate properties and arbitrary calls are rejected, including inside

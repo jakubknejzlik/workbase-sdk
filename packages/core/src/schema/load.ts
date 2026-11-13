@@ -21,7 +21,15 @@ function location(node: ts.Node): SourceLocation {
 }
 function fail(node: ts.Node, message: string): never { throw new SourceError(location(node), message) }
 function read(file: string) {
-  return ts.createSourceFile(file, readFileSync(file, 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TS)
+  const text = readFileSync(file, 'utf8')
+  const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS)
+  // Syntax errors the host would reject must never yield an interpreted config.
+  const [diagnostic] = ts.transpileModule(text, { fileName: file, reportDiagnostics: true, compilerOptions: { target: ts.ScriptTarget.Latest } }).diagnostics ?? []
+  if (diagnostic) {
+    const pos = diagnostic.start === undefined ? { line: 0, character: 0 } : source.getLineAndCharacterOfPosition(diagnostic.start)
+    throw new SourceError({ file, line: pos.line + 1, column: pos.character + 1 }, ts.flattenDiagnosticMessageText(diagnostic.messageText, '\n'))
+  }
+  return source
 }
 function unwrap(node: ts.Expression): ts.Expression {
   return ts.isParenthesizedExpression(node) || ts.isAsExpression(node) || ts.isSatisfiesExpression(node) || ts.isTypeAssertionExpression(node) ? unwrap(node.expression) : node
@@ -35,6 +43,7 @@ function properties(node: ts.ObjectLiteralExpression) {
   for (const property of node.properties) {
     if (!property.name) fail(property, 'Spread is outside the literal boundary')
     const name = key(property.name)
+    if (name === '__proto__') fail(property, '__proto__ is outside the literal boundary')
     if (entries.has(name)) fail(property, `Duplicate literal property: ${name}`)
     entries.set(name, property)
   }
@@ -171,11 +180,13 @@ function literal(node: ts.Expression, bindings: Map<string, Binding>, path: stri
   if (ts.isPrefixUnaryExpression(node) && [ts.SyntaxKind.MinusToken, ts.SyntaxKind.PlusToken].includes(node.operator) && ts.isNumericLiteral(node.operand)) return (node.operator === ts.SyntaxKind.MinusToken ? -1 : 1) * Number(node.operand.text)
   if (ts.isArrayLiteralExpression(node)) return node.elements.map((element, i) => literal(element, bindings, [...path, String(i)]))
   if (ts.isObjectLiteralExpression(node)) {
-    const result: Record<string, unknown> = Object.create(null)
+    // Plain objects, as JavaScript evaluation of the same literal would produce.
+    const result: Record<string, unknown> = {}
     for (const property of node.properties) {
       if (ts.isSpreadAssignment(property)) fail(property, 'Spread is outside the literal boundary')
       if (!ts.isPropertyAssignment(property)) fail(property, 'Expected a literal property assignment; no variables, methods or accessors')
       const name = key(property.name)
+      if (name === '__proto__') fail(property, '__proto__ is outside the literal boundary')
       if (Object.hasOwn(result, name)) fail(property, `Duplicate literal property: ${name}`)
       result[name] = literal(property.initializer, bindings, [...path, name])
     }

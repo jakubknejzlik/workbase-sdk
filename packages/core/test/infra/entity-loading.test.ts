@@ -64,6 +64,9 @@ describe('source diagnostics', () => {
     ['function call', declaration.replace("{ type: 'text', required: true }", "String('text')"), 'schema/worker.ts:4:', 'call'],
     ['unknown relation target', declaration.replace("displayField: 'name',", "relations: { other: { field: 'user', entity: 'missing' } },"), 'schema/worker.ts:7:', 'Unknown relation target'],
     ['unknown field type', declaration.replace("type: 'text'", "type: 'number'"), 'schema/worker.ts:4:', 'type'],
+    ['missing comma (syntax error)', declaration.replace("required: true },", "required: true }"), 'schema/worker.ts:5:', ''],
+    ['malformed numeric separator', declaration.replace("displayField: 'name',", "displayField: 'name', revision: 1__0,"), 'schema/worker.ts:7:', ''],
+    ['__proto__ key', declaration.replace("displayField: 'name',", "displayField: 'name', __proto__: { injected: true },"), 'schema/worker.ts:7:', '__proto__'],
   ])('rejects %s with file:line', (_name, entity, location, message) => {
     const { root, run } = consumer(entity)
     const result = run()
@@ -437,4 +440,22 @@ console.log('EQUIVALENT_WITH_BRAND')`)
     expect(result.stderr).toContain(name + ':')
     expect(result.stdout + result.stderr).not.toContain('CONSUMER_SENTINEL_EXECUTED')
   })
+})
+
+it('returns plain-prototype objects like JavaScript evaluation', () => {
+  const { root } = consumer(declaration, "languages: ['cs', 'en'], ui: { entities: { worker: { list: { views: [{ id: 'active', label: 'Active', where: { name: { eq: 'foo' } } }] } } } }, policies: { worker: { staff: { where: { name: { eq: 'foo' } } } } },")
+  writeFileSync(join(root, 'proto.ts'), `import { loadConfig } from '@workbasehq/core/schema/load'
+const { config } = await loadConfig(${JSON.stringify(join(root, 'config.ts'))})
+const seen: unknown[] = []
+const walk = (value: unknown): void => {
+  if (!value || typeof value !== 'object' || seen.includes(value)) return
+  seen.push(value)
+  if (!Array.isArray(value) && Object.getPrototypeOf(value) === null) throw new Error('null prototype')
+  for (const child of Object.values(value)) walk(child)
+}
+walk(config)
+console.log('ok')`)
+  const result = spawnSync('bun', [join(root, 'proto.ts')], { encoding: 'utf8' })
+  expect(result.stderr).toBe('')
+  expect(result.stdout.trim()).toBe('ok')
 })
