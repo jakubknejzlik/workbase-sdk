@@ -119,6 +119,8 @@ const schema = z.object({
 }).superRefine((config, ctx) => {
   if (config.plugins?.length && typeof config.interactive !== 'boolean') ctx.addIssue({ code: 'custom', path: ['interactive'], message: 'interactive must be an explicit boolean when plugins are installed' })
 })
+/** Shared schema for source-derived audits and property checks. */
+export const instanceConfigSchema = schema
 export type Field = z.infer<typeof fieldSchema>
 export type InstanceConfig = z.infer<typeof schema> & { effectiveAccess?: import('./access').EffectiveAccessPolicy }
 export type InstanceInput = z.input<typeof schema>
@@ -159,9 +161,11 @@ export function normalizeInstance(input: InstanceDefinitionInput, exactRoles = f
   // Era belongs to the authored input, never a plugin configure() contribution.
   // Strip the contributed key so absent legacy inputs retain no own baseline key.
   const { baseline: _baseline, ...data } = expanded
-  const config: InstanceConfig = schema.parse({ ...data, roles,
+  // Declarations may be unbound during schema planning; defineConfig installs the throwing accessor.
+  const validator = exactRoles && input.revision === undefined ? schema.safeExtend({ revision: z.number().int().positive().optional() as never }) : schema
+  const config = validator.parse({ ...data, roles,
     ...(Object.hasOwn(input, 'baseline') ? { baseline: (input as InstanceInput).baseline } : {}),
-  })
+  }) as InstanceConfig
   // Re-normalizing an executable config retains its already-compiled access policy.
   if ('effectiveAccess' in input) config.effectiveAccess = (input as InstanceConfig).effectiveAccess
   for (const name of Object.keys(config.pluginConfig ?? {})) {

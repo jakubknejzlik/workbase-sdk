@@ -1,8 +1,9 @@
+import { schemaLock } from '../src/migrations/schema-lock'
 import { effectiveEntityGrants } from '../src/access-evaluator'
 import { env } from 'cloudflare:workers'
 import { reset } from 'cloudflare:test'
 import { beforeEach, expect, it } from 'vitest'
-import { defineConfig, defineEntity, accountLink, defineAccess } from '../src/schema'
+import { defineConfig as unboundConfig, bindSchemaLock, defineEntity, accountLink, defineAccess } from '../src/schema'
 import { accessEntities, accessSystemActions, type EntityAccess } from '../src/access'
 import { bootstrap } from '@workbasehq/test-support/bootstrap'
 import { createApp } from '../src/app'
@@ -19,10 +20,14 @@ import { members } from '@workbasehq/plugins/members'
 import { organizations } from '@workbasehq/plugins/organizations'
 import { mailOutbox } from '@workbasehq/plugins/mail-outbox'
 
+const defineConfig = (input: Parameters<typeof unboundConfig>[0]) => {
+  const config = unboundConfig(input); return bindSchemaLock(config, schemaLock(config))
+}
+
 const all = { read: 'allow', create: 'allow', update: 'allow', delete: 'allow' } as const
 const self = { where: { use: 'self' }, fields: ['id', 'name', 'version'] }
 function config(matrix: EntityAccess = { admin: all, staff: { read: self, create: 'deny', update: { where: { use: 'self' } }, delete: 'deny' } }) {
-  return defineConfig({ id: 'access_test', revision: 1, roles: ['admin', 'staff'], organizationOwnerRole: 'admin', languages: ['en'],
+  return defineConfig({ id: 'access_test', roles: ['admin', 'staff'], organizationOwnerRole: 'admin', languages: ['en'],
     plugins: [identity, localAuth, legacyPermissions, members, organizations, machineCredentials(), mailOutbox()], interactive: false,
     entities: { worker: defineEntity({ fields: { name: { type: 'text', required: true }, user: accountLink() }, access: matrix }) },
     access: defineAccess({ roles: Object.fromEntries(['admin', 'staff'].map(role => [role, { system: Object.fromEntries(accessSystemActions.map(action => [action, 'allow'])) }])),
@@ -134,7 +139,7 @@ it('direct organization permission and effective privileges share authored syste
   expect(kernel.config.organizationPermissions.admin).not.toContain('members.read')
 })
 it('schema-only slice-1 declarations cannot acquire legacy authorization defaults when executed', () => {
-  const declaration = defineConfig({ id: 'schema_only', revision: 1, roles: ['admin'], organizationOwnerRole: 'admin', languages: ['en'], entities: {} })
+  const declaration = defineConfig({ id: 'schema_only', roles: ['admin'], organizationOwnerRole: 'admin', languages: ['en'], entities: {} })
   expect(() => new KernelRegistry(declaration)).toThrow('explicit entity access and shared access.ts')
 })
 
@@ -163,7 +168,7 @@ it('authored system grants admit custom-role audit readers and explicit denial b
   const admin = await requireScope(await resolveActor(request('/', 'admin'), runtime(), kernel.config), 'org-a', kernel.config)
   expect(hasOwnerRole(admin, kernel.config)).toBe(true)
   expect(() => kernel.resourcePermission(admin, 'audit.read')).not.toThrow()
-  const owner = defineConfig({ id: 'owner_probe', revision: 1, roles: ['owner'], organizationOwnerRole: 'owner', languages: ['en'], entities: {},
+  const owner = defineConfig({ id: 'owner_probe', roles: ['owner'], organizationOwnerRole: 'owner', languages: ['en'], entities: {},
     access: defineAccess({ predicates: {}, entities: Object.fromEntries(accessEntities.map(entity => [entity, { owner: 'deny' }])),
       roles: { owner: { system: Object.fromEntries(accessSystemActions.map(action => [action, 'allow'])) } },
     }),
@@ -303,7 +308,7 @@ it('capabilities list allowed mutations using each operation filter when read is
 })
 
 it('narrow credential cannot inherit principal sensitive field grant', async () => {
-  const selected = defineConfig({ id: 'secret_probe', revision: 1, roles: ['admin', 'staff'], organizationOwnerRole: 'admin', languages: ['en'],
+  const selected = defineConfig({ id: 'secret_probe', roles: ['admin', 'staff'], organizationOwnerRole: 'admin', languages: ['en'],
     plugins: config().plugins, interactive: false,
     entities: { worker: defineEntity({ fields: { name: { type: 'text', required: true }, user: accountLink(), secret: { type: 'text', sensitive: true } },
       access: { admin: { ...all, read: { where: {}, fields: ['id', 'name', 'secret'] } }, staff: { read: self, create: 'none', update: { where: { use: 'self' } }, delete: 'none' } } }) },

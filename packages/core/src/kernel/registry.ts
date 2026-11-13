@@ -1,3 +1,4 @@
+import { assertSchemaLockBound } from '../schema/revision'
 import { accessGuards } from '../access-guards'
 import { isBuiltinPlugin } from './builtin-source'
 import { baseFields, defineInstance, normalizeInstance, type InstanceConfig, type InstanceInput, type Operation } from '../config'
@@ -36,6 +37,7 @@ export class KernelRegistry {
   /** Audit the actual runtime bypass, including separately supplied options. */
   get authorizationTrust(): boolean { return this.trust }
   constructor(config: InstanceInput & Pick<InstanceConfig, 'effectiveAccess'>, options: RuntimeOptions = {}, env?: RuntimeEnv) {
+    assertSchemaLockBound(config)
     if (config.baseline === 'workbase-sdk' && !config.effectiveAccess) throw new DeclarationError(['access'], 'Executable schema configurations require explicit entity access and shared access.ts')
     const resolved = resolvePlugins(options.plugins ?? config.plugins ?? [], config.interactive)
     this.plugins = resolved.plugins

@@ -1,11 +1,12 @@
 import { createHash } from 'node:crypto'
 /** Build-time source validation only: keep Node and the TS compiler out of runtime imports. */
-import { readFileSync, realpathSync, readdirSync, statSync } from 'node:fs'
+import { readFileSync, existsSync, realpathSync, readdirSync, statSync } from 'node:fs'
 import { dirname, extname, isAbsolute, resolve, relative } from 'node:path'
 import { fileURLToPath, URL } from 'node:url'
 import ts from 'typescript'
-import { accountLink, DeclarationError, defineConfig, defineEntity, defineAccess } from '../schema'
+import { accountLink, DeclarationError, defineConfig, defineEntity, defineAccess, bindSchemaLock } from '../schema'
 import type { InstanceConfig } from '../config'
+import { parseLock } from '../migrations/schema-lock'
 
 export interface SourceLocation { file: string; line: number; column: number }
 export type SourceMap = Record<string, SourceLocation>
@@ -21,7 +22,7 @@ function location(node: ts.Node): SourceLocation {
   return { file: file.fileName, line: pos.line + 1, column: pos.character + 1 }
 }
 function fail(node: ts.Node, message: string): never { throw new SourceError(location(node), message) }
-function read(file: string) {
+function readSource(file: string) {
   const text = readFileSync(file, 'utf8')
   const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS)
   // Syntax errors the host would reject must never yield an interpreted config.
@@ -209,9 +210,11 @@ function literal(node: ts.Expression, bindings: Map<string, Binding>, path: stri
  */
 export function configSources(file: string): SourceMap {
   const entry = realpathSync(resolve(file))
-  const source = read(entry)
+  const source = readSource(entry)
   const sources: SourceMap = { '': location(source) }
-  const declaration = exported(source, 'default')
+  let declaration = exported(source, 'default')
+  if (declaration && ts.isCallExpression(declaration) && ts.isIdentifier(declaration.expression)
+    && sdkBinding(imports(source).get(declaration.expression.text), entry, 'bindSchemaLock')) declaration = declaration.arguments[0]
   if (!declaration || !ts.isCallExpression(declaration) || !declaration.arguments[0]) return sources
   // Code registrations may contain methods, calls and spreads. Index their
   // enclosing declarations without applying the data-only literal validator.
@@ -241,7 +244,7 @@ export function configSources(file: string): SourceMap {
     if (!binding || !binding.module.startsWith('./')) continue
     const name = prefix === 'access' ? 'access' : prefix.slice('entities.'.length)
     const path = entityPath(binding, entry, name, prefix === 'access' ? '' : 'schema')
-    const imported = read(path)
+    const imported = readSource(path)
     const call = exported(imported, binding.imported)
     if (call && ts.isCallExpression(call) && call.arguments[0]) record(call.arguments[0], prefix)
   }
@@ -257,10 +260,26 @@ export function configSources(file: string): SourceMap {
  */
 export async function loadConfig(file: string): Promise<{ config: InstanceConfig; sources: SourceMap; configHash: string }> {
   const entry = realpathSync(resolve(file))
+  const readSet = new Map<string, string>()
+  const read = (file: string) => {
+    const source = readSource(file)
+    readSet.set(file, source.text)
+    return source
+  }
   const source = read(entry)
   const sources: SourceMap = { '': location(source) }
   const bindings = imports(source)
-  const declaration = exported(source, 'default')
+  const exportedConfig = exported(source, 'default')
+  let declaration = exportedConfig
+  let lockImport: string | undefined
+  if (declaration && ts.isCallExpression(declaration) && ts.isIdentifier(declaration.expression)
+    && sdkBinding(bindings.get(declaration.expression.text), entry, 'bindSchemaLock')) {
+    const [inner, lock] = declaration.arguments
+    const binding = lock && ts.isIdentifier(lock) ? bindings.get(lock.text) : undefined
+    if (declaration.arguments.length !== 2 || !inner || binding?.module !== './schema.lock.json' || binding.imported !== 'default') fail(declaration, 'bindSchemaLock requires defineConfig({...}) and an imported ./schema.lock.json')
+    lockImport = (lock as ts.Identifier).text
+    declaration = unwrap(inner)
+  }
   if (!declaration || !ts.isCallExpression(declaration) || !ts.isIdentifier(declaration.expression)) fail(source, 'Config must default-export a direct SDK defineConfig({...}) call')
   if (!sdkBinding(bindings.get(declaration.expression.text), entry, 'defineConfig')) fail(declaration, 'Expected a direct named SDK defineConfig import')
   const arg = declaration.arguments[0]
@@ -281,7 +300,8 @@ export async function loadConfig(file: string): Promise<{ config: InstanceConfig
     if (!ts.isIdentifier(accessRef)) fail(accessRef, 'access must be imported from ./access.ts')
     entityImports.add(accessRef.text)
   }
-  moduleBoundary(source, declaration, ['defineConfig'], entityImports)
+  if (lockImport) entityImports.add(lockImport)
+  moduleBoundary(source, exportedConfig!, ['defineConfig', 'bindSchemaLock'], entityImports)
   const data: Record<string, unknown> = Object.create(null)
   for (const [name, property] of props) if (name !== 'entities' && name !== 'access') data[name] = literal(value(property)!, new Map())
   if (accessRef && ts.isIdentifier(accessRef)) {
@@ -323,9 +343,11 @@ export async function loadConfig(file: string): Promise<{ config: InstanceConfig
   try {
     const config = defineConfig({ ...data, entities } as Parameters<typeof defineConfig>[0])
     const hash = createHash('sha256')
-    for (const file of [...new Set(Object.values(sources).map(source => source.file))].sort()) {
-      hash.update(JSON.stringify([relative(dirname(entry), file), readFileSync(file, 'utf8')]))
+    for (const [file, text] of [...readSet].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)) {
+      hash.update(JSON.stringify([relative(dirname(entry), file), text]))
     }
+    const lockPath = resolve(dirname(entry), 'schema.lock.json')
+    if (existsSync(lockPath)) bindSchemaLock(config, parseLock(readFileSync(lockPath, 'utf8')))
     return { config, sources, configHash: hash.digest('hex') }
   } catch (error) { return remap(error, sources) }
 }

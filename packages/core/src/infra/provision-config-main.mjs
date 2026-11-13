@@ -26,4 +26,4 @@ async function main() {
     }
   }
 }
-await main()
+await main().catch(error => finish({ kind: 'load-error', message: error instanceof Error ? error.message : String(error) }))

@@ -3,6 +3,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { TestProject } from 'vitest/node'
+import { checkSchema, parseLock } from '../../../src/migrations/schema-lock'
+import { readFileSync } from 'node:fs'
 import { loadConfig } from '../../../src/schema/load'
 import { KernelRegistry } from '../../../src/kernel/registry'
 import { plan } from '../../../src/migrations/planner'
@@ -25,6 +27,7 @@ export default async function setup({ provide }: TestProject) {
   const directory = mkdtempSync(join(tmpdir(), 'workbase-era-'))
   try {
     const { config } = await loadConfig(join(root, 'config.ts'))
+    checkSchema(config, parseLock(readFileSync(join(root, 'schema.lock.json'), 'utf8')))
     const kernel = new KernelRegistry(config)
     const sql = plan(null, kernel.config).sql
     const files = [{ filename: '0001_r1.sql', sql, checksum: sha256(sql) }]

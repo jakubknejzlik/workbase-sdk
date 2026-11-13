@@ -1,11 +1,11 @@
 import { describe, expect, expectTypeOf, it } from 'vitest'
-import { defineConfig, defineEntity, accountLink, isSchemaConfig, type ConfigInput } from '../../src/schema'
+import { defineConfig, defineEntity, accountLink, isSchemaConfig, bindSchemaLock, type ConfigInput } from '../../src/schema'
 import { bodyValidator, defineInstance, Fn, Q } from '../../src/config'
 import { permissions } from '@workbasehq/plugins/permissions'
 import { publicSchema } from '../../src/public-schema'
 
 const worker = () => defineEntity({ fields: { name: { type: 'text', required: true }, user: accountLink() }, displayField: 'name' })
-const input = (): ConfigInput => ({ id: 'sample', revision: 1, roles: ['admin', 'staff'], organizationOwnerRole: 'admin', languages: ['cs', 'en'], entities: { worker: worker() } })
+const input = (): ConfigInput => ({ id: 'sample', roles: ['admin', 'staff'], organizationOwnerRole: 'admin', languages: ['cs', 'en'], entities: { worker: worker() } })
 
 it('keeps required nonempty text and protected account writes in core validators', () => {
   const config = defineConfig(input())
@@ -38,7 +38,7 @@ it('uses core scalar, enum, computed and display normalization for public metada
   expect(bodyValidator(config.entities.probe).safeParse({ name: 'Sample', active: true, amount: 2.5, count: 1 }).success).toBe(true)
   expect(bodyValidator(config.entities.probe).safeParse({ name: 'Sample', amount: '2' }).success).toBe(false)
   // The public metadata projection consumes this normalized schema, including computed fields.
-  const metadata = publicSchema(config, {}).entities.probe
+  const metadata = publicSchema(bindSchemaLock(config, { lockVersion: 1, revision: 1, parent: null, tables: [] }), {}).entities.probe
   expect(metadata.displayField).toBe('name')
   expect(metadata.fields.amount.type).toBe('float')
   expect(metadata.fields.active.type).toBe('bool')
@@ -131,9 +131,9 @@ function invalidDeclarationTypes() {
   // @ts-expect-error Field labels also belong to dictionaries.
   defineEntity({ fields: { name: { type: 'text', label: 'Sample' } } })
   // @ts-expect-error Roles and organizationOwnerRole are mandatory on this path.
-  defineConfig({ id: 'sample', revision: 1, languages: ['en'], entities: {} })
+  defineConfig({ id: 'sample', languages: ['en'], entities: {} })
   // @ts-expect-error Languages are mandatory on this path.
-  defineConfig({ id: 'sample', revision: 1, roles: ['admin'], organizationOwnerRole: 'admin', entities: {} })
+  defineConfig({ id: 'sample', roles: ['admin'], organizationOwnerRole: 'admin', entities: {} })
 }
 void invalidDeclarationTypes
 
@@ -141,5 +141,7 @@ it('recognizes SDK era on the config value and its spread copy', () => {
   const config = defineConfig(input())
   expect(isSchemaConfig(config)).toBe(true)
   // This is an era check, not a claim about the copy's provenance or access.
+  expect(() => ({ ...config })).toThrow('schema lock not bound')
+  bindSchemaLock(config, { lockVersion: 1, revision: 1, parent: null, tables: [] })
   expect(isSchemaConfig({ ...config })).toBe(true)
 })

@@ -16,10 +16,11 @@ function shared(): AccessInput {
 function consumer(access = shared(), worker: unknown = { admin: operations, staff: { read: { where: { use: 'self' }, fields: ['id', 'name'] }, create: 'deny', update: 'deny', delete: 'deny' } }) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'workbase-access-'))); roots.push(root)
   mkdirSync(join(root, 'schema'))
+  writeFileSync(join(root, 'schema.lock.json'), JSON.stringify({ lockVersion: 1, revision: 1, parent: null, tables: [] }))
   writeFileSync(join(root, 'config.ts'), `import { defineConfig } from '@workbasehq/core/schema'
 import worker from './schema/worker.ts'
 import access from './access.ts'
-export default defineConfig({ id: 'sample', revision: 1, roles: ['admin', 'staff'], organizationOwnerRole: 'admin', languages: ['en'], entities: { worker }, access })`)
+export default defineConfig({ id: 'sample', roles: ['admin', 'staff'], organizationOwnerRole: 'admin', languages: ['en'], entities: { worker }, access })`)
   writeFileSync(join(root, 'access.ts'), `import { defineAccess } from '@workbasehq/core/schema'\nexport default defineAccess(${JSON.stringify(access, null, 2)})`)
   writeFileSync(join(root, 'schema/worker.ts'), `import { defineEntity, accountLink } from '@workbasehq/core/schema'\nexport default defineEntity({ fields: { name: { type: 'text', required: true }, user: accountLink() }, access: ${JSON.stringify(worker, null, 2)} })`)
   return { root, matrix: worker, load: () => loadConfig(join(root, 'config.ts')) }
@@ -114,7 +115,7 @@ it('rejects an authored effectiveAccess literal instead of trusting it as compil
   // Reviewer repro (PR #18 verify2): no access.ts or entity access, policy injected as a literal.
   writeFileSync(join(root, 'config.ts'), `import { defineConfig } from '@workbasehq/core/schema'
 import worker from './schema/worker.ts'
-export default defineConfig({ id: 'sample', revision: 1, roles: ['admin', 'staff'], organizationOwnerRole: 'admin', languages: ['en'], entities: { worker }, effectiveAccess: ${JSON.stringify(compiled)} })`)
+export default defineConfig({ id: 'sample', roles: ['admin', 'staff'], organizationOwnerRole: 'admin', languages: ['en'], entities: { worker }, effectiveAccess: ${JSON.stringify(compiled)} })`)
   writeFileSync(join(root, 'schema/worker.ts'), `import { defineEntity, accountLink } from '@workbasehq/core/schema'\nexport default defineEntity({ fields: { name: { type: 'text', required: true }, user: accountLink() } })`)
   await expect(load()).rejects.toThrow(/effectiveAccess.*cannot be authored/)
   // Alongside real declarations the literal is still rejected, not merged or overridden.
@@ -122,6 +123,6 @@ export default defineConfig({ id: 'sample', revision: 1, roles: ['admin', 'staff
   writeFileSync(join(declared.root, 'config.ts'), `import { defineConfig } from '@workbasehq/core/schema'
 import worker from './schema/worker.ts'
 import access from './access.ts'
-export default defineConfig({ id: 'sample', revision: 1, roles: ['admin', 'staff'], organizationOwnerRole: 'admin', languages: ['en'], entities: { worker }, access, effectiveAccess: ${JSON.stringify(compiled)} })`)
+export default defineConfig({ id: 'sample', roles: ['admin', 'staff'], organizationOwnerRole: 'admin', languages: ['en'], entities: { worker }, access, effectiveAccess: ${JSON.stringify(compiled)} })`)
   await expect(declared.load()).rejects.toThrow(/effectiveAccess.*cannot be authored/)
 })
