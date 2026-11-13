@@ -74,6 +74,17 @@ test('required blank blocks locally and server issues map to field paths', async
   expect(await screen.findByText('custom')).toBeTruthy()
   expect(screen.getByLabelText('extra').getAttribute('aria-invalid')).toBe('true')
 })
+test('editing name preserves an unchanged padded enum literal on the wire', async () => {
+  const initial = { ...row, status: ' closed ' }
+  const metadata = { ...meta, fields: { ...fields, status: { ...fields.extra, type: 'enum', values: ['open', ' closed '] } } }
+  const fetch = vi.fn(async (_url: string, init: ClientRequestInit) => json(init.method === 'PATCH' ? { ...initial, name: 'Changed', version: 2 } : initial))
+  render(view(fetch, 'edit', { layout: ['name', 'status'], metadata }))
+  fireEvent.change(await screen.findByLabelText('name'), { target: { value: 'Changed' } })
+  expect((screen.getByLabelText('status') as unknown as { value: string }).value).toBe(' closed ')
+  fireEvent.click(screen.getByText('console.save'))
+  await waitFor(() => expect(navigate).toHaveBeenCalledWith('/items/x'))
+  expect(JSON.parse(String(fetch.mock.calls.find(([, init]) => init.method === 'PATCH')![1].body))).toEqual({ name: 'Changed' })
+})
 test('conflict retains draft; explicit reload and resave diffs against fresh server copy', async () => {
   let server = row, conflict = true
   const fetch = vi.fn(async (_url: string, init: ClientRequestInit) => {

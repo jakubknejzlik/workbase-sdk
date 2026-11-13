@@ -8,7 +8,7 @@ import sample from './fixtures/sample/config'
 const roles = ['owner', 'dispatcher', 'viewer']
 const config = defineInstance({ ...sample, account: { entity: 'users' }, entities: { ...sample.entities,
   users: { fields: { name: { type: 'string' }, role: { type: 'enum', values: roles } } },
-  probe: { displayField: 'name', fields: { name: { type: 'string', required: true }, extra: { type: 'string' }, locked: { type: 'string', readOnly: true }, user: { type: 'ref', entity: 'users', userLink: true } }, relations: { account: { field: 'user', entity: 'users' } } },
+  probe: { displayField: 'name', fields: { name: { type: 'string', required: true }, extra: { type: 'string' }, status: { type: 'enum', values: ['open', ' closed '] }, locked: { type: 'string', readOnly: true }, user: { type: 'ref', entity: 'users', userLink: true } }, relations: { account: { field: 'user', entity: 'users' } } },
 }, permissions: Object.fromEntries(roles.map(role => [role, { ...sample.permissions[role], users: ['read'], probe: ['read', 'create', 'update'] }])),
 policies: { ...sample.policies, users: { owner: 'all', dispatcher: 'all', viewer: 'all' }, probe: { owner: 'all', dispatcher: 'all', viewer: 'all' } } })
 const meta: EntityMeta = { displayField: 'name', fields: Object.fromEntries(Object.entries(config.entities.probe.fields).map(([key, f]) => [key, { type: f.type, required: f.required, readOnly: !!f.readOnly, computed: !!f.computed, userLink: !!f.userLink }])) }
@@ -55,6 +55,17 @@ it('native D1: empty name issues have paths/codes only; forged userLink/readOnly
   expect(failure).toMatchObject({ status: 400, code: 'validation_error', issues: [{ path: ['name'], code: 'too_small' }] })
   expect(Object.keys(failure.issues[0]).sort()).toEqual(['code', 'path'])
   for (const body of [{ user: 'owner-a' }, { locked: 'forged' }, { unknown: 'forged' }]) await expect(api.update('probe', created.id, 1, body, signal())).rejects.toMatchObject({ status: 400 })
+})
+it('native D1: editing name leaves an unchanged padded enum literal intact', async () => {
+  const { api, fetch } = client()
+  const initial = await api.create('probe', { name: 'Original', status: ' closed ' }, 'padded-enum', signal())
+  expect(initial.status).toBe(' closed ')
+  const edited = await api.update('probe', initial.id, initial.version, diff(meta, ['name', 'status'], initial, { ...initial, name: 'Changed' }), signal())
+  expect(edited).toMatchObject({ name: 'Changed', status: ' closed ', version: 2 })
+  expect(JSON.parse(String(fetch.mock.calls.at(-1)![1].body))).toEqual({ name: 'Changed' })
+  app = createApp(config, runtime())
+  expect(await client().api.one('probe', { id: initial.id }, signal())).toMatchObject({ name: 'Changed', status: ' closed ', version: 2 })
+  expect(await env.DB.prepare('SELECT status FROM probe WHERE id=?').bind(initial.id).first('status')).toBe(' closed ')
 })
 it('native D1: stale version retains cache/draft, reload then resave sends only changed keys', async () => {
   const first = client(), second = client(), initial = await first.api.create('probe', { name: 'A', extra: 'set' }, 'draft-3', signal())

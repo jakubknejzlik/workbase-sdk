@@ -13,6 +13,24 @@ test('diff trims, clears optional fields, blocks required empties, and excludes 
   expect(diff(meta, ['extra'], {}, {})).toEqual({})
   for (const flag of ['readOnly', 'computed', 'userLink']) expect(diff({ ...meta, fields: { name: { ...meta.fields.name, [flag]: true } } }, ['name'], { name: 'A' }, { name: 'B' })).toEqual({})
 })
+test.each(['string', 'text'])('diff retains free-text trimming for %s', type => {
+  const metadata = { ...meta, fields: { value: { ...meta.fields.extra, type } } }
+  expect(diff(metadata, ['value'], {}, { value: ' padded ' })).toEqual({ value: 'padded' })
+})
+test('an unchanged padded enum literal produces no PATCH entry', () => {
+  const metadata = { ...meta, fields: { status: { ...meta.fields.extra, type: 'enum', values: ['open', ' closed '] } } }
+  const initial = { status: ' closed ' }
+  expect(diff(metadata, ['status'], initial, { ...initial })).toEqual({})
+})
+test.each([
+  ['enum', ' closed '], ['enum', '   '], ['ref', ' record-id '],
+  ['datetime', ' 2026-11-13T00:00:00Z '], ['bool', false], ['int', 3], ['float', 1.5],
+  ['bool', ' false '], ['int', ' 3 '], ['float', ' 1.5 '],
+])('diff preserves exact %s value %j and omits it when unchanged', (type, value) => {
+  const metadata = { ...meta, fields: { value: { ...meta.fields.extra, type: String(type), values: ['open', ' closed ', '   '] } } }
+  expect(diff(metadata, ['value'], {}, { value })).toEqual({ value })
+  expect(diff(metadata, ['value'], { value }, { value })).toEqual({})
+})
 test('canonical cache keys and scoped client instances', async () => {
   expect(cacheKey('list', 'test', { b: 1, a: 2 })).toBe(cacheKey('list', 'test', { a: 2, b: 1 }))
   const fetch = vi.fn(async (_url: string, _init: ClientRequestInit) => response({ id: 'x', version: 1 }))

@@ -24,7 +24,7 @@ export function diff(meta: EntityMeta, layout: Node[], initial: Record<string, u
       const field = meta.fields[node]
       if (!field || field.readOnly || field.computed || field.userLink) continue
       let value = draft[node]
-      if (typeof value === 'string') value = value.trim()
+      if ((field.type === 'string' || field.type === 'text') && typeof value === 'string') value = value.trim()
       if (value === '' || value === null || value === undefined) {
         if (field.required) { issues.push({ path: [node], code: 'required' }); continue }
         value = null

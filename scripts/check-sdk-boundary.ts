@@ -10,6 +10,10 @@ import { assertCoreEnumLabels } from './check-core-enum-labels'
 import { sdkWorkspaceDirectories } from './lib/sdk-workspaces'
 import { assertSdkPackageNames, sdkPackageNames } from './sdk-provenance'
 import { consolePublicContent, checkConsolePublic } from './check-console-public'
+import pluginsManifest from '../packages/plugins/package.json'
+
+// Core is the required runtime peer; every other declared peer is optional tooling or UI.
+const optionalPeers = Object.keys(pluginsManifest.peerDependencies).filter(name => name !== '@workbasehq/core')
 
 export { instanceNames } from './lib/public-vocabulary'
 import { instanceNames } from './lib/public-vocabulary'
@@ -19,7 +23,7 @@ export function checkSdkBoundary(root: string, sourceOnly = false, vocabulary: R
   const failures: string[] = []
   function uiPeers(manifest: { exports?: Record<string, unknown>; peerDependencies?: Record<string, string>; peerDependenciesMeta?: Record<string, { optional?: boolean }> }, where: string) {
     if (!manifest.exports?.['./console/ui/vite']) return
-    for (const name of ['vite', '@tanstack/router-generator', 'es-module-lexer']) {
+    for (const name of optionalPeers) {
       if (!manifest.peerDependencies?.[name] || manifest.peerDependenciesMeta?.[name]?.optional !== true) failures.push(`UI build dependency must be an optional peer: ${where}: ${name}`)
     }
   }
