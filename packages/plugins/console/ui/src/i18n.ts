@@ -1,4 +1,6 @@
 import { createInstance } from 'i18next'
+import { use } from 'react'
+import { TranslationContext } from './i18n-context'
 import { mergeCatalogs, type Catalogs } from './catalogs'
 export { mergeCatalogs, sdkCatalogs } from './catalogs'
 export type { Catalogs } from './catalogs'
@@ -25,10 +27,17 @@ export function createI18n(options: { languages: readonly string[]; profile?: { 
     changeLanguage: async (language: string) => { if (!languages.includes(language)) throw new Error('Unconfigured language: ' + language); await instance.changeLanguage(language) },
     subscribe: (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener) } } }
 }
-let current: I18n | undefined
-/** Bind authored TSX's named SDK t import during host startup. */
-export function initI18n(options: Parameters<typeof createI18n>[0]): I18n { return current = createI18n(options) }
+let initialized = false
+/** Initialize a host runtime; authored TSX resolves its translator from ConsoleProvider. */
+export function initI18n(options: Parameters<typeof createI18n>[0]): I18n {
+  const runtime = createI18n(options)
+  initialized = true
+  return runtime
+}
 export const t: Translate = (key, variables) => {
-  if (!current) throw new Error('initI18n is required before rendering authored TSX')
-  return current.t(key, variables)
+  if (!initialized) throw new Error('initI18n is required before rendering authored TSX')
+  // React's use(context) permits translation calls in conditionals and loops.
+  const translate = use(TranslationContext)
+  if (!translate) throw new Error('ConsoleProvider is required for authored t; use the Instance i18n.t outside React')
+  return translate(key, variables)
 }

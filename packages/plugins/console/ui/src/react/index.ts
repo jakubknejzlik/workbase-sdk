@@ -5,6 +5,7 @@ import { ApiFailure, cacheKey, canonicalJSON, createClient, diff, type Client, t
 import { buildPath, type Node, type Page, type Slot } from '../index'
 import type { Manifest, ResolvedLink } from '../check'
 import type { I18n, Translate } from '../i18n'
+import { TranslationContext } from '../i18n-context'
 export type State<T> = { kind: 'loading' | 'empty' | 'notFound' | 'forbidden' | 'network' } | { kind: 'ready'; data: T } | { kind: 'validation'; issues: Issue[] }
 export function failureState(error: unknown): State<never> {
   return error instanceof ApiFailure && error.status === 404 ? { kind: 'notFound' } : error instanceof ApiFailure && error.status === 403 ? { kind: 'forbidden' }
@@ -21,7 +22,7 @@ export function ConsoleProvider({ identity, t, baseURL = '', fetch: transport = 
   const queries = useMemo(() => new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity, refetchOnWindowFocus: false } } }), [client])
   useEffect(() => client.subscribe(() => { void queries.invalidateQueries() }), [client, queries])
   useEffect(() => () => queries.clear(), [queries])
-  return h(Context.Provider, { value: { client, identity, t, slots }, key: canonicalJSON([baseURL, identity]) }, h(QueryClientProvider, { client: queries }, children))
+  return h(Context.Provider, { value: { client, identity, t, slots }, key: canonicalJSON([baseURL, identity]) }, h(TranslationContext.Provider, { value: t }, h(QueryClientProvider, { client: queries }, children)))
 }
 function useRuntime() { const runtime = useContext(Context); if (!runtime) throw new Error('ConsoleProvider is required'); return runtime }
 export function useRecord(entity: string, id: string) {

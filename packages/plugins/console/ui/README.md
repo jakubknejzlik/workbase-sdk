@@ -116,16 +116,22 @@ Non-goals:
 - No languages beyond cs/en, no date/number formatting helpers, no visual/axe checks.
 - No list-column completeness and no `frontend-console` changes.
 
-`/i18n` uses only the optional `i18next` peer ([configuration](https://www.i18next.com/overview/configuration-options)).
+`/i18n` uses the optional `i18next` ([configuration](https://www.i18next.com/overview/configuration-options)) and React peers.
 Import bundled resources from `.workbase-ui/locales.json`, then call
 `initI18n({ languages, profile, catalogs })` once during host startup. It returns
 `{ t, languages, language, changeLanguage, subscribe }`; authored TSX imports
 `{ t }` directly from `@workbasehq/plugins/console/ui/i18n`. `createI18n` creates
-an independent runtime for tests or isolated hosts. Pass `t` and `i18n` to
+an independent runtime for tests or isolated hosts. Pass the returned runtime's
+`t` and the runtime as `i18n` to
 `ConsoleProvider` for live copy updates, and render `LanguageSwitcher` from
 `/react` with `{ i18n }`. It appears only for multiple configured languages.
 `resolveLanguage(profile, languages)` uses a configured profile language or the
 first configured language. Neither detection nor browser/profile storage occurs.
+
+The named `t` is for React rendering and reads the consuming `ConsoleProvider`'s
+translator; it has no global translator fallback. Use the returned runtime's
+`i18n.t` for event handlers and non-React callers. Async SSR work outside the React
+render tree must carry its own runtime; request isolation there is out of scope.
 
 Namespaces are `domain`, `ui` (the default), and `sdk`, with flat dotted keys.
 `fallbackLng: false` prevents language fallback; missing keys render `⟦ns:key⟧`
