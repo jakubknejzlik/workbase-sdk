@@ -21,6 +21,7 @@ const node: z.ZodType<Node> = z.lazy(() => z.union([
   id,
   z.strictObject({ kind: z.literal('col'), children: z.array(node).length(1), span: z.union([z.number(), z.strictObject(Object.fromEntries(['xs', 'sm', 'md', 'lg', 'xl'].map(bp => [bp, z.number().optional()])))]) }),
   z.strictObject({ kind: z.enum(['section', 'row', 'columns', 'tabs', 'tab']), title: title.optional(), children: z.array(node) }),
+  z.strictObject({ kind: z.literal('action'), name: id }),
   z.strictObject({ kind: z.literal('slot'), id, props: z.record(id, z.union([z.string(), z.boolean()])) }),
 ]))
 const pageSchema = z.strictObject({
@@ -36,7 +37,7 @@ const propSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('key') }),
 ])
 const slotsSchema = z.record(id, z.strictObject({ contexts: z.array(z.enum(['record', 'form', 'row'])).min(1), props: z.record(id, propSchema) }))
-export type Schema = Record<string, { displayField?: string; fields: Record<string, { type: string; required?: boolean; readOnly?: boolean; computed?: unknown; userLink?: boolean; values?: string[]; entity?: string }> }>
+export type Schema = Record<string, { displayField?: string; actions?: Record<string, unknown>; fields: Record<string, { type: string; required?: boolean; readOnly?: boolean; computed?: unknown; userLink?: boolean; values?: string[]; entity?: string }> }>
 const entitySchema = z.strictObject({ displayField: z.string(), fields: z.record(id, z.strictObject({
   type: z.string(), required: z.boolean(), readOnly: z.boolean(), computed: z.boolean(), userLink: z.boolean(), values: z.array(z.string()).optional(), ref: id.optional(),
 })) })
@@ -136,6 +137,10 @@ export function normalise(sources: Sources, values: Record<string, unknown>, sch
     function walk(nodes: Node[]) {
       for (const node of nodes) {
         if (typeof node === 'string') { field(node); continue }
+        if (node.kind === 'action') {
+          if (!page.entity || !Object.hasOwn(schema[page.entity].actions ?? {}, node.name)) throw new Error(`Unknown action ${node.name}`)
+          continue
+        }
         if (node.kind !== 'slot') { walk(node.children); continue }
         const definition = slots[node.id]
         if (!definition) throw new Error(`Unknown slot ${node.id}`)

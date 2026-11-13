@@ -45,7 +45,8 @@ export function validatePolicies(config: InstanceConfig) {
       } else if (config.entities[entity].fields[field]?.computed) throw new Error(`Row policy cannot depend on computed field: ${entity}.${field}. Fix: use stored fields to establish row access before computing values.`)
     }
   }
-  const policies = config.effectiveAccess ? config.effectiveAccess.entities.filter(rule => config.entities[rule.entity] && rule.decision === 'allow').map(rule => [rule.entity, { [rule.role]: { where: rule.where, fields: rule.fields ?? undefined } }] as const) : Object.entries(config.policies)
+  const policies: (readonly [string, InstanceConfig['policies'][string]])[] = config.effectiveAccess ? config.effectiveAccess.entities.filter(rule => config.entities[rule.entity] && rule.decision === 'allow').map(rule => [rule.entity, { [rule.role]: { where: rule.where, fields: rule.fields ?? undefined } }] as const) : Object.entries(config.policies)
+  if (config.effectiveAccess) policies.push(...config.effectiveAccess.actions.flatMap(action => action.conditions.map(condition => [action.entity, { [config.roles[0]]: { where: condition.when, fields: undefined } }] as const)))
   for (const [entity, roles] of policies) {
     if (!Object.hasOwn(config.entities, entity)) throw new Error(`Unknown policy entity: ${entity}`)
     for (const [role, policy] of Object.entries(roles)) {
@@ -117,7 +118,7 @@ function policyGraphUsesActorLinks(config: InstanceConfig, entity: string, roles
   }
   return policy(entity)
 }
-function rolePolicyFilter(config: InstanceConfig, entity: string, scope: Scope, role: string, authored?: InstanceConfig['policies'][string][string]): TableFilter {
+export function rolePolicyFilter(config: InstanceConfig, entity: string, scope: Scope, role: string, authored?: InstanceConfig['policies'][string][string]): TableFilter {
   if (scope.actor.type === 'service' && scope.role === 'SYSTEM') return { kind: 'all' }
   const actor = projections.get(scope)
   if ((config.account || scope.actor.type === 'agent') && !actor) return { kind: 'none' }

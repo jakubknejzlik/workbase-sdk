@@ -60,6 +60,7 @@ export type RenderContext = Runtime & { metadata: EntityMeta; entity: string; mo
 /** Every structural node shares this traversal; fields dispatch solely by metadata type. */
 export function renderNode(node: Node, ctx: RenderContext): ReactNode {
   if (typeof node !== 'string') {
+    if (node.kind === 'action') return null // Live action rendering belongs to the capabilities slice.
     if (node.kind === 'tabs') return h(Tabs, { node, ctx })
     if (node.kind !== 'slot') return h(node.kind === 'section' || node.kind === 'tab' ? 'section' : 'div', { 'data-layout': node.kind, style: structuralStyle[node.kind as keyof typeof structuralStyle] }, 'title' in node && node.title && h('h2', null, ctx.t('ui:' + node.title)), ...node.children.map((child, i) => h('div', { key: i }, renderNode(child, ctx))))
     const slot = ctx.slots[node.id]
@@ -78,7 +79,7 @@ export function renderNode(node: Node, ctx: RenderContext): ReactNode {
   const error = ctx.issues?.filter(issue => issue.path[0] === node).map(issue => issue.code).join(', ')
   return h('div', null, h('label', null, ctx.t('domain:field.' + ctx.entity + '.' + node)), editable ? renderer({ field, name: ctx.t('domain:field.' + ctx.entity + '.' + node), t: ctx.t, enumKey: 'domain:enum.' + ctx.entity + '.' + node + '.', value: ctx.draft?.[node], change: value => ctx.change!(node, value), error }) : h('span', null, field.type === 'enum' && ctx.record[node] != null ? ctx.t('domain:enum.' + ctx.entity + '.' + node + '.' + ctx.record[node]) : String(ctx.record[node] ?? '')), error && h('span', { role: 'alert' }, ctx.t(error === 'required' ? 'sdk:required' : 'sdk:validation')))
 }
-function Tabs({ node, ctx }: { node: Exclude<Node, string | { kind: 'slot' }>; ctx: RenderContext }) {
+function Tabs({ node, ctx }: { node: Exclude<Node, string | { kind: 'slot' } | { kind: 'action' }>; ctx: RenderContext }) {
   const [active, setActive] = useState(0)
   return h('div', null, 'title' in node && node.title && h('h2', null, ctx.t('ui:' + node.title)),
     h('div', { role: 'tablist' }, ...node.children.map((child, i) => h('button', { key: i, type: 'button', role: 'tab', 'aria-selected': active === i, onClick: () => setActive(i) }, typeof child !== 'string' && 'title' in child && child.title ? ctx.t('ui:' + child.title) : String(i + 1)))),

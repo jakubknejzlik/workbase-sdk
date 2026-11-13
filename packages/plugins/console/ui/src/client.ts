@@ -3,7 +3,7 @@ export type FieldMeta = { type: string; required: boolean; readOnly: boolean; co
 export type EntityMeta = { displayField: string; fields: Record<string, FieldMeta> }
 export type Issue = { path: (string | number)[]; code: string }
 export class ApiFailure extends Error {
-  constructor(public status: number, public code: string, public issues?: Issue[]) { super(code) }
+  constructor(public status: number, public code: string, public issues?: Issue[], public reason?: string) { super(code) }
 }
 export type RecordData = Record<string, unknown> & { id: string; version: number }
 export type ListData = { data: RecordData[]; next_cursor: string | null }
@@ -20,7 +20,7 @@ export function diff(meta: EntityMeta, layout: Node[], initial: Record<string, u
   const body: Record<string, unknown> = {}, issues: Issue[] = []
   function walk(nodes: Node[]) {
     for (const node of nodes) {
-      if (typeof node !== 'string') { if (node.kind !== 'slot') walk(node.children); continue }
+      if (typeof node !== 'string') { if (node.kind !== 'slot' && node.kind !== 'action') walk(node.children); continue }
       const field = meta.fields[node]
       if (!field || field.readOnly || field.computed || field.userLink) continue
       let value = draft[node]
@@ -54,7 +54,7 @@ export function createClient(options: { baseURL: string; orgId: string; actorId:
       })
       const value = await response.json() as Record<string, unknown>
       signal.throwIfAborted()
-      if (!response.ok) throw new ApiFailure(response.status, String(value.error ?? 'api_error'), value.issues as Issue[] | undefined)
+      if (!response.ok) throw new ApiFailure(response.status, String(value.error ?? 'api_error'), value.issues as Issue[] | undefined, typeof value.reason === 'string' ? value.reason : undefined)
       return value
     } catch (error) {
       signal.throwIfAborted()
@@ -107,6 +107,15 @@ export function createClient(options: { baseURL: string; orgId: string; actorId:
         return result
       }
       return { load: (input: ListBind, signal: AbortSignal) => page(input, signal, false), more: (signal: AbortSignal) => page(bind, signal, true) }
+    },
+    async act(entity: string, id: string, name: string, signal: AbortSignal): Promise<RecordData> {
+      const detail = entityPath(entity) + '/' + encodeURIComponent(id)
+      const result = await wire(detail + '/actions/' + encodeURIComponent(name), signal, 'POST', {})
+      invalidate()
+      const row = result.id === id && Number.isSafeInteger(result.version) && result.actions && typeof result.actions === 'object'
+        ? result as RecordData : await wire(detail, signal) as RecordData
+      invalidate(entity, row)
+      return row
     },
     create: (entity: string, body: unknown, draftKey: string, signal: AbortSignal) => mutate(entity, entityPath(entity), 'POST', body, { 'Idempotency-Key': draftKey }, signal),
     update: (entity: string, id: string, version: number, body: unknown, signal: AbortSignal) => {

@@ -125,12 +125,12 @@ export function checkSources(root: string): Sources {
         const typeOnly = clause.isTypeOnly
         if (!typeOnly && node.moduleSpecifier.text === sdk) {
           if (clause.name || !names || !ts.isNamedImports(names)) fail(node, 'Expected named SDK imports')
-          for (const item of names.elements) if (!item.isTypeOnly && ![...helpers, 'defineNav', 'defineSlots', 'defineKeys', 'col', 'param', 'one', 'list', 'p', 'layout', 'slot', 'link', 'buildPath', 'parseParams'].includes((item.propertyName ?? item.name).text)) fail(item, `${(item.propertyName ?? item.name).text} is not in slice 7`)
+          for (const item of names.elements) if (!item.isTypeOnly && ![...helpers, 'defineNav', 'defineSlots', 'defineKeys', 'col', 'param', 'one', 'list', 'p', 'layout', 'slot', 'action', 'link', 'buildPath', 'parseParams'].includes((item.propertyName ?? item.name).text)) fail(item, `${(item.propertyName ?? item.name).text} is not in slice 7`)
         }
         edge(node.moduleSpecifier, node.moduleSpecifier.text, typeOnly)
       }
       if (ts.isCallExpression(node) && (node.expression.kind === ts.SyntaxKind.ImportKeyword || /^(?:require|eval|Function)$/.test(node.expression.getText(tree)))) fail(node, 'Dynamic imports and unclassified evaluation are prohibited')
-      if (ts.isCallExpression(node) && /^(?:query|action)$/.test(node.expression.getText(tree))) fail(node, `${node.expression.getText(tree)} is not in slice 7`)
+      if (ts.isCallExpression(node) && /^(?:query)$/.test(node.expression.getText(tree))) fail(node, `${node.expression.getText(tree)} is not in slice 7`)
       ts.forEachChild(node, visit)
     }
     visit(tree)

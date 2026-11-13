@@ -33,7 +33,7 @@ export function buildPath(to: string, params: Record<string, string | number>): 
     return encodeURIComponent(value)
   }).join('/')
 }
-export type EntityShape = { fields: Record<string, { type: string; userLink?: boolean }> }
+export type EntityShape = { fields: Record<string, { type: string; userLink?: boolean }>; actions?: Record<string, unknown> }
 export type Field<E extends EntityShape> = keyof E['fields'] & string
 export type PropSpec = { kind: 'field'; type: string } | { kind: 'boolean'; default?: boolean } | { kind: 'when' } | { kind: 'key' }
 export const p = {
@@ -45,11 +45,13 @@ export const p = {
 export type Slot = { contexts: ('record' | 'form' | 'row')[]; props: Record<string, PropSpec>; component: (...args: any[]) => any }
 export const defineSlots = <const S extends Record<string, Slot>>(slots: S): S => slots
 export type Span = number | Partial<Record<'xs' | 'sm' | 'md' | 'lg' | 'xl', number>>
-export type Node<F extends string = string> = F | { kind: 'section' | 'row' | 'columns' | 'tabs' | 'tab'; title?: string; children: Node<F>[] } | { kind: 'slot'; id: string; props: Record<string, string | boolean> } | { kind: 'col'; children: Node<F>[]; span: Span }
-export const col = <F extends string>(node: Node<F>, span: Span): Node<F> => ({ kind: 'col', children: [node], span })
+export type ActionName<E extends EntityShape> = string extends keyof E['fields'] ? string : E extends { actions: object } ? keyof E['actions'] & string : never
+export type Node<F extends string = string, A extends string = string> = F | { kind: 'section' | 'row' | 'columns' | 'tabs' | 'tab'; title?: string; children: Node<F, A>[] } | { kind: 'slot'; id: string; props: Record<string, string | boolean> } | { kind: 'col'; children: Node<F, A>[]; span: Span } | { kind: 'action'; name: A }
+export const col = <F extends string, A extends string = string>(node: Node<F, A>, span: Span): Node<F, A> => ({ kind: 'col', children: [node], span })
 export const defineKeys = <const T extends Record<string, readonly string[]>>(keys: T): T => keys
 export const slot = (id: string, props: Record<string, string | boolean> = {}): Node<never> => ({ kind: 'slot', id, props })
-export const layout = <E extends EntityShape>(nodes: Node<Field<E>>[]): Node<Field<E>>[] => nodes
+export const action = <E extends EntityShape = EntityShape>(name: ActionName<E>): { kind: 'action'; name: typeof name } => ({ kind: 'action', name })
+export const layout = <E extends EntityShape>(nodes: Node<Field<E>, ActionName<E>>[]): Node<Field<E>, ActionName<E>>[] => nodes
 export type Target = { entity: string; mode: 'list' | 'detail' | 'edit' }
 export const link = (entity: string, mode: Target['mode'] = 'detail'): Target => ({ entity, mode })
 export const defineNav = <const T extends { title: string; target: Target }[]>(items: T): T => items
@@ -61,7 +63,7 @@ export type Page = {
 type PageInput = Pick<Page, 'title'> & Partial<Omit<Page, 'kind' | 'title' | 'component'>>
 export const page = (input: PageInput): Page => ({ params: {}, search: {}, data: {}, layout: [], uses: [], omit: [], ...input, kind: 'page' })
 export const customPage = (input: PageInput & Required<Pick<Page, 'component' | 'uses'>>): Page => ({ ...page(input), kind: 'customPage' })
-type EntityOptions<E extends EntityShape> = Omit<PageInput, 'entity' | 'mode' | 'layout' | 'omit'> & { layout?: Node<Field<E>>[]; omit?: Field<E>[] }
+type EntityOptions<E extends EntityShape> = Omit<PageInput, 'entity' | 'mode' | 'layout' | 'omit'> & { layout?: Node<Field<E>, ActionName<E>>[]; omit?: Field<E>[] }
 export const entityListPage = <E extends EntityShape = EntityShape>(entity: string, options: EntityOptions<E>): Page => page({ ...options, entity, mode: 'list', data: { records: list(entity), ...options.data } })
 export const entityCreatePage = <E extends EntityShape = EntityShape>(entity: string, options: EntityOptions<E>): Page => page({ ...options, entity, mode: 'create' })
 function recordPage<E extends EntityShape>(mode: 'detail' | 'edit', entity: string, options: EntityOptions<E> & { recordParam: string }): Page {

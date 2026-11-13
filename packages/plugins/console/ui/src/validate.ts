@@ -45,7 +45,7 @@ export function requiredKeys(config: { entities: Schema }, manifest: Manifest, s
         if ('title' in node && node.title) add('ui:' + node.title, at(file, node.title))
         if (node.kind === 'slot') for (const [prop, spec] of Object.entries(manifest.slots[node.id].props)) {
           if (spec.kind === 'key') add('ui:' + node.props[prop], at(file, String(node.props[prop])))
-        } else walk(node.children)
+        } else if (node.kind !== 'action') walk(node.children)
       }
     }
     walk(route.layout)
@@ -81,7 +81,7 @@ export function checkStructure(manifest: Manifest, root: string): Finding[] {
         }
         if (node.kind === 'slot') {
           for (const [prop, spec] of Object.entries(manifest.slots[node.id].props)) if (spec.kind === 'field') placed.add(String(node.props[prop]))
-        } else walk(node.children, node.kind)
+        } else if (node.kind !== 'action') walk(node.children, node.kind)
       }
     }
     walk(route.layout)

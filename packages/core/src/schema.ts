@@ -1,5 +1,7 @@
 import { assertSchemaLockBound } from './schema/revision'
 export { bindSchemaLock } from './schema/revision'
+import { recordActionsSchema, type ActionWhen } from './record-actions-data'
+export { actionReasonKeys } from './record-actions-data'
 import { effectiveSystemGrant } from './access-evaluator'
 import { entityAccessSchema, compileAccess, defineAccess, type AccessInput } from './access'
 import { validatePolicies } from './policies'
@@ -24,6 +26,7 @@ export const declarationSchema = z.strictObject({
   checks: z.array(z.strictObject({ left: identifier, op: z.enum(['<=', '>=']), right: identifier })).optional(),
   commandsOnly: z.boolean().optional(),
   access: entityAccessSchema.optional(),
+  actions: recordActionsSchema.optional(),
 })
 export type EntityInput = z.input<typeof declarationSchema>
 declare const entityBrand: unique symbol
@@ -41,7 +44,7 @@ type LiteralFields<T extends EntityInput> = {
   [K in keyof T['fields']]: T['fields'][K] & Record<Exclude<keyof T['fields'][K], keyof EntityInput['fields'][string]>, never>
 }
 /** Data declaration only. loadConfig additionally enforces the literal source boundary. */
-export function defineEntity<const T extends EntityInput>(input: T & Record<Exclude<keyof T, keyof EntityInput>, never> & { fields: LiteralFields<T> }): EntityDeclaration<T> {
+export function defineEntity<const T extends EntityInput>(input: T & Record<Exclude<keyof T, keyof EntityInput>, never> & { fields: LiteralFields<T>; actions?: { [K in keyof T['actions']]: T['actions'][K] & { available?: { when: ActionWhen<T>; reason: string }[] } } }): EntityDeclaration<T> {
   const entity = parse(declarationSchema, input)
   const relations = { ...entity.relations }
   for (const [name, field] of Object.entries(entity.fields)) {
@@ -115,10 +118,10 @@ export function defineConfig(input: ConfigInput): SchemaConfig {
   }
   let config: SchemaConfig
   try {
-    config = normalizeInstance({ ...input, revision: undefined as never, roles, languages,
+    config = normalizeInstance({ ...input, revision: undefined as never, baseline: 'workbase-sdk', roles, languages,
       entities: { ...domain, users: accountEntity(roles) }, account: { entity: 'users' },
       permissions: input.permissions ?? {},
-    }, true, (error, path) => { throw new DeclarationError(path, error instanceof Error ? error.message : String(error)) }) as SchemaConfig
+    } as Parameters<typeof normalizeInstance>[0], true, (error, path) => { throw new DeclarationError(path, error instanceof Error ? error.message : String(error)) }) as SchemaConfig
   } catch (error) {
     if (error instanceof DeclarationError) throw error
     if (error instanceof z.ZodError) {
