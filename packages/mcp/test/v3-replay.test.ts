@@ -1,5 +1,5 @@
 import { registerTempDir, cleanupTempDir } from '../../../scripts/lib/test-temp-dir.mjs'
-import { appendFile, mkdtemp, symlink } from 'node:fs/promises'
+import { appendFile, mkdtemp, readFile, symlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { execFileSync } from 'node:child_process'
@@ -50,14 +50,18 @@ it.each(['node', 'bun'])('validates a proposal on a V3 instance created through 
     expect(preview).toMatchObject({ ok: true, revision: 2, sql: expect.stringContaining('ADD COLUMN') })
     const verification = await call('apply_to_disposable', { proposalId: proposal.proposalId })
     expect(verification, JSON.stringify(verification)).toMatchObject({ ok: true, verified: true, diffs: [] })
+    // Legacy promote must not write a V3 instance (#40 slice 0, #47): the
+    // validated proposal is refused before any file is touched.
+    const configBefore = await readFile(join(root, 'config.ts'), 'utf8')
     const promotion = await call('promote', { proposalId: proposal.proposalId, expectedRevision: 1 })
-    expect(promotion, JSON.stringify(promotion)).toMatchObject({ ok: true, migration: '0002_r2.sql' })
-    const promoted = await store.load('replay-fixture')
-    expect(promoted.migrations.at(-1)!.sql).not.toContain('INSERT INTO instance_meta')
+    expect(promotion, JSON.stringify(promotion)).toMatchObject({ ok: false, error: { code: 'v3_promote_unsupported' } })
+    expect(await readFile(join(root, 'config.ts'), 'utf8')).toBe(configBefore)
+    const current = await store.load('replay-fixture')
+    expect(current.migrations.map(m => m.name)).toEqual(bundle.migrations.map(m => m.name))
     const deploy = new DatabaseSync(':memory:')
     try {
-      await migrateInstance(replayQuery(deploy, promoted.migrations), promoted.migrations.map(m => ({ filename: m.name, sql: m.sql, checksum: createHash('sha256').update(m.sql).digest('hex') })), replayEngine(promoted.config, promoted.runtime).kernel)
-      expect(deploy.prepare('SELECT MAX(revision) AS revision FROM instance_meta').get()).toEqual({ revision: 2 })
+      await migrateInstance(replayQuery(deploy, current.migrations), current.migrations.map(m => ({ filename: m.name, sql: m.sql, checksum: createHash('sha256').update(m.sql).digest('hex') })), replayEngine(current.config, current.runtime).kernel)
+      expect(deploy.prepare('SELECT MAX(revision) AS revision FROM instance_meta').get()).toEqual({ revision: 1 })
     } finally { deploy.close() }
     await appendFile(join(root, 'migrations/0001_r1.sql'), '\nSELECT * FROM missing_domain_source;\n')
     const failure = await call('validate', { instance: 'replay-fixture' })

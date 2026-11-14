@@ -1,3 +1,4 @@
+import { guardV3LegacyWrite } from './v3-guard.ts'
 import { readFile, readdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { defineInstance, type InstanceConfig } from '@workbasehq/core/config'
@@ -55,6 +56,7 @@ export async function versionFiles(directory: string, current: InstanceConfig, n
 export async function rollback(store: Store, instance: string, to: number, options: { allowDestructive?: boolean; expectedRevision?: number; preview?: boolean } = {}) {
   return store.locked(instance, async () => {
     const bundle: Bundle = await store.load(instance)
+    guardV3LegacyWrite(bundle.config, 'rollback')
     if (options.expectedRevision !== undefined && options.expectedRevision !== bundle.config.revision) fail('stale_revision', 'Revision changed; inspect history again', 409)
     const directory = await store.directory(instance)
     if (to > bundle.config.revision) fail('invalid_version', 'Rollback target must be an existing revision')

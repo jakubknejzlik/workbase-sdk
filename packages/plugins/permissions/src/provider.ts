@@ -30,7 +30,7 @@ function check(config: InstanceConfig, scope: Scope, command: KernelCommand) {
       if (scope.actor.type !== 'user' || !roleNamePrivileges(scope.role).has(action)) throw new ApiError(403, 'owner_required')
       return
     }
-    if (action === 'identity.write') {
+    if (action === 'identity.write' || action === 'organizations.provision') {
       if (scope.actor.type !== 'service') throw new ApiError(403, 'permission_denied')
       return
     }

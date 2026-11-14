@@ -1,3 +1,4 @@
+import { guardV3LegacyWrite } from './v3-guard.ts'
 import { submitChange, promotionHash } from './submit-change.ts'
 import type { GitHubConfiguration } from './github.ts'
 import { bootstrapInstance } from './bootstrap.ts'
@@ -148,6 +149,7 @@ export class Workflow {
             indexes: bundle.indexes, pendingProposals: pending }
         }
         if (name === 'propose_change') {
+          guardV3LegacyWrite(bundle.config, 'propose', input.changes)
           this.revision(bundle, input.baseRevision)
           if (input.changes.some((change: { kind: string }) => ['set_display_field', 'set_label', 'add_role', 'remove_role', 'set_permissions', 'set_organization_permissions'].includes(change.kind))) prepareChanges(bundle.config, bundle.indexes, input.changes)
           else guard(input.changes, bundle.config)
@@ -168,6 +170,7 @@ export class Workflow {
           return { ok: true, status: p.status }
         }
         requireConfigChange(p)
+        if (name === 'promote') guardV3LegacyWrite(bundle.config, 'promote')
         if (name === 'promote') this.revision(bundle, input.expectedRevision)
         this.revision(bundle, p.baseRevision)
         if (['discarded', 'promoted'].includes(p.status)) fail('proposal_closed', `Proposal is ${p.status}`, 409)

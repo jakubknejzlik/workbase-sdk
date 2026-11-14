@@ -4,15 +4,19 @@ import { ApiError } from '../../../core/src/errors'
 import { kernelFor } from '@workbasehq/core/kernel/registry'
 import { accountScope, requireScope } from '../../../core/src/authorization'
 import { validateRole } from '../../../core/src/organization-permissions'
-import { accountProvisioning } from '../../../core/src/account-provisioning'
 import { issuerGuard, organizationRule } from '../../../core/src/organization-rules'
 import { RuleFailed } from '../../../core/src/execution/errors'
-import { membershipExecutor } from '../../../core/src/organizations'
+import { membershipExecutor, organizationCreationRule, provisionOrganization } from '../../../core/src/organizations'
 import type { App, RuntimeEnv } from '../../../core/src/types'
 import type { InstanceConfig } from '@workbasehq/core/config'
 export function organizationRoutes(app: App, config: InstanceConfig, env: RuntimeEnv) {
   const execute = membershipExecutor(config, env)
-  const nowISO = () => new Date().toISOString()
+  app.post('/internal/organizations', async c => {
+    c.header('Cache-Control', 'no-store')
+    const { name, ownerEmail } = z.strictObject({ name: z.string().trim().min(1).max(200), ownerEmail: z.string().trim().email() }).parse(await c.req.json())
+    const result = await provisionOrganization(config, env, name, ownerEmail, c.get('correlationId'))
+    return c.json(result.body, result.status)
+  })
   for (const path of ['/organizations/:orgId', '/orgs/:orgId']) app.patch(path, async c => {
     c.header('Cache-Control', 'no-store')
     const kernel = kernelFor(config)
@@ -40,13 +44,9 @@ export function organizationRoutes(app: App, config: InstanceConfig, env: Runtim
     const { name } = z.strictObject({ name: z.string().trim().min(1).max(200) }).parse(await c.req.json())
     const id = ulid(); const ownerRole = validateRole(config, config.organizationOwnerRole)
     const scope = await accountScope(resolved, id, ownerRole, c.get('correlationId'))
-    if (!kernelFor(config).providers.has('members')) throw new ApiError(403, 'members_required')
-    const provision = await accountProvisioning(env, config, resolved.user, id, ownerRole, nowISO())
+    const rule = await organizationCreationRule(config, env, resolved.user, id, name, ownerRole)
     await execute(scope, 'organizations/create', 'organizations.create', {
-      rules: [organizationRule('organization_create',
-        { sql: 'INSERT INTO organizations (id,name) VALUES (?,?)', bindings: [id, name] },
-        ...provision,
-        { sql: 'INSERT INTO memberships (user_id,organization_id,role) SELECT ?,?,? WHERE changes()=1', bindings: [resolved.user.id, id, ownerRole] })],
+      rules: [rule],
       event: { operation: 'organization.created', entity: 'organizations', entityId: id },
       result: { status: 201, body: { id, name, role: ownerRole } },
     })
