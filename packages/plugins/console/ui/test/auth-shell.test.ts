@@ -80,21 +80,21 @@ test('resolved invitation gates profile, accepts once, stores org and ignores le
   history.replaceState(null, '', '/invitation?id=invite-A')
   const fetch = vi.fn(async (path: string) => json(path.endsWith('/resolve') ? { ...invitation, account_match: true, next: 'profile' } : path.endsWith('/accept') ? { organization_id: 'one', entry_target: '//evil' } : complete))
   render(view(fetch).element); fireEvent.click(await screen.findByText('Accept invitation'))
-  await waitFor(() => expect(navigate).toHaveBeenCalledWith('/')); expect(localStorage.getItem('workbase.org')).toBe('one')
+  await waitFor(() => expect(navigate).toHaveBeenCalledWith('/')); expect(localStorage.getItem('workbase:org')).toBe('one')
   expect(fetch.mock.calls.filter(([path]) => path.endsWith('/accept'))).toHaveLength(1)
 })
 function appFetch(profile: object | number) { return vi.fn(async (path: string, init: ClientRequestInit) => json(path === '/me' ? me : path.endsWith('/capabilities') ? grants({}) : typeof profile === 'number' ? {} : init.method === 'PATCH' ? complete : profile, path === '/me/profile' && typeof profile === 'number' ? profile : 200)) }
 test('one membership selects itself and profile 500 leaves shell usable', async () => {
   const fetch = appFetch(500); render(view(fetch).element); await screen.findByText('APP')
-  expect(localStorage.getItem('workbase.org')).toBe('one'); expect(navigate).not.toHaveBeenCalled()
+  expect(localStorage.getItem('workbase:org')).toBe('one'); expect(navigate).not.toHaveBeenCalled()
 })
 test('IdP incomplete profile has zero navigations and no PATCH', async () => {
-  localStorage.setItem('workbase.org', 'one')
+  localStorage.setItem('workbase:org', 'one')
   const fetch = appFetch({ ...complete, completeness: { complete: false }, capabilities: { canEditNames: false } }); render(view(fetch).element)
   await screen.findByText('Your identity provider must complete your name'); expect(screen.queryByText('APP')).toBeNull(); expect(navigate).not.toHaveBeenCalled(); expect(fetch.mock.calls.some(([, init]) => init.method === 'PATCH')).toBe(false)
 })
 test('profile submit sends at most one PATCH and mounts children from completeness', async () => {
-  localStorage.setItem('workbase.org', 'one')
+  localStorage.setItem('workbase:org', 'one')
   const fetch = appFetch({ ...complete, completeness: { complete: false }, firstName: null, lastName: null }); render(view(fetch).element)
   fireEvent.change(await screen.findByLabelText('First name'), { target: { value: 'A' } }); fireEvent.change(screen.getByLabelText('Last name'), { target: { value: 'B' } })
   const save = screen.getByRole('button', { name: 'Save' }); fireEvent.click(save); fireEvent.click(save)
@@ -109,14 +109,14 @@ test('several memberships offer chooser, none offers inbox', async () => {
 test('language choice persists through a fresh runtime before sign-in', async () => {
   history.replaceState(null, '', '/sign-in')
   const { i18n, element } = view(async () => json({})); render(element)
-  await act(async () => i18n.changeLanguage('cs')); expect(localStorage.getItem('workbase.language')).toBe('cs'); expect(createAuthI18n({ languages: ['en', 'cs'], catalogs: {} }).language()).toBe('cs')
+  await act(async () => i18n.changeLanguage('cs')); expect(localStorage.getItem('workbase:language')).toBe('cs'); expect(createAuthI18n({ languages: ['en', 'cs'], catalogs: {} }).language()).toBe('cs')
 })
 test.each([204, 401])('sign-out %s is JSON POST, clears org, replaces location', async status => {
   vi.stubGlobal('location', { get pathname() { return originalLocation.pathname }, get search() { return originalLocation.search }, replace })
-  history.replaceState(null, '', '/sign-in'); localStorage.setItem('workbase.org', 'one')
+  history.replaceState(null, '', '/sign-in'); localStorage.setItem('workbase:org', 'one')
   const fetch = vi.fn(async (_path: string, _init: ClientRequestInit) => status === 204 ? new Response(null, { status }) : json({ error: 'unauthenticated' }, status)); render(view(fetch).element)
   fireEvent.click(screen.getByRole('button', { name: 'Sign out' })); await waitFor(() => expect(replace).toHaveBeenCalledWith('/sign-in'))
-  expect(localStorage.getItem('workbase.org')).toBeNull(); const [path, init] = fetch.mock.calls[0]; expect(path).toBe('/auth/logout'); expect(init.method).toBe('POST'); expect(init.body).toBe('{}'); expect(new Headers(init.headers).get('Content-Type')).toBe('application/json')
+  expect(localStorage.getItem('workbase:org')).toBeNull(); const [path, init] = fetch.mock.calls[0]; expect(path).toBe('/auth/logout'); expect(init.method).toBe('POST'); expect(init.body).toBe('{}'); expect(new Headers(init.headers).get('Content-Type')).toBe('application/json')
 })
 test('Session optional onState observes existing states', async () => {
   const onState = vi.fn(); render(h(Session, { orgId: 'one', t: key => key, onState, fetch: async () => json({}, 401) }))
@@ -127,7 +127,7 @@ function transition(type: 'pagehide' | 'pageshow', persisted: boolean) {
   window.dispatchEvent(Object.assign(new Event(type), { persisted }))
 }
 test.each([false, true])('pagehide synchronously removes the private subtree before history can save it (persisted: %s)', async persisted => {
-  localStorage.setItem('workbase.org', 'one')
+  localStorage.setItem('workbase:org', 'one')
   render(view(appFetch(complete)).element); await screen.findByText('APP')
   act(() => {
     transition('pagehide', persisted)
@@ -137,7 +137,7 @@ test.each([false, true])('pagehide synchronously removes the private subtree bef
 })
 test.each([false, true])('persisted pageshow boots afresh before rendering the current account (signed out: %s)', async signedOut => {
   vi.stubGlobal('location', { get pathname() { return originalLocation.pathname }, get search() { return originalLocation.search }, replace })
-  localStorage.setItem('workbase.org', 'one')
+  localStorage.setItem('workbase:org', 'one')
   let restored = false, releaseMe!: (response: Response) => void, releaseCaps!: (response: Response) => void
   const nextMe = new Promise<Response>(resolve => { releaseMe = resolve }), nextCaps = new Promise<Response>(resolve => { releaseCaps = resolve })
   const fetch = vi.fn(async (path: string) => {
@@ -168,7 +168,7 @@ test.each([false, true])('persisted pageshow boots afresh before rendering the c
 })
 test.each([204, 401])('sign-out %s removes private DOM before replacing the document', async code => {
   vi.stubGlobal('location', { get pathname() { return originalLocation.pathname }, get search() { return originalLocation.search }, replace })
-  localStorage.setItem('workbase.org', 'one')
+  localStorage.setItem('workbase:org', 'one')
   const fetch = appFetch(complete)
   render(view(async (path, init) => path === '/auth/logout' ? code === 204 ? new Response(null, { status: code }) : json({}, code) : fetch(path, init)).element)
   await screen.findByText('APP')
@@ -180,7 +180,7 @@ test.each([204, 401])('sign-out %s removes private DOM before replacing the docu
   expect(screen.queryByText('APP')).toBeNull()
 })
 test('ordinary pageshow leaves the current boot intact', async () => {
-  localStorage.setItem('workbase.org', 'one')
+  localStorage.setItem('workbase:org', 'one')
   const fetch = appFetch(complete)
   render(view(fetch).element); await screen.findByText('APP')
   act(() => transition('pageshow', false))

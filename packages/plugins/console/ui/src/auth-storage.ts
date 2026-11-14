@@ -6,7 +6,7 @@ function preference(store: () => Storage, key: string) {
   }
 }
 export const authStorage = {
-  org: preference(() => localStorage, 'workbase.org'),
-  language: preference(() => localStorage, 'workbase.language'),
+  org: preference(() => localStorage, 'workbase:org'),
+  language: preference(() => localStorage, 'workbase:language'),
   returnTo: preference(() => sessionStorage, 'workbase.returnTo'),
 }

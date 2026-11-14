@@ -200,7 +200,7 @@ SDK CI and release workflows install the lockfile-pinned Chromium version first.
 
 Mount `AuthShell` from `@workbasehq/plugins/console/ui/react` outside the
 Instance `RouterProvider`. Create its runtime once with
-`createAuthI18n({ languages, catalogs })`; this feeds `workbase.language` from
+`createAuthI18n({ languages, catalogs })`; this feeds `workbase:language` from
 localStorage through the existing profile-language seam. Pass `{ manifest, i18n,
 navigate: path => router.navigate({ to: path }) }` and the router as children.
 The shell intercepts `/sign-in`, `/auth/complete`, and `/invitation` before
@@ -234,7 +234,7 @@ safe destination, or uses the recipient inbox when there are no memberships.
 Account mismatch screens reveal no invited email and offer a sign-out button.
 The server remains the authority for resolving and accepting an invitation.
 
-`localStorage['workbase.org']` stores the selected org only. One membership is
+`localStorage['workbase:org']` stores the selected org only. One membership is
 selected automatically, several offer a chooser, and none show the invitation
 inbox. `Session` still validates membership and boots exactly `/me` and
 capabilities in parallel; its optional `onState(kind)` reports existing states.

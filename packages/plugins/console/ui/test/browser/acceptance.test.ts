@@ -148,7 +148,7 @@ test('auth shell: wrong accounts cannot bind; sign-out, inline magic link, profi
     await page.getByRole('button', { name: 'Save', exact: true }).click(); await page.getByRole('button', { name: 'Accept invitation', exact: true }).waitFor()
     expect(patches).toBe(1); expect(new URL(page.url()).pathname).toBe(path)
     await page.getByRole('button', { name: 'Accept invitation', exact: true }).click(); await page.waitForURL(origin + '/')
-    expect(await page.evaluate(() => localStorage.getItem('workbase.org'))).toBe('org-a')
+    expect(await page.evaluate(() => localStorage.getItem('workbase:org'))).toBe('org-a')
     await page.goto('/workers/' + invited.workerId); await page.getByText('Auth recipient', { exact: true }).waitFor()
     const replay = await b.request.post('/invitations/' + invited.invitation_id + '/accept', { headers: await cookieHeaders(b), data: {} })
     expect(replay.status()).toBe(200); expect(await replay.json()).toMatchObject({ replayed: true })
