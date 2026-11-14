@@ -1,4 +1,10 @@
-# Generic browser console
+# Legacy generic browser console
+
+This guide describes the retained runtime-model console and its prebuilt assets.
+The V3 standalone template builds Instance-owned pages with `consoleUI()` and
+AuthShell, then passes `assetsDir: './dist'` to SDK `provision()`. Follow the
+[V3 getting-started guide](getting-started.md) for that template's generation,
+checks and build/deploy commands. The legacy APIs and assets below still ship.
 
 The public browser build consumes the authenticated version 1
 [console-model contract](console-model.md). An instance ID or entity is never a
@@ -30,7 +36,7 @@ widgets need the console provider and its live page endpoint.
 
 `packages/console-generated/src` now contains reusable rendering code and types.
 Its historical name is producer-internal, not another published npm package.
-All instances use the runtime browser path; transaction commands use the generic
+Legacy generic-console instances use the runtime browser path; transaction commands use the generic
 command form. Custom domain grammar/copy requires runtime-supported localization
 or a future instance-owned extension. Missing copy falls back to identifiers;
 the browser never restores it from private catalogs.

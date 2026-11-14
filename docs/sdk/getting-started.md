@@ -1,134 +1,144 @@
-# Standalone SDK getting started
+# Standalone V3 Instance getting started
 
-A standalone instance installs only the public core, plugins and mcp SDK packages,
-plus ordinary deployment/development tools. The prebuilt generic console ships in
-plugins; infra and the workbase-migrate command ship in core. No producer checkout
-or browser build is needed. Use Bun 1.4.3 and Node 22.13+.
-
-After the matching release is available on npm:
-
-```sh
-bunx @workbasehq/mcp init --root /absolute/path/to/instance --id neutral_instance --target cloudflare-github
-cd /absolute/path/to/instance
-git init
-bun install
-bunx --no-install sst install
-bun run migrate:initial
-bun run typecheck
-bun run check:migrations
-```
-
-The CLI is available as `workbase` and `workbase-mcp`. Init pins all three SDK
-packages to its own release version. It writes files only and preserves conflicts. Review its JSON report.
-The generated README.md is the complete local and remote operator guide; CLAUDE.md
-contains the branch/MCP/PR workflow. The canonical template lives in
+The standalone template builds an Instance-owned Vite console and a Worker from
+three coordinated SDK packages: core, plugins and mcp. Use Bun 1.4.3 and Node
+25.8.0. The canonical template and its operator guide live in
 [packages/mcp/templates/standalone](../../packages/mcp/templates/standalone/).
 
-A new instance has entities: {}, permissions: {}, policies: {}. Run initial SQL
-once before the configuration MCP loop. Keep config, history, SQL and the lockfile
-in git. Never regenerate an existing migration chain or hand-edit generated schema.
-Use inspect → propose → validate → preview → apply_to_disposable → promote for
-schema changes; give each new entity explicit permissions and policies.
+## Init and install
 
-For local development, copy .dev.vars.example to .dev.vars, generate a stable
-private secret with `openssl rand -hex 32`, run migrate:local then migrate:plugins,
-and start `bun run dev` on 127.0.0.1. When EMAIL is absent, retrieve the magic link from local D1 email_outbox.body
-as shown in the generated README. Stop the Worker before migrating local persistence.
+Use the installed `workbase` CLI (`workbase-mcp` is an alias):
 
-The generated .mcp.json registers separate config and data processes from the
-installed package. Config uses the instance root; data uses WORKBASE_BASE_URL,
-WORKBASE_TOKEN and WORKBASE_ORG_ID. Obtain an organization-scoped agent token from
-the authenticated owner's session; never commit it. Restart config MCP after install
-and initial SQL. The data server defaults to read-only.
+```sh
+workbase init --root <dir> --id <id> --target cloudflare-github
+```
 
-Remote deployment uses the thin sst.config.ts and
-`@workbasehq/core/infra/provision`, with `consoleAssetsDir()` from
-`@workbasehq/plugins/console/assets`. Install the pinned tools from package.json
-and run `sst install` to generate provider types before typechecking. The provisioner
-runs packaged workbase-migrate for SQL/plugin verification before upload, and
-supplies SCHEMA_EXPECTED plus D1/KV/queues/DLQ/cron/ASSETS bindings. Wrangler is local
-only. See the [infra contract](../../packages/core/src/infra/README.md).
+Before a coordinated SDK version is published, install its three candidate
+archives in a separate tools directory to obtain that CLI. Use the dependency
+and override form below there too, with paths relative to the tools manifest.
+Run `npm install` and put that directory's `node_modules/.bin` on your PATH.
+Init only copies files and reports JSON with `created`, `unchanged` or `conflict`;
+it performs no installation, generation or deployment and preserves existing bytes.
 
-Copy deploy.env.example to private .env and fill the account/token, stable
-BETTER_AUTH_SECRET, WORKBASE_RESOURCE_PREFIX, exact HTTPS AUTH_BASE_URL,
-EMAIL_FROM authorized for Cloudflare send_email, and optional WORKBASE_DOMAIN
-matching that origin. URL/domain may contain `{stage}`. WORKBASE_OWNER_EMAIL is
-the address used manually at login, not a seeded owner or authorization grant.
-Registration is open; the creator becomes organization owner. Review that policy
-before opening the instance to public traffic. Configure a verified recipient
-where required by Cloudflare's delivery setup.
+Init pins all three SDK dependencies to its own exact version. For an unpublished
+candidate, copy the three matching archives into the Instance's `vendor/sdk/` and
+replace only the SDK dependency entries. Add identical overrides at the manifest
+root. Replace `<version>` with the coordinated version in the archive names:
 
-SST Cloudflare home uses the account-level shared `sst-state` R2 bucket. Resolve
-account access and state sharing explicitly before `bun run deploy --stage trial`.
-A resource/stage prefix does not isolate that bucket. Keep app/prefix/stage/secret
-stable across redeploys. Production retains/protects resources. Remove disposable
-stages with `bun run remove --stage trial` after acceptance.
+```json
+{
+  "dependencies": {
+    "@workbasehq/core": "file:vendor/sdk/workbasehq-core-<version>.tgz",
+    "@workbasehq/plugins": "file:vendor/sdk/workbasehq-plugins-<version>.tgz",
+    "@workbasehq/mcp": "file:vendor/sdk/workbasehq-mcp-<version>.tgz"
+  },
+  "overrides": {
+    "@workbasehq/core": "file:vendor/sdk/workbasehq-core-<version>.tgz",
+    "@workbasehq/plugins": "file:vendor/sdk/workbasehq-plugins-<version>.tgz",
+    "@workbasehq/mcp": "file:vendor/sdk/workbasehq-mcp-<version>.tgz"
+  }
+}
+```
 
-Instance deployment workflows are excluded from this SDK checkout. Configure and review automation separately before remote use. Init preserves existing files and performs no remote actions.
+Keep the generated React, TanStack, i18next, Vite, router-generator, lexer and
+other third-party dependencies. Use file archives rather than workspace links,
+directory links or TypeScript path aliases. In the generated Instance directory,
+run `npm install`, commit `package-lock.json`, then use `npm ci` for frozen installs.
+Registry installation of this candidate is deferred until its publication.
 
-Remote acceptance must cover schema compatibility, console HTML/assets under CSP,
-HTTPS magic-link delivery, organization creation, permitted and denied writes,
-redeploy/data retention, queue/cron and stage removal. Health alone is insufficient.
-Release staging/publication and real-account acceptance are separate operator gates;
-local packed-package smoke (`bun scripts/smoke-mcp-template.ts`) verifies generated
-files and installed candidate bytes without deployment.
+## Author and generate
 
-## Upgrade existing configs to 0.2.3
+The scaffold has one `worker` entity, admin/staff access, English dictionaries,
+and list, new, detail and edit pages. Author literal configuration in `config.ts`,
+entities in `schema/*`, access rules in `access.ts`, pages/navigation in `ui/*`
+and translations in `locales/en/*.json`. `runtime.ts` composes plugins and enables
+interactive login outside the literal loader boundary. Keep the generated
+OpenAPI document out of `config.ts` imports.
 
-Pin `@workbasehq/core`, `@workbasehq/plugins` and `@workbasehq/mcp` to `0.2.3`,
-install, and restart the config MCP. Configs from 0.2.1/0.2.2 that lack a valid
-`displayField` can now be inspected and repaired. No config changes happen at
-startup. The Worker remains strict: repair the config before starting/deploying it.
+Run these commands in order for a fresh Instance:
 
-1. Call `inspect_schema({"instance":"your-instance"})` to find the revision.
-   Call `validate({"instance":"your-instance"})` to receive every display-field
-   error. Each error includes a `suggestedChange`; review these suggestions.
-2. Submit all repairs together to `propose_change`, using that revision as
-   `baseRevision`. For an existing entity the exact operation is:
+```sh
+bun run migrate:plan --init
+bun run access:lock --write
+bun run openapi:write
+bun run check
+bun run typecheck
+WORKBASE_BUILD_SHA=<40-character-commit-sha> bun run build:console
+```
 
-   ```json
-   {"kind":"set_display_field","entity":"zakaznik","displayField":"jmeno"}
-   ```
+The schema planner writes `schema.lock.json` and `migrations/0001_r1.sql` first.
+Access auditing executes `runtime.ts`, so it needs that lock; `access:lock` already
+includes `--write` and accepts the explicit flag too. OpenAPI generation follows
+and stamps revision and configHash. Commit those files with `access.lock.json`,
+`access.lock.md`, `openapi.json` and the install lockfile. Init ships none of these
+artifacts and never overwrites them.
 
-   `displayField` must be an existing readable scalar field. References (`ref`)
-   and fields hidden from readers are rejected. Use fields returned by inspection;
-   the example identifiers above are placeholders for your own schema.
-3. Call `validate({"proposalId":"..."})`, then `preview_migration` with the same
-   proposal ID. Display-field-only repairs generate revision/SDK metadata SQL
-   with no table changes. The original schema and record data stay intact.
-4. Call `apply_to_disposable`, then `promote` with the proposal ID and the original
-   revision as `expectedRevision`. Promotion writes a new config/history entry
-   and migration for review. Apply the committed migration through your normal
-   migration/deployment workflow before restarting the Worker.
+`check` runs `check:schema`, `check:access`, `check:openapi` and `check:ui` in that
+order. UI validation includes dictionary completeness and bare-text checks.
+`typecheck` runs `generate:ui` before TypeScript. `build:console` runs Vite under
+Bun with the SDK `consoleUI()` integration; the SPA mounts AuthShell. The ignored
+outputs are `.workbase-ui/`, `dist/` and `.sst/`.
 
-An incomplete repair returns the remaining errors. Invalid proposals cannot be
-applied or promoted. Original migrations and history are preserved; a historical
-config with invalid display fields is visible in `list_versions` with rollback
-blocked. Repair it in a new version rather than rewriting archived source.
+Replace the build SHA placeholder with the reviewed commit's 40 hex characters.
+An explicit SHA is required outside git. Build from a clean, committed tree so
+the SHA identifies the authored bytes; the template does not invoke the SDK's
+optional `assertCleanDeploy()` guard automatically.
+For later physical schema changes use `bun run migrate:plan --base <git-ref>`.
+`bun run check:schema` works without git; `bun run check:schema --base <git-ref>`
+also checks migration linkage. Regenerate derived artifacts after authored changes
+and review their diffs rather than hand-editing generated files.
 
-## Upgrade the standalone SDK
+Repeated init leaves matching files unchanged. Rewriting SDK dependencies or
+editing `schema/worker.ts` produces conflicts for those files with bytes intact.
+It also preserves generated artifacts and the lockfile.
 
-Call `upgrade_sdk` with `instance`, its current `baseRevision`, and an exact,
-newer same-major `targetVersion`. Use the returned `proposalId` with `validate`,
-`preview_migration`, then `apply_to_disposable` to verify the installed target in
-an isolated consumer. Call `promote` with that ID and the original revision as
-`expectedRevision` to publish exactly the verified `package.json`, `bun.lock`
-and next SDK marker SQL locally. Configuration, history, indexes and revision
-are preserved. Changed inputs or revoked evidence require fresh verification.
+## Develop and deploy
 
-Review these files through your normal PR and PR preview workflow before merging.
-Promotion does not deploy or apply SQL to a running database. SDK proposals are
-not yet supported by `submit_change` (409 `sdk_upgrade_not_supported`).
+Copy `.dev.vars.example` to private `.dev.vars` and configure credentials.
+`bun run dev` serves the console, and `bun run dev:worker` starts local Wrangler.
+There are no seeded accounts. Plain Wrangler domain migrations alone do not
+initialize the SDK/plugin tables; use the SDK migration orchestration for a
+complete database. The template supplies `bun run migrate:remote` for a configured
+remote `DATABASE_ID`, using `runtime.ts`.
 
-## Submit a promoted change for review
+For deployment, copy `deploy.env.example` to private `.env`. Configure
+`CLOUDFLARE_DEFAULT_ACCOUNT_ID`, `CLOUDFLARE_API_TOKEN`, stable `BETTER_AUTH_SECRET`,
+`WORKBASE_RESOURCE_PREFIX`, exact HTTPS `AUTH_BASE_URL`, and an authorized
+`EMAIL_FROM`. Optional `WORKBASE_DOMAIN` must match that origin. URL/domain may
+contain `{stage}`. `WORKBASE_OWNER_EMAIL` is a manual login address, not a seed
+or authorization grant. Registration is enabled and the creator becomes organization
+owner; review that policy before opening the Instance to public traffic.
 
-After verification and `promote`, call `submit_change` with `instance`, `proposalId`
-and the expected remote base commit as `expectedBaseSha`. It opens one GitHub PR
-containing the promoted files, a Czech change summary and the migration preview SQL.
-Retries return the same PR and immutable head SHA; preview/check status can be
-`pending`. A stale base or changed promoted files are rejected.
+Run `bun x --no-install sst install` to fetch providers and generate provider types; this step needs
+network access. Commit authored files and generated artifacts before deployment.
+Then run:
 
-This requires operator-configured GitHub access. The credential connection is not
-available yet; the default configuration returns a Czech “GitHub access is not
-configured” error. Credentials, repository, base branch and file selection are never
-tool inputs. `submit_change` never merges, tags, releases or deploys.
+```sh
+bun run deploy --stage <stage>
+```
+
+The deploy script checks, builds `dist/`, then runs SST. Its thin `sst.config.ts`
+passes `configPath: './runtime.ts'` and `assetsDir: './dist'` to SDK `provision()`.
+Provisioning applies SDK → plugin → Instance migrations before upload. See the
+[infra contract](../../packages/core/src/infra/README.md) for state, bindings and
+migration guarantees. In staging, native Worker requests redirect to the canonical
+`AUTH_BASE_URL`; that origin must be reachable and must not redirect to itself.
+
+SST uses the account-level shared `sst-state` R2 bucket. Arrange account/state
+access before deployment; resource/stage prefixes do not isolate that bucket.
+Keep app/prefix/stage/secret stable across redeploys. Production retains/protects
+resources. Remove disposable stages with `bun run remove --stage <stage>` after
+acceptance. Live deployment and remote acceptance require the operator's account.
+No preview workflow or deployment wrapper is included in this template.
+
+The generated `.mcp.json` registers only data MCP, using `WORKBASE_BASE_URL`,
+`WORKBASE_TOKEN` and `WORKBASE_ORG_ID`, with read-only mode by default. Keep
+credentials private. Legacy config-writer proposal/promotion and schema discovery
+are not the V3 authoring flow. Managers operating the Instance later use the
+approved MCP/PR process and do not edit code directly.
+
+Remote acceptance covers schema compatibility, console assets under CSP, HTTPS
+login, organization creation, permitted and denied writes, redeploy/data retention,
+queue/cron and stage removal. The SDK pack gate's V3 template smoke verifies
+installed candidate bytes and the local generation/check/build/migration path;
+it does not deploy or prove remote acceptance.

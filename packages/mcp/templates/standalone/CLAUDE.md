@@ -1,7 +1,7 @@
 # Instance {{INSTANCE_ID}}
 
 Selector: `{{INSTANCE_SELECTOR}}`.
-Read README.md for the SDK getting-started guide and branch/MCP/PR guide context.
+Read README.md for installation, artifact generation and the review workflow.
 
 This is the phase-2 handwritten V3 reference path. Keep declarative schema in
 `schema/*`, literal config in `config.ts`, executable composition in `runtime.ts`,

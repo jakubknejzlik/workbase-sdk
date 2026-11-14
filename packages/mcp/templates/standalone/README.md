@@ -1,8 +1,14 @@
 # {{INSTANCE_ID}}
 
 A V3 Instance with one worker entity and list, new, detail and edit pages.
-Bun 1.4.3 and Node 25.8.0 are required. The SDK getting-started guide and
-branch/MCP/PR guide in the SDK repository describe the wider workflow.
+Bun 1.4.3 and Node 25.8.0 are required. See `docs/sdk/getting-started.md` in the
+SDK repository for the installation and review workflow.
+
+Generate this scaffold with the installed SDK CLI:
+
+```sh
+workbase init --root <dir> --id <id> --target cloudflare-github
+```
 
 ## Install
 
@@ -38,7 +44,7 @@ For a fresh Instance run these in order:
 
 ```sh
 bun run migrate:plan --init
-bun run access:lock
+bun run access:lock --write
 bun run openapi:write
 bun run check
 bun run typecheck
@@ -50,8 +56,12 @@ Commit `schema.lock.json`, `migrations/0001_r1.sql`, `access.lock.json`,
 init never ships or overwrites them. Later schema changes use
 `bun run migrate:plan --base <git-ref>`; `check:schema` works without git and can
 also accept `--base <git-ref>` to check migration linkage.
+`access:lock` already supplies `--write` and targets `runtime.ts`; the explicit
+flag above is accepted too. `check` runs schema, access, OpenAPI and UI validation.
 UI generation runs before typecheck. `.workbase-ui/`, `dist/` and `.sst/` are ignored.
-An explicit build SHA is required outside git; builds inside git require a clean tree.
+An explicit build SHA is required outside git. Build from a clean, committed tree
+so the SHA identifies the authored bytes; the template does not automatically
+invoke the SDK's optional `assertCleanDeploy()` guard.
 
 ## Run and deploy
 
@@ -62,7 +72,7 @@ The detail page uses the SDK application-access card and the SPA mounts AuthShel
 There are no seeded accounts. Configure credentials privately from the env examples.
 
 For deployment copy `deploy.env.example` to `.env`, configure the environment,
-then run `sst install` to fetch providers and generate SST types. This step needs
+then run `bun x --no-install sst install` to fetch providers and generate SST types. This step needs
 network access. `bun run deploy --stage <stage>` checks, builds `dist/`, then runs
 SST. SDK `provision()` applies SDK → plugin → Instance migrations before upload.
 For staging, set `AUTH_BASE_URL` to the canonical origin: native Worker requests
