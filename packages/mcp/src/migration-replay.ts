@@ -47,14 +47,22 @@ export type ReplayMigration = { name: string; sql: string; syntheticRevision?: n
 export type ReplayEngine = Pick<typeof infra, 'migrateD1' | 'migrateInstance' | 'instanceMigrationReceipt' | 'queryDatabase'> & Pick<typeof schema, 'revisionSQL'> & Partial<Pick<typeof pluginMigrations, 'PluginMigrationError'>> & { kernel: KernelRegistry }
 type ReplayContext = { file: string; migration: string }
 export type ReplayDiagnostic = ReplayContext & { kind: ReplayErrorKind; sqlError: string }
+// Underlying text never becomes an Error property or public diagnostic. This
+// module is also copied to the isolated SDK consumer, so keep storage local.
+const privateReplayCauses = new WeakMap<object, unknown>()
+export function privateReplayMessage(error: unknown): string {
+  if (typeof error === 'object' && error !== null && privateReplayCauses.has(error)) return privateReplayMessage(privateReplayCauses.get(error))
+  return error instanceof Error ? error.message : String(error)
+}
 export class MigrationReplayError extends Error {
   readonly code = 'migration_replay_failed'
   readonly diagnostic: ReplayDiagnostic
-  constructor(diagnostic: ReplayContext & { kind: ReplayErrorKind }) {
+  constructor(diagnostic: ReplayContext & { kind: ReplayErrorKind }, cause?: unknown) {
     const kind = Object.hasOwn(replayMessages, diagnostic.kind) ? diagnostic.kind : 'sqlite'
     const bounded = { file: publicText(diagnostic.file, 512), migration: publicText(diagnostic.migration, 256), kind, sqlError: replayMessages[kind] }
     super(`Migration ${bounded.migration} failed in ${bounded.file}: ${bounded.sqlError}`)
     this.diagnostic = bounded
+    if (cause !== undefined) privateReplayCauses.set(this, cause)
   }
 }
 export const usesBaseline = (config: Pick<InstanceConfig, 'baseline'>) => config.baseline === 'workbase-sdk'
@@ -70,10 +78,10 @@ export function replayError(error: unknown, engine: Pick<ReplayEngine, 'PluginMi
   if (engine.PluginMigrationError && error instanceof engine.PluginMigrationError) {
     console.error('Private plugin migration failure', String(error instanceof Error ? error.stack : error).slice(0, 65536))
     return new MigrationReplayError({ migration: `${error.namespace}/${error.migration}`, file: baselineSource(error.namespace),
-      kind: typeof error.cause === 'object' && error.cause !== null && sqliteFailures.has(error.cause) ? sqliteKind(error.cause) : 'generation' })
+      kind: typeof error.cause === 'object' && error.cause !== null && sqliteFailures.has(error.cause) ? sqliteKind(error.cause) : 'generation' }, error.cause)
   }
   if (typeof error === 'object' && error !== null && sqliteFailures.has(error)) {
-    return new MigrationReplayError({ file: '@workbasehq/core/infra', migration: 'verification', kind: sqliteKind(error) })
+    return new MigrationReplayError({ file: '@workbasehq/core/infra', migration: 'verification', kind: sqliteKind(error) }, error)
   }
   return error
 }
@@ -114,7 +122,7 @@ export function replayQuery(db: DatabaseSync, migrations: readonly ReplayMigrati
         try { db.exec('ROLLBACK') } catch (cleanup) { console.error('Private replay cleanup failure', String(cleanup instanceof Error ? cleanup.stack : cleanup).slice(0, 65536)) }
       }
       console.error('Private SQLite replay failure', String(error instanceof Error ? error.stack : error).slice(0, 65536))
-      if (context) throw new MigrationReplayError({ ...context, kind: sqliteKind(error) })
+      if (context) throw new MigrationReplayError({ ...context, kind: sqliteKind(error) }, error)
       throw error
     }
   }
@@ -149,7 +157,7 @@ export async function replayInstance(db: DatabaseSync, migrations: readonly Repl
       try { db.exec(migration.sql); options.record?.(migration.sql) }
       catch (error) {
         console.error('Private SQLite replay failure', String(error instanceof Error ? error.stack : error).slice(0, 65536))
-        throw new MigrationReplayError({ file: `migrations/${migration.name}`, migration: migration.name, kind: sqliteKind(error) })
+        throw new MigrationReplayError({ file: `migrations/${migration.name}`, migration: migration.name, kind: sqliteKind(error) }, error)
       }
     }
   }

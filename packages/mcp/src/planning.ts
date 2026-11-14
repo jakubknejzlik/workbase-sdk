@@ -9,6 +9,35 @@ import { effectivePolicies } from './policies.ts'
 import { roleNamePrivileges } from '@workbasehq/core/organization-permissions'
 
 export const hash = (value: unknown) => createHash('sha256').update(typeof value === 'string' ? value : JSON.stringify(value)).digest('hex')
+// Only complete engine constraint names may supply detail. Everything else in
+// SQLite/Wrangler/plugin text is private, including RAISE text posing as a name.
+const rebuildParts = ['inline_constraints', 'incoming_actions', 'foreign_keys', 'columns', 'indexes', 'triggers', 'rowid'] as const
+type RebuildPart = typeof rebuildParts[number]
+type RebuildBlock = { entity?: string; part?: RebuildPart }
+const rebuildName = new RegExp(`^rebuild_requires_review_([a-z0-9_]+?)_(${rebuildParts.join('|')})$`)
+export function rebuildBlock(message: string, entities: readonly string[]): RebuildBlock | undefined {
+  // SQLite supplies one name after CHECK; Wrangler adds its fixed error code.
+  // Strip only terminal styling, never arbitrary text after the name.
+  const reported = message.match(/CHECK constraint failed: ([^\r\n]*)/)?.[1]
+  if (reported === undefined) {
+    // A bare guard-like RAISE is not a constraint name. It may only select the
+    // generic literal, and cannot attribute a part or entity.
+    return /^rebuild_requires_review(?:_|$)/.test(message) ? {} : undefined
+  }
+  const token = reported.replace(/\x1b\[[0-9;]*m/g, '').replace(/: SQLITE_CONSTRAINT(?: \(extended: SQLITE_CONSTRAINT_CHECK\))?$/, '').trim()
+  if (token === 'rebuild_requires_review') return {}
+  if (!token.startsWith('rebuild_requires_review_')) return undefined
+  const detail = rebuildName.exec(token)
+  if (!detail) return {}
+  const entity = entities.find(entity => entity === detail[1])
+  const part = rebuildParts.find(part => part === detail[2])
+  return entity && part ? { entity, part } : {}
+}
+export function rebuildBlockMessage(block: RebuildBlock): string {
+  return block.entity && block.part
+    ? `Rebuild blocked for ${block.entity}: physical ${block.part.replaceAll('_', ' ')} differs from the fresh configured schema; a manually reviewed migration is required`
+    : 'Rebuild blocked: physical schema or foreign key validation requires a manually reviewed migration'
+}
 const own = (object: object, key: string) => Object.hasOwn(object, key)
 export function guard(changes: Change[], config: InstanceConfig) {
   const entities = new Set(Object.keys(config.entities))
