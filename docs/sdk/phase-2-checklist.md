@@ -27,11 +27,13 @@ stage and the deployment inputs in [getting-started.md](getting-started.md).
   `/build.json.openapi`. Attach both digests and metadata. Sources:
   [live verification](../../packages/core/src/openapi/cli.ts),
   [canonical OpenAPI response](../../packages/core/src/openapi/routes.ts).
-- [ ] 5. Establish admin and staff sessions via real delivered magic links and
-  invite/accept, then verify allowed CRUD and denied cross-org/staff operations
+- [ ] 5. Follow [first-owner onboarding](onboarding.md): sign in, provision via ops,
+  then invite staff and accept. Use the mailbox only on exact dev/test stages;
+  use real delivered magic links for other stages. Verify allowed CRUD and denied cross-org/staff operations
   on the deployed HTTPS origin. Record HTTPS `__Host-` cookie behavior, edge CSP,
-  and real D1/queue/email acceptance; local outbox/loopback checks do not cover
-  them. There is no role selector or seeded-role acceptance (slice 17 deferred).
+  and real D1/queue acceptance; local mailbox/loopback checks do not cover them.
+  Record real email delivery separately when using mail; mailbox acceptance does
+  not establish it. There is no role selector or seeded-role acceptance (slice 17 deferred).
   Sources: [runtime composition](../../packages/mcp/templates/standalone/runtime.ts),
   [local session scope](../../scripts/lib/installed-consumer-live.ts).
 - [ ] 6. Push and deploy a layout-only change; verify existing data survives.

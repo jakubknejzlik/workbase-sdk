@@ -19,6 +19,10 @@ export default $config({
       if (!value) throw new Error(`Set ${key} before running SST`)
       return value
     }
+    const emailFrom = process.env.EMAIL_FROM
+    const mailboxToken = process.env.WORKBASE_DEV_MAILBOX_TOKEN
+    if (emailFrom && mailboxToken) throw new Error('EMAIL_FROM cannot be combined with WORKBASE_DEV_MAILBOX_TOKEN')
+    if (mailboxToken && !['dev', 'test'].includes($app.stage)) throw new Error('WORKBASE_DEV_MAILBOX_TOKEN requires dev or test stage')
     const domain = process.env.WORKBASE_DOMAIN?.replaceAll('{stage}', $app.stage)
     const deployed = await provision({
       configPath: './runtime.ts', handler: './src/index.ts', migrationsDir: './migrations',
@@ -26,8 +30,10 @@ export default $config({
       authSecret: required('BETTER_AUTH_SECRET'), authBaseUrl: required('AUTH_BASE_URL').replaceAll('{stage}', $app.stage),
       assetsDir: consoleAssetsDir(),
       ...(domain ? { domain } : {}),
-      email: { from: required('EMAIL_FROM') },
+      opsToken: required('WORKBASE_OPS_TOKEN'),
+      ...(mailboxToken ? { devMailbox: { token: mailboxToken } } : { email: { from: required('EMAIL_FROM') } }),
     })
-    return { url: deployed.url, databaseId: deployed.databaseId }
+    return { url: deployed.url, databaseId: deployed.databaseId,
+      ...(deployed.devMailboxUrl ? { devMailboxUrl: deployed.devMailboxUrl } : {}) }
   },
 })

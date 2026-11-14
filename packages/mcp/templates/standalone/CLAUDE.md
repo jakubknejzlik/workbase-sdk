@@ -15,5 +15,12 @@ SDK `provision()`. No Instance console build is needed. Do not add seeded accoun
 
 Managers operating this Instance later must use the approved MCP/PR workflow and
 must not edit code directly. The bundled config-writer is a legacy interface;
-the template registers only the data MCP server. See README.md for installation,
+the template registers separate data and ops MCP servers with environment-only
+credentials. For dev/test onboarding, follow README.md and `docs/sdk/onboarding.md`
+in the SDK repository: request sign-in, use `read_dev_mail`, complete the profile,
+then `provision_organization` and invite staff. Keep registration open and
+`allowCreate: false`; never seed identities or enable self-service creation to
+bypass operator provisioning. `EMAIL_FROM` and `WORKBASE_DEV_MAILBOX_TOKEN` are
+mutually exclusive; the mailbox is limited to exact dev/test stages.
+See README.md for installation,
 artifact generation and repeated-init conflict behavior.
