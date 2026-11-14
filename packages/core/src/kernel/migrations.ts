@@ -84,7 +84,10 @@ export async function expectedPluginMigrations(plugins: readonly WorkbasePlugin[
   return rows.sort((a, b) => a.namespace < b.namespace ? -1 : a.namespace > b.namespace ? 1 : a.position - b.position)
 }
 export async function pluginMigrationStatus(db: D1Database, plugins: readonly WorkbasePlugin[], config: MigrationConfig) {
-  for (const plugin of plugins) await plugin.checkSchema?.(db, config)
+  for (const plugin of plugins) {
+    try { await plugin.checkSchema?.(db, config) }
+    catch (error) { throw new PluginMigrationError(plugin.name, 'checkSchema', error) }
+  }
   const expected = await expectedPluginMigrations(plugins, config)
   const names = new Set(ledgerPlugins(plugins, config).map(plugin => plugin.name))
   const { results } = await db.prepare('SELECT namespace,name,position,checksum FROM _plugin_migrations ORDER BY namespace,position').all<PluginMigrationRow>()

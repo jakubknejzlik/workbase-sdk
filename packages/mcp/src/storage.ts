@@ -15,7 +15,7 @@ import { hash } from './planning.ts'
 import { WorkflowError, fail, identifier, instanceSelector, type Index } from './schemas.ts'
 
 export type Migration = { name: string; sql: string }
-export type Bundle = { config: InstanceConfig; runtime?: InstanceConfig; migrations: Migration[]; indexes: Index[]; fingerprint: string; dependencyDigest?: string; guards: Record<string, string | null> }
+export type Bundle = { config: InstanceConfig; runtime?: InstanceConfig; migrations: Migration[]; indexes: Index[]; fingerprint: string; dependencyDigest?: string; sdkVersion?: string; guards: Record<string, string | null> }
 export const json = (value: unknown) => JSON.stringify(value, null, 2) + '\n'
 export const configSource = (config: InstanceConfig, options: { history?: boolean } = {}) => {
   const { plugins, ...data } = serializableInstanceConfig(config)
@@ -76,8 +76,8 @@ export async function durableAtomic(path: string, data: string) {
   await syncDirectory(dirname(path))
 }
 const require = createRequire(import.meta.url)
-async function importConfig(path: string, sourceHash: string, replayPaths: string[] = []) {
-  if (process.versions.bun) {
+async function importConfig(path: string, sourceHash: string, replayPaths: string[] = [], invalidate = true) {
+  if (process.versions.bun && invalidate) {
     // Reload sibling version sources and history JSON as well as the entrypoint.
     // Keep SDK/plugin modules cached so canonical plugin provenance is preserved.
     for (const name of (await readdir(dirname(path))).filter(n => /^config(?:\.[a-z0-9_-]+)?\.(ts|json)$/.test(n))) {
@@ -340,7 +340,7 @@ export class Store {
       return await this.lockContext.run(held, fn)
     } finally { held.active = false; await release() }
   }
-  private configCache = new Map<string, { sourceHash: string; config: InstanceConfig; runtimeHash?: string; runtime?: InstanceConfig }>()
+  private configCache = new Map<string, { sourceHash: string; config: InstanceConfig; runtimeHash?: string; runtime?: InstanceConfig; paths?: Record<string, Buffer> }>()
   private instanceDirectories = new Map<string, string>()
   private standalone = false
   public allowed: Set<string>
@@ -452,23 +452,26 @@ export class Store {
     const names = (await readdir(dir)).filter(n => /^config(?:\.[a-z0-9_-]+)?\.(ts|json)$/.test(n)).sort()
     const sources: Record<string, string> = {}
     for (const name of names) { await noLink(join(dir, name)); sources[name] = await readFile(join(dir, name), 'utf8') }
+    // Hash the complete tracked graph before evaluating either entrypoint.
+    const inputs = await replaySources(dir)
     const sourceHash = hash(sources)
     const cached = this.configCache.get(instance)
-    // Reload tracked version sources when their content changes, including transitive config imports.
-    let config = cached?.sourceHash === sourceHash ? cached.config
-      : await importConfig(join(dir, 'config.ts'), sourceHash)
-    let runtime: InstanceConfig | undefined, runtimeHash: string | undefined
+    const graph = { ...sources, ...Object.fromEntries(Object.entries(inputs).map(([path, bytes]) => [path, bytes.toString('utf8')])) }
+    const runtimeHash = hash(graph)
+    const fresh = cached?.runtimeHash !== runtimeHash
+    const paths = [...new Set([...Object.keys(inputs), ...Object.keys(cached?.paths ?? {})])]
+    const config = fresh ? await importConfig(join(dir, 'config.ts'), runtimeHash, paths) : cached.config
+    let runtime: InstanceConfig | undefined
     if (config.baseline === 'workbase-sdk') {
-      const inputs = await replaySources(dir)
-      for (const [path, bytes] of Object.entries(inputs)) sources[path] = bytes.toString('utf8')
-      runtimeHash = hash(sources)
-      if (cached && cached.runtimeHash !== runtimeHash && cached.sourceHash === sourceHash) config = await importConfig(join(dir, 'config.ts'), runtimeHash, Object.keys(inputs))
+      Object.assign(sources, graph)
       if (inputs['runtime.ts']) {
-        runtime = cached?.runtimeHash === runtimeHash ? cached.runtime : await importConfig(join(dir, 'runtime.ts'), runtimeHash, Object.keys(inputs))
+        // The config import already invalidated the graph. Preserve that same
+        // graph when loading runtime, including its import of config.ts.
+        runtime = fresh ? await importConfig(join(dir, 'runtime.ts'), runtimeHash, paths, false) : cached.runtime
         if (runtime?.id !== config.id || runtime.revision !== config.revision) fail('revision_mismatch', 'runtime.ts and config.ts disagree', 409)
       }
     }
-    this.configCache.set(instance, { sourceHash, config, runtimeHash, runtime })
+    this.configCache.set(instance, { sourceHash, config, runtimeHash, runtime, paths: inputs })
     const migrationNames = (await readdir(join(dir, 'migrations'))).filter(name => name !== '.gitkeep').sort()
     if (migrationNames.some(n => !/^\d{4}_[a-z0-9_]+\.sql$/.test(n))) fail('invalid_migrations', 'Unexpected migration filename')
     const migrations: Migration[] = []
@@ -479,7 +482,9 @@ export class Store {
       ...Object.entries(sources).map(([name, source]) => [name, hash(source)]),
       ...migrations.map(m => [`migrations/${m.name}`, hash(m.sql)]),
     ])
-    return { config, ...(runtime ? { runtime } : {}), indexes, migrations, ...(dependencies ? { dependencyDigest: dependencies.digest } : {}),
+    const sdkVersion = dependencies?.guards['package.json'] && config.baseline === 'workbase-sdk'
+      ? JSON.parse(await readFile(join(dir, 'package.json'), 'utf8')).dependencies?.['@workbasehq/core'] : undefined
+    return { config, ...(runtime ? { runtime } : {}), indexes, migrations, ...(typeof sdkVersion === 'string' ? { sdkVersion } : {}), ...(dependencies ? { dependencyDigest: dependencies.digest } : {}),
       fingerprint: hash({ sources, config, migrations, indexes, ...(dependencies ? { dependencyDigest: dependencies.digest } : {}) }), guards }
   }
   async find(id: string) {
@@ -844,7 +849,7 @@ export class Store {
       const paths = new Set([
         ...Object.keys(expected),
         ...(await readdir(dir)).filter(n => /^config(?:\.[a-z0-9_-]+)?\.(ts|json)$/.test(n)),
-        ...(await readdir(join(dir, 'migrations'))).map(n => `migrations/${n}`),
+        ...(await readdir(join(dir, 'migrations'))).filter(n => n !== '.gitkeep').map(n => `migrations/${n}`),
       ])
       // Read the destination last, immediately before capturing it for publication.
       if (publishing) { paths.delete(publishing); paths.add(publishing) }

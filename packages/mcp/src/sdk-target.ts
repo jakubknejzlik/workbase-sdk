@@ -17,6 +17,7 @@ export type TargetOptions = {
   instanceRoot: string; checkoutRoot: string; targetVersion: string
   base: BaseDigests & { instanceId: string; baseRevision: number }
   inputs: SdkInputs
+  baseline?: 'workbase-sdk'
   /** Caller holds the Instance lock and recomputes BOTH original base digests. */
   readBase: () => Promise<BaseDigests>
   signal?: AbortSignal; timeoutMs?: number; registry?: string
@@ -210,7 +211,7 @@ export async function runSdkTarget(options: TargetOptions) {
     assertBound(prepared.identity, identity, 'prepared identity'); assertBound(prepared.inputHashes, inputHashes, 'prepared hashes')
     const stage: UpgradeStage = prepared.stage
     const count = Object.keys(captured).filter(path => path.startsWith('migrations/')).length
-    assertBound(stage.marker.path, `migrations/${String(count + 1).padStart(4, '0')}_sdk_upgrade.sql`, 'marker path')
+    assertBound(stage.marker.path, `migrations/${String(count + 1).padStart(4, '0')}_${options.baseline === 'workbase-sdk' ? `r${identity.baseRevision}` : 'sdk_upgrade'}.sql`, 'marker path')
     const marker = await regular(join(consumer, stage.marker.path))
     const checkStage = async () => {
       assertBound(hashInputs(await captureSdkInputs(consumer)), { ...inputHashes, [stage.marker.path]: digestBytes(marker) }, 'staged input bytes')

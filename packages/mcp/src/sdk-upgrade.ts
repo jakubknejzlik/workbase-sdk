@@ -83,7 +83,10 @@ const publicMessages: Record<string, string> = {
   internal_error: 'SDK operation failed; no database was deployed',
 }
 export function sdkWorkflowError(error: unknown): WorkflowError {
-  if (error instanceof MigrationReplayError) return new WorkflowError(error.code, error.message, 422, error.diagnostic)
+  if (error instanceof MigrationReplayError) {
+    if (error.diagnostic.sqlError === 'Migration statement generation failed') return new WorkflowError('internal_error', publicMessages.internal_error, 500, { file: error.diagnostic.file, migration: error.diagnostic.migration })
+    return new WorkflowError(error.code, error.message, 422, error.diagnostic)
+  }
   const code = error instanceof WorkflowError || error instanceof RegistrySdkError ? error.code : error instanceof z.ZodError ? 'invalid_input' : 'internal_error'
   const status = error instanceof WorkflowError ? error.status : error instanceof RegistrySdkError ? 409 : code === 'invalid_input' ? 400 : 500
   return new WorkflowError(code, Object.hasOwn(publicMessages, code) ? publicMessages[code] : 'SDK operation failed; the proposal has no accepted evidence', status)
@@ -101,7 +104,10 @@ async function executionBase(bundle: Bundle, proposal: Pick<SdkUpgradeProposal, 
   if (bundle.fingerprint !== proposal.baseFingerprint) fail('sdk_upgrade_base_changed', 'SDK proposal application inputs changed; create a new proposal', 409)
   // SDK execution is checked against the selected target, which may be newer
   // than this producer. Normal config operations retain their producer ceiling.
-  const current = executionVersion((await instanceMeta(bundle, null)).core_version)
+  const meta = await instanceMeta(bundle, null)
+  // V3 domain files leave SDK stamps to the running engine; the guarded pin
+  // identifies the installed SDK even while this producer is still running.
+  const current = executionVersion(bundle.config.baseline === 'workbase-sdk' && bundle.sdkVersion ? bundle.sdkVersion : meta.core_version)
   if (target[0] !== current[0]) fail('sdk_upgrade_major_unsupported', 'SDK upgrades must stay within the current major version', 409)
   const difference = target.findIndex((part, index) => part !== current[index])
   if (difference < 0 || target[difference] < current[difference]) fail('sdk_upgrade_forward_required', 'SDK upgrades require a strictly newer version', 409)
@@ -122,14 +128,18 @@ async function promoteSdkUpgrade(store: Store, proposal: SdkUpgradeProposal, rec
   const authorizeTarget = async () => {
     const target = await store.load(proposal.instance)
     const meta = await instanceMeta(target, proposal.targetVersion)
-    if (meta.revision !== proposal.baseRevision || meta.core_version !== proposal.targetVersion) fail('revision_mismatch', 'Published SDK marker differs from verified evidence', 409)
+    // V3 receipts/stamps belong to the executing engine. This producer may
+    // still be older than the newly installed SDK; the bound target proof
+    // verifies its version, while replay here verifies the published files.
+    const version = target.config.baseline === 'workbase-sdk' ? evidence.result.marker.version : meta.core_version
+    if (meta.revision !== proposal.baseRevision || version !== proposal.targetVersion) fail('revision_mismatch', 'Published SDK marker differs from verified evidence', 409)
     await requireEvidence(store, proposal, await store.sdkProposalSource(proposal.proposalId))
     signal?.throwIfAborted()
   }
   if (proposal.status === 'promoted') { await authorizeTarget(); return result }
   await executionBase(bundle, proposal)
   const next = Math.max(0, ...bundle.migrations.map(migration => Number(migration.name.slice(0, 4)))) + 1
-  if (marker.path !== `migrations/${String(next).padStart(4, '0')}_sdk_upgrade.sql`) fail('validation_required', 'SDK marker is not the next migration', 409)
+  if (marker.path !== `migrations/${String(next).padStart(4, '0')}_${bundle.config.baseline === 'workbase-sdk' ? `r${bundle.config.revision}` : 'sdk_upgrade'}.sql`) fail('validation_required', 'SDK marker is not the next migration', 409)
   proposal.status = 'promoted'
   proposal.promotion = { inputHashes: { ...evidence.result.inputHashes, [marker.path]: marker.sha256 }, digest: '0'.repeat(64) }
   proposal.promotion.digest = evidenceDigest(proposal, proposal.promotion.inputHashes, await bridgeDigest(fileURLToPath(new URL('.', import.meta.url).href)))
@@ -208,7 +218,7 @@ export async function executeSdkUpgrade(store: Store, proposal: SdkUpgradePropos
     }
     const proof = await runSdkTarget({ instanceRoot: directory, checkoutRoot: resolve(checkoutRoot), targetVersion: proposal.targetVersion,
       base: { instanceId: bundle.config.id, baseRevision: proposal.baseRevision, baseFingerprint: proposal.baseFingerprint, baseDependencyDigest: proposal.baseDependencyDigest },
-      inputs, signal,
+      inputs, signal, baseline: bundle.config.baseline === 'workbase-sdk' ? 'workbase-sdk' : undefined,
       readBase: async () => {
         const current = await store.load(proposal.instance)
         return { baseFingerprint: current.fingerprint, baseDependencyDigest: current.dependencyDigest! }

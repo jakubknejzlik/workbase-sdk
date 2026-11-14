@@ -3,8 +3,8 @@ import type { Bundle, Migration } from './storage.ts'
 import { CORE_VERSION } from '@workbasehq/core/config'
 import { KernelRegistry } from '@workbasehq/core/kernel/registry'
 import { PluginMigrationError } from '@workbasehq/core/kernel/migrations'
-import { migrateD1, queryDatabase } from '@workbasehq/core/infra'
-import { replayInstance, readInstanceMeta, usesBaseline, MigrationReplayError } from './migration-replay.ts'
+import { migrateD1, migrateInstance, instanceMigrationReceipt, migrationErrorMessage, queryDatabase } from '@workbasehq/core/infra'
+import { replayInstance, readInstanceMeta, usesBaseline, MigrationReplayError, sqliteMessage, publicText, type ReplayMigration } from './migration-replay.ts'
 import { initialSchema, revisionSQL } from '@workbasehq/core/migrations/schema'
 import { fail } from './schemas.ts'
 import { indexSQL, migrationBlockReason } from './planning.ts'
@@ -15,27 +15,29 @@ export function replay<T>(migrations: Migration[], fn: (db: DatabaseSync) => T):
   try {
     for (const m of migrations) {
       try { db.exec(m.sql) }
-      catch (error) { throw new MigrationReplayError({ file: `migrations/${m.name}`, migration: m.name, sqlError: error instanceof Error ? error.message : String(error) }) }
+      catch (error) { throw new MigrationReplayError({ file: `migrations/${m.name}`, migration: m.name, sqlError: sqliteMessage(error) }) }
     }
     return fn(db)
   }
   catch (error) {
     const reason = migrationBlockReason(error)
-    if (reason) fail('migration_blocked', reason)
+    if (reason) fail('migration_blocked', publicText(reason, 2048))
     throw error
   } finally { db.close() }
 }
 export const replayEngine = (config: Bundle['config'], runtime?: Bundle['runtime']) => ({ kernel: new KernelRegistry(runtime
-  ? { ...runtime, ...config, plugins: runtime.plugins, interactive: runtime.interactive } : config), migrateD1, queryDatabase, revisionSQL, PluginMigrationError })
-export async function replayBundle<T>(bundle: Pick<Bundle, 'config' | 'runtime' | 'migrations'>, fn: (db: DatabaseSync) => T): Promise<T> {
+  ? { ...runtime, ...config, plugins: runtime.plugins, interactive: runtime.interactive } : config), migrateD1, migrateInstance, instanceMigrationReceipt, queryDatabase, revisionSQL, PluginMigrationError })
+export async function replayBundle<T>(bundle: Pick<Bundle, 'config' | 'runtime'> & { migrations: ReplayMigration[] }, fn: (db: DatabaseSync) => T, options: { mode?: 'synthetic' } = {}): Promise<T> {
   if (!usesBaseline(bundle.config)) return replay(bundle.migrations, fn)
   const db = new DatabaseSync(':memory:')
   try {
-    await replayInstance(db, bundle.migrations, replayEngine(bundle.config, bundle.runtime))
+    await replayInstance(db, bundle.migrations, replayEngine(bundle.config, bundle.runtime), options)
     return fn(db)
   } catch (error) {
     const reason = migrationBlockReason(error)
-    if (reason) fail('migration_blocked', reason)
+    if (reason) fail('migration_blocked', publicText(reason, 2048))
+    const diagnostic = migrationErrorMessage(error)
+    if (/^migration_(?!failed:)/.test(diagnostic)) fail(diagnostic.split(':')[0], diagnostic, 422)
     throw error
   } finally { db.close() }
 }
@@ -67,8 +69,8 @@ export async function instanceMeta(bundle: Bundle, supportedVersion: string | nu
   })
 }
 export async function expectedSnapshot(bundle: Bundle, prepared: { target: Bundle['config']; indexes: Bundle['indexes']; sql: string }) {
-  const planned = await replayBundle({ ...bundle, migrations: [...bundle.migrations, { name: 'proposal.sql', sql: prepared.sql }] }, db => snapshot(db, usesBaseline(bundle.config)))
-  const desired = await replayBundle({ config: prepared.target, runtime: bundle.runtime, migrations: [{ name: 'desired.sql', sql: initialSchema(prepared.target) + prepared.indexes.map(indexSQL).join('\n') }] }, db => snapshot(db, usesBaseline(prepared.target)))
+  const planned = await replayBundle({ ...bundle, migrations: [...bundle.migrations, { name: 'proposal.sql', sql: prepared.sql, syntheticRevision: prepared.target.revision }] }, db => snapshot(db, usesBaseline(bundle.config)), { mode: 'synthetic' })
+  const desired = await replayBundle({ config: prepared.target, runtime: bundle.runtime, migrations: [{ name: 'desired.sql', syntheticRevision: prepared.target.revision, sql: initialSchema(prepared.target) + prepared.indexes.map(indexSQL).join('\n') }] }, db => snapshot(db, usesBaseline(prepared.target)), { mode: 'synthetic' })
   // Compare logical config semantics without column ordinals or SQLite-assigned FK IDs.
   const logical = (rows: ReturnType<typeof snapshot>) => rows.map(({ sql, ...r }) => ({ ...r,
     ...(r.type === 'index' ? { sql: sql.replaceAll('"', '').replace(/\s+/g, '') } : {}),

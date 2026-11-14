@@ -58,7 +58,7 @@ async function executeBridge(root: string, raw: unknown) {
   const { CORE_VERSION, defineInstance } = await load('@workbasehq/core/config') as typeof import('@workbasehq/core/config')
   const { initialSchema, coreVersionSQL, revisionSQL, quote } = await load('@workbasehq/core/migrations/schema') as typeof import('@workbasehq/core/migrations/schema')
   const { KernelRegistry } = await load('@workbasehq/core/kernel/registry') as typeof import('@workbasehq/core/kernel/registry')
-  const { migrateD1, migrateInstance, queryDatabase, readMigrationFiles } = await load('@workbasehq/core/infra') as typeof import('@workbasehq/core/infra')
+  const { migrateD1, migrateInstance, instanceMigrationReceipt, sdkStampSQL, queryDatabase, readMigrationFiles } = await load('@workbasehq/core/infra') as typeof import('@workbasehq/core/infra')
   const { pluginMigrationStatus, PluginMigrationError } = await load('@workbasehq/core/kernel/migrations') as typeof import('@workbasehq/core/kernel/migrations')
   if (CORE_VERSION !== request.identity.targetVersion) throw new Error('Target CORE_VERSION mismatch')
   const literal = (await import(pathToFileURL(join(root, 'config.ts')).href)).default
@@ -66,7 +66,7 @@ async function executeBridge(root: string, raw: unknown) {
     ? (await import(pathToFileURL(join(root, 'runtime.ts')).href)).default : literal)
   if (config.id !== request.identity.instanceId || config.revision !== request.identity.baseRevision) throw new Error('Captured configuration identity mismatch')
   const kernel = new KernelRegistry(config)
-  const engine = { kernel, migrateD1, queryDatabase, revisionSQL, PluginMigrationError }
+  const engine = { kernel, migrateD1, migrateInstance, instanceMigrationReceipt, queryDatabase, revisionSQL, PluginMigrationError }
   // Validate archived sources with the target SDK as well. JSON history hydrates
   // only canonical published exports, never serialized executable hooks.
   const descriptors: Record<string, [specifier: string, exported: string]> = {
@@ -98,8 +98,8 @@ async function executeBridge(root: string, raw: unknown) {
   }
   const names = Object.keys(request.inputHashes).filter(path => path.startsWith('migrations/')).sort()
   if (!names.length || names.some((path, i) => Number(path.slice(11, 15)) !== i + 1) || names.length >= 9999) throw new Error('Invalid migration sequence or filename limit')
-  const markerPath = `migrations/${String(names.length + 1).padStart(4, '0')}_sdk_upgrade.sql`
-  const markerSQL = coreVersionSQL(config.revision) + '\n'
+  const markerPath = `migrations/${String(names.length + 1).padStart(4, '0')}_${usesBaseline(config) ? `r${config.revision}` : 'sdk_upgrade'}.sql`
+  const markerSQL = usesBaseline(config) ? sdkStampSQL : coreVersionSQL(config.revision) + '\n'
   const marker = { path: markerPath, sha256: digestBytes(markerSQL) }
   if (request.action === 'prepare') {
     await writeFile(join(root, markerPath), markerSQL, { flag: 'wx' })
@@ -140,7 +140,7 @@ async function executeBridge(root: string, raw: unknown) {
       if (!kernel.config.entities[index.entity] || !Array.isArray(index.fields) || !index.fields.length || index.fields.some(field => !kernel.config.entities[index.entity].fields[field])) throw new Error('Invalid configured index')
       return `CREATE INDEX ${quote(index.name)} ON ${quote(index.entity)} (${['organization_id', ...index.fields].map(quote).join(', ')});`
     }).join('\n')
-    if (usesBaseline(config)) await replayInstance(desired, [{ name: 'desired.sql', sql: initialSchema(kernel.config) + indexSQL }], engine)
+    if (usesBaseline(config)) await replayInstance(desired, [{ name: 'desired.sql', syntheticRevision: config.revision, sql: initialSchema(kernel.config) + indexSQL }], engine, { mode: 'synthetic' })
     else {
       desired.exec(initialSchema(kernel.config) + indexSQL)
       try { await kernel.applyMigrations(queryDatabase(queryFor(desired))) }

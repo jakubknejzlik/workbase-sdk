@@ -8,7 +8,11 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { createServer } from '../src/server'
-import { replayBundle } from '../src/offline'
+import { replayBundle, replayEngine } from '../src/offline'
+import { migrateInstance } from '@workbasehq/core/infra'
+import { replayQuery } from '../src/migration-replay'
+import { DatabaseSync } from 'node:sqlite'
+import { createHash } from 'node:crypto'
 
 const roots: string[] = []
 afterEach(() => { for (const root of roots.splice(0)) cleanupTempDir(root) })
@@ -46,11 +50,19 @@ it.each(['node', 'bun'])('validates a proposal on a V3 instance created through 
     expect(preview).toMatchObject({ ok: true, revision: 2, sql: expect.stringContaining('ADD COLUMN') })
     const verification = await call('apply_to_disposable', { proposalId: proposal.proposalId })
     expect(verification, JSON.stringify(verification)).toMatchObject({ ok: true, verified: true, diffs: [] })
+    const promotion = await call('promote', { proposalId: proposal.proposalId, expectedRevision: 1 })
+    expect(promotion, JSON.stringify(promotion)).toMatchObject({ ok: true, migration: '0002_r2.sql' })
+    const promoted = await store.load('replay-fixture')
+    expect(promoted.migrations.at(-1)!.sql).not.toContain('INSERT INTO instance_meta')
+    const deploy = new DatabaseSync(':memory:')
+    try {
+      await migrateInstance(replayQuery(deploy, promoted.migrations), promoted.migrations.map(m => ({ filename: m.name, sql: m.sql, checksum: createHash('sha256').update(m.sql).digest('hex') })), replayEngine(promoted.config, promoted.runtime).kernel)
+      expect(deploy.prepare('SELECT MAX(revision) AS revision FROM instance_meta').get()).toEqual({ revision: 2 })
+    } finally { deploy.close() }
     await appendFile(join(root, 'migrations/0001_r1.sql'), '\nSELECT * FROM missing_domain_source;\n')
-    const failure = await call('validate', { proposalId: proposal.proposalId })
+    const failure = await call('validate', { instance: 'replay-fixture' })
     expect(failure).toMatchObject({ ok: false, errors: [{ code: 'migration_replay_failed',
       message: expect.stringMatching(/0001_r1\.sql.*migrations\/0001_r1\.sql.*no such table: missing_domain_source/) }] })
-    expect(await call('preview_migration', { proposalId: proposal.proposalId })).toMatchObject({ ok: false,
-      error: { code: 'migration_replay_failed', message: expect.stringContaining('0001_r1.sql') } })
+
   } finally { await client.close(); await transport.close(); await server.close() }
 })

@@ -50,6 +50,19 @@ function supportedCoreVersion(value: unknown) {
     (version[1] < current[1] || (version[1] === current[1] && version[2] <= current[2]))
 }
 
+export const sdkStampSQL = '-- SDK stamp is owned by deployment.\n'
+
+/** Shared by deployment and explicitly synthetic offline replay. */
+export function instanceMigrationReceipt(sdk: boolean, migration: Migration) {
+  if (!sdk) return ''
+  const match = /^\d+_r([1-9]\d*)\.sql$/.exec(migration.filename)
+  if (!match || !Number.isSafeInteger(Number(match[1]))) throw new MigrationDiagnostic({ code: 'migration_instance_revision_mismatch' })
+  // Only the explicit SDK-only marker may reuse a revision. Ordinary domain
+  // files retain strict receipts, including rejection of planner-owned receipts.
+  const receipt = revisionSQL(Number(match[1]))
+  return (migration.sql === sdkStampSQL ? receipt.replace('INSERT INTO', 'INSERT OR IGNORE INTO') : receipt) + '\n'
+}
+
 export async function migrateInstance(query: D1Query, files: readonly Migration[], kernel: KernelRegistry) {
   assertSchemaLockBound(kernel.config)
   const db = queryDatabase(query)
@@ -65,10 +78,7 @@ export async function migrateInstance(query: D1Query, files: readonly Migration[
   }
   if (sdk) await kernel.applyMigrations(db)
   const domain = await migrateD1(query, files, migration => {
-    if (!sdk) return ''
-    const match = /^\d+_r([1-9]\d*)\.sql$/.exec(migration.filename)
-    if (!match || !Number.isSafeInteger(Number(match[1]))) throw new MigrationDiagnostic({ code: 'migration_instance_revision_mismatch' })
-    return revisionSQL(Number(match[1])) + '\n'
+    return instanceMigrationReceipt(sdk, migration)
   })
   const rows = await db.prepare('SELECT filename,checksum FROM _migrations ORDER BY filename').all<{ filename: string; checksum: string }>()
   const expectedRows = [...files].sort((a, b) => a.filename < b.filename ? -1 : a.filename > b.filename ? 1 : 0)

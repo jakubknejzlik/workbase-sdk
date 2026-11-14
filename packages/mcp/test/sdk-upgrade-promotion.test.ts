@@ -6,8 +6,10 @@ import { syncBuiltinESMExports } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import { defineConfig, bindSchemaLock, defineAccess, accessEntities, accessSystemActions } from '@workbasehq/core/schema'
+import { schemaLock } from '@workbasehq/core/migrations/schema-lock'
 import { CORE_VERSION } from '@workbasehq/core/config'
-import { Store, json } from '../src/storage.ts'
+import { Store, json, configSource } from '../src/storage.ts'
 import { Workflow } from '../src/workflow.ts'
 import { captureSdkInputs, runSdkTarget } from '../src/sdk-target.ts'
 import { parseProposal } from '../src/proposals.ts'
@@ -512,4 +514,22 @@ it('still rejects an unauthorised future SDK stamp outside SDK target verificati
   const bundle = await store.load('sample')
   bundle.migrations.push({ name: '0002_foreign.sql', sql: `UPDATE instance_meta SET core_version = '${targetVersion}';` })
   await expect(instanceMeta(bundle)).rejects.toThrow(expect.objectContaining({ code: 'revision_mismatch' }))
+})
+
+it('promotes deploy-valid V3 SDK markers when the target is newer than the producer', async () => {
+  const current = defineConfig({ id: 'sample', interactive: false, languages: ['en'], roles: ['admin'], organizationOwnerRole: 'admin', entities: {},
+    access: defineAccess({ predicates: {}, entities: Object.fromEntries(accessEntities.map(entity => [entity, { admin: 'deny' }])), roles: { admin: { system: Object.fromEntries(accessSystemActions.map(action => [action, 'deny'])) } } }),
+  })
+  await fs.writeFile(join(root, 'config.ts'), configSource(bindSchemaLock(current, schemaLock(current))))
+  for (const name of await fs.readdir(join(root, 'migrations'))) await fs.rm(join(root, 'migrations', name))
+  await fs.writeFile(join(root, 'migrations/0001_r1.sql'), 'SELECT 1;\n')
+  await restart()
+  const proposed = await workflow.call('upgrade_sdk', { instance: 'sample', baseRevision: 1, targetVersion })
+  expect(proposed).toMatchObject({ ok: true }); proposalId = String(proposed.proposalId)
+  const verification = await workflow.call('apply_to_disposable', { proposalId })
+  expect(verification, JSON.stringify(verification)).toMatchObject({ ok: true, verified: true })
+  expect(await promote(1)).toMatchObject({ ok: true, status: 'promoted', migration: '0002_r1.sql' })
+  await restart()
+  expect(await promote(1)).toMatchObject({ ok: true, status: 'promoted', migration: '0002_r1.sql' })
+  expect(await workflow.call('upgrade_sdk', { instance: 'sample', baseRevision: 1, targetVersion })).toMatchObject({ ok: false, error: { code: 'sdk_upgrade_forward_required' } })
 })

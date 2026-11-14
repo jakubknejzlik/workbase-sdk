@@ -24,6 +24,7 @@ function requireConfigChange(proposal: Proposal): asserts proposal is ConfigChan
 export type ToolResult = Record<string, unknown>
 export function errorResult(error: unknown): ToolResult {
   if (isDisplayFieldError(error)) return { ok: false, errors: error.errors }
+  if (error instanceof MigrationReplayError && error.diagnostic.sqlError === 'Migration statement generation failed') return { ok: false, error: { code: 'internal_error', status: 500, message: 'Configuration operation failed; no database was deployed', details: { file: error.diagnostic.file, migration: error.diagnostic.migration } } }
   if (error instanceof MigrationReplayError) return { ok: false, error: { code: error.code, status: 422, message: error.message, details: error.diagnostic } }
   if (error instanceof WorkflowError) return { ok: false, error: { code: error.code, status: error.status, message: error.message, ...(error.details ? { details: error.details } : {}) } }
   if (error instanceof z.ZodError) return { ok: false, error: { code: 'invalid_input', status: 400, message: 'Input does not match the tool schema', issues: error.issues.map(({ path, message }) => ({ path, message })) } }
@@ -208,7 +209,7 @@ export class Workflow {
           const number = Math.max(0, ...bundle.migrations.map(m => Number(m.name.slice(0, 4)))) + 1
           if (number > 9999) fail('migration_limit', 'Migration number exceeds four digits')
           const slug = `${p.changes[0].kind}_${p.proposalId.slice(0, 8)}`
-          const migration = `${String(number).padStart(4, '0')}_${slug}.sql`
+          const migration = `${String(number).padStart(4, '0')}_${prepared.target.baseline === 'workbase-sdk' ? `r${prepared.target.revision}` : slug}.sql`
           p.status = 'promoted'; p.promotedRevision = prepared.target.revision; p.migration = migration
           const files = [
             { path: `migrations/${migration}`, data: prepared.sql, create: true },
