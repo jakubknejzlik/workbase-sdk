@@ -76,8 +76,11 @@ artifacts and never overwrites them.
 `check` runs `check:schema`, `check:access`, `check:openapi` and `check:ui` in that
 order. UI validation includes dictionary completeness and bare-text checks.
 `typecheck` runs `generate:ui` before TypeScript. `build:console` runs Vite under
-Bun with the SDK `consoleUI()` integration; the SPA mounts AuthShell. The ignored
-outputs are `.workbase-ui/`, `dist/` and `.sst/`.
+Bun with the SDK `consoleUI()` integration; the SPA mounts AuthShell. The shipped
+`.gitignore` uses `.workbase-ui*` to ignore both the `.workbase-ui` symlink and
+its `.workbase-ui.generation-*/` sibling directories; `dist/` and `.sst/` are also
+ignored. Existing Instances must replace `.workbase-ui/` with `.workbase-ui*`
+before generating or staging files.
 
 Replace the build SHA placeholder with the reviewed commit's 40 hex characters.
 An explicit SHA is required outside git. Build from a clean, committed tree so
@@ -95,7 +98,18 @@ It also preserves generated artifacts and the lockfile.
 ## Develop and deploy
 
 Copy `.dev.vars.example` to private `.dev.vars` and configure credentials.
-`bun run dev` serves the console, and `bun run dev:worker` starts local Wrangler.
+`bun run dev` starts Vite without an API proxy. AuthShell requests same-origin
+`/me`, `/build.json` and `/auth/...`, which return 404 on Vite even when
+`bun run dev:worker` is running; login through the Vite origin cannot work.
+
+For local asset/API inspection, first run `build:console` as above, then run
+`bun run dev:worker` alone and open `http://127.0.0.1:9290`. The Worker serves
+the built console and `/build.json` from that origin; unauthenticated `/me`
+returns JSON 401. Rebuild the console after UI changes. This is not a complete
+local login setup: a fresh, unconfigured Worker returns 503 for magic-link
+sign-in. The template supplies no complete local database/auth bootstrap flow;
+use a configured deployed origin for end-to-end login acceptance.
+
 There are no seeded accounts. Plain Wrangler domain migrations alone do not
 initialize the SDK/plugin tables; use the SDK migration orchestration for a
 complete database. The template supplies `bun run migrate:remote` for a configured

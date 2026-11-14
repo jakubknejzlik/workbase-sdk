@@ -89,6 +89,23 @@ it('ships authored V3 sources and excludes Instance-generated artifacts', async 
   expect(guide).toContain('file:vendor/sdk/workbasehq-core-')
   expect(guide).toContain('"overrides"')
 })
+it('ignores the generated UI symlink and its sibling generation directory', async () => {
+  const root = await empty()
+  await bootstrapInstance(root, input)
+  const generation = '.workbase-ui.generation-test'
+  await mkdir(join(root, generation))
+  await writeFile(join(root, generation, 'manifest.json'), '{}\n')
+  await symlink(generation, join(root, '.workbase-ui'))
+  const git = (...args: string[]) => spawnSync('git', ['-c', 'core.excludesFile=/dev/null', ...args], { cwd: root, encoding: 'utf8' })
+  expect(git('init', '-q').status).toBe(0)
+  const ignored = git('check-ignore', '.workbase-ui', `${generation}/manifest.json`)
+  expect(ignored.status).toBe(0)
+  expect(ignored.stdout.trim().split('\n')).toEqual(['.workbase-ui', `${generation}/manifest.json`])
+  const status = git('status', '--short', '--', '.workbase-ui*')
+  expect(status.status).toBe(0)
+  expect(status.stdout).toBe('')
+  expect(git('check-ignore', 'ui/workers/index.ts').status).toBe(1)
+})
 it('preserves authored schema, dependency rewrites and generated artifact bytes on re-init', async () => {
   const root = await empty()
   const first = await bootstrapInstance(root, input)

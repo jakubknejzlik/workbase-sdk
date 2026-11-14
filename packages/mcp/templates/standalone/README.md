@@ -58,14 +58,25 @@ init never ships or overwrites them. Later schema changes use
 also accept `--base <git-ref>` to check migration linkage.
 `access:lock` already supplies `--write` and targets `runtime.ts`; the explicit
 flag above is accepted too. `check` runs schema, access, OpenAPI and UI validation.
-UI generation runs before typecheck. `.workbase-ui/`, `dist/` and `.sst/` are ignored.
+UI generation runs before typecheck. The shipped `.gitignore` uses `.workbase-ui*`
+to ignore both the `.workbase-ui` symlink and its `.workbase-ui.generation-*/`
+sibling directories; `dist/` and `.sst/` are also ignored. Existing Instances must
+replace `.workbase-ui/` with `.workbase-ui*` before generating or staging files.
 An explicit build SHA is required outside git. Build from a clean, committed tree
 so the SHA identifies the authored bytes; the template does not automatically
 invoke the SDK's optional `assertCleanDeploy()` guard.
 
 ## Run and deploy
 
-`bun run dev` serves the console; `bun run dev:worker` starts the local Worker.
+`bun run dev` starts Vite without an API proxy. AuthShell's same-origin `/me`,
+`/build.json` and `/auth/...` requests return 404 there even while `dev:worker`
+runs, so login through Vite cannot work. For local asset/API inspection, build
+the console as above, then run `bun run dev:worker` alone and open
+`http://127.0.0.1:9290`. The Worker serves the built console and `/build.json`;
+unauthenticated `/me` returns JSON 401. Rebuild after UI changes. This is not a
+complete local login setup: fresh, unconfigured magic-link sign-in returns 503.
+The template supplies no complete local database/auth bootstrap flow; use a
+configured deployed origin for end-to-end login acceptance.
 Apply SDK, plugin and Instance migrations with the SDK migration tool; plain
 Wrangler domain migrations alone do not initialize a complete database.
 The detail page uses the SDK application-access card and the SPA mounts AuthShell.
