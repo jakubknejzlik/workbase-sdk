@@ -59,19 +59,20 @@ bun run access:lock
 bun run openapi:write
 bun run check
 bun run typecheck
-WORKBASE_BUILD_SHA=<40-character-commit-sha> bun run build:console
 ```
 
 Schema planning writes `schema.lock.json` and `migrations/0001_r1.sql`; access
 auditing needs that lock and writes `access.lock.json` and `access.lock.md`.
 OpenAPI follows and stamps revision and `x-workbase-config-hash`.
 Commit these artifacts with `package-lock.json`. `check` runs schema, access,
-OpenAPI and UI checks. `typecheck` generates UI first; the console build generates
-the Vite assets and build metadata. Generated UI lives under ignored
-`.workbase-ui*`; assets live under `dist/`. For later physical schema changes use
+OpenAPI and UI checks. `typecheck` generates UI first under ignored
+`.workbase-ui*`. The console uses the installed SDK's prebuilt assets from
+`@workbasehq/plugins`; no Instance console build or `WORKBASE_BUILD_SHA` is needed.
+SST passes `assetsDir: consoleAssetsDir()` from `@workbasehq/plugins/console/assets`
+to SDK `provision()`. For later physical schema changes use
 `bun run migrate:plan --base <git-ref>` and review generated diffs. Sources:
 [template scripts](../../packages/mcp/templates/standalone/package.json),
-[artifact/build assertions](../../scripts/smoke-template.ts).
+[artifact/asset assertions](../../scripts/smoke-template.ts).
 
 ## Bootstrap a fresh local Worker and D1
 
@@ -137,7 +138,7 @@ path would select different databases. The smoke additionally asserts unchanged
 ledger snapshots. Sources: [live bridge](../../scripts/lib/installed-consumer-live.ts),
 [D1 migration batches](../../packages/core/src/infra/d1-migrations.ts).
 
-After building the console, start the consumer's installed Wrangler:
+Start the consumer's installed Wrangler to serve the installed SDK console assets:
 
 ```sh
 WRANGLER_SEND_METRICS=false node node_modules/wrangler/bin/wrangler.js dev \
@@ -145,8 +146,8 @@ WRANGLER_SEND_METRICS=false node node_modules/wrangler/bin/wrangler.js dev \
   --persist-to .wrangler/state --log-level error
 ```
 
-Open `http://127.0.0.1:9290` for same-origin console and API requests. Vite's dev
-server has no API proxy. The smoke chooses a free port, waits for `/health`, then
+Open `http://127.0.0.1:9290` for same-origin console and API requests. No Vite server
+or console build is needed. The smoke chooses a free port, waits for `/health`, then
 signs in through `/auth/sign-in/magic-link`, reads the resulting URL from local
 `email_outbox.body` and verifies it. It completes `/me/profile`, creates an
 organization for admin membership, then invites and accepts a staff account
@@ -180,8 +181,9 @@ HTTPS cookie-enforcement test. Source:
 `bun scripts/smoke-template.ts --directory dist-sdk` uses the same initialized,
 tarball-installed consumer throughout. Its unpacked fixture adds cs translations
 and a nullable text field; the shipped template remains English-only. Beyond
-generation/build/migrations, it checks persistence across Worker restart, CRUD,
-omitted versus null PATCH, stale-write 409, 26-row paging and display-field search,
+generation, console asset checks and migrations, it checks persistence across
+Worker restart, CRUD, omitted versus null PATCH, stale-write 409, 26-row paging
+and display-field search,
 cross-org denial, and loss of staff row access after unlink. Sixteen renders cover
 four routes × 1280/390 widths × cs/en with translated headings, no horizontal
 overflow or page errors. Protected account fields stay out of new/edit forms;
@@ -213,7 +215,7 @@ live result and the final teardown marker before reporting success. Sources:
 
 Set `WORKBASE_EVIDENCE_DIR` to an absolute directory outside the repo and archive
 directory for optional PNGs and timing JSON. Timings cover install, npm ci,
-typecheck, cold/warm builds and live assertions with OS/Node/Bun metadata; no
+typecheck and live assertions with OS/Node/Bun metadata; no
 performance thresholds are enforced. Source:
 [evidence and timing](../../scripts/lib/installed-consumer-live.ts).
 
