@@ -29,9 +29,12 @@
     "check:ci-invariants": "bun scripts/sdk-ci-invariants.ts && bun run check:ui",
     "console:build": "bun scripts/build-console.ts",
     "sdk:pack": "bash scripts/sdk-pack.sh",
-    "check:ui": "bun packages/plugins/console/ui/src/cli.ts"
+    "check:ui": "bun packages/plugins/console/ui/src/cli.ts",
+    "check:openapi": "bun scripts/check-openapi.ts",
+    "openapi:write": "bun scripts/check-openapi.ts --write"
   },
   "devDependencies": {
+    "@apidevtools/swagger-parser": "13.1.0",
     "@cloudflare/vitest-pool-workers": "0.23.0",
     "@cloudflare/workers-types": "^5.0.0",
     "@playwright/test": "1.58.2",
@@ -39,12 +42,12 @@
     "@types/node": "^25.0.0",
     "@workbasehq/core": "workspace:*",
     "@workbasehq/plugins": "workspace:*",
+    "playwright": "1.58.2",
     "sst": "4.17.1",
+    "tsx": "4.23.15",
     "typescript": "^6.0.0",
     "vitest": "^4.1.0",
-    "wrangler": "4.126.0",
-    "playwright": "1.58.2",
-    "tsx": "4.23.15"
+    "wrangler": "4.126.0"
   },
   "patchedDependencies": {
     "sonner@2.0.7": "patches/sonner@2.0.7.patch",
