@@ -78,7 +78,12 @@ function containsTransform(schema: z.core.$ZodType, seen = new Set<z.core.$ZodTy
   const add = (value: unknown) => {
     if ((value as z.core.$ZodType | null)?._zod?.def) children.push(value as z.core.$ZodType)
   }
-  const addList = (value: unknown) => { if (Array.isArray(value)) value.forEach(add) }
+  // Entries too are read as data descriptors: an accessor-backed array index must never run.
+  const addList = (value: unknown) => {
+    if (!Array.isArray(value)) return
+    const length = Object.getOwnPropertyDescriptor(value, 'length')?.value as number
+    for (let index = 0; index < length; index++) add(Object.getOwnPropertyDescriptor(value, index)?.value)
+  }
   switch (read('type')) {
     case 'transform': return true
     case 'optional': case 'nullable': case 'default': case 'prefault':

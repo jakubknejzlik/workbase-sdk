@@ -52,6 +52,26 @@ it('verify4 enum getter: never reads enum entries in a transform-free pipe input
   expect(calls).toBe(0)
 })
 
+it('r2 verify1 list getters: never reads accessor-backed union, xor or tuple entries', async () => {
+  for (const kind of ['union', 'xor', 'tuple'] as const) {
+    let calls = 0, armed = false
+    const list: any = [z.string(), z.number()]
+    Object.defineProperty(list, '0', { enumerable: true, configurable: true, get() { calls++; if (armed) throw new Error('LIST_GETTER_MUST_NOT_RUN'); return z.string() } })
+    const inner: z.ZodType = kind === 'union' ? z.union(list) : kind === 'xor' ? z.xor(list) : z.tuple(list)
+    const outer: z.ZodType = kind === 'tuple' ? z.union([z.string(), inner]) : inner
+    const input = z.object({ value: outer.pipe(z.string()) })
+    expect(input.parse({ value: 'ok' })).toEqual({ value: 'ok' })
+    armed = true; calls = 0
+    const test = probe(input), expected = test.legacy()
+    expect(calls).toBe(0)
+    const response = await test.response()
+    expect(response.status).toBe(200)
+    expect(JSON.stringify(await commands(response))).toBe(expected)
+    expect(test.current()).toBe(expected)
+    expect(calls).toBe(0)
+  }
+})
+
 const transformed = () => z.string().transform(value => value.toUpperCase())
 const containers: [string, (tx: ReturnType<typeof transformed>, factory: () => string) => z.ZodType][] = [
   ['transform', () => z.transform(() => 'value')],
