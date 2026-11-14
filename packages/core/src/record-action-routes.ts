@@ -1,5 +1,5 @@
 import { readRecord } from './record-read'
-import { isAccountAccessCommand } from './worker-access-actions'
+import { isAccountAccessCommand } from './account-command'
 import { z } from 'zod'
 import { ApiError } from './errors'
 import type { InstanceConfig } from './config'

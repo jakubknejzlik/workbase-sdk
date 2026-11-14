@@ -25,16 +25,24 @@ access policy, with a test requiring identical generated documents.
 Objects use the access lock's canonical serializer. Set-like declaration arrays
 are sorted without locale-dependent comparison; authored enum order is retained.
 The query extension reuses the current public schema projection verbatim. Request
-schemas use Zod's input mode so transforms describe their accepted HTTP input.
-The existing `/schema` projection and its output-mode behavior stay unchanged.
+schemas use a default-free Zod input projection with an explicit public vocabulary
+allowlist. It follows output-facing metadata across wrappers and pipelines, carries
+sensitivity internally, and omits pipeline-only constraints and object keys absent
+from the public output shape. Shared schemas are converted once per generation;
+runtime default, prefault and catch factories are never evaluated. The existing `/schema` projection and its output-mode behavior
+stay unchanged.
 
 REST list cursors contain the last returned row id. Query cursors are opaque
 signed tokens bound to the query and authorization scope. Optional response fields
 allow field masks and query selections; strict row objects reject undeclared keys.
 The document publishes field names and safe metadata, including masked fields,
 while omitting row filters, predicate names, expression bodies, defaults, credentials
-and deployment configuration. Allowed entity operations are boolean `true` even
-when runtime access is filtered. Action reasons are public dictionary keys.
+and deployment configuration. Entity permissions reuse `/schema.policies` exactly:
+entity → role → `true`, without operation grants or internal tables. Field metadata
+uses the same public field projection as `/schema`; protected user-link/computed
+flags and action condition inventories or command associations are omitted.
+Action components encode both tuple lengths, and every component insertion rejects
+an existing name.
 
 Generic command results have no registered output schema and remain opaque.
 Built-in access action results describe credential property names as strings;

@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import { labelDependencies } from './query/labels'
-import { publicQuery, publicCommands, sanitizeSchema } from './public-projection'
+import { publicQuery, publicCommands, publicFields, publicPolicies, sanitizeSchema } from './public-projection'
 import type { InstanceConfig } from './config'
 import type { RuntimeOptions } from './types'
 
@@ -13,17 +13,10 @@ export function publicSchema(config: InstanceConfig, options: RuntimeOptions) {
     entities: Object.fromEntries(Object.entries(config.entities).map(([name, entity]) => [name, {
       ...(entity.displayField ? { displayField: entity.displayField } : {}),
       ...(entity.label ? { labelDependencies: labelDependencies(config, name) } : {}),
-      fields: Object.fromEntries(Object.entries(entity.fields).map(([fieldName, field]) => [fieldName, {
-        type: field.type, required: field.required,
-        ...(field.values === undefined ? {} : { values: field.values }),
-        ...(field.entity === undefined ? {} : { entity: field.entity }),
-        ...(field.readOnly === undefined ? {} : { readOnly: field.readOnly }),
-        ...(field.sensitive === undefined ? {} : { sensitive: field.sensitive }),
-        ...(field.ui === undefined ? {} : { ui: field.ui }),
-      }])),
+      fields: publicFields(entity),
     }])),
     query: publicQuery(config),
-    policies: Object.fromEntries(Object.entries(config.policies).map(([entity, roles]) => [entity, Object.fromEntries(Object.keys(roles).map(role => [role, true]))])),
+    policies: publicPolicies(config),
     capabilities: { path: '/o/:org/capabilities', authentication: 'required' },
     roles: config.roles, permissions: config.permissions,
     commands: publicCommands(config, options),

@@ -75,25 +75,7 @@
         ],
         "type": "object"
       },
-      "Action_worker_cancel_invite": {
-        "additionalProperties": false,
-        "properties": {},
-        "required": [],
-        "type": "object"
-      },
-      "Action_worker_invite": {
-        "additionalProperties": false,
-        "properties": {
-          "email": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "email"
-        ],
-        "type": "object"
-      },
-      "Action_worker_link_account": {
+      "Action_6_worker_12_link_account": {
         "additionalProperties": false,
         "properties": {
           "user_id": {
@@ -106,10 +88,28 @@
         ],
         "type": "object"
       },
-      "Action_worker_unlink_account": {
+      "Action_6_worker_13_cancel_invite": {
         "additionalProperties": false,
         "properties": {},
         "required": [],
+        "type": "object"
+      },
+      "Action_6_worker_14_unlink_account": {
+        "additionalProperties": false,
+        "properties": {},
+        "required": [],
+        "type": "object"
+      },
+      "Action_6_worker_6_invite": {
+        "additionalProperties": false,
+        "properties": {
+          "email": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "email"
+        ],
         "type": "object"
       },
       "Capabilities": {
@@ -590,6 +590,7 @@
           "name": {
             "type": "string",
             "x-workbase-field": {
+              "required": true,
               "type": "string"
             }
           },
@@ -603,7 +604,12 @@
             ],
             "type": "string",
             "x-workbase-field": {
-              "type": "enum"
+              "required": true,
+              "type": "enum",
+              "values": [
+                "admin",
+                "staff"
+              ]
             }
           },
           "updated_at": {
@@ -800,6 +806,7 @@
           "name": {
             "type": "string",
             "x-workbase-field": {
+              "required": true,
               "type": "text"
             }
           },
@@ -821,8 +828,8 @@
             "x-workbase-field": {
               "entity": "users",
               "readOnly": true,
-              "type": "ref",
-              "userLink": true
+              "required": false,
+              "type": "ref"
             }
           },
           "user_account": {
@@ -1477,9 +1484,9 @@
           },
           "rowAccess": {
             "enum": [
-              "no_account",
-              "invited",
               "expired",
+              "invited",
+              "no_account",
               "signed_in"
             ],
             "type": "string"
@@ -1506,8 +1513,8 @@
               },
               "locale": {
                 "enum": [
-                  "en",
-                  "cs"
+                  "cs",
+                  "en"
                 ],
                 "type": "string"
               },
@@ -2638,8 +2645,8 @@
                 },
                 "locale": {
                   "enum": [
-                    "en",
-                    "cs"
+                    "cs",
+                    "en"
                   ],
                   "type": "string"
                 }
@@ -2710,9 +2717,9 @@
           },
           "rowAccess": {
             "enum": [
-              "no_account",
-              "invited",
               "expired",
+              "invited",
+              "no_account",
               "signed_in"
             ],
             "type": "string"
@@ -2739,8 +2746,8 @@
               },
               "locale": {
                 "enum": [
-                  "en",
-                  "cs"
+                  "cs",
+                  "en"
                 ],
                 "type": "string"
               },
@@ -2941,6 +2948,7 @@
           "name": {
             "type": "string",
             "x-workbase-field": {
+              "required": true,
               "type": "string"
             }
           },
@@ -2954,7 +2962,12 @@
             ],
             "type": "string",
             "x-workbase-field": {
-              "type": "enum"
+              "required": true,
+              "type": "enum",
+              "values": [
+                "admin",
+                "staff"
+              ]
             }
           },
           "updated_at": {
@@ -2966,10 +2979,8 @@
         },
         "required": [],
         "type": "object",
-        "x-workbase-actions": {},
         "x-workbase-display": {
-          "displayField": "name",
-          "labelDependencies": []
+          "displayField": "name"
         },
         "x-workbase-relations": {}
       },
@@ -3085,6 +3096,7 @@
           "name": {
             "type": "string",
             "x-workbase-field": {
+              "required": true,
               "type": "text"
             }
           },
@@ -3106,8 +3118,8 @@
             "x-workbase-field": {
               "entity": "users",
               "readOnly": true,
-              "type": "ref",
-              "userLink": true
+              "required": false,
+              "type": "ref"
             }
           },
           "user_account": {
@@ -3126,36 +3138,8 @@
         },
         "required": [],
         "type": "object",
-        "x-workbase-actions": {
-          "cancel_invite": {
-            "command": "worker/access_cancel_invite",
-            "reasons": [
-              "access.no_invitation"
-            ]
-          },
-          "invite": {
-            "command": "worker/access_invite",
-            "reasons": [
-              "access.already_linked",
-              "access.invitation_pending"
-            ]
-          },
-          "link_account": {
-            "command": "worker/access_link_account",
-            "reasons": [
-              "access.already_linked"
-            ]
-          },
-          "unlink_account": {
-            "command": "worker/access_unlink_account",
-            "reasons": [
-              "access.not_linked"
-            ]
-          }
-        },
         "x-workbase-display": {
-          "displayField": "name",
-          "labelDependencies": []
+          "displayField": "name"
         },
         "x-workbase-relations": {
           "user_account": {
@@ -3940,7 +3924,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/Action_worker_cancel_invite"
+                "$ref": "#/components/schemas/Action_6_worker_13_cancel_invite"
               }
             }
           },
@@ -4036,7 +4020,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/Action_worker_invite"
+                "$ref": "#/components/schemas/Action_6_worker_6_invite"
               }
             }
           },
@@ -4140,7 +4124,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/Action_worker_link_account"
+                "$ref": "#/components/schemas/Action_6_worker_12_link_account"
               }
             }
           },
@@ -4236,7 +4220,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/Action_worker_unlink_account"
+                "$ref": "#/components/schemas/Action_6_worker_14_unlink_account"
               }
             }
           },
@@ -7057,262 +7041,7 @@
   ],
   "x-workbase-config-hash": "614c5e1868698b1dfe50ef6d0a9151b46d9c6eeffdbe82c2d25fcbecf01b0d58",
   "x-workbase-permissions": {
-    "entities": {
-      "_migrations": {
-        "admin": {
-          "create": true,
-          "delete": true,
-          "read": true,
-          "update": true
-        }
-      },
-      "_ops_relay_run": {
-        "admin": {
-          "create": true,
-          "delete": true,
-          "read": true,
-          "update": true
-        }
-      },
-      "_plugin_migrations": {
-        "admin": {
-          "create": true,
-          "delete": true,
-          "read": true,
-          "update": true
-        }
-      },
-      "access_tokens": {
-        "admin": {
-          "create": true,
-          "delete": true,
-          "read": true,
-          "update": true
-        }
-      },
-      "account": {
-        "admin": {
-          "create": true,
-          "delete": true,
-          "read": true,
-          "update": true
-        }
-      },
-      "atomic_assert": {
-        "admin": {
-          "create": true,
-          "delete": true,
-          "read": true,
-          "update": true
-        }
-      },
-      "audit_events": {
-        "admin": {
-          "create": true,
-          "delete": true,
-          "read": true,
-          "update": true
-        }
-      },
-      "audit_outbox": {
-        "admin": {
-          "create": true,
-          "delete": true,
-          "read": true,
-          "update": true
-        }
-      },
-      "d1_migrations": {
-        "admin": {
-          "create": true,
-          "delete": true,
-          "read": true,
-          "update": true
-        }
-      },
-      "email_outbox": {
-        "admin": {
-          "create": true,
-          "delete": true,
-          "read": true,
-          "update": true
-        }
-      },
-      "idempotency_keys": {
-        "admin": {
-          "create": true,
-          "delete": true,
-          "read": true,
-          "update": true
-        }
-      },
-      "identities": {
-        "admin": {
-          "create": true,
-          "delete": true,
-          "read": true,
-          "update": true
-        }
-      },
-      "identity_link_grants": {
-        "admin": {
-          "create": true,
-          "delete": true,
-          "read": true,
-          "update": true
-        }
-      },
-      "identity_profiles": {
-        "admin": {
-          "create": true,
-          "delete": true,
-          "read": true,
-          "update": true
-        }
-      },
-      "instance_meta": {
-        "admin": {
-          "create": true,
-          "delete": true,
-          "read": true,
-          "update": true
-        }
-      },
-      "invitations": {
-        "admin": {
-          "create": true,
-          "delete": true,
-          "read": true,
-          "update": true
-        },
-        "staff": {
-          "create": true
-        }
-      },
-      "memberships": {
-        "admin": {
-          "create": true,
-          "delete": true,
-          "read": true,
-          "update": true
-        }
-      },
-      "organization_scopes": {
-        "admin": {
-          "create": true,
-          "delete": true,
-          "read": true,
-          "update": true
-        }
-      },
-      "organizations": {
-        "admin": {
-          "create": true,
-          "delete": true,
-          "read": true,
-          "update": true
-        }
-      },
-      "rateLimit": {
-        "admin": {
-          "create": true,
-          "delete": true,
-          "read": true,
-          "update": true
-        }
-      },
-      "security_log": {
-        "admin": {
-          "create": true,
-          "delete": true,
-          "read": true,
-          "update": true
-        }
-      },
-      "session": {
-        "admin": {
-          "create": true,
-          "delete": true,
-          "read": true,
-          "update": true
-        }
-      },
-      "sessions": {
-        "admin": {
-          "create": true,
-          "delete": true,
-          "read": true,
-          "update": true
-        }
-      },
-      "user": {
-        "admin": {
-          "create": true,
-          "delete": true,
-          "read": true,
-          "update": true
-        }
-      },
-      "users": {
-        "admin": {
-          "create": true,
-          "delete": true,
-          "read": true,
-          "update": true
-        }
-      },
-      "verification": {
-        "admin": {
-          "create": true,
-          "delete": true,
-          "read": true,
-          "update": true
-        }
-      },
-      "webhook_deliveries": {
-        "admin": {
-          "create": true,
-          "delete": true,
-          "read": true,
-          "update": true
-        }
-      },
-      "worker": {
-        "admin": {
-          "create": true,
-          "delete": true,
-          "read": true,
-          "update": true
-        },
-        "staff": {
-          "read": true
-        }
-      },
-      "workflow_holds": {
-        "admin": {
-          "create": true,
-          "delete": true,
-          "read": true,
-          "update": true
-        }
-      },
-      "workflow_runs": {
-        "admin": {
-          "create": true,
-          "delete": true,
-          "read": true,
-          "update": true
-        }
-      },
-      "workflow_steps": {
-        "admin": {
-          "create": true,
-          "delete": true,
-          "read": true,
-          "update": true
-        }
-      }
-    },
+    "entities": {},
     "resources": {
       "admin": {
         "users": [

@@ -1,7 +1,7 @@
 import { z } from 'zod'
 import type { InstanceConfig } from './config'
 import type { RuntimeOptions } from './types'
-import { fieldsFor, fieldType, operatorsFor } from './query/schema'
+import { fieldsFor, fieldType, operatorsFor } from './query/input-schema'
 import { QUERY_LIMITS } from './query/limits'
 
 // These objects map user-defined names to schemas; their keys are not keywords.
@@ -34,10 +34,27 @@ export function publicQuery(config: InstanceConfig) {
   }
 }
 
-export function publicCommands(config: InstanceConfig, options: RuntimeOptions, input = false) {
+/** Shared anonymous allowlists; preserve /schema insertion order and values. */
+export function publicFields(entity: InstanceConfig['entities'][string]) {
+  return Object.fromEntries(Object.entries(entity.fields).map(([fieldName, field]) => [fieldName, {
+    type: field.type, required: field.required,
+    ...(field.values === undefined ? {} : { values: field.values }),
+    ...(field.entity === undefined ? {} : { entity: field.entity }),
+    ...(field.readOnly === undefined ? {} : { readOnly: field.readOnly }),
+    ...(field.sensitive === undefined ? {} : { sensitive: field.sensitive }),
+    ...(field.ui === undefined ? {} : { ui: field.ui }),
+  }]))
+}
+export function publicPolicies(config: InstanceConfig) {
+  return Object.fromEntries(Object.entries(config.policies).map(([entity, roles]) => [entity, Object.fromEntries(Object.keys(roles).map(role => [role, true]))]))
+}
+export function publicCommandDefinitions(config: InstanceConfig, options: RuntimeOptions) {
   return config.commands.flatMap(name => {
     const command = options.commands?.get(name)
-    return command && !('system' in command.permission) ? [{ name, permission: command.permission, ...(command.ui ? { ui: command.ui } : {}),
-      additionalPermissions: command.additionalPermissions ?? [], inputSchema: sanitizeSchema(z.toJSONSchema(command.input, input ? { io: 'input' } : undefined)) }] : []
+    return command && !('system' in command.permission) ? [{ name, command }] : []
   })
+}
+export function publicCommands(config: InstanceConfig, options: RuntimeOptions, input = false) {
+  return publicCommandDefinitions(config, options).map(({ name, command }) => ({ name, permission: command.permission, ...(command.ui ? { ui: command.ui } : {}),
+    additionalPermissions: command.additionalPermissions ?? [], inputSchema: sanitizeSchema(z.toJSONSchema(command.input, input ? { io: 'input' } : undefined)) }))
 }

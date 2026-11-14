@@ -49,7 +49,7 @@ it('validates 3.1, rejects broken documents, and round-trips exact canonical byt
   expect(text).not.toContain(CORE_VERSION)
   expect(text).not.toMatch(/"servers"|"const"|"examples"|file:line|\/Users\/|"conditional"|"opaqueHooks"|"predicates"/)
   expect(doc['x-workbase-query']).toEqual(publicQuery(fixture().config))
-  expect(doc['x-workbase-permissions'].entities.worker.staff).toEqual({ read: true })
+  expect(doc['x-workbase-permissions'].entities).toEqual(publicSchema(fixture().config, {}).policies)
   expect(Object.keys(doc.paths).sort()).toEqual([
     '/api/users', '/api/users/{id}', '/api/worker', '/api/worker/{id}',
     ...['invite', 'cancel_invite', 'link_account', 'unlink_account'].map(action => `/api/worker/{id}/actions/${action}`),
@@ -85,7 +85,8 @@ it('describes request grammar, disjoint entities, both cursor contracts and muta
   expect(update({ name: 'Jana', version: 1 })).toBe(true)
   expect(update({ name: '' })).toBe(false)
   for (const name of ['invite', 'cancel_invite', 'link_account', 'unlink_account']) {
-    const action = doc.components.schemas[`Action_worker_${name}`]
+    const component = doc.paths[`/api/worker/{id}/actions/${name}`].post.requestBody.content['application/json'].schema.$ref.split('/').at(-1)
+    const action = doc.components.schemas[component]
     expect(action.properties).not.toHaveProperty('id')
     const invalid = new Ajv({ strict: false, validateFormats: false }).compile(action)
     expect(invalid({ id: 'forged' })).toBe(false)
@@ -107,7 +108,7 @@ it('sorts set-like declarations without sorting authored enums and never mutates
 it('canaries every excluded Zod config/entity/field key, environment, effective-policy internals and input defaults', () => {
   const canary = 'synthetic-access-secret-at-least-32'
   const kernel = fixture(), config = cloneInstanceConfig(kernel.config)
-  const allow = ['id', 'revision', 'entities', 'roles', 'permissions', 'commands']
+  const allow = ['id', 'revision', 'entities', 'roles', 'permissions', 'commands', 'policies']
   const checked: string[] = []
   for (const key of Object.keys(instanceConfigSchema.shape)) if (!allow.includes(key)) {
     // The generator is deliberately exercised with poisoned, already-normalized data.
@@ -121,7 +122,7 @@ it('canaries every excluded Zod config/entity/field key, environment, effective-
   }
   // Restore label AST: dependencies are public field names; expression literal values are private.
   delete config.entities.worker.label
-  const publicField = ['type', 'required', 'values', 'entity', 'readOnly', 'userLink', 'computed', 'sensitive', 'min']
+  const publicField = ['type', 'required', 'values', 'entity', 'readOnly', 'sensitive', 'min', 'ui']
   for (const key of Object.keys(fieldSchema.shape)) if (!publicField.includes(key)) {
     ;(config.entities.worker.fields.name as any)[key] = canary
     checked.push(`entities.*.fields.*.${key}`)
