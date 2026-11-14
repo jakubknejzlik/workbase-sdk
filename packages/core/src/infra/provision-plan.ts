@@ -1,4 +1,5 @@
 import type { Input } from '@pulumi/pulumi'
+import { createHash } from 'node:crypto'
 import { readFile, readdir, stat } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import type { SchemaRevision } from '../schema-compatibility'
@@ -118,6 +119,10 @@ export async function createProvisionPlan(options: ProvisionOptions): Promise<Pr
     .filter((value): value is string => typeof value === 'string' && value.length > 0)
   const schema = await provisionConfigSchema(root, configPath, migrationsDir, secrets)
   try {
+    // Older consumers without the artifact retain provisioning; live verification fails closed.
+    let openapi = 'unbuilt'
+    try { openapi = createHash('sha256').update(await readFile(join(dirname(configPath), 'openapi.json'))).digest('hex') }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error }
     const files = await readMigrationFiles(migrationsDir)
     const tools = await packageTools()
     const name = (suffix: string) => resourceName(options.resourcePrefix, options.stage, suffix)
@@ -126,11 +131,11 @@ export async function createProvisionPlan(options: ProvisionOptions): Promise<Pr
       names: { database: name('db'), audit: name('audit'), events: name('events'), deadLetter: name('events-dlq'), worker: name('worker') },
       id: `Workbase${sha256(JSON.stringify([options.resourcePrefix, options.stage])).slice(0, 20)}`,
       schema,
-      environment: { STAGE: options.stage, SCHEMA_EXPECTED: JSON.stringify(schema), AUTH_BASE_URL: options.authBaseUrl,
+      environment: { STAGE: options.stage, SCHEMA_EXPECTED: JSON.stringify(schema), OPENAPI_SHA256: openapi, AUTH_BASE_URL: options.authBaseUrl,
         ...(options.email ? { EMAIL_FROM: options.email.from } : {}),
         ...(options.webhook?.events ? { WEBHOOK_EVENTS: options.webhook.events } : {}),
       },
-      bindingNames: ['DB', 'AUDIT_KV', 'EVENTS_QUEUE', 'BETTER_AUTH_SECRET', 'AUTH_BASE_URL', 'STAGE', 'SCHEMA_EXPECTED',
+      bindingNames: ['DB', 'AUDIT_KV', 'EVENTS_QUEUE', 'BETTER_AUTH_SECRET', 'AUTH_BASE_URL', 'STAGE', 'SCHEMA_EXPECTED', 'OPENAPI_SHA256',
         ...(assetsDir ? ['ASSETS'] : []), ...(options.email ? ['EMAIL', 'EMAIL_FROM'] : []),
         ...(options.webhook ? ['WEBHOOK_URL', 'WEBHOOK_ALLOWED_HOSTS', ...(options.webhook.service ? ['WEBHOOK_SERVICE'] : []), ...(options.webhook.events ? ['WEBHOOK_EVENTS'] : [])] : []),
         ...(options.internalToken ? ['INTERNAL_TOKEN'] : []),

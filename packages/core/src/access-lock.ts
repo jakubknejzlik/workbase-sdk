@@ -11,12 +11,8 @@ export interface AccessLockOptions {
   sources: SourceMap
 }
 export interface AccessLockFiles { json: string; md: string }
-export function canonical(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(canonical)
-  if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value)
-    .sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).map(([key, child]) => [key, canonical(child)]))
-  return value
-}
+import { canonical } from './canonical'
+export { canonical } from './canonical'
 const json = (value: unknown) => JSON.stringify(canonical(value))
 const cell = (value: string) => value.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('|', '&#124;').replaceAll('`', '&#96;').replaceAll('\n', '<br>')
 

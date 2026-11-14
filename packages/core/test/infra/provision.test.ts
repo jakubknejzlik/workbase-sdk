@@ -1,5 +1,5 @@
 import { registerTempDir, cleanupTempDir } from '../../../../scripts/lib/test-temp-dir.mjs'
-import { mkdtemp, mkdir, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { isSecret, output, secret, type Output } from '@pulumi/pulumi'
@@ -26,7 +26,7 @@ beforeEach(async () => {
   await writeFile(join(root, 'worker.ts'), 'export default { fetch() { return new Response("ok") } }\n')
   await writeFile(join(root, 'sql/0001_initial.sql'), 'CREATE TABLE records (id TEXT PRIMARY KEY);\n')
   options = { projectRoot: root, configPath: 'application inputs/config.ts', handler: 'worker.ts', migrationsDir: 'sql',
-    resourcePrefix: 'neutral-app', stage: 'preview', authSecret, authBaseUrl: 'https://neutral.example.test', accountId: 'a'.repeat(32) }
+    resourcePrefix: 'neutral-app', stage: 'preview', authSecret, authBaseUrl: 'https://neutral.example.test', accountId: '0'.repeat(32) }
 })
 afterEach(async () => { records.length = 0; vi.unstubAllGlobals(); vi.unstubAllEnvs(); cleanupTempDir(root) })
 
@@ -278,7 +278,7 @@ it.each([false, true])('binds opsToken as secret_text with legacy binding=%s and
   const tokenOptions = { ...options, opsToken: secret('synthetic-ops-token'),
     ...(legacy ? { internalToken: secret('synthetic-internal-token') } : {}) }
   const plan = await createProvisionPlan(tokenOptions)
-  expect(plan.bindingNames).toEqual(['DB', 'AUDIT_KV', 'EVENTS_QUEUE', 'BETTER_AUTH_SECRET', 'AUTH_BASE_URL', 'STAGE', 'SCHEMA_EXPECTED',
+  expect(plan.bindingNames).toEqual(['DB', 'AUDIT_KV', 'EVENTS_QUEUE', 'BETTER_AUTH_SECRET', 'AUTH_BASE_URL', 'STAGE', 'SCHEMA_EXPECTED', 'OPENAPI_SHA256',
     ...(legacy ? ['INTERNAL_TOKEN'] : []), 'OPS_TOKEN'])
   expect(JSON.stringify(plan)).not.toContain('synthetic-ops-token')
   expect(await createProvisionPlan(tokenOptions)).toEqual(plan)
@@ -300,4 +300,17 @@ it('requires SST only when provisioning, while dry planning works without SST or
   await expect(provision(options)).rejects.toMatchObject({ code: 'provision_requires_sst' })
   expect(records).toEqual([])
   validateProvisionOptions(options)
+})
+
+
+it('hashes the exact artifact beside config independently of bundle contents', async () => {
+  const path = join(root, 'application inputs/openapi.json')
+  const original = '{"openapi":"3.1.0"}\n'
+  await writeFile(path, original)
+  const plan = await createProvisionPlan(options)
+  expect(plan.environment.OPENAPI_SHA256).toBe(sha256(original))
+  await writeFile(path, original + '\n')
+  expect((await createProvisionPlan(options)).environment.OPENAPI_SHA256).toBe(sha256(original + '\n'))
+  await rm(path)
+  expect((await createProvisionPlan(options)).environment.OPENAPI_SHA256).toBe('unbuilt')
 })

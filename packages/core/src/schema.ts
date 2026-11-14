@@ -1,5 +1,6 @@
 import { assertSchemaLockBound } from './schema/revision'
 export { bindSchemaLock } from './schema/revision'
+export { bindOpenApi } from './openapi/routes'
 import { recordActionsSchema, type ActionWhen } from './record-actions-data'
 export { actionReasonKeys } from './record-actions-data'
 import { effectiveSystemGrant } from './access-evaluator'

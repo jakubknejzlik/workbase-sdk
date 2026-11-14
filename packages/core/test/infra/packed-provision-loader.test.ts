@@ -39,6 +39,26 @@ it('regression: packed config and plugin imports load inside an SST bundle with 
     if (!usePreparedConsumerDependencies(consumer, 'loader', archives)) {
       npm(['install', '--ignore-scripts', '--no-audit', '--no-fund', '--registry=https://registry.npmjs.org'], consumer)
     }
+    cpSync(join(root, 'packages/core/test/fixtures/worker-access'), join(consumer, 'openapi-instance'), { recursive: true })
+    writeFileSync(join(consumer, 'openapi-runtime.ts'), `import config from './openapi-instance/config'
+import { createApp } from '@workbasehq/core/app'
+import { openApiRoutes } from '@workbasehq/core/openapi/routes'
+if (typeof openApiRoutes !== 'function') throw Error('missing_openapi_route_export')
+export default createApp(config, { DB: {} } as any)
+`)
+    writeFileSync(join(consumer, 'bundle-openapi.mjs'), `import { build } from 'esbuild'
+await build({ entryPoints: ['openapi-runtime.ts'], outfile: 'openapi-runtime.mjs', bundle: true, platform: 'browser', format: 'esm', external: ['node:*'] })
+`)
+    execFileSync(process.execPath, ['bundle-openapi.mjs'], { cwd: consumer, env, stdio: 'pipe' })
+    writeFileSync(join(consumer, 'verify-openapi.mjs'), `import app from './openapi-runtime.mjs'
+import { readFileSync } from 'node:fs'
+const response = await app.request('http://localhost/openapi.json')
+if (response.status !== 200 || await response.text() !== readFileSync('openapi-instance/openapi.json', 'utf8')) throw Error('packed_openapi_roundtrip_failed')
+console.log('Packed OpenAPI: browser bundle serves exact committed bytes anonymously')
+`)
+    const roundtrip = execFileSync(process.execPath, ['verify-openapi.mjs'], { cwd: consumer, env, encoding: 'utf8', stdio: 'pipe' })
+    expect(roundtrip).toContain('browser bundle serves exact committed bytes anonymously')
+    console.log(roundtrip.trim())
     mkdirSync(join(consumer, 'sql'))
     mkdirSync(join(consumer, 'local-migrations'))
     mkdirSync(join(consumer, '.sst/platform'), { recursive: true })

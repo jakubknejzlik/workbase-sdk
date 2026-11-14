@@ -28,7 +28,7 @@ it('console serves assets, extensionless SPA routes and exact CSP without swallo
   for (const method of ['POST', 'OPTIONS']) {
     expect((await app.request('http://localhost/unknown/path', { method })).status).toBe(404)
   }
-  expect(await (await app.request('http://localhost/build.json')).json()).toEqual({ sha: 'a'.repeat(40), builtAt: '2026-10-24T00:00:00.000Z', revision: sample.revision })
+  expect(await (await app.request('http://localhost/build.json')).json()).toEqual({ sha: 'a'.repeat(40), builtAt: '2026-10-24T00:00:00.000Z', revision: sample.revision, openapi: 'unbuilt' })
 })
 
 const mutationPaths = ['/api/clients', '/commands/jobs/create', '/workflows/test', '/query', '/orgs', '/orgs/org-a/leave', '/invitations/accept', '/auth/link', '/auth/logout', '/auth/revoke-all']
@@ -100,5 +100,5 @@ it('raw local assets supply build identity without SST environment bindings', as
   } } as Fetcher })
   const response = await app.request('http://localhost/build.json', { headers: { Cookie: 'private=credential' } })
   expect(response.headers.get('Cache-Control')).toBe('no-store')
-  expect(await response.json()).toEqual({ sha: 'b'.repeat(40), builtAt: '2026-10-24T00:00:00.000Z', revision: sample.revision })
+  expect(await response.json()).toEqual({ sha: 'b'.repeat(40), builtAt: '2026-10-24T00:00:00.000Z', revision: sample.revision, openapi: 'unbuilt' })
 })
