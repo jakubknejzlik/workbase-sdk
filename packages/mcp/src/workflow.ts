@@ -18,9 +18,11 @@ import { versionHistory } from '@workbasehq/core/migrations/versions'
 import { inspectInstance, isDisplayFieldError } from '@workbasehq/core/config'
 import { parseProposal, proposalRecord, type Proposal, type ConfigChangeProposal, type LegacyConfigProposal } from './proposals.ts'
 import { executeSdkUpgrade, proposeSdkUpgrade, sdkWorkflowError } from './sdk-upgrade.ts'
+import { executeComposition, proposeComposition } from './composition/workflow.ts'
 
 function requireConfigChange(proposal: Proposal): asserts proposal is ConfigChangeProposal {
   if (proposal.kind === 'sdk_upgrade') fail('sdk_upgrade_not_supported', 'SDK-upgrade execution requires an upgrade handler; config-change tools cannot execute this proposal', 409)
+  if (proposal.kind !== 'config_change') fail('composition_not_supported', 'Composition requires its own handler', 409)
 }
 export type ToolResult = Record<string, unknown>
 export function errorResult(error: unknown): ToolResult {
@@ -35,7 +37,7 @@ export class Workflow {
   constructor(public store: Store, private github?: GitHubConfiguration) {}
   async call(name: string, raw: unknown, signal?: AbortSignal): Promise<ToolResult> {
     const callId = crypto.randomUUID()
-    let proposalId: string | undefined = ['propose_change', 'upgrade_sdk'].includes(name) ? crypto.randomUUID() : undefined
+    let proposalId: string | undefined = ['propose_change', 'propose_composition', 'upgrade_sdk'].includes(name) ? crypto.randomUUID() : undefined
     const args = raw && typeof raw === 'object' ? raw as Record<string, unknown> : {}
     let instance = this.store.allowed.values().next().value as string | undefined
     let sdk = name === 'upgrade_sdk' || Object.hasOwn(args, 'proposalId') && ['validate', 'preview_migration', 'apply_to_disposable', 'discard', 'promote', 'submit_change'].includes(name)
@@ -114,6 +116,12 @@ export class Workflow {
       }
       return await this.store.locked(targetInstance, async () => {
         if (name === 'upgrade_sdk') return proposeSdkUpgrade(this.store, targetInstance, input.baseRevision, input.targetVersion, proposalId!)
+        if (name === 'propose_composition') return proposeComposition(this.store, targetInstance, input.baseRevision, input.changes, proposalId!)
+        if (input.proposalId) {
+          const p = parseProposal((await this.store.find(input.proposalId)).proposal)
+          if (p.instance !== targetInstance || p.proposalId !== input.proposalId) fail('invalid_proposal', 'Proposal identity mismatch', 409)
+          if (p.kind === 'composition_change') return executeComposition(this.store, p, name, input, signal)
+        }
         if (name === 'submit_change') {
           const p = parseProposal((await this.store.find(input.proposalId)).proposal)
           if (p.instance !== targetInstance || p.proposalId !== input.proposalId) fail('invalid_proposal', 'Proposal identity mismatch', 409)
