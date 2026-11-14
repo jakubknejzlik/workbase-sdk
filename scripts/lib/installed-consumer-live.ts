@@ -1,19 +1,22 @@
 import assert from 'node:assert/strict'
 import { spawn, execFileSync, type ChildProcess } from 'node:child_process'
 import { once } from 'node:events'
-import { cpSync, existsSync, mkdirSync, readFileSync, realpathSync, readdirSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:net'
 import { platform, release } from 'node:os'
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { chromium, type Browser, type BrowserContext, type Page } from 'playwright'
 import type { Manifest } from '../../packages/plugins/console/ui/src/check'
+import processes from './installed-consumer-processes.cjs'
+import { deferTempDirCleanup } from './test-temp-dir.mjs'
 
 declare const document: { documentElement: { scrollWidth: number } }
 declare const window: { innerWidth: number }
 declare const localStorage: { setItem(key: string, value: string): void }
 const root = resolve(import.meta.dirname, '../..')
 const guard = join(root, 'scripts/lib/installed-consumer-network.cjs')
+const processGuard = join(root, 'scripts/lib/installed-consumer-processes.cjs')
 const json = (file: string) => JSON.parse(readFileSync(file, 'utf8'))
 export type BuildTimings = { npm_install_ms: number; npm_ci_ms: number; typecheck_ms: number; cold_build_ms: number; warm_build_ms: number }
 
@@ -85,20 +88,17 @@ async function settlesWithin(pending: Promise<unknown>, milliseconds: number): P
   finally { clearTimeout(timer) }
 }
 
-async function stop(child: ChildProcess | undefined, processGroup = false) {
+async function stop(child: ChildProcess | undefined) {
   if (!child) return
   const running = () => child.exitCode === null && child.signalCode === null
   const controller = new AbortController()
   const closed = running() ? once(child, 'exit', { signal: controller.signal }) : Promise.resolve()
   const signal = (name: NodeJS.Signals) => {
-    if (processGroup && child.pid) {
-      try { process.kill(-child.pid, name) } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error }
-    } else if (running()) child.kill(name)
+    if (running()) child.kill(name)
   }
   try {
     signal('SIGTERM')
     await settlesWithin(closed, 5000)
-    // Kill remaining descendants even if the group leader already exited.
     signal('SIGKILL')
     await settlesWithin(closed, 1000)
   } finally { controller.abort() }
@@ -107,16 +107,56 @@ async function stop(child: ChildProcess | undefined, processGroup = false) {
 /** Node owns the live phase so its socket guard also covers Wrangler and Playwright. */
 export async function runInstalledConsumerLive(consumer: string, env: NodeJS.ProcessEnv, timings: BuildTimings, archives: string) {
   const started = performance.now()
-  const child = spawn('node', ['--require', guard, '--import', join(root, 'node_modules/tsx/dist/esm/index.mjs'), fileURLToPath(import.meta.url), consumer, JSON.stringify(timings), archives], {
-    cwd: consumer, env: { ...env, NODE_OPTIONS: '--require=' + guard, WRANGLER_SEND_METRICS: 'false', CI: 'true', BROWSER: 'none' }, stdio: 'inherit', detached: true,
+  const directory = mkdtempSync('/tmp/workbase-live-processes-'), registry = join(directory, 'groups')
+  writeFileSync(registry, '', { mode: 0o600 })
+  const releaseDirectories = deferTempDirCleanup()
+  // exit cannot await promises. Run the same bounded group cleanup synchronously
+  // before test-temp-dir's exit listener can remove the consumer directory.
+  const exiting = () => { try { processes.stopGroupsSync(registry) } finally { rmSync(directory, { recursive: true, force: true }) } }
+  process.prependOnceListener('exit', exiting)
+  let interruption: NodeJS.Signals | undefined
+  let cancel!: () => void
+  const canceled = new Promise<void>(resolve => { cancel = resolve })
+  const signals = ['SIGINT', 'SIGTERM', 'SIGHUP'] as const
+  const listeners = signals.map(signal => {
+    const listener = () => { interruption ??= signal; cancel() }
+    process.on(signal, listener)
+    return listener
   })
   const controller = new AbortController()
   let timeout: ReturnType<typeof setTimeout> | undefined
-  const deadline = new Promise<never>((_, reject) => { timeout = setTimeout(() => reject(Error('Installed consumer live timed out after 240000 ms')), 240000) })
+  let child: ChildProcess | undefined
   try {
-    const [code, signal] = await Promise.race([once(child, 'exit', { signal: controller.signal }), deadline])
-    assert.equal(code, 0, `Installed consumer live failed (${signal ?? code})`)
-  } finally { clearTimeout(timeout); controller.abort(); await stop(child, true) }
+    child = spawn('node', ['--require', processGuard, '--require', guard, '--import', join(root, 'node_modules/tsx/dist/esm/index.mjs'), fileURLToPath(import.meta.url), consumer, JSON.stringify(timings), archives], {
+      cwd: consumer, env: { ...env, WORKBASE_LIVE_PROCESS_REGISTRY: registry, NODE_OPTIONS: '--require=' + JSON.stringify(processGuard) + ' --require=' + JSON.stringify(guard), WRANGLER_SEND_METRICS: 'false', CI: 'true', BROWSER: 'none' }, stdio: 'inherit', detached: true,
+    })
+    processes.register(registry, child.pid)
+    const deadline = new Promise<never>((_, reject) => { timeout = setTimeout(() => reject(Error('Installed consumer live timed out after 240000 ms')), 240000) })
+    const result = await Promise.race([once(child, 'exit', { signal: controller.signal }), deadline, canceled])
+    if (result) {
+      const [code, signal] = result
+      assert.equal(code, 0, `Installed consumer live failed (${signal ?? code})`)
+    }
+  } finally {
+    clearTimeout(timeout); controller.abort()
+    try {
+      await processes.stopGroups(registry)
+      // A spawn error has no PID; keep the event wait bounded in that case too.
+      if (child && !child.pid) await stop(child)
+    } finally {
+      process.off('exit', exiting)
+      signals.forEach((signal, index) => process.off(signal, listeners[index]))
+      rmSync(directory, { recursive: true, force: true })
+      releaseDirectories()
+      if (interruption) {
+        // The existing directory helper now cleans and re-raises the signal.
+        // Keep the event loop alive until the re-raised signal is delivered.
+        setInterval(() => {}, 1000)
+        process.kill(process.pid, interruption)
+        await new Promise<never>(() => {})
+      }
+    }
+  }
   console.log(`Installed consumer added live wall time: ${Math.round(performance.now() - started)} ms; extra warm build: ${timings.warm_build_ms} ms`)
 }
 

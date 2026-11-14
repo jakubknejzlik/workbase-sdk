@@ -106,6 +106,31 @@ for (const mode of ['child', 'no-exit']) {
   })
 }
 
+for (const runtime of ['node', 'bun']) {
+  for (const action of ['SIGINT', 'SIGTERM', 'SIGHUP', 'timeout', 'success', 'error', 'exit']) {
+    test(`${runtime} live ${action} reaps every group before removing directories`, () => {
+      const directory = mkdtempSync(join(scratch, 'lifecycle-'))
+      const result = spawnSync('node', [resolve('scripts/test/fixtures/installed-consumer-lifecycle.cjs'), runtime, directory, action, 'tree'], { encoding: 'utf8', timeout: 15000 })
+      expect(result.status, result.stdout + result.stderr).toBe(0)
+      expect(result.stdout).toContain('"survivors":[]')
+    }, 20000)
+  }
+  for (const action of ['SIGINT', 'SIGTERM', 'timeout']) {
+    test(`${runtime} live ${action} reaps unresponsive detached Chromium`, () => {
+      const directory = mkdtempSync(join(scratch, 'chromium-'))
+      const result = spawnSync('node', [resolve('scripts/test/fixtures/installed-consumer-lifecycle.cjs'), runtime, directory, action, 'chromium'], { encoding: 'utf8', timeout: 15000 })
+      expect(result.status, result.stdout + result.stderr).toBe(0)
+      expect(result.stdout).toContain('"survivors":[]')
+    }, 20000)
+  }
+  test(`${runtime} live shutdown reaps groups registered during termination`, () => {
+    const directory = mkdtempSync(join(scratch, 'late-'))
+    const result = spawnSync('node', [resolve('scripts/test/fixtures/installed-consumer-lifecycle.cjs'), runtime, directory, 'timeout', 'late'], { encoding: 'utf8', timeout: 15000 })
+    expect(result.status, result.stdout + result.stderr).toBe(0)
+    expect(result.stdout).toContain('"survivors":[]')
+  }, 20000)
+}
+
 test('smoke status qualifies post-install isolation and routed HTTP browser coverage', () => {
   const source = readFileSync(resolve('scripts/smoke-template.ts'), 'utf8')
   const status = source.split('\n').find(line => line.includes('V3 packed template smoke passed:'))!

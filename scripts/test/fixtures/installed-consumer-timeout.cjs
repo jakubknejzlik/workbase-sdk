@@ -29,6 +29,9 @@ if (mode === 'grandchild') {
     return child
   }
   syncBuiltinESMExports()
+  const processes = require('../../lib/installed-consumer-processes.cjs')
+  const stopGroups = processes.stopGroups
+  processes.stopGroups = file => stopGroups(file, 100, 100)
   global.setTimeout = (fn, ms, ...args) => actualSetTimeout(fn, ms === 240000 ? 300 : [5000, 1000, 10000].includes(ms) ? 100 : ms, ...args)
   ;(async () => {
     const { runInstalledConsumerLive } = await import(pathToFileURL(resolve(__dirname, '../../lib/installed-consumer-live.ts')).href)
