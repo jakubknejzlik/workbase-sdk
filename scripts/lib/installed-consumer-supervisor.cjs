@@ -18,7 +18,13 @@ function sweep() {
   sweeping = true
   publish()
   process.kill(0, 'SIGTERM')
-  setTimeout(() => process.kill(0, 'SIGKILL'), GRACE_MS)
+  setTimeout(() => {
+    // Final stage: publish the marker immediately before the group kill. An
+    // external SIGKILL earlier in the sweep leaves no marker and fails the run.
+    result = { ...result, final: true }
+    publish()
+    process.kill(0, 'SIGKILL')
+  }, GRACE_MS)
 }
 process.stdin.on('end', sweep).on('error', sweep).resume()
 try {

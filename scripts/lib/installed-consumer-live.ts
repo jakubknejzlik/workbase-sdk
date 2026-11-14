@@ -121,6 +121,7 @@ export async function runInstalledConsumerLive(consumer: string, env: NodeJS.Pro
   const controller = new AbortController()
   let timeout: ReturnType<typeof setTimeout> | undefined
   let child: ChildProcess | undefined
+  let unsettled = false
   try {
     child = spawn('node', [supervisor, resultFile, '--require', processGuard, '--require', guard, '--import', join(root, 'node_modules/tsx/dist/esm/index.mjs'), fileURLToPath(import.meta.url), consumer, JSON.stringify(timings), archives], {
       cwd: consumer, env: { ...env, NODE_OPTIONS: '--require=' + JSON.stringify(processGuard) + ' --require=' + JSON.stringify(guard), WRANGLER_SEND_METRICS: 'false', CI: 'true', BROWSER: 'none' }, stdio: ['pipe', 'inherit', 'inherit'], detached: true,
@@ -133,6 +134,9 @@ export async function runInstalledConsumerLive(consumer: string, env: NodeJS.Pro
     if (result && !interruption) {
       assert(existsSync(resultFile), 'Installed consumer live result missing')
       const status = json(resultFile)
+      // Success needs the supervisor's final-stage marker: a supervisor killed
+      // during its sweep window must not authorize a run with live descendants.
+      assert.equal(status.final, true, 'Installed consumer supervisor did not finish teardown')
       assert.equal(status.code, 0, `Installed consumer live failed (${status.error ?? status.signal ?? status.code})`)
     }
   } finally {
@@ -142,7 +146,8 @@ export async function runInstalledConsumerLive(consumer: string, env: NodeJS.Pro
       // owns escalation, including sweeping descendants after a successful run.
       child?.stdin?.destroy()
       if (child?.pid && child.exitCode === null && child.signalCode === null) {
-        await settlesWithin(once(child, 'exit', { signal: controller.signal }), 13000)
+        // Fail closed below: an unsettled supervisor never reports success.
+        unsettled = !await settlesWithin(once(child, 'exit', { signal: controller.signal }), 13000)
       }
     } finally {
       controller.abort()
@@ -161,6 +166,8 @@ export async function runInstalledConsumerLive(consumer: string, env: NodeJS.Pro
       }
     }
   }
+  // Reached only without an earlier error, which keeps the primary failure.
+  if (unsettled) throw Error('Installed consumer supervisor did not exit within 13000 ms')
   console.log(`Installed consumer added live wall time: ${Math.round(performance.now() - started)} ms; extra warm build: ${timings.warm_build_ms} ms`)
 }
 
@@ -236,8 +243,8 @@ export async function open() {
     throw Error('Worker readiness timeout: ' + logs)
   }
   const contexts: BrowserContext[] = [], forbidden: string[] = [], pageErrors: string[] = []
-  let cleaning: Promise<void> | undefined
-  const cleanup = () => cleaning ??= (async () => {
+  let teardown: Promise<void> | undefined
+  const cleanup = () => teardown ??= (async () => {
     const closing = (async () => {
       const results = await Promise.allSettled(contexts.map(context => context.close()))
       results.push(...await Promise.allSettled([browser?.close(), stop(worker), proxy.dispose()]))
