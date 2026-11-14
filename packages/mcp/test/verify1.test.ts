@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { DatabaseSync } from 'node:sqlite'
-import { mkdtemp, mkdir, symlink, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
@@ -13,6 +13,7 @@ import { migrateInstance } from '@workbasehq/core/infra'
 import { MigrationDiagnostic } from '../../core/src/infra/diagnostics'
 import { applyDisposable } from '../src/disposable'
 import { expectedSnapshot, replay, replayBundle, replayEngine } from '../src/offline'
+import * as offline from '../src/offline'
 import { MigrationReplayError, replayError, replayInstance, replayQuery } from '../src/migration-replay'
 import { prepare } from '../src/planning'
 import { Store, configSource } from '../src/storage'
@@ -46,9 +47,16 @@ function assertPrivate(payload: string, results: unknown[]) {
   }
 }
 
-it.each(['validate', 'preview_migration', 'apply_to_disposable', 'promote'])('verify1: %s rejects a target locale rejected by deploy checkSchema', async tool => {
+it.each([
+  { tool: 'validate', format: 'V3' },
+  { tool: 'preview_migration', format: 'V3' },
+  { tool: 'apply_to_disposable', format: 'V3' },
+  { tool: 'promote', format: 'legacy' },
+  { tool: 'promote', format: 'V3' },
+])('verify1: $tool rejects a target locale rejected by deploy checkSchema ($format instance)', async ({ tool, format }) => {
   const root = registerTempDir(await mkdtemp(join(tmpdir(), 'verify1-'))); roots.push(root)
-  const dir = join(root, 'examples/probe'), current = config()
+  const dir = join(root, 'examples/probe'), current = format === 'V3' ? config()
+    : defineInstance({ id: 'replay_fixture', revision: 1, interactive: false, roles: ['owner'], entities: {}, permissions: {} })
   await mkdir(join(dir, 'migrations'), { recursive: true })
   await symlink(resolve('node_modules'), join(root, 'node_modules'))
   await writeFile(join(root, 'package.json'), '{"type":"module"}')
@@ -57,19 +65,40 @@ it.each(['validate', 'preview_migration', 'apply_to_disposable', 'promote'])('ve
   await writeFile(join(dir, 'migrations/0001_r1.sql'), initialSchema(current))
   const store = new Store(root, new Set(['probe'])); await store.init()
   const workflow = new Workflow(store), bundle = await store.load('probe')
+  expect(bundle.config.baseline).toBe(format === 'V3' ? 'workbase-sdk' : undefined)
   const planned = prepare(bundle.config, [], [{ kind: 'set_locale', locale: 'cs' }])
   const migrations = [...bundle.migrations, { name: '0002_r2.sql', sql: planned.sql }]
-  const engine = replayEngine(planned.target, bundle.runtime), db = new DatabaseSync(':memory:')
+  // Legacy Store.load ignores runtime.ts; supply its deploy hook explicitly.
+  const runtime: typeof bundle.config = bundle.runtime ?? { ...bundle.config, plugins: [{ name: 'target_check', version: '1.0.0', checkSchema: async (db, target) => {
+    if ((target as { locale?: string }).locale === 'cs') await db.prepare('SELECT * FROM required_after_change').all()
+  } }] }
+  const engine = replayEngine(planned.target, runtime), db = new DatabaseSync(':memory:')
   let deployError: unknown
   try { deployError = await rejected(() => migrateInstance(replayQuery(db, migrations), migrations.map(m => ({ filename: m.name, sql: m.sql, checksum: createHash('sha256').update(m.sql).digest('hex') })), engine.kernel)) }
   finally { db.close() }
-  const deployCode = (replayError(deployError, engine) as { code: string }).code
+  const deployFailure = replayError(deployError, engine) as MigrationReplayError
+  const deployCode = deployFailure.code
   expect(deployCode).toBe('migration_replay_failed')
+  expect(deployFailure.diagnostic.migration).toBe('target_check/checkSchema')
   const proposal = await workflow.call('propose_change', { instance: 'probe', baseRevision: 1, changes: [{ kind: 'set_locale', locale: 'cs' }] })
-  if (tool === 'apply_to_disposable' || tool === 'promote') await workflow.call('validate', { proposalId: proposal.proposalId })
-  if (tool === 'promote') await workflow.call('apply_to_disposable', { proposalId: proposal.proposalId })
+  expect(proposal).toMatchObject({ ok: true })
+  if (format === 'V3') {
+    if (tool === 'apply_to_disposable' || tool === 'promote') await workflow.call('validate', { proposalId: proposal.proposalId })
+    if (tool === 'promote') await workflow.call('apply_to_disposable', { proposalId: proposal.proposalId })
+  }
+  // Legacy replay does not run plugin hooks. Inject the real deploy checkSchema
+  // failure at its replay boundary to retain promote's public error parity check.
+  const snapshot = format === 'legacy' ? vi.spyOn(offline, 'expectedSnapshot').mockRejectedValue(deployFailure) : undefined
+  const configBefore = await readFile(join(dir, 'config.ts'))
   const result = await workflow.call(tool, { proposalId: proposal.proposalId, ...(tool === 'promote' ? { expectedRevision: 1 } : {}) })
-  expect(result).toMatchObject(tool === 'validate' ? { ok: false, errors: [{ code: deployCode }] } : { ok: false, error: { code: deployCode } })
+  const code = format === 'V3' && tool === 'promote' ? 'v3_promote_unsupported' : deployCode
+  expect(result).toMatchObject(tool === 'validate' ? { ok: false, errors: [{ code }] } : { ok: false, error: { code } })
+  if (snapshot) {
+    expect(snapshot).toHaveBeenCalledOnce()
+    expect(snapshot).toHaveBeenCalledWith(expect.objectContaining({ config: bundle.config }),
+      expect.objectContaining({ target: expect.objectContaining({ locale: 'cs' }) }))
+  }
+  expect(await readFile(join(dir, 'config.ts'))).toEqual(configBefore)
   expect((await store.load('probe')).config.revision).toBe(1)
 })
 
