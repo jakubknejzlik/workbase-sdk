@@ -7,7 +7,7 @@ import { createHash } from 'node:crypto'
 import { cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
-// Only archives enter this non-git consumer. Steps 1–7 keep OS network isolation;
+// Only archives enter this non-git consumer. Post-install commands in steps 1–7 keep OS network isolation;
 // the subsequent live phase permits loopback under a separate JavaScript guard.
 const root = resolve(import.meta.dirname, '..')
 const args = process.argv.slice(2)
@@ -245,7 +245,7 @@ finally { await client.close(); await transport.close() }
 `)
   console.log(run('bun', ['.smoke/data.ts']).trim())
   await runInstalledConsumerLive(consumer, env, timings, directory)
-  console.log(`V3 packed template smoke passed: 9/9 steps; SDK ${versions.mcp}; lock sha256=${lockHash}; steps 1–7 IP network blocked by OS isolation for commands and descendants; JS fetch/http/https/net/tls/dgram guarded; steps 8–9 loopback-only JS guard + browser origin allowlist; no deploy`)
+  console.log(`V3 packed template smoke passed: 9/9 steps; SDK ${versions.mcp}; lock sha256=${lockHash}; steps 1–7 post-install IP network blocked by OS isolation for commands and descendants; bootstrap/install/init/ci are not isolated; JS fetch/http/https/net/tls/dgram guarded; steps 8–9 loopback-only JS guard + browser origin filter for routed HTTP only (WebSockets not covered); native workerd/Chromium networking is outside the JS guard; no deploy`)
 } catch (error) {
   if (error && typeof error === 'object' && 'stderr' in error) console.error(String(error.stderr))
   throw error

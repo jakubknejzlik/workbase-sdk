@@ -7,9 +7,11 @@ const allow = host => {
 }
 const connect = net.Socket.prototype.connect
 net.Socket.prototype.connect = function (...args) {
-  const first = Array.isArray(args[0]) ? args[0][0] : args[0]
-  if (!(typeof first === 'string' || first && typeof first === 'object' && first.path)) {
-    allow(first && typeof first === 'object' ? first.host ?? first.hostname : typeof args[1] === 'string' ? args[1] : undefined)
+  const normalized = Array.isArray(args[0]) ? args[0] : args
+  const first = normalized[0]
+  // Match Node's isPipeName: nonnegative numeric strings select TCP, not IPC.
+  if (!(typeof first === 'string' && !(Number(first) >= 0) || first && typeof first === 'object' && first.path)) {
+    allow(first && typeof first === 'object' ? first.host ?? first.hostname : typeof normalized[1] === 'string' ? normalized[1] : undefined)
   }
   return connect.apply(this, args)
 }

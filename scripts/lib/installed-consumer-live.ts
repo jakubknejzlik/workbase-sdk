@@ -79,23 +79,44 @@ export function assertInstalledArtifacts(consumer: string) {
   return manifest
 }
 
-async function stop(child: ChildProcess | undefined) {
-  if (!child || child.exitCode !== null || child.signalCode !== null) return
-  const closed = once(child, 'exit')
-  child.kill('SIGTERM')
-  const kill = setTimeout(() => child.kill('SIGKILL'), 5000)
-  try { await closed } finally { clearTimeout(kill) }
+async function settlesWithin(pending: Promise<unknown>, milliseconds: number): Promise<boolean> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try { return await Promise.race([pending.then(() => true), new Promise<boolean>(resolve => { timer = setTimeout(() => resolve(false), milliseconds) })]) }
+  finally { clearTimeout(timer) }
+}
+
+async function stop(child: ChildProcess | undefined, processGroup = false) {
+  if (!child) return
+  const running = () => child.exitCode === null && child.signalCode === null
+  const controller = new AbortController()
+  const closed = running() ? once(child, 'exit', { signal: controller.signal }) : Promise.resolve()
+  const signal = (name: NodeJS.Signals) => {
+    if (processGroup && child.pid) {
+      try { process.kill(-child.pid, name) } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error }
+    } else if (running()) child.kill(name)
+  }
+  try {
+    signal('SIGTERM')
+    await settlesWithin(closed, 5000)
+    // Kill remaining descendants even if the group leader already exited.
+    signal('SIGKILL')
+    await settlesWithin(closed, 1000)
+  } finally { controller.abort() }
 }
 
 /** Node owns the live phase so its socket guard also covers Wrangler and Playwright. */
 export async function runInstalledConsumerLive(consumer: string, env: NodeJS.ProcessEnv, timings: BuildTimings, archives: string) {
   const started = performance.now()
   const child = spawn('node', ['--require', guard, '--import', join(root, 'node_modules/tsx/dist/esm/index.mjs'), fileURLToPath(import.meta.url), consumer, JSON.stringify(timings), archives], {
-    cwd: consumer, env: { ...env, NODE_OPTIONS: '--require=' + guard, WRANGLER_SEND_METRICS: 'false', CI: 'true', BROWSER: 'none' }, stdio: 'inherit',
+    cwd: consumer, env: { ...env, NODE_OPTIONS: '--require=' + guard, WRANGLER_SEND_METRICS: 'false', CI: 'true', BROWSER: 'none' }, stdio: 'inherit', detached: true,
   })
-  const timeout = setTimeout(() => child.kill('SIGTERM'), 240000)
-  try { const [code, signal] = await once(child, 'exit'); assert.equal(code, 0, `Installed consumer live failed (${signal ?? code})`) }
-  finally { clearTimeout(timeout); await stop(child) }
+  const controller = new AbortController()
+  let timeout: ReturnType<typeof setTimeout> | undefined
+  const deadline = new Promise<never>((_, reject) => { timeout = setTimeout(() => reject(Error('Installed consumer live timed out after 240000 ms')), 240000) })
+  try {
+    const [code, signal] = await Promise.race([once(child, 'exit', { signal: controller.signal }), deadline])
+    assert.equal(code, 0, `Installed consumer live failed (${signal ?? code})`)
+  } finally { clearTimeout(timeout); controller.abort(); await stop(child, true) }
   console.log(`Installed consumer added live wall time: ${Math.round(performance.now() - started)} ms; extra warm build: ${timings.warm_build_ms} ms`)
 }
 
@@ -173,10 +194,13 @@ export async function open() {
   const contexts: BrowserContext[] = [], forbidden: string[] = [], pageErrors: string[] = []
   let cleaning: Promise<void> | undefined
   const cleanup = () => cleaning ??= (async () => {
-    const results = await Promise.allSettled(contexts.map(context => context.close()))
-    results.push(...await Promise.allSettled([browser?.close(), stop(worker), proxy.dispose()]))
-    const failures = results.filter(result => result.status === 'rejected')
-    assert.equal(failures.length, 0, 'Live process cleanup failed')
+    const closing = (async () => {
+      const results = await Promise.allSettled(contexts.map(context => context.close()))
+      results.push(...await Promise.allSettled([browser?.close(), stop(worker), proxy.dispose()]))
+      const failures = results.filter(result => result.status === 'rejected')
+      assert.equal(failures.length, 0, 'Live process cleanup failed')
+    })()
+    assert(await settlesWithin(closing, 10000), 'Live process cleanup timed out')
   })()
   const interrupted = () => { void cleanup().finally(() => process.exit(143)) }
   process.once('SIGTERM', interrupted); process.once('SIGINT', interrupted)
@@ -230,6 +254,7 @@ export async function open() {
     const stale = row.version
     row = await (await call(admin, rowPath, 'PATCH', { name: 'Persistent renamed' }, orgA.id, { 'If-Match': `"${row.version}"` })).json()
     assert.equal(row.note, 'Keep this')
+    assert.equal((await (await call(admin, rowPath, 'GET', undefined, orgA.id)).json()).note, 'Keep this', 'Omitted PATCH must retain the stored note')
     row = await (await call(admin, rowPath, 'PATCH', { note: null }, orgA.id, { 'If-Match': `"${row.version}"` })).json()
     assert.equal(row.note, null)
     assert.equal((await (await call(admin, rowPath, 'GET', undefined, orgA.id)).json()).note, null)
