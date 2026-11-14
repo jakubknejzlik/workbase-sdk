@@ -13,6 +13,7 @@ guide. Start with the
 [console guide](docs/sdk/generic-console.md), and the
 [release guide](docs/sdk/release.md).
 See [row policies](docs/sdk/policies.md) for actor-based access rules.
+See [MCP composition](docs/sdk/mcp-composition.md) for built-in V3 runtime authoring.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for local checks and
 [SECURITY.md](SECURITY.md) for private vulnerability reporting.

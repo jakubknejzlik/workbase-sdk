@@ -14,7 +14,7 @@ import { noLink } from './storage.ts'
 // Trusted operator setting, never accepted through MCP tool arguments.
 export const stateRoot = process.env.WORKBASE_MCP_STATE_ROOT ?? '/tmp/codex/mcp-state'
 export type Verification = { verified: boolean; diffs: unknown[]; directory?: string }
-export type Prepared = { target: Bundle['config']; indexes: Index[]; sql: string }
+export type Prepared = { target: Bundle['config']; indexes: Index[]; sql: string; composition?: boolean }
 const require = createRequire(import.meta.url)
 const wrangler = () => join(dirname(require.resolve('wrangler/package.json')), 'bin', 'wrangler.js')
 async function migrate(config: string, persistence: string, cwd: string, entities: readonly string[], signal?: AbortSignal) {
@@ -91,7 +91,7 @@ export async function applyDisposable(bundle: Bundle, prepared: Prepared, expect
       // Capture actual engine SQL, including baseline/domain receipts, then let
       // Wrangler execute those exact bytes in the disposable D1.
       const db = new DatabaseSync(':memory:'), statements: { sql: string; name: string }[] = []
-      try { await replayInstance(db, [...bundle.migrations, proposal], replayEngine(prepared.target, bundle.runtime), {
+      try { await replayInstance(db, prepared.composition ? bundle.migrations : [...bundle.migrations, proposal], replayEngine(prepared.target, bundle.runtime), {
         mode: 'synthetic', record: (sql, context) => statements.push({ sql, name: (context?.migration ?? 'ledger').replace(/[^a-z0-9_]/gi, '_') }),
       }) }
       finally { db.close() }

@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { changeSchema, exactVersion, fail } from './schemas.ts'
+import { changeSchema, compositionChangeSchema, exactVersion, fail } from './schemas.ts'
 import { migrationPreviewSchema, promotedFilesSchema } from './submit-change.ts'
 import { digestBytes, inputHashesSchema, inputPath, resultSchema, sha256Schema } from './sdk-upgrade-protocol.ts'
 import { sdkNames } from './sdk-registry.ts'
@@ -18,6 +18,13 @@ const legacyConfigSchema = z.strictObject({
   promotedRevision: z.number().int().optional(), migration: z.string().optional(),
 })
 const configChangeSchema = legacyConfigSchema.extend({ kind: z.literal('config_change') })
+const compositionProposalSchema = z.strictObject({
+  ...envelope, kind: z.literal('composition_change'),
+  status: z.enum(['proposed', 'validated', 'verified', 'promoted', 'discarded']),
+  changes: z.array(compositionChangeSchema).min(1).max(50),
+  validation: proofSchema.optional(), verification: proofSchema.optional(),
+  promotedFiles: promotedFilesSchema.optional(),
+})
 const digest = z.string().regex(/^[a-f0-9]{64}$/).refine(value => !/\s/.test(value))
 const packageName = z.enum(['@workbasehq/core', '@workbasehq/plugins', '@workbasehq/mcp'])
 const artifact = z.strictObject({
@@ -80,7 +87,8 @@ const sdkUpgradeSchema = z.strictObject({
       || Object.entries(expected).some(([path, digest]) => actual[path] !== digest)) reject()
   }
 })
-export const proposalSchema = z.discriminatedUnion('kind', [configChangeSchema, sdkUpgradeSchema])
+export const proposalSchema = z.discriminatedUnion('kind', [configChangeSchema, sdkUpgradeSchema, compositionProposalSchema])
+export type CompositionProposal = z.infer<typeof compositionProposalSchema>
 export type ConfigChangeProposal = z.infer<typeof configChangeSchema>
 export type SdkUpgradeProposal = z.infer<typeof sdkUpgradeSchema>
 export type Proposal = z.infer<typeof proposalSchema>

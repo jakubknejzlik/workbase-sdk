@@ -3,6 +3,8 @@ import { acquireInstanceLock } from './instance-lock.ts'
 import { devFixtures } from './dev-support.ts'
 import { noLink } from './paths.ts'
 import { replaySources } from './replay-sources.ts'
+import { parseRuntimeSource } from './composition/runtime-source.ts'
+import { hydrateRuntimePlugins } from './composition/registry.ts'
 import { constants } from 'node:fs'
 import { open, lstat, mkdir, readFile, readdir, realpath, rename, rm, writeFile, link, unlink } from 'node:fs/promises'
 import { resolve, join, dirname } from 'node:path'
@@ -15,7 +17,7 @@ import { hash } from './planning.ts'
 import { WorkflowError, fail, identifier, instanceSelector, type Index } from './schemas.ts'
 
 export type Migration = { name: string; sql: string }
-export type Bundle = { config: InstanceConfig; runtime?: InstanceConfig; migrations: Migration[]; indexes: Index[]; fingerprint: string; dependencyDigest?: string; sdkVersion?: string; guards: Record<string, string | null> }
+export type Bundle = { config: InstanceConfig; runtime?: InstanceConfig; runtimeSource?: string; migrations: Migration[]; indexes: Index[]; fingerprint: string; dependencyDigest?: string; sdkVersion?: string; guards: Record<string, string | null> }
 export const json = (value: unknown) => JSON.stringify(value, null, 2) + '\n'
 export const configSource = (config: InstanceConfig, options: { history?: boolean } = {}) => {
   const { plugins, ...data } = serializableInstanceConfig(config)
@@ -134,7 +136,7 @@ async function dependencyHash(path: string) {
   const bytes = await fileBytes(path)
   return bytes === null ? null : byteHash(bytes)
 }
-const transactionPath = z.string().regex(/^(package\.json|bun\.lock|config(?:\.v[1-9][0-9]*)?\.ts|config\.(?:indexes|versions)\.json|migrations\/\d{4}_[a-z0-9_]+\.sql|proposals\/[a-f0-9-]+\.json)$/)
+const transactionPath = z.string().regex(/^(runtime\.ts|package\.json|bun\.lock|config(?:\.v[1-9][0-9]*)?\.ts|config\.(?:indexes|versions)\.json|migrations\/\d{4}_[a-z0-9_]+\.sql|proposals\/[a-f0-9-]+\.json)$/)
 const digest = z.string().regex(/^[a-f0-9]{64}$/)
 const base64 = z.string().refine(value => Buffer.from(value, 'base64').toString('base64') === value)
 const identityPart = z.union([z.string().regex(/^(0|[1-9][0-9]*)$/), z.number().int().nonnegative().transform(String)])
@@ -445,15 +447,20 @@ export class Store {
     if (!this.owns(dir)) return this.withLock(dir, () => this.dependencyDigest(instance))
     return this.standalone ? (await dependencySnapshot(await this.directory(instance))).digest : undefined
   }
-  async load(instance: string): Promise<Bundle> {
+  async load(instance: string, options: { canonicalRuntime?: boolean } = {}): Promise<Bundle> {
     const dir = await this.directory(instance)
-    if (!this.owns(dir)) return this.withLock(dir, () => this.load(instance))
+    if (!this.owns(dir)) return this.withLock(dir, () => this.load(instance, options))
     const dependencies = this.standalone ? await dependencySnapshot(dir) : undefined
     const names = (await readdir(dir)).filter(n => /^config(?:\.[a-z0-9_-]+)?\.(ts|json)$/.test(n)).sort()
     const sources: Record<string, string> = {}
     for (const name of names) { await noLink(join(dir, name)); sources[name] = await readFile(join(dir, name), 'utf8') }
     // Hash the complete tracked graph before evaluating either entrypoint.
     const inputs = await replaySources(dir)
+    const runtimeSource = inputs['runtime.ts']?.toString('utf8')
+    if (options.canonicalRuntime && runtimeSource === undefined) fail('runtime_not_canonical', 'runtime.ts is required for composition changes')
+    // Interpret before any runtime import; custom expressions must never execute
+    // merely because a caller tried to compose built-ins.
+    const model = options.canonicalRuntime ? parseRuntimeSource(runtimeSource!) : undefined
     const sourceHash = hash(sources)
     const cached = this.configCache.get(instance)
     const graph = { ...sources, ...Object.fromEntries(Object.entries(inputs).map(([path, bytes]) => [path, bytes.toString('utf8')])) }
@@ -467,11 +474,12 @@ export class Store {
       if (inputs['runtime.ts']) {
         // The config import already invalidated the graph. Preserve that same
         // graph when loading runtime, including its import of config.ts.
-        runtime = fresh ? await importConfig(join(dir, 'runtime.ts'), runtimeHash, paths, false) : cached.runtime
+        runtime = model ? { ...config, ...(model.interactive === undefined ? {} : { interactive: model.interactive }), plugins: hydrateRuntimePlugins(model, config) }
+          : fresh ? await importConfig(join(dir, 'runtime.ts'), runtimeHash, paths, false) : cached.runtime
         if (runtime?.id !== config.id || runtime.revision !== config.revision) fail('revision_mismatch', 'runtime.ts and config.ts disagree', 409)
       }
     }
-    this.configCache.set(instance, { sourceHash, config, runtimeHash, runtime, paths: inputs })
+    if (!options.canonicalRuntime) this.configCache.set(instance, { sourceHash, config, runtimeHash, runtime, paths: inputs })
     const migrationNames = (await readdir(join(dir, 'migrations'))).filter(name => name !== '.gitkeep').sort()
     if (migrationNames.some(n => !/^\d{4}_[a-z0-9_]+\.sql$/.test(n))) fail('invalid_migrations', 'Unexpected migration filename')
     const migrations: Migration[] = []
@@ -484,7 +492,7 @@ export class Store {
     ])
     const sdkVersion = dependencies?.guards['package.json'] && config.baseline === 'workbase-sdk'
       ? JSON.parse(await readFile(join(dir, 'package.json'), 'utf8')).dependencies?.['@workbasehq/core'] : undefined
-    return { config, ...(runtime ? { runtime } : {}), indexes, migrations, ...(typeof sdkVersion === 'string' ? { sdkVersion } : {}), ...(dependencies ? { dependencyDigest: dependencies.digest } : {}),
+    return { config, ...(runtime ? { runtime } : {}), ...(options.canonicalRuntime ? { runtimeSource } : {}), indexes, migrations, ...(typeof sdkVersion === 'string' ? { sdkVersion } : {}), ...(dependencies ? { dependencyDigest: dependencies.digest } : {}),
       fingerprint: hash({ sources, config, migrations, indexes, ...(dependencies ? { dependencyDigest: dependencies.digest } : {}) }), guards }
   }
   async find(id: string) {
@@ -848,6 +856,9 @@ export class Store {
     const check = async (temporary?: string, publishing?: string) => {
       const paths = new Set([
         ...Object.keys(expected),
+        // Composition publication must also reject newly added authored graph
+        // inputs, as well as edits/deletions of the originally guarded paths.
+        ...(Object.hasOwn(guards, 'runtime.ts') ? Object.keys(await replaySources(dir)) : []),
         ...(await readdir(dir)).filter(n => /^config(?:\.[a-z0-9_-]+)?\.(ts|json)$/.test(n)),
         ...(await readdir(join(dir, 'migrations'))).filter(n => n !== '.gitkeep').map(n => `migrations/${n}`),
       ])
