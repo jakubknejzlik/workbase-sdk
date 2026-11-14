@@ -1,6 +1,7 @@
 import { authorizeOperation } from './authorization'
 import { organizationPermission } from './execution/permissions'
 import { ApiError } from './errors'
+import { RuleFailed } from './execution/errors'
 import { sha256 } from './crypto'
 import { accountProvisioning } from './account-provisioning'
 import { validateRole } from './organization-permissions'
@@ -101,6 +102,8 @@ export async function provisionOrganization(config: InstanceConfig, env: Runtime
     if (!await verifiedOwner()) return signInRequired
     // A concurrent assignment must preserve the same single-account conflict as the preflight.
     await accountProvisioning(env, config, owner, id, role, new Date().toISOString())
+    // Rule diagnostics are internal; the public contract is a fixed conflict.
+    if (error instanceof RuleFailed) throw new ApiError(409, 'organization_conflict')
     throw error
   }
   return { status: 201 as const, body }

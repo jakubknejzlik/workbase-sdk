@@ -169,6 +169,7 @@ it('rolls back organization and account provisioning if owner membership inserti
   const before = await counts()
   const response = await provision()
   expect(response.status).toBe(409)
+  expect(await response.json()).toEqual({ error: 'organization_conflict' })
   expect(await counts()).toEqual(before)
 })
 
