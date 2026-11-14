@@ -71,6 +71,37 @@ local Worker runners. A local sidecar needs the same persisted D1 database as th
 application plus `STAGE=dev` or `test` and `DEV_MAILBOX_TOKEN`. Keep that entry and
 its runner configuration separate from your application entry.
 
+## Operator onboarding with MCP
+
+Run the separate `workbase ops` stdio server with operator-set environment:
+
+```sh
+export WORKBASE_BASE_URL="$APP_URL"
+export WORKBASE_OPS_TOKEN="$OPS_TOKEN"
+# Optional: the sidecar URL and dedicated secret from Provisioning above.
+export WORKBASE_DEV_MAILBOX_URL="$MAILBOX_URL"
+export WORKBASE_DEV_MAILBOX_TOKEN="$DEV_MAILBOX_TOKEN"
+workbase ops
+```
+
+URLs and secrets are environment-only; HTTPS is required except for loopback HTTP.
+No data token or organization ID is needed. Omit both mailbox variables to expose
+only `provision_organization({ name, ownerEmail })`. Setting both also lists
+`read_dev_mail({ recipient, limit? })`, which uses the exact
+[sidecar message contract](#reading-messages) above: limit defaults to 20, maximum
+50, and the result is `{ ok: true, data: { messages: [...] } }`. The server neither
+filters expired messages nor extracts links from their bodies.
+
+Follow the [first-user flow](#first-verified-user-and-organization) below: request
+normal sign-in mail, read it with `read_dev_mail`, open the link and complete the
+profile, then call `provision_organization` for that verified email. Production
+onboarding uses real mail and the same provisioning tool without mailbox config.
+Errors are fixed `{ ok: false, code, status }` results; unknown/unverified owners
+receive `owner_sign_in_required` (409). Both configured tokens are redacted from
+tool output. Mail bodies intentionally contain sign-in/invitation credentials;
+the ops server writes no stderr output or log file. Invalid configuration exits
+with status 1. The tenant data server continues to strip invitation `accept_url`.
+
 ## First verified user and organization
 
 Set `APP_URL` to the application's configured auth origin, `MAILBOX_URL` to the

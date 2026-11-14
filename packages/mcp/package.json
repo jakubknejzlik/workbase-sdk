@@ -30,7 +30,8 @@
   "exports": {
     ".": "./src/server.ts",
     "./stdio": "./src/stdio.ts",
-    "./data": "./src/data/index.ts"
+    "./data": "./src/data/index.ts",
+    "./ops": "./src/ops/server.ts"
   },
   "publishConfig": {
     "access": "public"
@@ -40,7 +41,7 @@
     "workbase": "src/bin.ts"
   },
   "license": "Apache-2.0",
-  "description": "Configuration and data Model Context Protocol servers for Workbase applications.",
+  "description": "Configuration, data and operator Model Context Protocol servers for Workbase applications.",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/jakubknejzlik/workbase-sdk.git",

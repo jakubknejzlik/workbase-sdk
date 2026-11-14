@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Add the separate `workbase ops` MCP server for operator-provisioned organizations
+  and optional development mailbox reads using the s2 sidecar. Environment-only
+  credentials, loopback-only HTTP, fixed errors and token redaction keep operator
+  access separate from tenant data tools. See [operator onboarding](docs/sdk/dev-mailbox.md#operator-onboarding-with-mcp). (#43 s3)
 - Add an opt-in development mailbox sidecar Worker for the exact `dev`/`test`
   stages, with a dedicated secret and bounded, read-only recipient lookup.
   Production provisioning rejects the option and application bundles exclude the
