@@ -213,8 +213,12 @@ export function configSources(file: string): SourceMap {
   const source = readSource(entry)
   const sources: SourceMap = { '': location(source) }
   let declaration = exported(source, 'default')
-  if (declaration && ts.isCallExpression(declaration) && ts.isIdentifier(declaration.expression)
-    && sdkBinding(imports(source).get(declaration.expression.text), entry, 'bindSchemaLock')) declaration = declaration.arguments[0]
+  const bindings = imports(source)
+  while (declaration && ts.isCallExpression(declaration) && ts.isIdentifier(declaration.expression)) {
+    const binding = bindings.get(declaration.expression.text)
+    if (!['bindOpenApi', 'bindSchemaLock'].some(name => sdkBinding(binding, entry, name))) break
+    declaration = declaration.arguments[0]
+  }
   if (!declaration || !ts.isCallExpression(declaration) || !declaration.arguments[0]) return sources
   // Code registrations may contain methods, calls and spreads. Index their
   // enclosing declarations without applying the data-only literal validator.
@@ -233,7 +237,6 @@ export function configSources(file: string): SourceMap {
   const arg = unwrap(declaration.arguments[0])
   record(arg, '')
   if (!ts.isObjectLiteralExpression(arg)) return sources
-  const bindings = imports(source)
   const props = new Map(members(arg).map(property => [key(property.name), property]))
   const refs: [string, ts.Expression | undefined][] = [['access', value(props.get('access'))]]
   const entities = value(props.get('entities'))
@@ -271,6 +274,15 @@ export async function loadConfig(file: string): Promise<{ config: InstanceConfig
   const bindings = imports(source)
   const exportedConfig = exported(source, 'default')
   let declaration = exportedConfig
+  let specImport: string | undefined
+  if (declaration && ts.isCallExpression(declaration) && ts.isIdentifier(declaration.expression)
+    && sdkBinding(bindings.get(declaration.expression.text), entry, 'bindOpenApi')) {
+    const [inner, spec] = declaration.arguments
+    const binding = spec && ts.isIdentifier(spec) ? bindings.get(spec.text) : undefined
+    if (declaration.arguments.length !== 2 || !inner || binding?.module !== './openapi.json' || binding.imported !== 'default') fail(declaration, 'bindOpenApi requires a config and an imported ./openapi.json')
+    specImport = (spec as ts.Identifier).text
+    declaration = unwrap(inner)
+  }
   let lockImport: string | undefined
   if (declaration && ts.isCallExpression(declaration) && ts.isIdentifier(declaration.expression)
     && sdkBinding(bindings.get(declaration.expression.text), entry, 'bindSchemaLock')) {
@@ -301,7 +313,10 @@ export async function loadConfig(file: string): Promise<{ config: InstanceConfig
     entityImports.add(accessRef.text)
   }
   if (lockImport) entityImports.add(lockImport)
-  moduleBoundary(source, exportedConfig!, ['defineConfig', 'bindSchemaLock'], entityImports)
+  if (specImport) entityImports.add(specImport)
+  // The generated spec is never read here: missing/stale artifacts must remain repairable,
+  // and hashing the artifact would make its embedded configHash self-referential.
+  moduleBoundary(source, exportedConfig!, ['defineConfig', 'bindSchemaLock', 'bindOpenApi'], entityImports)
   const data: Record<string, unknown> = Object.create(null)
   for (const [name, property] of props) if (name !== 'entities' && name !== 'access') data[name] = literal(value(property)!, new Map())
   if (accessRef && ts.isIdentifier(accessRef)) {

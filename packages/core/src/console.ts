@@ -14,10 +14,10 @@ export async function buildInfo(config: Pick<InstanceConfig, 'revision'>, env: R
       }
     }
   }
-  return { sha: sha ?? 'unbuilt', builtAt: builtAt ?? 'unbuilt', revision: config.revision }
+  return { sha: sha ?? 'unbuilt', builtAt: builtAt ?? 'unbuilt', revision: config.revision, openapi: env.OPENAPI_SHA256 ?? 'unbuilt' }
 }
 function isConsolePath(path: string) {
-  return !(/^\/(api|auth|mcp|internal|ops|admin|commands|workflows|query|orgs|invitations|audit|me|health|schema|console-info|bootstrap|build\.json)(\/|$)/.test(path)
+  return !(/^\/(api|auth|mcp|internal|ops|admin|commands|workflows|query|orgs|invitations|audit|me|health|schema|console-info|bootstrap|build\.json|openapi\.json)(\/|$)/.test(path)
     || /^\/o\/[^/]+\/(bootstrap|capabilities|console-model|console-registry|console-pages|config-versions)(\/|$)/.test(path))
 }
 

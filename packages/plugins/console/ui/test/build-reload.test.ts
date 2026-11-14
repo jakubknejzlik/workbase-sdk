@@ -3,7 +3,7 @@ import { watchBuild } from '../src/build-reload'
 const bundle = 'a'.repeat(40), server = 'b'.repeat(40)
 function setup(sha = server, dirty = false, storage = new Map<string, string>()) {
   const listeners = new Set<() => void>(), reload = vi.fn()
-  const fetch = vi.fn(async () => Response.json({ sha }))
+  const fetch = vi.fn(async () => Response.json({ sha, openapi: '0'.repeat(64) }))
   const options = { sha: bundle, fetch, dirty: () => dirty, storage: { getItem: (key: string) => storage.get(key) ?? null, setItem: (key: string, value: string) => { storage.set(key, value) } },
     document: { visibilityState: 'visible', addEventListener: (_event: string, listener: () => void) => { listeners.add(listener) }, removeEventListener: (_event: string, listener: () => void) => { listeners.delete(listener) } }, reload }
   return { options, listeners, reload, storage, fetch, setDirty: (value: boolean) => { dirty = value } }

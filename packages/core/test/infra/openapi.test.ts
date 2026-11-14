@@ -163,7 +163,7 @@ it('CLI detects missing, stale and edited-field drift; check never writes; --wri
     expect(await runOpenApiCli(args)).toBe(1)
     expect(await runOpenApiCli([...args, '--write'])).toBe(0)
     expect(await runOpenApiCli(args)).toBe(0)
-    await expect(runOpenApiCli(['--live', 'https://example.test'])).rejects.toThrow('Usage')
+    await expect(runOpenApiCli(['--live', 'https://example.test', '--write'])).rejects.toThrow('Usage')
   } finally { await rm(temp, { recursive: true, force: true }); await rm(directory, { recursive: true, force: true }) }
 })
 it('the literal loader fixture has the same worker/account public schema and policy as the runtime fixture', async () => {

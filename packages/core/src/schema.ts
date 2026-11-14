@@ -1,5 +1,6 @@
 import { assertSchemaLockBound } from './schema/revision'
 export { bindSchemaLock } from './schema/revision'
+export { bindOpenApi } from './openapi/routes'
 import { recordActionsSchema, type ActionWhen } from './record-actions-data'
 export { actionReasonKeys } from './record-actions-data'
 import { effectiveSystemGrant } from './access-evaluator'
@@ -98,6 +99,8 @@ export function defineConfig(input: ConfigInput): SchemaConfig {
   if ('account' in input || 'enumLabels' in input) throw new DeclarationError([], 'Account ownership and labels are SDK/dictionary concerns')
   // effectiveAccess is compiler output only; an authored literal would bypass compileAccess.
   if ('effectiveAccess' in input) throw new DeclarationError(['effectiveAccess'], 'effectiveAccess is compiled from access.ts and entity access; it cannot be authored')
+  // openapi is generated output bound by bindOpenApi(config, ./openapi.json); an authored literal would desync served bytes from the committed hash.
+  if ('openapi' in input) throw new DeclarationError(['openapi'], 'openapi is generated into openapi.json and bound with bindOpenApi; it cannot be authored')
   const domain: InstanceInput['entities'] = {}
   for (const [name, entity] of Object.entries(input.entities)) {
     if (name === 'users') throw new DeclarationError(['entities', name], 'users is SDK-owned; use accountLink()')

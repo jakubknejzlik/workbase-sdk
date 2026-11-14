@@ -126,7 +126,7 @@ const schema = z.object({
 /** Shared schema for source-derived audits and property checks. */
 export const instanceConfigSchema = schema
 export type Field = z.infer<typeof fieldSchema>
-export type InstanceConfig = z.infer<typeof schema> & { effectiveAccess?: import('./access').EffectiveAccessPolicy }
+export type InstanceConfig = z.infer<typeof schema> & { effectiveAccess?: import('./access').EffectiveAccessPolicy; openapi?: Record<string, unknown> }
 export type InstanceInput = z.input<typeof schema>
 export type Operation = 'read' | 'create' | 'update' | 'delete'
 export const reservedEntities = new Set(['users', 'organizations', 'memberships', 'sessions', 'invitations', 'email_outbox', 'audit_outbox', 'security_log', 'idempotency_keys', 'instance_meta', 'webhook_deliveries', 'audit_events', 'd1_migrations', 'identities', 'access_tokens', 'user', 'session', 'account', 'verification', 'rateLimit', 'identity_link_grants', '_plugin_migrations'])
@@ -169,6 +169,12 @@ export function normalizeInstance(input: InstanceDefinitionInput, exactRoles = f
   const config = validator.parse({ ...data, roles,
     ...(Object.hasOwn(input, 'baseline') ? { baseline: (input as InstanceInput).baseline } : {}),
   }) as InstanceConfig
+  // Generated spec data survives normalization, copies and serialized configs.
+  // Only SDK-era configs carry a bound spec (bindOpenApi requires the baseline); legacy inputs cannot author one.
+  if ('openapi' in input) {
+    if (config.baseline !== 'workbase-sdk') throw new Error('openapi is generated into openapi.json and bound with bindOpenApi; legacy configs cannot carry it')
+    config.openapi = (input as InstanceConfig).openapi
+  }
   // Re-normalizing an executable config retains its already-compiled access policy.
   if ('effectiveAccess' in input) config.effectiveAccess = (input as InstanceConfig).effectiveAccess
   for (const name of Object.keys(config.pluginConfig ?? {})) {
