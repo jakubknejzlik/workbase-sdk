@@ -85,4 +85,5 @@ if [[ "$pack_only" == false ]]; then
     bun x --no-install vitest run --config packages/plugins/console/ui/test/browser/vitest.config.ts
   )
   bun "$root/scripts/sdk-smoke.ts"
+  bun "$root/scripts/smoke-template.ts"
 fi

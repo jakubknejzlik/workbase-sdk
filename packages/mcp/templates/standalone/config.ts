@@ -1,21 +1,12 @@
-import { defineInstance } from '@workbasehq/core/config'
-import { createIdentity } from '@workbasehq/plugins/identity'
-import { createMembers } from '@workbasehq/plugins/members'
-import { createOrganizations } from '@workbasehq/plugins/organizations'
-import { permissions } from '@workbasehq/plugins/permissions'
-import { createLocalAuth } from '@workbasehq/plugins/local-auth'
-import { machineCredentials } from '@workbasehq/plugins/machine-credentials'
-import { mailOutbox } from '@workbasehq/plugins/mail-outbox'
-import { audit } from '@workbasehq/plugins/audit'
-import { consoleUI } from '@workbasehq/plugins/console'
+import { defineConfig, bindSchemaLock } from '@workbasehq/core/schema'
+import worker from './schema/worker'
+import access from './access'
+import lock from './schema.lock.json'
 
-export default defineInstance({
-  id: '{{INSTANCE_ID}}', displayName: '{{INSTANCE_ID}}', revision: 1,
-  registration: 'open', interactive: true,
-  plugins: [createIdentity(), permissions({ roles: ['owner', 'viewer'], ownerRole: 'owner' }),
-    createMembers(), createOrganizations({ allowCreate: true }), createLocalAuth({ methods: ['magic-link'] }),
-    machineCredentials(), mailOutbox(), audit(), consoleUI()],
-  entities: {},
-  permissions: {},
-  policies: {},
-})
+export default bindSchemaLock(defineConfig({
+  id: '{{INSTANCE_ID}}', displayName: '{{INSTANCE_ID}}',
+  // The literal model is loadable before executable login plugins are composed.
+  interactive: false, registration: 'open', languages: ['en'],
+  roles: ['admin', 'staff'], organizationOwnerRole: 'admin',
+  entities: { worker }, access,
+}), lock)
