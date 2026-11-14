@@ -98,6 +98,16 @@ it('rejects competing access module candidates using the entity resolver', async
   writeFileSync(join(root, 'access.js'), 'export default {}')
   await expect(load()).rejects.toThrow(/config.ts:\d+:\d+:.*Ambiguous/)
 })
+it('rejects an authored openapi literal instead of serving it unbound (PR #33 review1)', async () => {
+  const { defineConfig } = await import('../../src/schema')
+  const spec = { openapi: '3.1.0', info: { version: 'r1' }, 'x-workbase-revision': 1, 'x-workbase-config-hash': '0'.repeat(64), paths: {}, components: {} }
+  expect(() => defineConfig({ id: 'sample', roles: ['admin'], organizationOwnerRole: 'admin', languages: ['en'], entities: {}, openapi: spec } as any)).toThrow(/openapi.*cannot be authored/)
+  const { root, load } = consumer()
+  writeFileSync(join(root, 'config.ts'), `import { defineConfig } from '@workbasehq/core/schema'
+import worker from './schema/worker.ts'
+export default defineConfig({ id: 'sample', roles: ['admin', 'staff'], organizationOwnerRole: 'admin', languages: ['en'], entities: { worker }, openapi: ${JSON.stringify(spec)} } as any)`)
+  await expect(load()).rejects.toThrow(/openapi.*cannot be authored/)
+})
 it('includes entity access sources in configHash while preserving physical schema', async () => {
   const { root, load } = consumer(); const a = await load()
   const { readFileSync } = await import('node:fs')
