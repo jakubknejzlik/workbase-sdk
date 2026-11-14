@@ -5,9 +5,11 @@ import { tmpdir } from 'node:os'
 import { delimiter, dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { execute } from './sdk-process.ts'
+import { MigrationReplayError } from './migration-replay.ts'
+import { replaySources } from './replay-sources.ts'
 import { assertRegistryLock, assertRegistryManifest, downloadRegistryArchives, resolveRegistrySdk, sdkNames, verifyRegistryConsumer } from './sdk-registry.ts'
 import { acceptUpgradeResult, assertBound, BRIDGE_VERSION, bridgeDigest, bridgeFiles, consumerModules, digestBytes, identitySchema, inputPath, inside, preparedSchema,
-  type UpgradeIdentity, type UpgradeRequest, type UpgradeStage } from './sdk-upgrade-protocol.ts'
+  replayFailureSchema, type UpgradeIdentity, type UpgradeRequest, type UpgradeStage } from './sdk-upgrade-protocol.ts'
 
 export type SdkInputs = Record<string, Buffer>
 export type BaseDigests = Pick<UpgradeIdentity, 'baseFingerprint' | 'baseDependencyDigest'>
@@ -31,7 +33,7 @@ async function regular(path: string) {
 export async function captureSdkInputs(root: string): Promise<SdkInputs> {
   if (!(await lstat(join(root, 'migrations'))).isDirectory()) throw new Error('Linked migrations directory')
   const names = [...dependencyNames, ...(await readdir(root)).filter(name => /^config(?:\.[a-z0-9_-]+)?\.(ts|json)$/.test(name)),
-    ...(await readdir(join(root, 'migrations'))).map(name => `migrations/${name}`)].sort()
+    ...(await readdir(join(root, 'migrations'))).filter(name => name !== '.gitkeep').map(name => `migrations/${name}`)].sort()
   if (!names.includes('config.ts')) throw new Error('Missing captured configuration')
   const inputs: SdkInputs = {}
   let bytes = 0
@@ -40,6 +42,14 @@ export async function captureSdkInputs(root: string): Promise<SdkInputs> {
     inputPath.parse(name)
     inputs[name] = await regular(join(root, name)); bytes += inputs[name].length
     if (bytes > 32 * 1024 * 1024) throw new Error('SDK inputs exceed byte bound')
+  }
+  // Only V3 instances carry a schema lock; retained inline inputs are unchanged.
+  if (await lstat(join(root, 'schema.lock.json')).catch(error => { if (error.code === 'ENOENT') return null; throw error })) {
+    for (const [path, source] of Object.entries(await replaySources(root))) {
+      inputPath.parse(path)
+      inputs[path] = source; bytes += source.length
+      if (bytes > 32 * 1024 * 1024) throw new Error('SDK inputs exceed byte bound')
+    }
   }
   return inputs
 }
@@ -145,11 +155,29 @@ export async function runSdkTarget(options: TargetOptions) {
       signal.throwIfAborted()
       const result = await execute(argv, consumer, { env, signal, timeoutMs: 90000, maxOutputBytes: 1024 * 1024 })
       signal.throwIfAborted()
-      if (result.rc !== 0) throw new Error(`SDK target command failed (${result.rc}): ${result.stderr}\n${result.stdout}`)
+      if (result.rc !== 0) {
+        // Only a structured replay failure bound to this request is public.
+        // Arbitrary command/config output retains the existing private boundary.
+        if (argv.at(-1)?.endsWith('sdk-upgrade-worker.ts')) {
+          let failure
+          try { failure = replayFailureSchema.parse(JSON.parse(await regular(join(consumer, '.sdk-bridge/replay-error.json')).then(bytes => bytes.toString('utf8')))) }
+          catch { /* Non-replay failures remain private. */ }
+          if (failure) {
+            assertBound(failure.identity, identity, 'replay error identity')
+            const request = JSON.parse(await readFile(join(consumer, '.sdk-bridge/request.json'), 'utf8'))
+            assertBound(failure.inputHashes, request.inputHashes, 'replay error inputs')
+            throw new MigrationReplayError(failure.diagnostic)
+          }
+        }
+        throw new Error(`SDK target command failed (${result.rc}): ${result.stderr}\n${result.stdout}`)
+      }
     }
     for (const [path, bytes] of Object.entries(captured)) {
       inputPath.parse(path)
-      if (!dependencyNames.includes(path)) await writeFile(join(consumer, path), bytes)
+      if (!dependencyNames.includes(path)) {
+        await mkdir(dirname(join(consumer, path)), { recursive: true })
+        await writeFile(join(consumer, path), bytes)
+      }
     }
     await writeFile(join(consumer, 'package.json'), manifest)
     await writeFile(join(consumer, 'bunfig.toml'), `[install]\nregistry = ${JSON.stringify(registry)}\n[install.scopes]\nworkbasehq = ${JSON.stringify(registry)}\n`)

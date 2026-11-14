@@ -9,6 +9,7 @@ import { schemas, WorkflowError, fail, type ToolName } from './schemas.ts'
 import { guard, hash, prepare, prepareChanges } from './planning.ts'
 import { effectivePolicies } from './policies.ts'
 import { expectedSnapshot, instanceMeta } from './offline.ts'
+import { MigrationReplayError } from './migration-replay.ts'
 import { applyDisposable } from './disposable.ts'
 import { assertRemovedRolesUnused } from './role-usage'
 import { readVersions, rollback, versionFiles } from './versions'
@@ -23,6 +24,7 @@ function requireConfigChange(proposal: Proposal): asserts proposal is ConfigChan
 export type ToolResult = Record<string, unknown>
 export function errorResult(error: unknown): ToolResult {
   if (isDisplayFieldError(error)) return { ok: false, errors: error.errors }
+  if (error instanceof MigrationReplayError) return { ok: false, error: { code: error.code, status: 422, message: error.message, details: error.diagnostic } }
   if (error instanceof WorkflowError) return { ok: false, error: { code: error.code, status: error.status, message: error.message, ...(error.details ? { details: error.details } : {}) } }
   if (error instanceof z.ZodError) return { ok: false, error: { code: 'invalid_input', status: 400, message: 'Input does not match the tool schema', issues: error.issues.map(({ path, message }) => ({ path, message })) } }
   return { ok: false, error: { code: 'internal_error', status: 500, message: 'Configuration operation failed; no database was deployed' } }
@@ -117,14 +119,14 @@ export class Workflow {
           return await submitChange(await this.store.directory(targetInstance), p, input.expectedBaseSha, this.github, () => this.store.dependencyDigest(targetInstance))
         }
         const bundle = await this.store.load(targetInstance)
-        const diagnose = () => {
+        const diagnose = async () => {
           const errors: { code: string; message: string }[] = [...inspectInstance(bundle.config).errors]
-          let meta: ReturnType<typeof instanceMeta> | null = null
-          try { meta = instanceMeta(bundle) }
-          catch (error) { errors.push({ code: error instanceof WorkflowError ? error.code : 'invalid_migrations', message: error instanceof Error ? error.message : 'Cannot replay committed migrations' }) }
+          let meta: Awaited<ReturnType<typeof instanceMeta>> | null = null
+          try { meta = await instanceMeta(bundle) }
+          catch (error) { errors.push({ code: error instanceof WorkflowError || error instanceof MigrationReplayError ? error.code : 'invalid_migrations', message: error instanceof Error ? error.message : 'Cannot replay committed migrations' }) }
           return { validation: { ok: errors.length === 0, errors }, meta }
         }
-        if (name === 'validate' && input.instance) return diagnose().validation
+        if (name === 'validate' && input.instance) return (await diagnose()).validation
         if (name === 'list_versions') return { ok: true, ...versionHistory(bundle.config, await readVersions(await this.store.directory(targetInstance))) }
         if (name === 'inspect_schema') {
           const dir = await this.store.directory(targetInstance)
@@ -134,7 +136,7 @@ export class Workflow {
             const p = parseProposal(found.proposal)
             if (!['promoted', 'discarded'].includes(p.status)) pending.push({ proposalId: p.proposalId, baseRevision: p.baseRevision, createdAt: p.createdAt, status: p.status })
           }
-          const diagnostics = diagnose()
+          const diagnostics = await diagnose()
           return { ok: true, instance: targetInstance, revision: bundle.config.revision, instance_meta: diagnostics.meta, validation: diagnostics.validation,
             entities: bundle.config.entities, roles: bundle.config.roles, permissions: bundle.config.permissions,
             locale: bundle.config.locale, ui: bundle.config.ui, enumLabels: bundle.config.enumLabels,
@@ -168,21 +170,21 @@ export class Workflow {
         if (name === 'validate') {
           delete p.validation; delete p.verification; p.status = 'proposed'
           try {
-            instanceMeta(bundle)
+            await instanceMeta(bundle)
             const prepared = prepare(bundle.config, bundle.indexes, p.changes)
-            expectedSnapshot(bundle, prepared)
+            await expectedSnapshot(bundle, prepared)
             p.validation = this.proof(bundle, prepared); p.status = 'validated'
             await save()
             return { ok: true, errors: [], revision: prepared.target.revision, warnings: prepared.warnings }
           } catch (error) {
             await save()
             const detail = error instanceof Error ? error.message : 'Invalid configuration'
-            return { ok: false, errors: isDisplayFieldError(error) ? error.errors : error instanceof WorkflowError && Array.isArray(error.details) ? error.details : [{ code: error instanceof WorkflowError ? error.code : 'invalid_config', message: detail }] }
+            return { ok: false, errors: isDisplayFieldError(error) ? error.errors : error instanceof WorkflowError && Array.isArray(error.details) ? error.details : [{ code: error instanceof WorkflowError || error instanceof MigrationReplayError ? error.code : 'invalid_config', message: detail }] }
           }
         }
-        instanceMeta(bundle)
+        await instanceMeta(bundle)
         const prepared = prepare(bundle.config, bundle.indexes, p.changes)
-        const expected = expectedSnapshot(bundle, prepared)
+        const expected = await expectedSnapshot(bundle, prepared)
         const proof = this.proof(bundle, prepared)
         if (name === 'preview_migration') return { ok: true, sql: prepared.sql, configDiff: prepared.patch, revision: prepared.target.revision }
         if (name === 'promote' && bundle.dependencyDigest !== undefined && p.verification && p.verification.dependencyDigest !== bundle.dependencyDigest) fail('dependencies_changed', 'Závislosti instance se změnily nebo chybí jejich ověření. Návrh je nutné znovu ověřit pomocí validate a apply_to_disposable.', 409)

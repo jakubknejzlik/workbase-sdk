@@ -2,6 +2,7 @@ import { AsyncLocalStorage } from 'node:async_hooks'
 import { acquireInstanceLock } from './instance-lock.ts'
 import { devFixtures } from './dev-support.ts'
 import { noLink } from './paths.ts'
+import { replaySources } from './replay-sources.ts'
 import { constants } from 'node:fs'
 import { open, lstat, mkdir, readFile, readdir, realpath, rename, rm, writeFile, link, unlink } from 'node:fs/promises'
 import { resolve, join, dirname } from 'node:path'
@@ -14,7 +15,7 @@ import { hash } from './planning.ts'
 import { WorkflowError, fail, identifier, instanceSelector, type Index } from './schemas.ts'
 
 export type Migration = { name: string; sql: string }
-export type Bundle = { config: InstanceConfig; migrations: Migration[]; indexes: Index[]; fingerprint: string; dependencyDigest?: string; guards: Record<string, string | null> }
+export type Bundle = { config: InstanceConfig; runtime?: InstanceConfig; migrations: Migration[]; indexes: Index[]; fingerprint: string; dependencyDigest?: string; guards: Record<string, string | null> }
 export const json = (value: unknown) => JSON.stringify(value, null, 2) + '\n'
 export const configSource = (config: InstanceConfig, options: { history?: boolean } = {}) => {
   const { plugins, ...data } = serializableInstanceConfig(config)
@@ -75,7 +76,7 @@ export async function durableAtomic(path: string, data: string) {
   await syncDirectory(dirname(path))
 }
 const require = createRequire(import.meta.url)
-async function importConfig(path: string, sourceHash: string) {
+async function importConfig(path: string, sourceHash: string, replayPaths: string[] = []) {
   if (process.versions.bun) {
     // Reload sibling version sources and history JSON as well as the entrypoint.
     // Keep SDK/plugin modules cached so canonical plugin provenance is preserved.
@@ -84,6 +85,7 @@ async function importConfig(path: string, sourceHash: string) {
       await noLink(source)
       delete require.cache[source]
     }
+    for (const name of replayPaths) delete require.cache[join(dirname(path), name)]
   }
   const url = `${pathToFileURL(path).href}?mcp=${sourceHash}`
   // SDK consumers run Bun natively; tsx is only a Node/monorepo convenience.
@@ -338,7 +340,7 @@ export class Store {
       return await this.lockContext.run(held, fn)
     } finally { held.active = false; await release() }
   }
-  private configCache = new Map<string, { sourceHash: string; config: InstanceConfig }>()
+  private configCache = new Map<string, { sourceHash: string; config: InstanceConfig; runtimeHash?: string; runtime?: InstanceConfig }>()
   private instanceDirectories = new Map<string, string>()
   private standalone = false
   public allowed: Set<string>
@@ -453,10 +455,21 @@ export class Store {
     const sourceHash = hash(sources)
     const cached = this.configCache.get(instance)
     // Reload tracked version sources when their content changes, including transitive config imports.
-    const config = cached?.sourceHash === sourceHash ? cached.config
+    let config = cached?.sourceHash === sourceHash ? cached.config
       : await importConfig(join(dir, 'config.ts'), sourceHash)
-    this.configCache.set(instance, { sourceHash, config })
-    const migrationNames = (await readdir(join(dir, 'migrations'))).sort()
+    let runtime: InstanceConfig | undefined, runtimeHash: string | undefined
+    if (config.baseline === 'workbase-sdk') {
+      const inputs = await replaySources(dir)
+      for (const [path, bytes] of Object.entries(inputs)) sources[path] = bytes.toString('utf8')
+      runtimeHash = hash(sources)
+      if (cached && cached.runtimeHash !== runtimeHash && cached.sourceHash === sourceHash) config = await importConfig(join(dir, 'config.ts'), runtimeHash, Object.keys(inputs))
+      if (inputs['runtime.ts']) {
+        runtime = cached?.runtimeHash === runtimeHash ? cached.runtime : await importConfig(join(dir, 'runtime.ts'), runtimeHash, Object.keys(inputs))
+        if (runtime?.id !== config.id || runtime.revision !== config.revision) fail('revision_mismatch', 'runtime.ts and config.ts disagree', 409)
+      }
+    }
+    this.configCache.set(instance, { sourceHash, config, runtimeHash, runtime })
+    const migrationNames = (await readdir(join(dir, 'migrations'))).filter(name => name !== '.gitkeep').sort()
     if (migrationNames.some(n => !/^\d{4}_[a-z0-9_]+\.sql$/.test(n))) fail('invalid_migrations', 'Unexpected migration filename')
     const migrations: Migration[] = []
     for (const name of migrationNames) { await noLink(join(dir, 'migrations', name)); migrations.push({ name, sql: await readFile(join(dir, 'migrations', name), 'utf8') }) }
@@ -466,7 +479,7 @@ export class Store {
       ...Object.entries(sources).map(([name, source]) => [name, hash(source)]),
       ...migrations.map(m => [`migrations/${m.name}`, hash(m.sql)]),
     ])
-    return { config, indexes, migrations, ...(dependencies ? { dependencyDigest: dependencies.digest } : {}),
+    return { config, ...(runtime ? { runtime } : {}), indexes, migrations, ...(dependencies ? { dependencyDigest: dependencies.digest } : {}),
       fingerprint: hash({ sources, config, migrations, indexes, ...(dependencies ? { dependencyDigest: dependencies.digest } : {}) }), guards }
   }
   async find(id: string) {

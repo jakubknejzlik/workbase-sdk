@@ -132,7 +132,10 @@ export type Operation = 'read' | 'create' | 'update' | 'delete'
 export const reservedEntities = new Set(['users', 'organizations', 'memberships', 'sessions', 'invitations', 'email_outbox', 'audit_outbox', 'security_log', 'idempotency_keys', 'instance_meta', 'webhook_deliveries', 'audit_events', 'd1_migrations', 'identities', 'access_tokens', 'user', 'session', 'account', 'verification', 'rateLimit', 'identity_link_grants', '_plugin_migrations'])
 type InstanceDefinitionInput = Omit<ShorthandInput, 'roles' | 'entities' | 'permissions' | 'baseline'> & { roles?: string[]; entities?: ShorthandInput['entities']; permissions?: ShorthandInput['permissions'] }
 export function defineInstance(input: InstanceDefinitionInput): InstanceConfig {
-  return normalizeInstance(input)
+  const config = input as InstanceConfig
+  // Replaying or planning a compiled V3 schema must retain its authored roles,
+  // just as the runtime kernel does. Inline instances keep legacy expansion.
+  return normalizeInstance(input, config.baseline === 'workbase-sdk' && !!config.effectiveAccess)
 }
 /** @internal Shared kernel normalization; schema declarations opt into exact authored roles. */
 export function normalizeInstance(input: InstanceDefinitionInput, exactRoles = false, entityError?: (error: unknown, path: (string | number)[]) => never): InstanceConfig {

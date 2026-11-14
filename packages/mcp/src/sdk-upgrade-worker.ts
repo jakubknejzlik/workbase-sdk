@@ -1,5 +1,6 @@
 // Candidate bridge, copied with its protocol into a standalone installed consumer.
 // It never imports the target MCP's planning/offline/disposable implementation.
+import { replayInstance, replayQuery, replayError, readInstanceMeta, usesBaseline, MigrationReplayError } from './migration-replay.ts'
 import { DatabaseSync } from 'node:sqlite'
 import { registerHooks } from 'node:module'
 import { lstat, readFile, readdir, writeFile } from 'node:fs/promises'
@@ -55,14 +56,17 @@ async function executeBridge(root: string, raw: unknown) {
     return import(pathToFileURL(resolutions[specifier]).href)
   }
   const { CORE_VERSION, defineInstance } = await load('@workbasehq/core/config') as typeof import('@workbasehq/core/config')
-  const { initialSchema, coreVersionSQL, quote } = await load('@workbasehq/core/migrations/schema') as typeof import('@workbasehq/core/migrations/schema')
+  const { initialSchema, coreVersionSQL, revisionSQL, quote } = await load('@workbasehq/core/migrations/schema') as typeof import('@workbasehq/core/migrations/schema')
   const { KernelRegistry } = await load('@workbasehq/core/kernel/registry') as typeof import('@workbasehq/core/kernel/registry')
   const { migrateD1, migrateInstance, queryDatabase, readMigrationFiles } = await load('@workbasehq/core/infra') as typeof import('@workbasehq/core/infra')
-  const { pluginMigrationStatus } = await load('@workbasehq/core/kernel/migrations') as typeof import('@workbasehq/core/kernel/migrations')
+  const { pluginMigrationStatus, PluginMigrationError } = await load('@workbasehq/core/kernel/migrations') as typeof import('@workbasehq/core/kernel/migrations')
   if (CORE_VERSION !== request.identity.targetVersion) throw new Error('Target CORE_VERSION mismatch')
-  const config = defineInstance((await import(pathToFileURL(join(root, 'config.ts')).href)).default)
+  const literal = (await import(pathToFileURL(join(root, 'config.ts')).href)).default
+  const config = defineInstance(usesBaseline(literal) && request.inputHashes['runtime.ts']
+    ? (await import(pathToFileURL(join(root, 'runtime.ts')).href)).default : literal)
   if (config.id !== request.identity.instanceId || config.revision !== request.identity.baseRevision) throw new Error('Captured configuration identity mismatch')
   const kernel = new KernelRegistry(config)
+  const engine = { kernel, migrateD1, queryDatabase, revisionSQL, PluginMigrationError }
   // Validate archived sources with the target SDK as well. JSON history hydrates
   // only canonical published exports, never serialized executable hooks.
   const descriptors: Record<string, [specifier: string, exported: string]> = {
@@ -101,15 +105,14 @@ async function executeBridge(root: string, raw: unknown) {
     await writeFile(join(root, markerPath), markerSQL, { flag: 'wx' })
     const files = await readMigrationFiles(join(root, 'migrations'))
     const statements: string[] = []
-    // Ask the target migration engine for its exact replay SQL and receipts.
-    await migrateD1(async sql => { if (!sql.startsWith('SELECT ')) statements.push(sql); return [{ success: true, results: [] }] }, files)
-    const replay = statements.join('\n') + '\n'
     const preflight = new DatabaseSync(':memory:')
     try {
-      preflight.exec(replay)
-      const meta = preflight.prepare('SELECT revision,core_version FROM instance_meta ORDER BY revision DESC LIMIT 1').get()
+      await replayInstance(preflight, files.map(m => ({ name: m.filename, sql: m.sql })), engine,
+        { legacyLedger: true, record: sql => statements.push(sql) })
+      const meta = readInstanceMeta(preflight)
       if (meta?.revision !== config.revision || meta.core_version !== CORE_VERSION) throw new Error('Wrong staged target marker')
     } finally { preflight.close() }
+    const replay = statements.join('\n;\n') + '\n'
     await writeFile(join(root, '.sdk-bridge/replay.sql'), replay, { flag: 'wx' })
     await checkInputs(root, request)
     return { kind: 'prepared', identity: request.identity, inputHashes: request.inputHashes, stage: { marker, replaySha256: digestBytes(replay) } }
@@ -120,35 +123,35 @@ async function executeBridge(root: string, raw: unknown) {
   const databases = await sqliteFiles(join(root, '.sdk-bridge/persist/v3/d1'))
   if (databases.length !== 1) throw new Error('Expected exactly one target Wrangler disposable D1')
   const db = new DatabaseSync(databases[0]), desired = new DatabaseSync(':memory:')
-  const queryFor = (database: DatabaseSync) => async (sql: string) => {
-    database.exec('BEGIN')
-    try {
-      const results = /^\s*(?:SELECT|PRAGMA)\b/i.test(sql) ? database.prepare(sql).all() : (database.exec(sql), [])
-      database.exec('COMMIT')
-      return [{ success: true, results }]
-    } catch (error) { database.exec('ROLLBACK'); throw error }
-  }
-  const metaSQL = 'SELECT revision,core_version FROM instance_meta ORDER BY revision DESC LIMIT 1'
+  const queryFor = replayQuery
   try {
     // Check BEFORE migrateInstance: its normal SDK stamping must not repair a bad
     // staged marker and turn an invalid replay into an accepted upgrade result.
-    const meta = db.prepare(metaSQL).get()
+    const meta = readInstanceMeta(db)
     if (meta?.revision !== config.revision || meta.core_version !== CORE_VERSION) throw new Error('Wrong replayed target marker')
-    await migrateInstance(queryFor(db), files, kernel)
+    if (usesBaseline(config)) await replayInstance(db, files.map(m => ({ name: m.filename, sql: m.sql })), engine)
+    else {
+      try { await migrateInstance(queryFor(db), files, kernel) }
+      catch (error) { throw replayError(error, engine) }
+    }
     const indexes = request.inputHashes['config.indexes.json'] ? JSON.parse(await readFile(join(root, 'config.indexes.json'), 'utf8')) : []
     if (!Array.isArray(indexes)) throw new Error('Invalid index list')
     const indexSQL = indexes.map((index: { name: string; entity: string; fields: string[] }) => {
       if (!kernel.config.entities[index.entity] || !Array.isArray(index.fields) || !index.fields.length || index.fields.some(field => !kernel.config.entities[index.entity].fields[field])) throw new Error('Invalid configured index')
       return `CREATE INDEX ${quote(index.name)} ON ${quote(index.entity)} (${['organization_id', ...index.fields].map(quote).join(', ')});`
     }).join('\n')
-    desired.exec(initialSchema(kernel.config) + indexSQL)
-    await kernel.applyMigrations(queryDatabase(queryFor(desired)))
+    if (usesBaseline(config)) await replayInstance(desired, [{ name: 'desired.sql', sql: initialSchema(kernel.config) + indexSQL }], engine)
+    else {
+      desired.exec(initialSchema(kernel.config) + indexSQL)
+      try { await kernel.applyMigrations(queryDatabase(queryFor(desired))) }
+      catch (error) { throw replayError(error, engine) }
+    }
     const plugins = await pluginMigrationStatus(queryDatabase(queryFor(db)), kernel.plugins, kernel.config)
     const desiredPlugins = await pluginMigrationStatus(queryDatabase(queryFor(desired)), kernel.plugins, kernel.config)
     if (plugins.expected !== plugins.applied || plugins.expected !== desiredPlugins.applied) throw new Error('Target plugin migrations differ')
     const schema = { status: 'pass', expected: digestBytes(JSON.stringify(physical(desired))), applied: digestBytes(JSON.stringify(physical(db))) }
     if (schema.expected !== schema.applied) throw new Error('Target physical schema requires additional repair')
-    const final = db.prepare(metaSQL).get()
+    const final = readInstanceMeta(db)
     if (final?.revision !== config.revision || final.core_version !== CORE_VERSION) throw new Error('Wrong final target marker')
     await checkInputs(root, request)
     return { kind: 'verified', identity: request.identity, inputHashes: request.inputHashes, stage: request.stage,
@@ -159,6 +162,13 @@ async function executeBridge(root: string, raw: unknown) {
 // File arguments and output stay in the private consumer; stdout is never proof.
 if (process.argv[1] && resolve(process.argv[1]) === resolve(import.meta.filename)) {
   const root = resolve(import.meta.dirname, '..')
-  const result = await runBridge(root, JSON.parse(await readFile(join(root, '.sdk-bridge/request.json'), 'utf8')))
-  await writeFile(join(root, '.sdk-bridge/result.json'), JSON.stringify(result) + '\n', { flag: 'wx' })
+  const request = requestSchema.parse(JSON.parse(await readFile(join(root, '.sdk-bridge/request.json'), 'utf8')))
+  try {
+    const result = await runBridge(root, request)
+    await writeFile(join(root, '.sdk-bridge/result.json'), JSON.stringify(result) + '\n', { flag: 'wx' })
+  } catch (error) {
+    if (!(error instanceof MigrationReplayError)) throw error
+    await writeFile(join(root, '.sdk-bridge/replay-error.json'), JSON.stringify({ identity: request.identity, inputHashes: request.inputHashes, diagnostic: error.diagnostic }) + '\n', { flag: 'wx' })
+    process.exitCode = 1
+  }
 }

@@ -1,6 +1,6 @@
 import { registerTempDir, cleanupTempDir } from '../../../scripts/lib/test-temp-dir.mjs'
 import { DatabaseSync } from 'node:sqlite'
-import { cp, lstat, mkdir, mkdtemp, readFile, readdir, realpath, writeFile } from 'node:fs/promises'
+import { cp, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
@@ -142,10 +142,52 @@ it('verifies local target migrations and rejects unbound/unknown child result fi
     { ...result, accepted: true },
   ]) expect(() => acceptUpgradeResult(changed, request, modules.packages, modules.resolutions)).toThrow()
 })
+it('prepares and verifies V3 SDK/plugin baselines before domain SQL in the isolated target bridge', async () => {
+  const root = await localConsumer()
+  await writeFile(join(root, 'config.ts'), `import { defineConfig, defineAccess, bindSchemaLock, accessEntities, accessSystemActions } from '@workbasehq/core/schema'
+import { schemaLock } from '@workbasehq/core/migrations/schema-lock'
+const config = defineConfig({ id: 'sdk_upgrade_fixture', interactive: false, languages: ['en'], roles: ['owner'], organizationOwnerRole: 'owner', entities: {},
+  plugins: [{ name: 'example', version: '1.0.0', migrations: [{ name: '001_example', sql: 'CREATE TABLE example AS SELECT revision FROM instance_meta;' }] }],
+  access: defineAccess({ predicates: {}, entities: Object.fromEntries(accessEntities.map(entity => [entity, { owner: 'deny' }])),
+    roles: { owner: { system: Object.fromEntries(accessSystemActions.map(action => [action, 'deny'])) } } }),
+})
+export default bindSchemaLock(config, schemaLock(config))
+`)
+  await writeFile(join(root, 'config.versions.json'), '[]\n')
+  await writeFile(join(root, 'config.indexes.json'), '[]\n')
+  await rename(join(root, 'migrations/0001_initial.sql'), join(root, 'migrations/0001_r1.sql'))
+  await writeFile(join(root, 'migrations/0001_r1.sql'), 'INSERT INTO example VALUES (7);\n')
+  const { request, database } = await preparedDatabase(root)
+  const result = resultSchema.parse(await bridge(root, request))
+  expect(result.schema.expected).toBe(result.schema.applied)
+  expect(result.marker).toEqual({ revision: 1, version: CORE_VERSION })
+  const db = new DatabaseSync(database)
+  try {
+    expect(db.prepare('SELECT * FROM example').all()).toEqual([{ revision: 7 }])
+    expect(db.prepare('SELECT namespace FROM _plugin_migrations ORDER BY rowid').all()).toEqual([{ namespace: 'workbase-sdk' }, { namespace: 'example' }])
+  } finally { db.close() }
+})
 it('rejects invalid target configuration', async () => {
   const root = await localConsumer()
   await writeFile(join(root, 'config.ts'), "export default { id: 'broken', entities: {} }\n")
   await expect(bridge(root, await requestFor(root))).rejects.toThrow()
+})
+it('captures the current V3 template sources and verifies its runtime plugin baselines in the target bridge', async () => {
+  const root = await localConsumer(true)
+  const { bootstrapInstance } = await import('../src/bootstrap')
+  const { execFileSync } = await import('node:child_process')
+  await rm(join(root, 'config.ts'))
+  await rm(join(root, 'migrations/0001_initial.sql'))
+  await writeFile(join(root, 'config.versions.json'), '[]\n')
+  await writeFile(join(root, 'config.indexes.json'), '[]\n')
+  await bootstrapInstance(root, { id: 'sdk_upgrade_fixture', target: 'cloudflare-github' })
+  execFileSync('bun', [resolve('packages/core/src/migrations/schema-cli.ts'), 'plan', '--root', root, '--init'], { encoding: 'utf8' })
+  const { request } = await preparedDatabase(root)
+  for (const path of ['runtime.ts', 'access.ts', 'schema.lock.json', 'schema/worker.ts']) expect(request.inputHashes[path]).toBe(digestBytes(await readFile(join(root, path))))
+  const result = resultSchema.parse(await bridge(root, request))
+  expect(result.schema.expected).toBe(result.schema.applied)
+  expect(result.plugins.expected).toBe(result.plugins.applied)
+  expect(result.marker).toEqual({ revision: 1, version: CORE_VERSION })
 })
 it('prepares historical rbac and tenancy through consumer-resolved target exports', async () => {
   const root = await localConsumer()

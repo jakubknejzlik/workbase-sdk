@@ -52,7 +52,7 @@ async function proposal(changes: Change[]) {
 async function targetDatabase() {
   const bundle = await store.load('role-workflow')
   const prepared = prepare(bundle.config, [], [{ kind: 'set_organization_permissions', role: 'owner', actions: ['members.update'] }])
-  const verification = await applyDisposable(bundle, prepared, expectedSnapshot(bundle, prepared), true)
+  const verification = await applyDisposable(bundle, prepared, await expectedSnapshot(bundle, prepared), true)
   expect(verification.verified).toBe(true)
   targetDirectory = verification.directory!
   const directory = join(targetDirectory, 'persist/v3/d1/miniflare-D1DatabaseObject')
