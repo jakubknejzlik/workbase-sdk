@@ -256,10 +256,12 @@ bundle and emit `dist/build-meta.json` with `{ sha, builtAt }`. SHA precedence i
 `WORKBASE_BUILD_SHA`, then `GITHUB_SHA`, then `git rev-parse HEAD` from the
 **consumer root**. A supplied invalid value fails the build instead of silently
 falling back. SHAs must be exactly 40 hex characters and are emitted lowercase.
-Development builds use `unbuilt`. The V3 template's `bun run build:console` runs
-`bun --bun vite build`; then pass
-`assetsDir: './dist'` to provision (or match a customized Vite outDir). These are
-the Instance's assets; do not use the legacy `consoleAssetsDir()`.
+Development builds use `unbuilt`. For a custom Instance console, run
+`bun --bun vite build`, then pass `assetsDir: './dist'` to provision (or match a
+customized Vite outDir). The V3 standalone template serves the installed SDK's
+prebuilt console using `assetsDir: consoleAssetsDir()` from
+`@workbasehq/plugins/console/assets`; it requires checks and typecheck before
+review, with no Instance console build.
 
 The Instance deployment wrapper must refuse a dirty repository before building:
 
@@ -271,9 +273,9 @@ assertCleanDeploy(process.cwd())
 
 The guard includes untracked files. Ignore `node_modules/`, `dist/` and
 `.workbase-ui*`; commit authored layout changes before deployment so they get a
-new SHA even when schema revision is unchanged. The V3 template checks/builds
-before SST deployment but does not call this optional guard in its deploy script
-or Vite config; ensure the worktree is clean before deploying. Keep any explicit
+new SHA even when schema revision is unchanged. The V3 standalone template runs
+checks before SST deployment and does not call this optional guard in its deploy
+script; ensure the worktree is clean before deploying. Keep any explicit
 server BUILD_SHA/BUILD_AT bindings consistent with the emitted metadata.
 
 `AuthShell` fetches `/build.json` separately at boot and on visibility. On a valid

@@ -48,7 +48,6 @@ bun run access:lock --write
 bun run openapi:write
 bun run check
 bun run typecheck
-WORKBASE_BUILD_SHA=<40-character-commit-sha> bun run build:console
 ```
 
 Commit `schema.lock.json`, `migrations/0001_r1.sql`, `access.lock.json`,
@@ -62,30 +61,32 @@ UI generation runs before typecheck. The shipped `.gitignore` uses `.workbase-ui
 to ignore both the `.workbase-ui` symlink and its `.workbase-ui.generation-*/`
 sibling directories; `dist/` and `.sst/` are also ignored. Existing Instances must
 replace `.workbase-ui/` with `.workbase-ui*` before generating or staging files.
-An explicit build SHA is required outside git. Build from a clean, committed tree
-so the SHA identifies the authored bytes; the template does not automatically
-invoke the SDK's optional `assertCleanDeploy()` guard.
+The console is prebuilt in `@workbasehq/plugins`; no Instance console build or
+`WORKBASE_BUILD_SHA` is needed. UI authoring sources remain available for validation
+and typecheck; the served SDK console uses its own layout, CSS, cs/en translations
+and magic-link sign-in rather than bundling the Instance's `ui/*` pages.
 
 ## Run and deploy
 
-`bun run dev` starts Vite without an API proxy. AuthShell's same-origin `/me`,
-`/build.json` and `/auth/...` requests return 404 there even while `dev:worker`
-runs, so login through Vite cannot work. For local asset/API inspection, build
-the console as above, then run `bun run dev:worker` alone and open
-`http://127.0.0.1:9290`. The Worker serves the built console and `/build.json`;
-unauthenticated `/me` returns JSON 401. Rebuild after UI changes. This is not a
-complete local login setup: fresh, unconfigured magic-link sign-in returns 503.
-The template supplies no complete local database/auth bootstrap flow; use a
-configured deployed origin for end-to-end login acceptance.
+`bun run dev` (or `bun run dev:worker`) starts the local Worker at
+`http://127.0.0.1:9290`. Wrangler serves the prebuilt SDK console directly from
+`node_modules/@workbasehq/plugins/console/assets` with the API on the same origin.
+No Vite server or console build is needed. Unauthenticated `/me` returns JSON 401.
+A fresh, unconfigured magic-link sign-in returns 503; the template supplies no
+complete local database/auth bootstrap flow. Use a configured deployed origin
+for end-to-end login acceptance.
 Apply SDK, plugin and Instance migrations with the SDK migration tool; plain
 Wrangler domain migrations alone do not initialize a complete database.
-The detail page uses the SDK application-access card and the SPA mounts AuthShell.
 There are no seeded accounts. Configure credentials privately from the env examples.
 
 For deployment copy `deploy.env.example` to `.env`, configure the environment,
 then run `bun x --no-install sst install` to fetch providers and generate SST types. This step needs
-network access. `bun run deploy --stage <stage>` checks, builds `dist/`, then runs
-SST. SDK `provision()` applies SDK → plugin → Instance migrations before upload.
+network access. `bun run deploy --stage <stage>` checks, then runs SST.
+The SST config passes `assetsDir: consoleAssetsDir()` from
+`@workbasehq/plugins/console/assets` to `provision()`, which sets
+`htmlHandling: 'none'`, `notFoundHandling: 'none'` and `runWorkerFirst: true`.
+The Worker handles SPA fallback and auth/API routes on the same origin.
+SDK `provision()` applies SDK → plugin → Instance migrations before upload.
 For staging, set `AUTH_BASE_URL` to the canonical origin: native Worker requests
 redirect there, so it must be reachable and must not redirect to itself.
 No deploy is performed by init. No preview workflow or deployment wrapper ships here.

@@ -13,6 +13,7 @@ export default $config({
   },
   async run() {
     const { provision } = await import('@workbasehq/core/infra/provision')
+    const { consoleAssetsDir } = await import('@workbasehq/plugins/console/assets')
     const required = (key: string) => {
       const value = process.env[key]
       if (!value) throw new Error(`Set ${key} before running SST`)
@@ -23,7 +24,7 @@ export default $config({
       configPath: './runtime.ts', handler: './src/index.ts', migrationsDir: './migrations',
       resourcePrefix: required('WORKBASE_RESOURCE_PREFIX'), stage: $app.stage,
       authSecret: required('BETTER_AUTH_SECRET'), authBaseUrl: required('AUTH_BASE_URL').replaceAll('{stage}', $app.stage),
-      assetsDir: './dist',
+      assetsDir: consoleAssetsDir(),
       ...(domain ? { domain } : {}),
       email: { from: required('EMAIL_FROM') },
     })

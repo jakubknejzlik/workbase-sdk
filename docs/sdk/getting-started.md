@@ -1,6 +1,6 @@
 # Standalone V3 Instance getting started
 
-The standalone template builds an Instance-owned Vite console and a Worker from
+The standalone template serves the prebuilt SDK console and a Worker from
 three coordinated SDK packages: core, plugins and mcp. Use Bun 1.4.3 and Node
 25.8.0. The canonical template and its operator guide live in
 [packages/mcp/templates/standalone](../../packages/mcp/templates/standalone/).
@@ -63,7 +63,6 @@ bun run access:lock --write
 bun run openapi:write
 bun run check
 bun run typecheck
-WORKBASE_BUILD_SHA=<40-character-commit-sha> bun run build:console
 ```
 
 The schema planner writes `schema.lock.json` and `migrations/0001_r1.sql` first.
@@ -75,17 +74,15 @@ artifacts and never overwrites them.
 
 `check` runs `check:schema`, `check:access`, `check:openapi` and `check:ui` in that
 order. UI validation includes dictionary completeness and bare-text checks.
-`typecheck` runs `generate:ui` before TypeScript. `build:console` runs Vite under
-Bun with the SDK `consoleUI()` integration; the SPA mounts AuthShell. The shipped
-`.gitignore` uses `.workbase-ui*` to ignore both the `.workbase-ui` symlink and
+`typecheck` runs `generate:ui` before TypeScript. Vite remains a development
+dependency for this authoring check. The served console comes prebuilt from
+`@workbasehq/plugins`, with SDK layout, CSS, cs/en and magic-link sign-in;
+Instance `ui/*` sources are validated but are not bundled into that console.
+The shipped `.gitignore` uses `.workbase-ui*` to ignore both the `.workbase-ui` symlink and
 its `.workbase-ui.generation-*/` sibling directories; `dist/` and `.sst/` are also
 ignored. Existing Instances must replace `.workbase-ui/` with `.workbase-ui*`
 before generating or staging files.
 
-Replace the build SHA placeholder with the reviewed commit's 40 hex characters.
-An explicit SHA is required outside git. Build from a clean, committed tree so
-the SHA identifies the authored bytes; the template does not invoke the SDK's
-optional `assertCleanDeploy()` guard automatically.
 For later physical schema changes use `bun run migrate:plan --base <git-ref>`.
 `bun run check:schema` works without git; `bun run check:schema --base <git-ref>`
 also checks migration linkage. Regenerate derived artifacts after authored changes
@@ -98,15 +95,11 @@ It also preserves generated artifacts and the lockfile.
 ## Develop and deploy
 
 Copy `.dev.vars.example` to private `.dev.vars` and configure credentials.
-`bun run dev` starts Vite without an API proxy. AuthShell requests same-origin
-`/me`, `/build.json` and `/auth/...`, which return 404 on Vite even when
-`bun run dev:worker` is running; login through the Vite origin cannot work.
-
-For local asset/API inspection, first run `build:console` as above, then run
-`bun run dev:worker` alone and open `http://127.0.0.1:9290`. The Worker serves
-the built console and `/build.json` from that origin; unauthenticated `/me`
-returns JSON 401. Rebuild the console after UI changes. This is not a complete
-local login setup: a fresh, unconfigured Worker returns 503 for magic-link
+`bun run dev` (or `bun run dev:worker`) starts the Worker at
+`http://127.0.0.1:9290`, serving assets directly from
+`node_modules/@workbasehq/plugins/console/assets` alongside the API.
+No console build or `WORKBASE_BUILD_SHA` is needed. Unauthenticated `/me`
+returns JSON 401. A fresh, unconfigured Worker returns 503 for magic-link
 sign-in. The template supplies no complete local database/auth bootstrap flow;
 use a configured deployed origin for end-to-end login acceptance.
 
@@ -133,8 +126,11 @@ Then run:
 bun run deploy --stage <stage>
 ```
 
-The deploy script checks, builds `dist/`, then runs SST. Its thin `sst.config.ts`
-passes `configPath: './runtime.ts'` and `assetsDir: './dist'` to SDK `provision()`.
+The deploy script checks, then runs SST. Its thin `sst.config.ts` passes
+`configPath: './runtime.ts'` and `assetsDir: consoleAssetsDir()` from
+`@workbasehq/plugins/console/assets` to SDK `provision()`. The provisioner sets
+`htmlHandling: 'none'`, `notFoundHandling: 'none'` and `runWorkerFirst: true`
+so the Worker handles SPA fallback and auth/API routes.
 Provisioning applies SDK → plugin → Instance migrations before upload. See the
 [infra contract](../../packages/core/src/infra/README.md) for state, bindings and
 migration guarantees. In staging, native Worker requests redirect to the canonical
@@ -156,5 +152,5 @@ approved MCP/PR process and do not edit code directly.
 Remote acceptance covers schema compatibility, console assets under CSP, HTTPS
 login, organization creation, permitted and denied writes, redeploy/data retention,
 queue/cron and stage removal. The SDK pack gate's V3 template smoke verifies
-installed candidate bytes and the local generation/check/build/migration path;
+installed candidate bytes and the local generation/check/prebuilt-assets/migration path;
 it does not deploy or prove remote acceptance.
