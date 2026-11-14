@@ -55,6 +55,13 @@ export function publicCommandDefinitions(config: InstanceConfig, options: Runtim
   })
 }
 export function publicCommands(config: InstanceConfig, options: RuntimeOptions, input = false) {
+  const schema = (command: { input: z.ZodType }) => {
+    if (!input) return z.toJSONSchema(command.input)
+    const projected = z.toJSONSchema(command.input, { io: 'input' })
+    // /schema historically exposed output-mode object/default semantics. Keep
+    // those bytes for representable schemas; transforms need the input view.
+    try { return z.toJSONSchema(command.input) } catch { return projected }
+  }
   return publicCommandDefinitions(config, options).map(({ name, command }) => ({ name, permission: command.permission, ...(command.ui ? { ui: command.ui } : {}),
-    additionalPermissions: command.additionalPermissions ?? [], inputSchema: sanitizeSchema(z.toJSONSchema(command.input, input ? { io: 'input' } : undefined)) }))
+    additionalPermissions: command.additionalPermissions ?? [], inputSchema: sanitizeSchema(schema(command)) }))
 }

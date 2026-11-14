@@ -11,7 +11,7 @@ import { canonical } from '../../src/access-lock'
 import { instanceConfigSchema, fieldSchema, cloneInstanceConfig, CORE_VERSION, Q, Fn } from '../../src/config'
 import { declarationSchema } from '../../src/schema'
 import { publicSchema } from '../../src/public-schema'
-import { publicQuery } from '../../src/public-projection'
+import { publicCommands, publicQuery } from '../../src/public-projection'
 import { KernelRegistry } from '../../src/kernel/registry'
 import { loadConfig } from '../../src/schema/load'
 import { workerAccessFixture } from '../fixtures/worker-access'
@@ -36,9 +36,28 @@ it('pins the current successful /schema fixture bytes across shared projection e
   config.commands = ['probe']
   const command = { name: 'probe', permission: { entity: 'worker', operation: 'update' }, additionalPermissions: [], input: z.object({ name: z.string().default('synthetic-access-secret-at-least-32') }), ui: { title: 'Probe' } } as any
   expect(JSON.stringify(publicSchema(config, { commands: new Map([['probe', command]]) }))).toBe(await readFile(join(root, 'schema.commands.public.json'), 'utf8'))
-  // Preserve the pre-existing transform error rather than changing a runtime contract.
+})
+it('projects account-link command inputs with transforms for /schema', () => {
   const kernel = fixture()
-  expect(() => publicSchema(kernel.config, kernel)).toThrow('Transforms cannot be represented')
+  const schema = publicSchema(kernel.config, kernel)
+  const invite = schema.commands.find(command => command.name === 'worker/access_invite')!
+  expect(invite).toBeDefined()
+  expect(invite.inputSchema).toMatchObject({ properties: { email: { type: 'string' } } })
+  expect(JSON.parse(JSON.stringify(schema))).toEqual(schema)
+})
+it('keeps transform-free /schema command bytes identical to the legacy projection', () => {
+  const config = workerAccessFixture()
+  config.commands = ['probe']
+  const input = z.object({
+    name: z.string().default('synthetic-access-secret-at-least-32'),
+    children: z.array(z.object({ label: z.string().optional() })).optional(),
+    choice: z.union([z.string(), z.number()]),
+  })
+  const command = { name: 'probe', permission: { entity: 'worker', operation: 'update' }, input } as any
+  const options = { commands: new Map([['probe', command]]) }
+  const published = publicSchema(config, options)
+  const legacy = { ...published, commands: publicCommands(config, options) }
+  expect(JSON.stringify(published)).toBe(JSON.stringify(legacy))
 })
 it('validates 3.1, rejects broken documents, and round-trips exact canonical bytes', async () => {
   const text = bytes(), doc = JSON.parse(text)

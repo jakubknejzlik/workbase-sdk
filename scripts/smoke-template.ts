@@ -1,4 +1,5 @@
 import { registerTempDir, cleanupTempDir } from './lib/test-temp-dir.mjs'
+import { isolateSmokeNetwork } from './lib/smoke-network'
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
@@ -24,13 +25,21 @@ writeFileSync(guard, `import http from 'node:http'
 import https from 'node:https'
 import net from 'node:net'
 import tls from 'node:tls'
+import dgram from 'node:dgram'
+import { syncBuiltinESMExports } from 'node:module'
 const denied = () => { throw Error('Packed smoke forbids network after install') }
 globalThis.fetch = denied
 http.request = http.get = https.request = https.get = denied
 net.connect = net.createConnection = tls.connect = denied
+net.Socket.prototype.connect = denied
+dgram.createSocket = dgram.Socket.prototype.connect = dgram.Socket.prototype.send = denied
+syncBuiltinESMExports()
 `)
-const run = (cmd: string, args: string[], cwd = consumer) => execFileSync(cmd, cmd === 'bun' && offline ? ['--preload=' + guard, ...args] : args,
-  { cwd, env, encoding: 'utf8', timeout: 240000, stdio: 'pipe', maxBuffer: 8 * 1024 * 1024 })
+const run = (cmd: string, args: string[], cwd = consumer, childEnv = env) => {
+  const guardedArgs = cmd === 'bun' && offline ? ['--preload=' + guard, ...args] : args
+  const [executable, isolatedArgs] = offline ? isolateSmokeNetwork(cmd, guardedArgs) : [cmd, guardedArgs]
+  return execFileSync(executable, isolatedArgs, { cwd, env: childEnv, encoding: 'utf8', timeout: 240000, stdio: 'pipe', maxBuffer: 8 * 1024 * 1024 })
+}
 const npm = (args: string[], cwd = consumer) => run('npm', [...args, '--no-audit', '--no-fund', '--registry=https://registry.npmjs.org'], cwd)
 const digest = (path: string) => createHash('sha256').update(readFileSync(path)).digest('hex')
 const files = (path: string): string[] => readdirSync(path, { withFileTypes: true }).flatMap(entry => entry.isDirectory() ? files(join(path, entry.name)) : [join(path, entry.name)])
@@ -123,6 +132,7 @@ try {
   assert.deepEqual(json(join(consumer, 'schema.lock.json')).tables.map((table: { name: string }) => table.name), ['worker'])
   assert(json(join(consumer, 'access.lock.json')).enforcementInputs.plugins.length > 0)
   console.log(run('bun', ['--eval', `import assert from 'node:assert/strict'; import config from './runtime'; import { loadConfig } from '@workbasehq/core/schema/load'; import spec from './openapi.json'; assert.equal(config.id, ${JSON.stringify(id)}); assert.equal(config.revision, 1); assert(config.interactive); const loaded = await loadConfig('./config.ts'); assert.equal(spec['x-workbase-config-hash'], loaded.configHash); console.log('Runtime identity, lock revision and OpenAPI configHash match')`]).trim())
+  console.log(run('bun', ['--eval', `import assert from 'node:assert/strict'; import { createApp } from '@workbasehq/core/app'; import config from './runtime'; const app = createApp(config, { DB: { prepare() { throw Error('unexpected DB access') } }, BETTER_AUTH_SECRET: process.env.BETTER_AUTH_SECRET, AUTH_BASE_URL: process.env.AUTH_BASE_URL }); const response = await app.request('https://neutral.example.test/schema'); assert.equal(response.status, 200); const schema = await response.json(); assert.equal(schema.instance, ${JSON.stringify(id)}); assert(schema.commands.some(command => command.name === 'worker/access_invite')); console.log('Packed runtime GET /schema: 200 + valid JSON with account-link commands')`]).trim())
   console.log('Step 3: schema → access → OpenAPI generated twice; all bytes match; identity verified via runtime/spec')
   console.log(run('bun', ['run', 'check']).trim())
   console.log(run('bun', ['run', 'typecheck']).trim())
@@ -154,10 +164,8 @@ globalThis.fetch = async (url, init) => {
   return Response.json({ success: true, result: [{ success: true, results: [] }] })
 }
 `)
-  const migrate = () => JSON.parse(execFileSync(join(consumer, 'node_modules/.bin/workbase-migrate'), ['migrate', database, './migrations', '--config', './runtime.ts'], {
-    cwd: consumer, encoding: 'utf8', timeout: 120000, stdio: 'pipe',
-    env: { ...env, NODE_OPTIONS: env.NODE_OPTIONS + ' --import=' + migrationFixture, WORKBASE_SMOKE_DATABASE: join(scratch, 'd1.sqlite'), CLOUDFLARE_API_TOKEN: 'synthetic-access-secret-at-least-32' },
-  }))
+  const migrate = () => JSON.parse(run(join(consumer, 'node_modules/.bin/workbase-migrate'), ['migrate', database, './migrations', '--config', './runtime.ts'], consumer,
+    { ...env, NODE_OPTIONS: env.NODE_OPTIONS + ' --import=' + migrationFixture, WORKBASE_SMOKE_DATABASE: join(scratch, 'd1.sqlite'), CLOUDFLARE_API_TOKEN: 'synthetic-access-secret-at-least-32' }))
   const applied = migrate(), reapplied = migrate()
   assert.equal(applied.event, 'infra.migrations.applied')
   assert.equal(applied.applied, 1)
@@ -222,7 +230,7 @@ try { await client.connect(transport); assert.equal(client.getServerVersion()?.v
 finally { await client.close(); await transport.close() }
 `)
   console.log(run('bun', ['.smoke/data.ts']).trim())
-  console.log(`V3 packed template smoke passed: 7/7 steps; SDK ${versions.mcp}; lock sha256=${lockHash}; post-install network blocked; no deploy`)
+  console.log(`V3 packed template smoke passed: 7/7 steps; SDK ${versions.mcp}; lock sha256=${lockHash}; post-install IP network blocked by OS isolation for commands and descendants; JS fetch/http/https/net/tls/dgram guarded; no deploy`)
 } catch (error) {
   if (error && typeof error === 'object' && 'stderr' in error) console.error(String(error.stderr))
   throw error

@@ -19,7 +19,7 @@ export function publicSchema(config: InstanceConfig, options: RuntimeOptions) {
     policies: publicPolicies(config),
     capabilities: { path: '/o/:org/capabilities', authentication: 'required' },
     roles: config.roles, permissions: config.permissions,
-    commands: publicCommands(config, options),
+    commands: publicCommands(config, options, true),
     workflows: [...(options.workflows?.values() ?? [])].map(workflow => ({ name: workflow.name, version: workflow.version,
       inputSchema: sanitizeSchema(z.toJSONSchema(workflow.input)),
       permissions: workflow.steps?.map(step => ({ name: step.operation.name, permission: step.operation.permission })),
