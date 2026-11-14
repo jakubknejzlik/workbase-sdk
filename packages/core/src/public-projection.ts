@@ -3,6 +3,7 @@ import type { InstanceConfig } from './config'
 import type { RuntimeOptions } from './types'
 import { fieldsFor, fieldType, operatorsFor } from './query/input-schema'
 import { QUERY_LIMITS } from './query/limits'
+import { publicOutputSchema } from './openapi/input-projection'
 
 // These objects map user-defined names to schemas; their keys are not keywords.
 const schemaMaps = new Set(['properties', 'patternProperties', '$defs', 'definitions', 'dependentSchemas'])
@@ -54,14 +55,7 @@ export function publicCommandDefinitions(config: InstanceConfig, options: Runtim
     return command && !('system' in command.permission) ? [{ name, command }] : []
   })
 }
-export function publicCommands(config: InstanceConfig, options: RuntimeOptions, input = false) {
-  const schema = (command: { input: z.ZodType }) => {
-    if (!input) return z.toJSONSchema(command.input)
-    const projected = z.toJSONSchema(command.input, { io: 'input' })
-    // /schema historically exposed output-mode object/default semantics. Keep
-    // those bytes for representable schemas; transforms need the input view.
-    try { return z.toJSONSchema(command.input) } catch { return projected }
-  }
+export function publicCommands(config: InstanceConfig, options: RuntimeOptions, transformInputs = false) {
   return publicCommandDefinitions(config, options).map(({ name, command }) => ({ name, permission: command.permission, ...(command.ui ? { ui: command.ui } : {}),
-    additionalPermissions: command.additionalPermissions ?? [], inputSchema: sanitizeSchema(schema(command)) }))
+    additionalPermissions: command.additionalPermissions ?? [], inputSchema: sanitizeSchema(transformInputs ? publicOutputSchema(command.input) : z.toJSONSchema(command.input)) }))
 }

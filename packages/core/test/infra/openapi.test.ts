@@ -11,6 +11,7 @@ import { canonical } from '../../src/access-lock'
 import { instanceConfigSchema, fieldSchema, cloneInstanceConfig, CORE_VERSION, Q, Fn } from '../../src/config'
 import { declarationSchema } from '../../src/schema'
 import { publicSchema } from '../../src/public-schema'
+import { createApp } from '../../src/app'
 import { publicCommands, publicQuery } from '../../src/public-projection'
 import { KernelRegistry } from '../../src/kernel/registry'
 import { loadConfig } from '../../src/schema/load'
@@ -58,6 +59,48 @@ it('keeps transform-free /schema command bytes identical to the legacy projectio
   const published = publicSchema(config, options)
   const legacy = { ...published, commands: publicCommands(config, options) }
   expect(JSON.stringify(published)).toBe(JSON.stringify(legacy))
+})
+const schemaResponse = (config: any, options: any) => createApp(config, {
+  DB: { prepare() { throw new Error('unexpected DB access') } },
+  BETTER_AUTH_SECRET: 'synthetic-access-secret-at-least-32', AUTH_BASE_URL: 'https://neutral.example.test',
+} as any, options).request('https://neutral.example.test/schema')
+it('keeps custom pipeline inputs out of /schema output conversion, including beside a transform', async () => {
+  const config = fixture().config
+  config.commands = ['probe']
+  const fields = { value: z.custom<string>(value => typeof value === 'string').pipe(z.string()) }
+  for (const input of [z.object(fields), z.object({ ...fields, email: z.string().transform(value => value.toLowerCase()) })]) {
+    const options = { commands: new Map([['probe', { name: 'probe', input, permission: { entity: 'worker', operation: 'update' } } as any]]) }
+    const response = await schemaResponse(config, options)
+    expect(response.status).toBe(200)
+    const published = (await response.json() as any).commands[0].inputSchema
+    expect(published.properties.value).toEqual({ type: 'string' })
+    if (!('email' in input.shape)) expect(JSON.stringify(publicSchema(config, options).commands)).toBe(JSON.stringify(publicCommands(config, options)))
+  }
+})
+it('filters transform fallback nodes before conversion while preserving sibling output semantics', async () => {
+  const config = fixture().config
+  config.commands = ['probe']
+  const canary = 'synthetic-access-secret-at-least-32'
+  let evaluations = 0
+  const input = z.object({
+    secret: z.string().describe(canary).pipe(z.string().meta({ sensitive: true })),
+    public: z.string().default(() => { evaluations++; return canary }),
+    hidden: z.object({ privateField: z.string().describe(canary), publicField: z.string() })
+      .transform(value => ({ publicField: value.publicField })).pipe(z.object({ publicField: z.string() })),
+    email: z.string().describe(canary).transform(value => value.toLowerCase()),
+  })
+  const options = { commands: new Map([['probe', { name: 'probe', input, permission: { entity: 'worker', operation: 'update' } } as any]]) }
+  const response = await schemaResponse(config, options)
+  expect(response.status).toBe(200)
+  const text = await response.text()
+  expect(text).not.toContain(canary)
+  expect(text).not.toContain('privateField')
+  expect(evaluations).toBe(0)
+  const published = JSON.parse(text).commands[0].inputSchema
+  expect(published.additionalProperties).toBe(false)
+  expect(published.required).toContain('public')
+  expect(published.properties.hidden).toEqual({ type: 'object', properties: { publicField: { type: 'string' } }, required: ['publicField'], additionalProperties: false })
+  expect(published.properties.email).toEqual({ type: 'string' })
 })
 it('validates 3.1, rejects broken documents, and round-trips exact canonical bytes', async () => {
   const text = bytes(), doc = JSON.parse(text)

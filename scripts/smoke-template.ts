@@ -1,5 +1,5 @@
 import { registerTempDir, cleanupTempDir } from './lib/test-temp-dir.mjs'
-import { isolateSmokeNetwork } from './lib/smoke-network'
+import { assertSmokeNetworkIsolation, isolateSmokeNetwork } from './lib/smoke-network'
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
@@ -37,7 +37,7 @@ syncBuiltinESMExports()
 `)
 const run = (cmd: string, args: string[], cwd = consumer, childEnv = env) => {
   const guardedArgs = cmd === 'bun' && offline ? ['--preload=' + guard, ...args] : args
-  const [executable, isolatedArgs] = offline ? isolateSmokeNetwork(cmd, guardedArgs) : [cmd, guardedArgs]
+  const [executable, isolatedArgs] = offline ? isolateSmokeNetwork(cmd, guardedArgs, childEnv) : [cmd, guardedArgs]
   return execFileSync(executable, isolatedArgs, { cwd, env: childEnv, encoding: 'utf8', timeout: 240000, stdio: 'pipe', maxBuffer: 8 * 1024 * 1024 })
 }
 const npm = (args: string[], cwd = consumer) => run('npm', [...args, '--no-audit', '--no-fund', '--registry=https://registry.npmjs.org'], cwd)
@@ -108,6 +108,7 @@ try {
   for (const path of files(join(consumer, 'node_modules'))) assert(realpathSync(path).startsWith(realpathSync(consumer) + '/'), `Dependency escapes consumer: ${path}`)
   console.log('Step 2: npm install + npm ci; identical lock, single SDK copies, candidate integrity, no directory symlinks')
   writeFileSync(join(consumer, 'bunfig.toml'), 'preload = [' + JSON.stringify(guard) + ']\n')
+  assertSmokeNetworkIsolation(env, consumer)
   offline = true
   env.NODE_OPTIONS = '--import=' + guard
   env.npm_config_offline = 'true'
