@@ -3,6 +3,7 @@ import type { InstanceConfig } from './config'
 import type { RuntimeOptions } from './types'
 import { fieldsFor, fieldType, operatorsFor } from './query/input-schema'
 import { QUERY_LIMITS } from './query/limits'
+import { publicOutputSchema } from './openapi/input-projection'
 
 // These objects map user-defined names to schemas; their keys are not keywords.
 const schemaMaps = new Set(['properties', 'patternProperties', '$defs', 'definitions', 'dependentSchemas'])
@@ -54,7 +55,54 @@ export function publicCommandDefinitions(config: InstanceConfig, options: Runtim
     return command && !('system' in command.permission) ? [{ name, command }] : []
   })
 }
-export function publicCommands(config: InstanceConfig, options: RuntimeOptions, input = false) {
+export function publicCommands(config: InstanceConfig, options: RuntimeOptions, transformInputs = false) {
   return publicCommandDefinitions(config, options).map(({ name, command }) => ({ name, permission: command.permission, ...(command.ui ? { ui: command.ui } : {}),
-    additionalPermissions: command.additionalPermissions ?? [], inputSchema: sanitizeSchema(z.toJSONSchema(command.input, input ? { io: 'input' } : undefined)) }))
+    additionalPermissions: command.additionalPermissions ?? [], inputSchema: sanitizeSchema(transformInputs ? transformTolerantSchema(command.input) : z.toJSONSchema(command.input)) }))
+}
+/** Legacy output conversion stays the only path for every transform-free command,
+ * so its /schema bytes are unchanged by construction. Only a command whose graph
+ * contains a transform uses the disclosure-filtered projection. The check is
+ * structural: converting first would evaluate default factories before throwing. */
+function transformTolerantSchema(input: z.ZodType) {
+  return containsTransform(input) ? publicOutputSchema(input) : z.toJSONSchema(input)
+}
+/** Follow only known type-def children: enum/literal data and checks are leaves.
+ * Data descriptors skip executable accessors. Shape and lazy resolution use Zod's
+ * caches; a failed resolution leaves legacy conversion to decide the outcome. */
+function containsTransform(schema: z.core.$ZodType, seen = new Set<z.core.$ZodType>()): boolean {
+  if (seen.has(schema)) return false
+  seen.add(schema)
+  const def = schema._zod.def
+  const read = (key: string) => Object.getOwnPropertyDescriptor(def, key)?.value
+  const children: z.core.$ZodType[] = []
+  const add = (value: unknown) => {
+    if ((value as z.core.$ZodType | null)?._zod?.def) children.push(value as z.core.$ZodType)
+  }
+  // Entries too are read as data descriptors: an accessor-backed array index must never run.
+  const addList = (value: unknown) => {
+    if (!Array.isArray(value)) return
+    const length = Object.getOwnPropertyDescriptor(value, 'length')?.value as number
+    for (let index = 0; index < length; index++) add(Object.getOwnPropertyDescriptor(value, index)?.value)
+  }
+  switch (read('type')) {
+    case 'transform': return true
+    case 'optional': case 'nullable': case 'default': case 'prefault':
+    case 'nonoptional': case 'success': case 'catch': case 'readonly': case 'promise':
+      add(read('innerType')); break
+    case 'array': add(read('element')); break
+    case 'object':
+      try { Object.values((schema as z.core.$ZodObject)._zod.def.shape).forEach(add) } catch { /* Unresolvable shape. */ }
+      add(read('catchall')); break
+    case 'union': addList(read('options')); break
+    case 'intersection': add(read('left')); add(read('right')); break
+    case 'tuple': addList(read('items')); add(read('rest')); break
+    case 'record': case 'map': add(read('keyType')); add(read('valueType')); break
+    case 'set': add(read('valueType')); break
+    case 'pipe': add(read('in')); add(read('out')); break
+    case 'function': add(read('input')); add(read('output')); break
+    case 'lazy':
+      try { add((schema as z.core.$ZodLazy)._zod.innerType) } catch { /* Unresolvable lazy. */ }
+      break
+  }
+  return children.some(child => containsTransform(child, seen))
 }

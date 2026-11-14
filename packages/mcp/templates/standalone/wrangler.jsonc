@@ -9,14 +9,14 @@
     {
       "binding": "DB",
       "database_name": "workbase-{{INSTANCE_SELECTOR}}",
-      "database_id": "00000000-0000-0000-0000-000000000091",
+      "database_id": "00000000000000000000000000000000",
       "migrations_dir": "migrations"
     }
   ],
   "kv_namespaces": [
     {
       "binding": "AUDIT_KV",
-      "id": "00000000000000000000000000000091"
+      "id": "00000000000000000000000000000000"
     }
   ],
   "queues": {
@@ -37,7 +37,7 @@
     ]
   },
   "assets": {
-    "directory": "node_modules/@workbasehq/plugins/console/assets",
+    "directory": "./dist",
     "binding": "ASSETS",
     "html_handling": "none",
     "not_found_handling": "none",

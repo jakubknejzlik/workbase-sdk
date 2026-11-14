@@ -35,15 +35,27 @@ function sensitivity(schema: ZodSchema, seen = new Set<ZodSchema>()): boolean {
  * factories. Input syntax is retained; pipeline-only values and annotations are
  * omitted, and object keys must also exist on the public output side. This may
  * deliberately widen a pipeline's scalar constraints rather than disclose them.
- * /schema continues to use its original output conversion and sanitizer. */
+ * /schema uses the same disclosure rules with output conversion as its primary view. */
 export function publicInputSchema(input: z.ZodType): Schema {
+  const result = publicProjection(input, 'input')
+  delete result.$schema
+  return result
+}
+
+/** Preserve output semantics, visiting input syntax only at an output transform. */
+export function publicOutputSchema(input: z.ZodType): Schema {
+  return publicProjection(input, 'output')
+}
+
+type Mode = 'input' | 'output'
+function publicProjection(input: z.ZodType, io: Mode): Schema {
   const metadata = z.registry<Record<string, any>>()
-  const contexts = new WeakMap<ZodSchema, { boundary: ZodSchema; sensitive: boolean; restricted: boolean; schema: ZodSchema }[]>()
+  const contexts = new WeakMap<ZodSchema, { boundary: ZodSchema; sensitive: boolean; restricted: boolean; mode: Mode; schema: ZodSchema }[]>()
   const restrictedSchemas = new WeakSet<ZodSchema>()
   const undisclosed = z.unknown()
-  function project(source: ZodSchema, boundary = source, inherited = false, restricted = false): ZodSchema {
+  function project(source: ZodSchema, boundary = source, inherited = false, restricted = false, mode = io): ZodSchema {
     const sensitive = inherited || sensitivity(source) || sensitivity(boundary)
-    const cached = contexts.get(source)?.find(entry => entry.boundary === boundary && entry.sensitive === sensitive && entry.restricted === restricted)
+    const cached = contexts.get(source)?.find(entry => entry.boundary === boundary && entry.sensitive === sensitive && entry.restricted === restricted && entry.mode === mode)
     if (cached) return cached.schema
     const def = source._zod.def as any
     const chain = outputChain(boundary), publicNode = chain.at(-1)!, publicDef = publicNode._zod.def as any
@@ -59,9 +71,9 @@ export function publicInputSchema(input: z.ZodType): Schema {
     // Resolve structural getters lazily, after the clone is memoized (recursive objects).
     if (def.type === 'object') Object.defineProperty(copy, 'shape', { get: () => Object.fromEntries(Object.entries(def.shape).flatMap(([key, child]) => {
       const output = publicDef.type === 'object' ? publicDef.shape[key] : undefined
-      return restricted && !output ? [] : [[key, project(child as ZodSchema, output ?? child as ZodSchema, sensitive, restricted)]]
+      return restricted && !output ? [] : [[key, project(child as ZodSchema, output ?? child as ZodSchema, sensitive, restricted, mode)]]
     })), enumerable: true })
-    if (def.type === 'lazy') copy.getter = () => project((source as z.core.$ZodLazy)._zod.innerType!, publicNode, sensitive, restricted)
+    if (def.type === 'lazy') copy.getter = () => project((source as z.core.$ZodLazy)._zod.innerType!, publicNode, sensitive, restricted, mode)
     let schema: ZodSchema
     // Broadening private enum/literal values also prevents record/union processors
     // from deriving public key inventories from the private _zod.values set.
@@ -72,7 +84,7 @@ export function publicInputSchema(input: z.ZodType): Schema {
       schema = types.length === 1 ? primitives[types[0] as string] ?? z.unknown() : z.unknown()
     } else schema = z.core.clone(source, copy)
     const entries = contexts.get(source) ?? []
-    entries.push({ boundary, sensitive, restricted, schema })
+    entries.push({ boundary, sensitive, restricted, mode, schema })
     contexts.set(source, entries)
     if (restricted) restrictedSchemas.add(schema)
     const meta: Record<string, any> = {}
@@ -83,10 +95,22 @@ export function publicInputSchema(input: z.ZodType): Schema {
     metadata.add(schema, meta)
     // The constructor retains `copy` by reference. Replace child schemas only
     // after memoization; lazy getters above close over this same projection.
-    const child = (value: ZodSchema, output?: ZodSchema) => project(value, output ?? (restricted ? undisclosed : value), sensitive, restricted)
-    if (def.type === 'pipe') {
+    const child = (value: ZodSchema, output?: ZodSchema) => project(value, output ?? (restricted ? undisclosed : value), sensitive, restricted, mode)
+    if (def.type === 'pipe' && mode === 'output') {
+      copy.in = undisclosed // Never convert a representable output pipeline's input.
+      if (def.out._zod.def.type === 'transform') {
+        const fallback = project(source, boundary, sensitive, restricted, 'input')
+        // Use Zod's shared conversion context so recursive/reused schemas retain
+        // document-local refs. The fallback graph is already disclosure-filtered.
+        schema._zod.processJSONSchema = (ctx, _json, params) => {
+          z.core.processSchema(fallback, { ...ctx, io: 'input' }, params)
+          ctx.seen.get(schema)!.ref = fallback
+        }
+        copy.out = undisclosed
+      } else copy.out = project(def.out, boundary, sensitive, restricted, mode)
+    } else if (def.type === 'pipe') {
       const input = def.in._zod.def.type === 'transform' ? def.out : def.in
-      copy.in = project(input, boundary, sensitive, true)
+      copy.in = project(input, boundary, sensitive, true, mode)
       copy.out = z.unknown() // io:input never visits the executable output transform.
     } else {
       for (const key of ['innerType', 'element', 'keyType', 'valueType', 'left', 'right', 'rest', 'catchall']) if (def[key]) copy[key] = child(def[key], publicDef[key])
@@ -94,7 +118,7 @@ export function publicInputSchema(input: z.ZodType): Schema {
     }
     return schema
   }
-  const result = z.toJSONSchema(project(input), { io: 'input', metadata, override({ zodSchema, jsonSchema }) {
+  return z.toJSONSchema(project(input), { io, metadata, override({ zodSchema, jsonSchema }) {
     const restricted = restrictedSchemas.has(zodSchema)
     for (const key of Object.keys(jsonSchema)) if (!structural.has(key) && !annotations.includes(key as any) && !(constraints.has(key) && !restricted)) delete (jsonSchema as any)[key]
     if (restricted) {
@@ -104,6 +128,4 @@ export function publicInputSchema(input: z.ZodType): Schema {
       if (Array.isArray((jsonSchema as any).oneOf)) { (jsonSchema as any).anyOf = (jsonSchema as any).oneOf; delete (jsonSchema as any).oneOf }
     }
   } }) as Schema
-  delete result.$schema
-  return result
 }

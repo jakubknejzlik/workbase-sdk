@@ -1,6 +1,8 @@
-/// <reference path="./.sst/platform/config.d.ts" />
+// SST injects these at deployment time; local checks need no provider download.
+declare const $app: { stage: string }
+declare function $config<T>(config: T): T
 export default $config({
-  app(input) {
+  app(input: { stage: string }) {
     return {
       name: '{{INSTANCE_SELECTOR}}',
       home: 'cloudflare',
@@ -11,7 +13,6 @@ export default $config({
   },
   async run() {
     const { provision } = await import('@workbasehq/core/infra/provision')
-    const { consoleAssetsDir } = await import('@workbasehq/plugins/console/assets')
     const required = (key: string) => {
       const value = process.env[key]
       if (!value) throw new Error(`Set ${key} before running SST`)
@@ -19,10 +20,10 @@ export default $config({
     }
     const domain = process.env.WORKBASE_DOMAIN?.replaceAll('{stage}', $app.stage)
     const deployed = await provision({
-      configPath: './config.ts', handler: './src/index.ts', migrationsDir: './migrations',
+      configPath: './runtime.ts', handler: './src/index.ts', migrationsDir: './migrations',
       resourcePrefix: required('WORKBASE_RESOURCE_PREFIX'), stage: $app.stage,
       authSecret: required('BETTER_AUTH_SECRET'), authBaseUrl: required('AUTH_BASE_URL').replaceAll('{stage}', $app.stage),
-      assetsDir: consoleAssetsDir(),
+      assetsDir: './dist',
       ...(domain ? { domain } : {}),
       email: { from: required('EMAIL_FROM') },
     })

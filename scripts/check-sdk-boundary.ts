@@ -69,6 +69,11 @@ export function checkSdkBoundary(root: string, sourceOnly = false, vocabulary: R
       for (const specifier of imports) {
         if (specifier.startsWith('node:') || specifier.startsWith('cloudflare:') || builtinModules.includes(specifier)) continue
         if (specifier.startsWith('.')) {
+          // V3 template outputs are generated only after init in the consumer.
+          // Keep this list exact: every other missing relative import is an error.
+          const generated = relative(directory, path) === 'config.ts' && specifier === './schema.lock.json'
+            || relative(directory, path) === 'src/console.tsx' && ['../.workbase-ui/routeTree.gen', '../.workbase-ui/manifest.json', '../.workbase-ui/locales.json'].includes(specifier)
+          if (template && generated) continue
           const target = resolve(dirname(path), specifier)
           if (!target.startsWith(directory + '/')) {
             // Sibling scope packages retain their npm layout (plugins -> core).

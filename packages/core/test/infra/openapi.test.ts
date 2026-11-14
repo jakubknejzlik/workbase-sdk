@@ -11,7 +11,8 @@ import { canonical } from '../../src/access-lock'
 import { instanceConfigSchema, fieldSchema, cloneInstanceConfig, CORE_VERSION, Q, Fn } from '../../src/config'
 import { declarationSchema } from '../../src/schema'
 import { publicSchema } from '../../src/public-schema'
-import { publicQuery } from '../../src/public-projection'
+import { createApp } from '../../src/app'
+import { publicCommands, publicQuery } from '../../src/public-projection'
 import { KernelRegistry } from '../../src/kernel/registry'
 import { loadConfig } from '../../src/schema/load'
 import { workerAccessFixture } from '../fixtures/worker-access'
@@ -36,9 +37,70 @@ it('pins the current successful /schema fixture bytes across shared projection e
   config.commands = ['probe']
   const command = { name: 'probe', permission: { entity: 'worker', operation: 'update' }, additionalPermissions: [], input: z.object({ name: z.string().default('synthetic-access-secret-at-least-32') }), ui: { title: 'Probe' } } as any
   expect(JSON.stringify(publicSchema(config, { commands: new Map([['probe', command]]) }))).toBe(await readFile(join(root, 'schema.commands.public.json'), 'utf8'))
-  // Preserve the pre-existing transform error rather than changing a runtime contract.
+})
+it('projects account-link command inputs with transforms for /schema', () => {
   const kernel = fixture()
-  expect(() => publicSchema(kernel.config, kernel)).toThrow('Transforms cannot be represented')
+  const schema = publicSchema(kernel.config, kernel)
+  const invite = schema.commands.find(command => command.name === 'worker/access_invite')!
+  expect(invite).toBeDefined()
+  expect(invite.inputSchema).toMatchObject({ properties: { email: { type: 'string' } } })
+  expect(JSON.parse(JSON.stringify(schema))).toEqual(schema)
+})
+it('keeps transform-free /schema command bytes identical to the legacy projection', () => {
+  const config = workerAccessFixture()
+  config.commands = ['probe']
+  const input = z.object({
+    name: z.string().default('synthetic-access-secret-at-least-32'),
+    children: z.array(z.object({ label: z.string().optional() })).optional(),
+    choice: z.union([z.string(), z.number()]),
+  })
+  const command = { name: 'probe', permission: { entity: 'worker', operation: 'update' }, input } as any
+  const options = { commands: new Map([['probe', command]]) }
+  const published = publicSchema(config, options)
+  const legacy = { ...published, commands: publicCommands(config, options) }
+  expect(JSON.stringify(published)).toBe(JSON.stringify(legacy))
+})
+const schemaResponse = (config: any, options: any) => createApp(config, {
+  DB: { prepare() { throw new Error('unexpected DB access') } },
+  BETTER_AUTH_SECRET: 'synthetic-access-secret-at-least-32', AUTH_BASE_URL: 'https://neutral.example.test',
+} as any, options).request('https://neutral.example.test/schema')
+it('keeps custom pipeline inputs out of /schema output conversion, including beside a transform', async () => {
+  const config = fixture().config
+  config.commands = ['probe']
+  const fields = { value: z.custom<string>(value => typeof value === 'string').pipe(z.string()) }
+  for (const input of [z.object(fields), z.object({ ...fields, email: z.string().transform(value => value.toLowerCase()) })]) {
+    const options = { commands: new Map([['probe', { name: 'probe', input, permission: { entity: 'worker', operation: 'update' } } as any]]) }
+    const response = await schemaResponse(config, options)
+    expect(response.status).toBe(200)
+    const published = (await response.json() as any).commands[0].inputSchema
+    expect(published.properties.value).toEqual({ type: 'string' })
+    if (!('email' in input.shape)) expect(JSON.stringify(publicSchema(config, options).commands)).toBe(JSON.stringify(publicCommands(config, options)))
+  }
+})
+it('filters transform fallback nodes before conversion while preserving sibling output semantics', async () => {
+  const config = fixture().config
+  config.commands = ['probe']
+  const canary = 'synthetic-access-secret-at-least-32'
+  let evaluations = 0
+  const input = z.object({
+    secret: z.string().describe(canary).pipe(z.string().meta({ sensitive: true })),
+    public: z.string().default(() => { evaluations++; return canary }),
+    hidden: z.object({ privateField: z.string().describe(canary), publicField: z.string() })
+      .transform(value => ({ publicField: value.publicField })).pipe(z.object({ publicField: z.string() })),
+    email: z.string().describe(canary).transform(value => value.toLowerCase()),
+  })
+  const options = { commands: new Map([['probe', { name: 'probe', input, permission: { entity: 'worker', operation: 'update' } } as any]]) }
+  const response = await schemaResponse(config, options)
+  expect(response.status).toBe(200)
+  const text = await response.text()
+  expect(text).not.toContain(canary)
+  expect(text).not.toContain('privateField')
+  expect(evaluations).toBe(0)
+  const published = JSON.parse(text).commands[0].inputSchema
+  expect(published.additionalProperties).toBe(false)
+  expect(published.required).toContain('public')
+  expect(published.properties.hidden).toEqual({ type: 'object', properties: { publicField: { type: 'string' } }, required: ['publicField'], additionalProperties: false })
+  expect(published.properties.email).toEqual({ type: 'string' })
 })
 it('validates 3.1, rejects broken documents, and round-trips exact canonical bytes', async () => {
   const text = bytes(), doc = JSON.parse(text)
@@ -187,4 +249,30 @@ it('rebases recursive registered command and workflow input references into the 
   const schema = doc.paths['/commands/worker/tree'].post.requestBody.content['application/json'].schema
   const check = validate(doc, schema, { name: 'root', $schema: 'named property', default: 'named property', children: [{ name: 'leaf', $schema: 'nested property' }], idempotencyKey: 'synthetic' })
   expect(check({ name: 'root', children: [{ name: 1 }] })).toBe(false)
+})
+it('serves representable command inputs on /schema with byte-identical legacy output conversion', () => {
+  const config = fixture().config
+  config.commands = ['probe']
+  const described = z.string().describe('Public label')
+  for (const input of [
+    z.object({ label: described.optional() }),
+    z.object({ label: described.default('x') }),
+    z.object({ label: z.string().pipe(z.string()).describe('Public label') }),
+    z.object({ label: z.string().meta({ sensitive: true }).pipe(z.string()) }),
+  ]) {
+    const options = { commands: new Map([['probe', { name: 'probe', input, permission: { entity: 'worker', operation: 'update' } } as any]]) }
+    const legacy = { ...publicSchema(config, options), commands: publicCommands(config, options) }
+    expect(JSON.stringify(publicSchema(config, options))).toBe(JSON.stringify(legacy))
+  }
+})
+it('detects transforms inside function arguments and returns without evaluating default factories', async () => {
+  const config = fixture().config
+  config.commands = ['probe']
+  const transform = z.string().transform(value => value.toUpperCase())
+  for (const fn of [z.function({ input: [transform], output: z.string() }), z.function({ input: [], output: transform })]) {
+    const input = z.object({ value: z.union([z.string(), fn]).pipe(z.string()), label: z.string().default(() => { throw new Error('FACTORY_MUST_NOT_RUN') }) })
+    const options = { commands: new Map([['probe', { name: 'probe', input, permission: { entity: 'worker', operation: 'update' } } as any]]) }
+    expect(() => publicSchema(config, options)).not.toThrow()
+    expect((await schemaResponse(config, options)).status).toBe(200)
+  }
 })
