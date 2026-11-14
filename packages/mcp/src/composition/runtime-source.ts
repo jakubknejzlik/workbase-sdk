@@ -5,6 +5,13 @@ import { importOrder, permissionOptions, pluginOrder, pluginRegistry, parsePlugi
 export interface RuntimeModel { interactive?: boolean; plugins: RuntimePlugin[] }
 interface Binding { local: string; plugin?: PluginName; singleton?: boolean; node: ts.ImportSpecifier | ts.Identifier }
 interface Parsed { file: ts.SourceFile; object: ts.ObjectLiteralExpression; config: string; bindings: Binding[]; model: RuntimeModel }
+// transpileModule does not diagnose strict-mode/module binding early errors.
+const reservedBindings = new Set([
+  'eval', 'arguments', 'await', 'yield', 'let', 'implements', 'interface', 'package', 'private', 'protected', 'public', 'static',
+  'break', 'case', 'catch', 'class', 'const', 'continue', 'debugger', 'default', 'delete', 'do', 'else', 'enum', 'export', 'extends',
+  'false', 'finally', 'for', 'function', 'if', 'import', 'in', 'instanceof', 'new', 'null', 'return', 'super', 'switch', 'this',
+  'throw', 'true', 'try', 'typeof', 'var', 'void', 'while', 'with',
+])
 function reject(node: ts.Node, message: string): never {
   const file = node.getSourceFile()
   const { line, character } = file.getLineAndCharacterOfPosition(node.getStart(file))
@@ -59,6 +66,8 @@ function parse(source: string, filename: string): Parsed {
   let object: ts.ObjectLiteralExpression | undefined
   let config: string | undefined
   function bind(binding: Binding) {
+    const identifier = ts.isImportSpecifier(binding.node) ? binding.node.name : binding.node
+    if (reservedBindings.has(identifier.text)) reject(identifier, 'Invalid module import binding')
     if (locals.has(binding.local)) reject(binding.node, 'Duplicate import binding')
     locals.add(binding.local); bindings.push(binding)
   }
@@ -191,7 +200,16 @@ export function rewriteRuntimeSource(source: string, model: RuntimeModel, config
     const binding = parsed.bindings.find(item => item.plugin === plugin && !item.singleton) ?? parsed.bindings.find(item => item.plugin === plugin)
     if (binding) {
       names.set(plugin, binding.local)
-      if (binding.singleton) edits.push({ start: binding.node.getStart(parsed.file), end: binding.node.end, text: `${entry.factory} as ${binding.local}` })
+      if (binding.singleton && ts.isImportSpecifier(binding.node)) {
+        const imported = binding.node.propertyName ?? binding.node.name
+        // Splice only the imported token; retain every comment, alias and separator.
+        const start = imported.getStart(parsed.file)
+        const quoted = ts.isStringLiteral(imported)
+        edits.push({
+          start: start + (quoted ? 1 : 0), end: imported.end - (quoted ? 1 : 0),
+          text: binding.node.propertyName ? entry.factory : `${entry.factory} as ${source.slice(start, imported.end)}`,
+        })
+      }
     } else {
       let local = entry.factory
       for (let i = 2; locals.has(local); i++) local = `${entry.factory}${i}`

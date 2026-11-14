@@ -87,6 +87,55 @@ it('preserves comments, import order, aliases and all bytes outside the export l
   expect(parseRuntimeSource(rewritten)).toEqual(model)
   expect(rewriteRuntimeSource(rewritten, model, config)).toBe(rewritten)
 })
+it.each([
+  ['identity /* preserve-me */ as id', 'id', 'createIdentity /* preserve-me */ as id'],
+  ['identity /* before-as */ as /* after-as */ id', 'id', 'createIdentity /* before-as */ as /* after-as */ id'],
+  ['identity // before-as\n as id', 'id', 'createIdentity // before-as\n as id'],
+  ['identity /* unaliased */', 'identity', 'createIdentity as identity /* unaliased */'],
+  ['identity // unaliased\n', 'identity', 'createIdentity as identity // unaliased\n'],
+  ['identity /* trailing */ as id /* after-binding */', 'id', 'createIdentity /* trailing */ as id /* after-binding */'],
+  ['identity /* escaped alias */ as \\u0069d', 'id', 'createIdentity /* escaped alias */ as \\u0069d'],
+])('preserves authored import trivia when converting %s', (specifier, local, expected) => {
+  const source = `// header\nimport { /* leading */ ${specifier} } from '@workbasehq/plugins/identity'\nimport config from './config'\nexport default { ...config, plugins: [${local}] }\n// footer\n`
+  const target = applyRuntimeChanges(parseRuntimeSource(source), [{ kind: 'set_interactive', interactive: true }], config)
+  const rewritten = rewriteRuntimeSource(source, target, config)
+  expect(rewritten.slice(0, rewritten.indexOf('export default'))).toBe(
+    source.slice(0, source.indexOf('export default')).replace(specifier, expected),
+  )
+  expect(rewritten.endsWith('\n// footer\n')).toBe(true)
+  expect(parseRuntimeSource(rewritten)).toEqual(target)
+  expect(rewriteRuntimeSource(rewritten, target, config)).toBe(rewritten)
+})
+it.each([
+  'eval', 'arguments', 'await', 'yield', 'let', 'implements', 'interface', 'package', 'private', 'protected', 'public', 'static',
+  'break', 'case', 'catch', 'class', 'const', 'continue', 'debugger', 'default', 'delete', 'do', 'else', 'enum', 'export', 'extends',
+  'false', 'finally', 'for', 'function', 'if', 'import', 'in', 'instanceof', 'new', 'null', 'return', 'super', 'switch', 'this',
+  'throw', 'true', 'try', 'typeof', 'var', 'void', 'while', 'with', '1invalid', 'invalid-name', '\\u0065val', '\\u0061rguments',
+])('rejects invalid module binding %s in plugin and config imports', local => {
+  for (const source of [
+    `import { createIdentity as ${local} } from '@workbasehq/plugins/identity'\nimport config from './config'\nexport default { ...config, plugins: [] }\n`,
+    `import ${local} from './config'\nexport default { ...${local}, plugins: [] }\n`,
+  ]) {
+    expect(() => parseRuntimeSource(source, 'instance/runtime.ts')).toThrow(expect.objectContaining({
+      code: 'runtime_not_canonical', message: expect.stringMatching(/instance\/runtime.ts:\d+:\d+:/),
+      details: expect.objectContaining({ file: 'instance/runtime.ts', line: expect.any(Number), column: expect.any(Number) }),
+    }))
+  }
+})
+it('reports invalid bindings at the local identifier without exposing source text', () => {
+  const source = `import { createIdentity /* private-canary */ as eval } from '@workbasehq/plugins/identity'\nimport config from './config'\nexport default { ...config, plugins: [eval()] }\n`
+  expect(() => parseRuntimeSource(source, 'instance/runtime.ts')).toThrow(expect.objectContaining({
+    code: 'runtime_not_canonical',
+    details: { file: 'instance/runtime.ts', line: 1, column: source.indexOf('eval') + 1 },
+    message: expect.not.stringContaining('private-canary'),
+  }))
+})
+it.each(['id', '$identity', '_identity', 'café', '𐐀identity', 'async', 'of', 'type', 'using', '\\u0069d'])(
+  'accepts valid module binding %s', local => {
+    const source = `import { createIdentity as ${local} } from '@workbasehq/plugins/identity'\nimport config from './config'\nexport default { ...config, plugins: [${local}()] }\n`
+    expect(parseRuntimeSource(source)).toEqual({ plugins: [{ plugin: 'identity' }] })
+  },
+)
 it('adds missing imports without discarding authored imports or comments', () => {
   const target = applyRuntimeChanges(parseRuntimeSource(thin), changes, config)
   const rewritten = rewriteRuntimeSource(thin, target, config)
