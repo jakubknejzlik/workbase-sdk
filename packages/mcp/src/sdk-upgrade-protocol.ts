@@ -8,7 +8,7 @@ import { dirname, isAbsolute, join, relative, sep } from 'node:path'
 export const BRIDGE_VERSION = 1
 export const sha256Schema = z.string().regex(/^[a-f0-9]{64}$/)
 const version = z.string().regex(/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/)
-export const inputPath = z.string().regex(/^(?:package\.json|bun\.lock|config(?:\.[a-z0-9_-]+)?\.(?:ts|json)|migrations\/[0-9]{4}_[a-zA-Z0-9_-]+\.sql)$/)
+export const inputPath = z.string().regex(/^(?:package\.json|bun\.lock|runtime\.ts|access\.ts|schema\.lock\.json|schema\/(?:[a-zA-Z0-9_-]+\/)*[a-zA-Z0-9_-]+\.ts|config(?:\.[a-z0-9_-]+)?\.(?:ts|json)|migrations\/[0-9]{4}_[a-zA-Z0-9_-]+\.sql)$/)
 export const inputHashesSchema = z.record(inputPath, sha256Schema)
 export const identitySchema = z.strictObject({
   runId: z.uuid(), instanceId: z.string().regex(/^[a-z][a-z0-9_]*$/),
@@ -22,6 +22,10 @@ export const requestSchema = z.strictObject({
   action: z.enum(['prepare', 'verify']), identity: identitySchema,
   inputHashes: inputHashesSchema, stage: stageSchema.optional(),
 }).refine(value => (value.action === 'verify') === !!value.stage, 'Only verification has a bound stage')
+export const replayFailureSchema = z.strictObject({
+  identity: identitySchema, inputHashes: inputHashesSchema,
+  diagnostic: z.strictObject({ file: z.string().min(1).max(512), migration: z.string().min(1).max(256), sqlError: z.string().min(1).max(2048) }),
+})
 const packageSchema = z.strictObject({
   name: z.enum(['@workbasehq/core', '@workbasehq/plugins', '@workbasehq/mcp']), version,
   directory: z.string().min(1),
@@ -41,7 +45,7 @@ export type UpgradeIdentity = z.infer<typeof identitySchema>
 export type UpgradeStage = z.infer<typeof stageSchema>
 export type UpgradeResult = z.infer<typeof resultSchema>
 export const digestBytes = (bytes: string | Buffer) => createHash('sha256').update(bytes).digest('hex')
-export const bridgeFiles = ['sdk-upgrade-worker.ts', 'sdk-upgrade-protocol.ts'] as const
+export const bridgeFiles = ['sdk-upgrade-worker.ts', 'sdk-upgrade-protocol.ts', 'migration-replay.ts'] as const
 export async function bridgeDigest(directory: string) {
   const files = await Promise.all(bridgeFiles.map(async path => [path, digestBytes(await readFile(join(directory, path)))]))
   return digestBytes(JSON.stringify(files))

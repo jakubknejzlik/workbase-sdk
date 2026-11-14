@@ -1,9 +1,17 @@
 import { sdkMigrations, SDK_NAMESPACE } from '../migrations/sdk-baseline'
 import { assertResetEra, usesSdkBaseline, type MigrationConfig } from '../migrations/reset-era'
 import { coreMigrations } from '../migrations/model-b'
+import { internalMigrationMessage } from '../migrations/diagnostics'
 import { sha256 } from '../crypto'
 import type { WorkbasePlugin } from './plugin'
 import type { InstanceConfig } from '../config'
+
+/** Preserve the failing step even when statement generation fails before SQL. */
+export class PluginMigrationError extends Error {
+  constructor(readonly namespace: string, readonly migration: string, cause: unknown) {
+    super(`Plugin migration ${namespace}/${migration} failed: ${cause instanceof Error ? cause.message : String(cause)}`, { cause })
+  }
+}
 
 /** Per-plugin append-only ledgers. Absent namespaces are retained on uninstall. */
 export async function applyPluginMigrations(db: D1Database, plugins: readonly WorkbasePlugin[], config?: InstanceConfig) {
@@ -23,9 +31,14 @@ export async function applyPluginMigrations(db: D1Database, plugins: readonly Wo
       // D1 batch is transactional. SQL is supplied as statements by trusted plugins.
       // exec supports multi-statement SQL but is not transactional with the ledger;
       // prepare/batch keeps DDL, data changes and their ledger entry atomic.
-      const sql = migration.statements ? (await migration.statements(db)).flatMap(splitStatements) : splitStatements(migration.sql)
-      const statements = sql.map(statement => db.prepare(statement))
-      await db.batch([...statements, db.prepare('INSERT INTO _plugin_migrations (namespace,name,position,checksum) VALUES (?,?,?,?)').bind(plugin.name, migration.name, position, checksums[position])])
+      try {
+        const sql = migration.statements ? (await migration.statements(db)).flatMap(splitStatements) : splitStatements(migration.sql)
+        const statements = sql.map(statement => db.prepare(statement))
+        await db.batch([...statements, db.prepare('INSERT INTO _plugin_migrations (namespace,name,position,checksum) VALUES (?,?,?,?)').bind(plugin.name, migration.name, position, checksums[position])])
+      } catch (error) {
+        if (internalMigrationMessage(error)) throw error
+        throw new PluginMigrationError(plugin.name, migration.name, error)
+      }
     }
   }
 }

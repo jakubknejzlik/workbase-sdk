@@ -5,6 +5,7 @@ import { durableAtomic, json, type Bundle, type Store } from './storage.ts'
 import { fail, WorkflowError } from './schemas.ts'
 import { parseProposal, sdkEvidenceSchema, type SdkUpgradeProposal } from './proposals.ts'
 import { instanceMeta } from './offline.ts'
+import { MigrationReplayError } from './migration-replay.ts'
 import { captureSdkInputs, runSdkTarget, type SdkInputs } from './sdk-target.ts'
 import { assertBound, bridgeDigest, digestBytes } from './sdk-upgrade-protocol.ts'
 import { RegistrySdkError } from './sdk-registry.ts'
@@ -82,6 +83,7 @@ const publicMessages: Record<string, string> = {
   internal_error: 'SDK operation failed; no database was deployed',
 }
 export function sdkWorkflowError(error: unknown): WorkflowError {
+  if (error instanceof MigrationReplayError) return new WorkflowError(error.code, error.message, 422, error.diagnostic)
   const code = error instanceof WorkflowError || error instanceof RegistrySdkError ? error.code : error instanceof z.ZodError ? 'invalid_input' : 'internal_error'
   const status = error instanceof WorkflowError ? error.status : error instanceof RegistrySdkError ? 409 : code === 'invalid_input' ? 400 : 500
   return new WorkflowError(code, Object.hasOwn(publicMessages, code) ? publicMessages[code] : 'SDK operation failed; the proposal has no accepted evidence', status)
@@ -91,7 +93,7 @@ function executionVersion(version: string) {
   if (!/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(version)) fail('sdk_upgrade_target_unsupported', 'SDK execution requires a numeric release version without prerelease or build qualifiers', 409)
   return version.split('.').map(BigInt)
 }
-function executionBase(bundle: Bundle, proposal: Pick<SdkUpgradeProposal, 'targetVersion' | 'baseRevision' | 'baseFingerprint' | 'baseDependencyDigest'>) {
+async function executionBase(bundle: Bundle, proposal: Pick<SdkUpgradeProposal, 'targetVersion' | 'baseRevision' | 'baseFingerprint' | 'baseDependencyDigest'>) {
   const target = executionVersion(proposal.targetVersion)
   if (bundle.dependencyDigest === undefined) fail('sdk_upgrade_standalone_required', 'SDK upgrades require a standalone Instance', 409)
   if (bundle.config.revision !== proposal.baseRevision) fail('sdk_upgrade_base_changed', 'SDK proposal application inputs changed; create a new proposal', 409)
@@ -99,7 +101,7 @@ function executionBase(bundle: Bundle, proposal: Pick<SdkUpgradeProposal, 'targe
   if (bundle.fingerprint !== proposal.baseFingerprint) fail('sdk_upgrade_base_changed', 'SDK proposal application inputs changed; create a new proposal', 409)
   // SDK execution is checked against the selected target, which may be newer
   // than this producer. Normal config operations retain their producer ceiling.
-  const current = executionVersion(instanceMeta(bundle, null).core_version)
+  const current = executionVersion((await instanceMeta(bundle, null)).core_version)
   if (target[0] !== current[0]) fail('sdk_upgrade_major_unsupported', 'SDK upgrades must stay within the current major version', 409)
   const difference = target.findIndex((part, index) => part !== current[index])
   if (difference < 0 || target[difference] < current[difference]) fail('sdk_upgrade_forward_required', 'SDK upgrades require a strictly newer version', 409)
@@ -119,13 +121,13 @@ async function promoteSdkUpgrade(store: Store, proposal: SdkUpgradeProposal, rec
     migration: marker.path.slice('migrations/'.length), appliesToDatabase: false }
   const authorizeTarget = async () => {
     const target = await store.load(proposal.instance)
-    const meta = instanceMeta(target, proposal.targetVersion)
+    const meta = await instanceMeta(target, proposal.targetVersion)
     if (meta.revision !== proposal.baseRevision || meta.core_version !== proposal.targetVersion) fail('revision_mismatch', 'Published SDK marker differs from verified evidence', 409)
     await requireEvidence(store, proposal, await store.sdkProposalSource(proposal.proposalId))
     signal?.throwIfAborted()
   }
   if (proposal.status === 'promoted') { await authorizeTarget(); return result }
-  executionBase(bundle, proposal)
+  await executionBase(bundle, proposal)
   const next = Math.max(0, ...bundle.migrations.map(migration => Number(migration.name.slice(0, 4)))) + 1
   if (marker.path !== `migrations/${String(next).padStart(4, '0')}_sdk_upgrade.sql`) fail('validation_required', 'SDK marker is not the next migration', 409)
   proposal.status = 'promoted'
@@ -147,7 +149,7 @@ export async function proposeSdkUpgrade(store: Store, instance: string, baseRevi
     kind: 'sdk_upgrade', proposalId, instance, baseRevision, targetVersion, status: 'proposed', createdAt: new Date().toISOString(),
     baseFingerprint: bundle.fingerprint, baseDependencyDigest: bundle.dependencyDigest ?? '',
   }
-  executionBase(bundle, proposal)
+  await executionBase(bundle, proposal)
   await save(store, proposal)
   return { ok: true, proposalId, baseRevision, targetVersion, status: proposal.status }
 }
@@ -182,7 +184,7 @@ export async function executeSdkUpgrade(store: Store, proposal: SdkUpgradePropos
       await requireEvidence(store, original, source, attemptId)
     }
     const bundle = await store.load(proposal.instance)
-    executionBase(bundle, proposal)
+    await executionBase(bundle, proposal)
     const directory = await store.directory(proposal.instance)
     const inputs = await captureSdkInputs(directory)
     const baseInputHashes = hashes(inputs)
@@ -197,7 +199,7 @@ export async function executeSdkUpgrade(store: Store, proposal: SdkUpgradePropos
       proposal.evidence.binding.digest = evidenceDigest(proposal, baseInputHashes, await bridgeDigest(fileURLToPath(new URL('.', import.meta.url).href)))
       await save(store, proposal)
       signal?.throwIfAborted()
-      executionBase(await store.load(proposal.instance), proposal)
+      await executionBase(await store.load(proposal.instance), proposal)
       assertBound(hashes(await captureSdkInputs(directory)), baseInputHashes, 'preview accepted input bytes')
       await requireEvidence(store, proposal, await store.sdkProposalSource(proposal.proposalId))
       signal?.throwIfAborted()
@@ -214,7 +216,7 @@ export async function executeSdkUpgrade(store: Store, proposal: SdkUpgradePropos
     })
     // D2 has rechecked installed bytes and awaited cleanup. Fence publication
     // with both original digests and raw input bytes again under the same lock.
-    executionBase(await store.load(proposal.instance), proposal)
+    await executionBase(await store.load(proposal.instance), proposal)
     assertBound(hashes(await captureSdkInputs(directory)), baseInputHashes, 'publication base input bytes')
     signal?.throwIfAborted()
     const state = action === 'apply_to_disposable' ? 'verified' : 'validated'
@@ -227,7 +229,7 @@ export async function executeSdkUpgrade(store: Store, proposal: SdkUpgradePropos
     await save(store, proposal)
     // Abort or drift while the atomic record was published must also revoke it.
     signal?.throwIfAborted()
-    executionBase(await store.load(proposal.instance), proposal)
+    await executionBase(await store.load(proposal.instance), proposal)
     assertBound(hashes(await captureSdkInputs(directory)), baseInputHashes, 'accepted base input bytes')
     await requireEvidence(store, proposal, await store.sdkProposalSource(proposal.proposalId))
     signal?.throwIfAborted()
@@ -236,7 +238,7 @@ export async function executeSdkUpgrade(store: Store, proposal: SdkUpgradePropos
     // Publication can itself trigger abort/drift. Use the same durable
     // revocation primitive so a failed cleanup rewrite cannot retain proof.
     await store.revokeSdkProposal(proposal.proposalId)
-    if (error instanceof WorkflowError) throw error
+    if (error instanceof WorkflowError || error instanceof MigrationReplayError) throw error
     if (signal?.aborted) fail('sdk_upgrade_cancelled', 'SDK upgrade verification was cancelled', 409)
     if (error instanceof RegistrySdkError) throw error
     fail('sdk_upgrade_failed', 'SDK target verification failed; the proposal has no accepted evidence', 409)

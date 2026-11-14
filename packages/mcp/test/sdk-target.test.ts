@@ -185,6 +185,21 @@ it('uses a unique external consumer, preserves unrelated requirements and exact 
   expect(proof.targetDependencyDigest).not.toBe(options.base.baseDependencyDigest)
   await run(); expect(consumer).not.toBe(first)
 })
+it.each([false, true])('returns only a request-bound replay diagnostic from a failed bridge (foreign request: %s)', async foreign => {
+  const executeMock = vi.mocked(execute).getMockImplementation()!
+  vi.mocked(execute).mockImplementation(async (argv, cwd, commandOptions) => {
+    if (!argv.at(-1)?.endsWith('sdk-upgrade-worker.ts')) return executeMock(argv, cwd, commandOptions)
+    const request = JSON.parse(await readFile(join(cwd, '.sdk-bridge/request.json'), 'utf8'))
+    await writeFile(join(cwd, '.sdk-bridge/replay-error.json'), JSON.stringify({
+      identity: { ...request.identity, ...(foreign ? { baseFingerprint: '0'.repeat(64) } : {}) }, inputHashes: request.inputHashes,
+      diagnostic: { migration: '0001_r1.sql', file: 'migrations/0001_r1.sql', sqlError: 'no such table: missing_source' },
+    }))
+    return { rc: 1, stdout: 'private output', stderr: 'private output', timedOut: false }
+  })
+  if (foreign) await expect(run()).rejects.toThrow(/replay error identity/)
+  else await expect(run()).rejects.toMatchObject({ code: 'migration_replay_failed',
+    message: 'Migration 0001_r1.sql failed in migrations/0001_r1.sql: no such table: missing_source' })
+})
 it.each(['package.json', 'bun.lock'])('rejects base %s drift during installation and verification', async path => {
   const saved = await readFile(join(fixture.root, path))
   for (const phase of ['install', 'verify']) {

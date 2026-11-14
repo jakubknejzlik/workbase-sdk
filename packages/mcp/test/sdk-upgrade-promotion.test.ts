@@ -511,5 +511,5 @@ it.each(['before publication', 'during publication'])('restores original bytes w
 it('still rejects an unauthorised future SDK stamp outside SDK target verification', async () => {
   const bundle = await store.load('sample')
   bundle.migrations.push({ name: '0002_foreign.sql', sql: `UPDATE instance_meta SET core_version = '${targetVersion}';` })
-  expect(() => instanceMeta(bundle)).toThrow(expect.objectContaining({ code: 'revision_mismatch' }))
+  await expect(instanceMeta(bundle)).rejects.toThrow(expect.objectContaining({ code: 'revision_mismatch' }))
 })

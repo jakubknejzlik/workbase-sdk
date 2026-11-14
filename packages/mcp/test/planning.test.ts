@@ -20,7 +20,7 @@ it.each([
   const physical = { config, indexes: [], fingerprint: '', guards: {}, migrations: [{ name: '0001_initial.sql', sql:
     initialSchema(config).replace(original, modify(original)) + "\nINSERT INTO organizations VALUES ('org','Org'); INSERT INTO people (id,organization_id,name,created_at,updated_at) VALUES ('p','org','Person','now','now');" }] }
   const prepared = prepare(config, [], [{ kind: 'add_relation', entity: 'people', name: 'manager', field: 'manager_id', target: 'people' }])
-  expect(() => expectedSnapshot(physical, prepared)).toThrow(expect.objectContaining({ code: 'migration_blocked', message: expect.stringContaining(`people: physical ${difference}`) }))
+  await expect(expectedSnapshot(physical, prepared)).rejects.toThrow(expect.objectContaining({ code: 'migration_blocked', message: expect.stringContaining(`people: physical ${difference}`) }))
   // Bypass offline replay to exercise Wrangler's own named-CHECK error transport.
   expect(await applyDisposable(physical, prepared, [], false)).toMatchObject({ verified: false, diffs: [{ code: 'migration_blocked', message: expect.stringContaining(`people: physical ${difference}`) }] })
 })
@@ -41,12 +41,12 @@ describe('safe planning', () => {
     expect(run).toThrow(expect.objectContaining({ code: 'invalid_input', status: 400, message: expect.stringContaining("Invalid displayField: record; set displayField: 'name' to an existing readable field") }))
     expect(() => prepare(sample, [], [{ kind: 'add_entity', entity: 'record', fields: { count: { type: 'int' } }, permissions: { owner: ['read'] } }])).toThrow('Invalid displayField: record')
   })
-  it('uses the core planner and validates the resulting schema', () => {
+  it('uses the core planner and validates the resulting schema', async () => {
     const p = prepare(sample, [], [{ kind: 'add_field', entity: 'jobs', field: 'notes', definition: { type: 'text' } }])
     expect(p.sql.replaceAll('"', '')).toContain('ALTER TABLE jobs ADD COLUMN notes TEXT')
     expect(p.target.revision).toBe(sample.revision + 1)
-    expect(expectedSnapshot(bundle, p).some(t => t.name === 'jobs')).toBe(true)
-    expect(instanceMeta(bundle).revision).toBe(sample.revision)
+    expect((await expectedSnapshot(bundle, p)).some(t => t.name === 'jobs')).toBe(true)
+    expect((await instanceMeta(bundle)).revision).toBe(sample.revision)
   })
   it('carries displayField and UI hints through a rename in both instance configs', () => {
     for (const [config, entity] of [[sample, 'jobs'], [secondary, 'tasks']] as const) {
@@ -89,28 +89,28 @@ describe('safe planning', () => {
       }
     }
   })
-  it('supports new referenced entities, relation aliases, non-unique indexes and rename', () => {
+  it('supports new referenced entities, relation aliases, non-unique indexes and rename', async () => {
     const p = prepare(sample, [], [
       { kind: 'add_entity', entity: 'materials', fields: { label: { type: 'text' }, job_id: { type: 'ref', entity: 'jobs' } } },
       { kind: 'add_relation', entity: 'materials', name: 'job', field: 'job_id', target: 'jobs' },
       { kind: 'add_index', entity: 'materials', name: 'materials_label_idx', fields: ['label'] },
       { kind: 'rename_field', entity: 'jobs', from: 'title', to: 'summary' },
     ])
-    expect(expectedSnapshot(bundle, p)).toBeTruthy()
+    expect(await expectedSnapshot(bundle, p)).toBeTruthy()
     expect(p.target.permissions.viewer.materials).toEqual([])
   })
-  it('treats SQL-shaped defaults as data and verifies ordinary names resembling internal prefixes', () => {
+  it('treats SQL-shaped defaults as data and verifies ordinary names resembling internal prefixes', async () => {
     const p = prepare(sample, [], [
       { kind: 'add_entity', entity: 'acfx', fields: { name: { type: 'text' } } },
       { kind: 'add_field', entity: 'jobs', field: 'notes', definition: { type: 'text', default: "x'); DROP TABLE jobs; --" } },
     ])
-    const schema = expectedSnapshot(bundle, p)
+    const schema = await expectedSnapshot(bundle, p)
     expect(schema.some(t => t.name === 'jobs')).toBe(true)
     expect(schema.some(t => t.name === 'acfx')).toBe(true)
   })
-  it('detects missing/changed indexes, extra tables and altered columns during verification', () => {
+  it('detects missing/changed indexes, extra tables and altered columns during verification', async () => {
     const p = prepare(sample, [], [{ kind: 'add_field', entity: 'jobs', field: 'notes', definition: { type: 'text' } }])
-    const expected = expectedSnapshot(bundle, p)
+    const expected = await expectedSnapshot(bundle, p)
     const actual = replay([...bundle.migrations, { name: 'proposal.sql', sql: p.sql }], db => {
       db.exec('DROP INDEX jobs_org_idx; CREATE INDEX jobs_org_idx ON jobs(title); DROP INDEX jobs_client_id_idx; ALTER TABLE jobs RENAME COLUMN notes TO other_notes; CREATE TABLE unexpected (id TEXT);')
       return snapshot(db)

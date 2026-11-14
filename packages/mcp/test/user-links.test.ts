@@ -78,7 +78,7 @@ CREATE INDEX people_name_idx ON people (organization_id, name);\n`
     const upgraded = await application.store.load(instance)
     expect(upgraded.config.entities.people.fields.user).toMatchObject({ type: 'ref', entity: 'users', required: false, userLink: true, readOnly: true })
     expect(upgraded.config.entities.people.relations.user_account).toEqual({ field: 'user', entity: 'users' })
-    expect(instanceMeta(upgraded).revision).toBe(2)
+    expect((await instanceMeta(upgraded)).revision).toBe(2)
   } finally { await client.close(); await application.server.close() }
 })
 
