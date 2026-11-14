@@ -192,13 +192,13 @@ it.each([false, true])('returns only a request-bound replay diagnostic from a fa
     const request = JSON.parse(await readFile(join(cwd, '.sdk-bridge/request.json'), 'utf8'))
     await writeFile(join(cwd, '.sdk-bridge/replay-error.json'), JSON.stringify({
       identity: { ...request.identity, ...(foreign ? { baseFingerprint: '0'.repeat(64) } : {}) }, inputHashes: request.inputHashes,
-      diagnostic: { migration: '0001_r1.sql', file: 'migrations/0001_r1.sql', sqlError: 'no such table: missing_source' },
+      diagnostic: { migration: '0001_r1.sql', file: 'migrations/0001_r1.sql', kind: 'sql', sqlError: 'SQLite SQL logic error' },
     }))
     return { rc: 1, stdout: 'private output', stderr: 'private output', timedOut: false }
   })
   if (foreign) await expect(run()).rejects.toThrow(/replay error identity/)
   else await expect(run()).rejects.toMatchObject({ code: 'migration_replay_failed',
-    message: 'Migration 0001_r1.sql failed in migrations/0001_r1.sql: no such table: missing_source' })
+    message: 'Migration 0001_r1.sql failed in migrations/0001_r1.sql: SQLite SQL logic error' })
 })
 it.each(['package.json', 'bun.lock'])('rejects base %s drift during installation and verification', async path => {
   const saved = await readFile(join(fixture.root, path))

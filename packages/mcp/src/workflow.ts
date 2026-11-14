@@ -24,7 +24,7 @@ function requireConfigChange(proposal: Proposal): asserts proposal is ConfigChan
 export type ToolResult = Record<string, unknown>
 export function errorResult(error: unknown): ToolResult {
   if (isDisplayFieldError(error)) return { ok: false, errors: error.errors }
-  if (error instanceof MigrationReplayError && error.diagnostic.sqlError === 'Migration statement generation failed') return { ok: false, error: { code: 'internal_error', status: 500, message: 'Configuration operation failed; no database was deployed', details: { file: error.diagnostic.file, migration: error.diagnostic.migration } } }
+  if (error instanceof MigrationReplayError && error.diagnostic.kind === 'generation') return { ok: false, error: { code: 'internal_error', status: 500, message: 'Configuration operation failed; no database was deployed', details: { file: error.diagnostic.file, migration: error.diagnostic.migration } } }
   if (error instanceof MigrationReplayError) return { ok: false, error: { code: error.code, status: 422, message: error.message, details: error.diagnostic } }
   if (error instanceof WorkflowError) return { ok: false, error: { code: error.code, status: error.status, message: error.message, ...(error.details ? { details: error.details } : {}) } }
   if (error instanceof z.ZodError) return { ok: false, error: { code: 'invalid_input', status: 400, message: 'Input does not match the tool schema', issues: error.issues.map(({ path, message }) => ({ path, message })) } }
@@ -124,7 +124,10 @@ export class Workflow {
           const errors: { code: string; message: string }[] = [...inspectInstance(bundle.config).errors]
           let meta: Awaited<ReturnType<typeof instanceMeta>> | null = null
           try { meta = await instanceMeta(bundle) }
-          catch (error) { errors.push({ code: error instanceof WorkflowError || error instanceof MigrationReplayError ? error.code : 'invalid_migrations', message: error instanceof Error ? error.message : 'Cannot replay committed migrations' }) }
+          catch (error) {
+            console.error('Private committed migration validation failure', String(error instanceof Error ? error.stack : error).slice(0, 65536))
+            errors.push({ code: error instanceof WorkflowError || error instanceof MigrationReplayError ? error.code : 'invalid_migrations', message: error instanceof WorkflowError || error instanceof MigrationReplayError ? error.message : 'Cannot replay committed migrations' })
+          }
           return { validation: { ok: errors.length === 0, errors }, meta }
         }
         if (name === 'validate' && input.instance) return (await diagnose()).validation
@@ -179,8 +182,12 @@ export class Workflow {
             return { ok: true, errors: [], revision: prepared.target.revision, warnings: prepared.warnings }
           } catch (error) {
             await save()
-            const detail = error instanceof Error ? error.message : 'Invalid configuration'
-            return { ok: false, errors: isDisplayFieldError(error) ? error.errors : error instanceof WorkflowError && Array.isArray(error.details) ? error.details : [{ code: error instanceof WorkflowError || error instanceof MigrationReplayError ? error.code : 'invalid_config', message: detail }] }
+            console.error('Private proposal validation failure', String(error instanceof Error ? error.stack : error).slice(0, 65536))
+            const policyIssues = error instanceof z.ZodError ? error.issues.map(issue => ({ code: 'invalid_config', message:
+              issue.code === 'custom' && issue.path.at(-1) === 'actorLinkedIn'
+                ? 'actorLinkedIn requires an entity with a protected user link' : 'Invalid configuration' })) : undefined
+            const detail = error instanceof WorkflowError || error instanceof MigrationReplayError ? error.message : 'Invalid configuration'
+            return { ok: false, errors: isDisplayFieldError(error) ? error.errors : policyIssues ?? (error instanceof WorkflowError && Array.isArray(error.details) ? error.details : [{ code: error instanceof WorkflowError || error instanceof MigrationReplayError ? error.code : 'invalid_config', message: detail }]) }
           }
         }
         await instanceMeta(bundle)

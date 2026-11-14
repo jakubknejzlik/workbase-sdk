@@ -14,15 +14,15 @@ it.each([
   ['WITHOUT ROWID', 'rowid', (sql: string) => sql.replace(');\nCREATE INDEX', ') WITHOUT ROWID;\nCREATE INDEX')],
   ['partial UNIQUE known index', 'indexes', (sql: string) => sql.replace('CREATE INDEX "people_org_idx" ON "people"(organization_id, id)', 'CREATE UNIQUE INDEX "people_org_idx" ON "people"(organization_id, name) WHERE name IS NOT NULL')],
   ['inline UNIQUE', 'indexes', (sql: string) => sql.replace('"name" TEXT', '"name" TEXT UNIQUE')],
-] as const)('surfaces physical drift as migration_blocked in replay and real disposable D1: %s', async (_label, difference, modify) => {
+] as const)('rejects physical drift with closed diagnostics in replay and real disposable D1: %s', async (_label, _difference, modify) => {
   const config = defineInstance({ id: 'physical_guard', revision: 1, roles: ['owner'], entities: { people: { fields: { name: { type: 'string' } } } } })
   const original = createEntity('people', config.entities.people)
   const physical = { config, indexes: [], fingerprint: '', guards: {}, migrations: [{ name: '0001_initial.sql', sql:
     initialSchema(config).replace(original, modify(original)) + "\nINSERT INTO organizations VALUES ('org','Org'); INSERT INTO people (id,organization_id,name,created_at,updated_at) VALUES ('p','org','Person','now','now');" }] }
   const prepared = prepare(config, [], [{ kind: 'add_relation', entity: 'people', name: 'manager', field: 'manager_id', target: 'people' }])
-  await expect(expectedSnapshot(physical, prepared)).rejects.toThrow(expect.objectContaining({ code: 'migration_blocked', message: expect.stringContaining(`people: physical ${difference}`) }))
+  await expect(expectedSnapshot(physical, prepared)).rejects.toThrow(expect.objectContaining({ code: 'migration_replay_failed', message: expect.stringContaining('CHECK constraint failed') }))
   // Bypass offline replay to exercise Wrangler's own named-CHECK error transport.
-  expect(await applyDisposable(physical, prepared, [], false)).toMatchObject({ verified: false, diffs: [{ code: 'migration_blocked', message: expect.stringContaining(`people: physical ${difference}`) }] })
+  expect(await applyDisposable(physical, prepared, [], false)).toMatchObject({ verified: false, diffs: [{ code: 'disposable_apply_failed', message: 'Wrangler rejected the disposable migration' }] })
 })
 
 it('surfaces users account credential-schema refusal during MCP planning', () => {

@@ -51,7 +51,7 @@ it.each(['0001_initial.sql', '0001_r9007199254740992.sql', '0002_sdk_upgrade.sql
 })
 it('runs deploy plugin schema checks during committed replay', async () => {
   const current = config([{ name: 'requires_table', version: '1.0.0', checkSchema: async db => { await db.prepare('SELECT * FROM required_plugin_table').all() } }])
-  await expect(replayBundle({ config: current, migrations: [{ name: '0001_r1.sql', sql: 'SELECT 1;' }] }, () => {})).rejects.toThrow('required_plugin_table')
+  await expect(replayBundle({ config: current, migrations: [{ name: '0001_r1.sql', sql: 'SELECT 1;' }] }, () => {})).rejects.toMatchObject({ diagnostic: { migration: 'requires_table/checkSchema', sqlError: 'SQLite SQL logic error' } })
 })
 it.each([
   ['automatic rollback', 'CREATE TABLE conflicts (id INT PRIMARY KEY); INSERT INTO conflicts VALUES (1); INSERT OR ROLLBACK INTO conflicts VALUES (1);', 'UNIQUE constraint failed'],
@@ -66,7 +66,7 @@ it.each([
 })
 it('attributes shared-prefix SQL to the receipt filename and checksum', async () => {
   const migrations = [{ name: '0001_r1.sql', sql: 'SELECT 1;' }, { name: '0002_r2.sql', sql: 'SELECT 1;\n;\nSELECT * FROM actual_missing_domain;' }]
-  await expect(replayBundle({ config: config(), migrations }, () => {})).rejects.toMatchObject({ diagnostic: { migration: '0002_r2.sql', file: 'migrations/0002_r2.sql', sqlError: 'no such table: actual_missing_domain' } })
+  await expect(replayBundle({ config: config(), migrations }, () => {})).rejects.toMatchObject({ diagnostic: { migration: '0002_r2.sql', file: 'migrations/0002_r2.sql', sqlError: 'SQLite SQL logic error' } })
 })
 it('keeps callback messages private at both public boundaries', async () => {
   const marker = 'SYNTHETIC_PRIVATE_PLUGIN_MESSAGE'
@@ -132,7 +132,7 @@ it('rejects linked replay inputs and nested schema directories', async () => {
 })
 it('attributes a shared domain prefix inside a plugin batch to the plugin receipt', async () => {
   const current = config([{ name: 'actual_plugin', version: '1.0.0', migrations: [{ name: 'broken_plugin', sql: 'SELECT 1;\n;\nSELECT * FROM missing_plugin_table;' }] }])
-  await expect(replayBundle({ config: current, migrations: [{ name: '0001_r1.sql', sql: 'SELECT 1;' }] }, () => {})).rejects.toMatchObject({ diagnostic: { migration: 'actual_plugin/broken_plugin', sqlError: 'no such table: missing_plugin_table' } })
+  await expect(replayBundle({ config: current, migrations: [{ name: '0001_r1.sql', sql: 'SELECT 1;' }] }, () => {})).rejects.toMatchObject({ diagnostic: { migration: 'actual_plugin/broken_plugin', sqlError: 'SQLite SQL logic error' } })
 })
 
 it('redacts configured secrets and bounds vetted SQLite diagnostics', async () => {

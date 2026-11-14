@@ -84,7 +84,7 @@ const publicMessages: Record<string, string> = {
 }
 export function sdkWorkflowError(error: unknown): WorkflowError {
   if (error instanceof MigrationReplayError) {
-    if (error.diagnostic.sqlError === 'Migration statement generation failed') return new WorkflowError('internal_error', publicMessages.internal_error, 500, { file: error.diagnostic.file, migration: error.diagnostic.migration })
+    if (error.diagnostic.kind === 'generation') return new WorkflowError('internal_error', publicMessages.internal_error, 500, { file: error.diagnostic.file, migration: error.diagnostic.migration })
     return new WorkflowError(error.code, error.message, 422, error.diagnostic)
   }
   const code = error instanceof WorkflowError || error instanceof RegistrySdkError ? error.code : error instanceof z.ZodError ? 'invalid_input' : 'internal_error'

@@ -48,14 +48,14 @@ it('preserves legacy schema, metadata and input SQL bytes without replaying plug
 it('reports a broken SDK baseline with its namespace, name, source file and SQLite error', async () => {
   vi.spyOn(baseline, 'sdkMigrations').mockReturnValue([{ name: '001_system', sql: 'BROKEN BASELINE;' }])
   await expect(replayBundle({ config: config(), migrations: [] }, readInstanceMeta)).rejects.toMatchObject({
-    code: 'migration_replay_failed', message: expect.stringMatching(/workbase-sdk\/001_system.*sdk-baseline\.ts.*syntax error/),
+    code: 'migration_replay_failed', message: expect.stringMatching(/workbase-sdk\/001_system.*sdk-baseline\.ts.*SQLite SQL logic error/),
   })
 })
 it.each(['BEGIN;', 'CREATE TRIGGER broken AFTER INSERT ON users BEGIN'])('names a plugin baseline rejected before SQL execution: %s', async sql => {
   const current = config([{ name: 'example', version: '1.0.0', migrations: [{ name: '001_example', sql }] }])
   await expect(replayBundle({ config: current, migrations: [] }, readInstanceMeta)).rejects.toMatchObject({
     code: 'migration_replay_failed', diagnostic: { migration: 'example/001_example', file: '@workbasehq/plugins/example',
-      sqlError: expect.stringMatching(/transaction control|Unterminated/) },
+      sqlError: 'Migration statement generation failed' },
   })
 })
 
@@ -68,13 +68,13 @@ it.each(['plugin', 'instance'] as const)('reports a broken %s migration and reta
       code: 'migration_replay_failed', diagnostic: {
         migration: kind === 'plugin' ? 'example/001_example' : '0001_r1.sql',
         file: kind === 'plugin' ? '@workbasehq/plugins/example' : 'migrations/0001_r1.sql',
-        sqlError: 'no such table: missing_source',
+        sqlError: 'SQLite SQL logic error',
       },
     })
     try { await replayInstance(db, migrations, replayEngine(current)) }
     catch (error) {
       expect(error).toBeInstanceOf(MigrationReplayError)
-      expect(sdkWorkflowError(error)).toMatchObject({ code: 'migration_replay_failed', message: expect.stringContaining('missing_source'), status: 422 })
+      expect(sdkWorkflowError(error)).toMatchObject({ code: 'migration_replay_failed', message: expect.stringContaining('SQLite SQL logic error'), status: 422 })
     }
   } finally { db.close() }
 })

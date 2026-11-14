@@ -62,7 +62,7 @@ it.each(['node', 'bun'])('validates a proposal on a V3 instance created through 
     await appendFile(join(root, 'migrations/0001_r1.sql'), '\nSELECT * FROM missing_domain_source;\n')
     const failure = await call('validate', { instance: 'replay-fixture' })
     expect(failure).toMatchObject({ ok: false, errors: [{ code: 'migration_replay_failed',
-      message: expect.stringMatching(/0001_r1\.sql.*migrations\/0001_r1\.sql.*no such table: missing_domain_source/) }] })
+      message: expect.stringMatching(/0001_r1\.sql.*migrations\/0001_r1\.sql.*SQLite SQL logic error/) }] })
 
   } finally { await client.close(); await transport.close(); await server.close() }
 })

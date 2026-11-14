@@ -6,10 +6,9 @@ import { DatabaseSync } from 'node:sqlite'
 import { CORE_VERSION } from '@workbasehq/core/config'
 import type { Bundle } from './storage.ts'
 import { snapshot, replayEngine } from './offline.ts'
-import { replayInstance, readInstanceMeta, usesBaseline, MigrationReplayError, publicText } from './migration-replay.ts'
+import { replayInstance, readInstanceMeta, usesBaseline, MigrationReplayError } from './migration-replay.ts'
 import { WorkflowError, type Index } from './schemas.ts'
 import { noLink } from './storage.ts'
-import { migrationBlockReason } from './planning.ts'
 
 // Trusted operator setting, never accepted through MCP tool arguments.
 export const stateRoot = process.env.WORKBASE_MCP_STATE_ROOT ?? '/tmp/codex/mcp-state'
@@ -53,8 +52,7 @@ async function migrate(config: string, persistence: string, cwd: string, signal?
       if (code === 0 && !interrupted) resolve()
       else {
         console.error('Private Wrangler migration failure', output)
-        const reason = !interrupted && migrationBlockReason(output)
-        reject(new WorkflowError(reason ? 'migration_blocked' : 'disposable_apply_failed', (reason ? publicText(reason, 2048) : undefined) || (interrupted ? 'Local migration cancelled or exceeded 90 seconds' : 'Wrangler rejected the disposable migration'), 422))
+        reject(new WorkflowError('disposable_apply_failed', interrupted ? 'Local migration cancelled or exceeded 90 seconds' : 'Wrangler rejected the disposable migration', 422))
       }
     })
   })
@@ -89,7 +87,7 @@ export async function applyDisposable(bundle: Bundle, prepared: Prepared, expect
       // Capture actual engine SQL, including baseline/domain receipts, then let
       // Wrangler execute those exact bytes in the disposable D1.
       const db = new DatabaseSync(':memory:'), statements: { sql: string; name: string }[] = []
-      try { await replayInstance(db, [...bundle.migrations, proposal], replayEngine(bundle.config, bundle.runtime), {
+      try { await replayInstance(db, [...bundle.migrations, proposal], replayEngine(prepared.target, bundle.runtime), {
         mode: 'synthetic', record: (sql, context) => statements.push({ sql, name: (context?.migration ?? 'ledger').replace(/[^a-z0-9_]/gi, '_') }),
       }) }
       finally { db.close() }
@@ -114,7 +112,7 @@ export async function applyDisposable(bundle: Bundle, prepared: Prepared, expect
       return { verified: diffs.length === 0, diffs, ...(keep ? { directory: scratch } : {}) }
     } finally { db.close() }
   } catch (error) {
-    if (error instanceof MigrationReplayError && error.diagnostic.sqlError === 'Migration statement generation failed') return { verified: false, diffs: [{ code: 'disposable_verification_failed', message: 'Could not verify the disposable schema', file: error.diagnostic.file, migration: error.diagnostic.migration }], ...(keep ? { directory: scratch } : {}) }
+    if (error instanceof MigrationReplayError && error.diagnostic.kind === 'generation') return { verified: false, diffs: [{ code: 'disposable_verification_failed', message: 'Could not verify the disposable schema', file: error.diagnostic.file, migration: error.diagnostic.migration }], ...(keep ? { directory: scratch } : {}) }
     if (error instanceof MigrationReplayError) return { verified: false, diffs: [{ code: error.code, message: error.message }], ...(keep ? { directory: scratch } : {}) }
     if (error instanceof WorkflowError) return { verified: false, diffs: [{ code: error.code, message: error.message }], ...(keep ? { directory: scratch } : {}) }
     console.error('Private disposable verification failure', String(error instanceof Error ? error.stack : error).slice(0, 65536))

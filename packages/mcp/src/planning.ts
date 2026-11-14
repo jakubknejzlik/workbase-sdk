@@ -9,13 +9,6 @@ import { effectivePolicies } from './policies.ts'
 import { roleNamePrivileges } from '@workbasehq/core/organization-permissions'
 
 export const hash = (value: unknown) => createHash('sha256').update(typeof value === 'string' ? value : JSON.stringify(value)).digest('hex')
-/** Named rebuild guards carry the physical difference through SQLite and D1. */
-export function migrationBlockReason(error: unknown): string | undefined {
-  const message = error instanceof Error ? error.message : String(error)
-  const detail = message.match(/rebuild_requires_review_([a-z0-9_]+)_(rowid|columns|indexes|foreign_keys|inline_constraints|triggers|incoming_actions)\b/)
-  if (detail) return `Rebuild blocked for ${detail[1]}: physical ${detail[2].replaceAll('_', ' ')} differs from the fresh configured schema; a manually reviewed migration is required`
-  if (message.includes('rebuild_requires_review')) return 'Rebuild blocked: physical schema or foreign key validation requires a manually reviewed migration'
-}
 const own = (object: object, key: string) => Object.hasOwn(object, key)
 export function guard(changes: Change[], config: InstanceConfig) {
   const entities = new Set(Object.keys(config.entities))

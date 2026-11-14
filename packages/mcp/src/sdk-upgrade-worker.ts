@@ -140,7 +140,7 @@ async function executeBridge(root: string, raw: unknown) {
       if (!kernel.config.entities[index.entity] || !Array.isArray(index.fields) || !index.fields.length || index.fields.some(field => !kernel.config.entities[index.entity].fields[field])) throw new Error('Invalid configured index')
       return `CREATE INDEX ${quote(index.name)} ON ${quote(index.entity)} (${['organization_id', ...index.fields].map(quote).join(', ')});`
     }).join('\n')
-    if (usesBaseline(config)) await replayInstance(desired, [{ name: 'desired.sql', syntheticRevision: config.revision, sql: initialSchema(kernel.config) + indexSQL }], engine, { mode: 'synthetic' })
+    if (usesBaseline(config)) await replayInstance(desired, [{ name: 'desired.sql', syntheticRevision: config.revision, sql: initialSchema(kernel.config) + indexSQL }], engine, { mode: 'schema' })
     else {
       desired.exec(initialSchema(kernel.config) + indexSQL)
       try { await kernel.applyMigrations(queryDatabase(queryFor(desired))) }
