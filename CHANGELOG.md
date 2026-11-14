@@ -16,7 +16,8 @@
   nullable field come from an unpacked test fixture, not the shipped template
   (`scripts/fixtures/installed-consumer/`, `scripts/lib/installed-consumer-live.ts`).
 - Smoke isolation applies to post-install commands in steps 1–7; bootstrap,
-  installation, init and npm ci are outside it. Live steps 8–9 use a JS loopback
+  installation, initial init and npm ci are outside it; the repeated init
+  in step 7 is isolated. Live steps 8–9 use a JS loopback
   guard, not kernel isolation. The browser origin filter covers routed HTTP only,
   not WebSockets; native workerd/Chromium networking is outside the JS guard.
   A detached supervisor owns the live process group and a parent-pipe lifeline,

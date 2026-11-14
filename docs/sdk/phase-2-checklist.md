@@ -49,5 +49,5 @@ stage and the deployment inputs in [getting-started.md](getting-started.md).
   is a different policy. Sources:
   [remove script](../../packages/mcp/templates/standalone/package.json),
   [stage removal policy](../../packages/mcp/templates/standalone/sst.config.ts).
-- [ ] 8. Jakub reviews the PR, archive/artifact identity, remote results and
+- [ ] 8. The designated maintainer reviews the PR, archive/artifact identity, remote results and
   cleanup/recreation evidence; record the review before accepting phase 2.

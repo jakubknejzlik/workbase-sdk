@@ -191,7 +191,8 @@ Sources: [smoke](../../scripts/smoke-template.ts),
 [live assertions](../../scripts/lib/installed-consumer-live.ts).
 
 Post-install commands in steps 1–7 run under OS network isolation with JS guards;
-bootstrap, installation, init and npm ci do not. Live steps 8–9 run outside that
+bootstrap, installation, initial init and npm ci do not; the repeated
+init in step 7 is isolated. Live steps 8–9 run outside that
 isolation with a JS loopback-literal guard and a browser origin filter for routed
 HTTP. WebSockets are not covered by that filter; native workerd/Chromium networking
 is outside the JS guard. This is not kernel isolation for the live phase. Sources:
