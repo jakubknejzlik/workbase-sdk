@@ -1,0 +1,9 @@
+{
+  "entity.worker_one": "{{count}} pracovník",
+  "entity.worker_few": "{{count}} pracovníci",
+  "entity.worker_many": "{{count}} pracovníka",
+  "entity.worker_other": "{{count}} pracovníků",
+  "field.worker.name": "Jméno",
+  "field.worker.note": "Poznámka",
+  "field.worker.user": "Přístup do aplikace"
+}
