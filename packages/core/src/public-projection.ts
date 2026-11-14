@@ -57,5 +57,25 @@ export function publicCommandDefinitions(config: InstanceConfig, options: Runtim
 }
 export function publicCommands(config: InstanceConfig, options: RuntimeOptions, transformInputs = false) {
   return publicCommandDefinitions(config, options).map(({ name, command }) => ({ name, permission: command.permission, ...(command.ui ? { ui: command.ui } : {}),
-    additionalPermissions: command.additionalPermissions ?? [], inputSchema: sanitizeSchema(transformInputs ? publicOutputSchema(command.input) : z.toJSONSchema(command.input)) }))
+    additionalPermissions: command.additionalPermissions ?? [], inputSchema: sanitizeSchema(transformInputs ? transformTolerantSchema(command.input) : z.toJSONSchema(command.input)) }))
+}
+/** Legacy output conversion stays the only path for every transform-free command,
+ * so its /schema bytes are unchanged by construction. Only a command whose graph
+ * contains a transform uses the disclosure-filtered projection. The check is
+ * structural: converting first would evaluate default factories before throwing. */
+function transformTolerantSchema(input: z.ZodType) {
+  return containsTransform(input) ? publicOutputSchema(input) : z.toJSONSchema(input)
+}
+const childKeys = ['innerType', 'element', 'keyType', 'valueType', 'left', 'right', 'rest', 'catchall', 'in', 'out'] as const
+function containsTransform(schema: z.core.$ZodType, seen = new Set<z.core.$ZodType>()): boolean {
+  if (seen.has(schema)) return false
+  seen.add(schema)
+  const def = schema._zod.def as any
+  if (def.type === 'transform') return true
+  const children: z.core.$ZodType[] = childKeys.flatMap(key => def[key] ? [def[key]] : [])
+  if (def.type === 'object') children.push(...Object.values(def.shape as Record<string, z.core.$ZodType>))
+  if (Array.isArray(def.options)) children.push(...def.options)
+  if (Array.isArray(def.items)) children.push(...def.items)
+  if (def.type === 'lazy') children.push((schema as z.core.$ZodLazy)._zod.innerType)
+  return children.some(child => containsTransform(child, seen))
 }

@@ -250,3 +250,18 @@ it('rebases recursive registered command and workflow input references into the 
   const check = validate(doc, schema, { name: 'root', $schema: 'named property', default: 'named property', children: [{ name: 'leaf', $schema: 'nested property' }], idempotencyKey: 'synthetic' })
   expect(check({ name: 'root', children: [{ name: 1 }] })).toBe(false)
 })
+it('serves representable command inputs on /schema with byte-identical legacy output conversion', () => {
+  const config = fixture().config
+  config.commands = ['probe']
+  const described = z.string().describe('Public label')
+  for (const input of [
+    z.object({ label: described.optional() }),
+    z.object({ label: described.default('x') }),
+    z.object({ label: z.string().pipe(z.string()).describe('Public label') }),
+    z.object({ label: z.string().meta({ sensitive: true }).pipe(z.string()) }),
+  ]) {
+    const options = { commands: new Map([['probe', { name: 'probe', input, permission: { entity: 'worker', operation: 'update' } } as any]]) }
+    const legacy = { ...publicSchema(config, options), commands: publicCommands(config, options) }
+    expect(JSON.stringify(publicSchema(config, options))).toBe(JSON.stringify(legacy))
+  }
+})
