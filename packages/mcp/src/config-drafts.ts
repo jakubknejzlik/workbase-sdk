@@ -1,3 +1,4 @@
+import { guardV3LegacyWrite } from './v3-guard.ts'
 import { prepareConfigProposal, RuleConfigProposer, type ConfigProposer, type ConfigProposal } from '@workbasehq/core/config-proposals'
 import { versionHistory } from '@workbasehq/core/migrations/versions'
 import { expectedSnapshot, instanceMeta } from './offline'
@@ -30,6 +31,7 @@ export class ConfigDrafts {
     return this.store.locked(instance, async () => {
       if (saved.applied) return saved.applied
       const bundle = await this.store.load(instance)
+      guardV3LegacyWrite(bundle.config, 'apply')
       if (bundle.fingerprint !== saved.fingerprint) fail('stale_revision', 'Local files changed; propose again before applying', 409)
       const prepared = prepareConfigProposal(bundle.config, saved.proposal.patch)
       instanceMeta(bundle)
