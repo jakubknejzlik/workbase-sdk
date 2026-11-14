@@ -12,6 +12,6 @@ import config from './config'
 // Executable plugin composition stays outside the literal config loader boundary.
 export default { ...config, interactive: true, plugins: [
   createIdentity(), permissions({ roles: ['admin', 'staff'], ownerRole: 'admin' }),
-  createMembers(), createOrganizations({ allowCreate: true }), createLocalAuth({ methods: ['magic-link'] }),
+  createMembers(), createOrganizations({ allowCreate: false }), createLocalAuth({ methods: ['magic-link'] }),
   machineCredentials(), mailOutbox(), audit(), consoleUI(),
 ] }

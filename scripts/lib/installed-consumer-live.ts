@@ -55,7 +55,7 @@ export function assertInstalledArtifacts(consumer: string) {
   assert.deepEqual(sdk.map(([path]) => path).sort(), ['core', 'mcp', 'plugins'].map(name => 'node_modules/@workbasehq/' + name))
   assert(!/ui-v3|test-support|workspace:/.test(JSON.stringify(lock)))
   const mcp = json(join(consumer, '.mcp.json'))
-  assert.deepEqual(Object.keys(mcp.mcpServers), ['workbase_data'])
+  assert.deepEqual(Object.keys(mcp.mcpServers), ['workbase_data', 'workbase_ops'])
   assert(!/config/.test(JSON.stringify(mcp)))
   // Include hidden directories, but exclude third-party installs and local runtime state.
   const walk = (path: string) => {
@@ -184,7 +184,8 @@ async function live(consumer: string, timings: BuildTimings, archives: string) {
   const started = performance.now(), evidence = evidenceDirectory(process.env.WORKBASE_EVIDENCE_DIR, root, archives)
   const manifest = assertInstalledArtifacts(consumer)
   const port = await freePort(), origin = `http://127.0.0.1:${port}`
-  writeFileSync(join(consumer, '.dev.vars'), `BETTER_AUTH_SECRET=synthetic-access-secret-at-least-32\nAUTH_BASE_URL=${origin}\nEMAIL_FROM=login@example.test\n`, { mode: 0o600 })
+  const opsToken = 'example-ops'
+  writeFileSync(join(consumer, '.dev.vars'), `BETTER_AUTH_SECRET=synthetic-access-secret-at-least-32\nAUTH_BASE_URL=${origin}\nOPS_TOKEN=${opsToken}\n`, { mode: 0o600 })
   // This module resolves every SDK and Wrangler import from the installed consumer.
   // CLI --persist-to appends /v3; getPlatformProxy's explicit path does not.
   const bridge = join(consumer, '.smoke/local-db.ts')
@@ -194,6 +195,7 @@ import { SESSION_COOKIE } from '@workbasehq/core/session-contract'
 import { migrateInstance, readMigrationFiles } from '@workbasehq/core/infra'
 import { splitStatements } from '@workbasehq/core/kernel/migrations'
 import { KernelRegistry } from '@workbasehq/core/kernel/registry'
+import mailbox from '@workbasehq/core/dev-mailbox'
 import config from '../runtime'
 export async function open() {
   const proxy = await getPlatformProxy<{ DB: D1Database }>({ configPath: './wrangler.jsonc', persist: { path: '.wrangler/state/v3' }, remoteBindings: false })
@@ -203,6 +205,7 @@ export async function open() {
     const calls: string[] = []
     const tracked = async (sql: string) => { calls.push(sql); return query(sql) }
     const kernel = new KernelRegistry(config), files = await readMigrationFiles('./migrations')
+    assert.equal(kernel.config.pluginConfig?.organizations?.allowCreate, false)
     const first = await migrateInstance(tracked, files, kernel)
     assert.equal(first.applied, 1)
     const ledger = await db.prepare('SELECT namespace,name FROM _plugin_migrations ORDER BY rowid').all()
@@ -222,12 +225,20 @@ export async function open() {
     assert.equal(await snapshot(), before)
     assert.equal(first.pluginMigrations, repeated.pluginMigrations)
     console.log('Live migration: SDK → plugins → 0001_r1.sql; initial=1, rerun=0; ledgers unchanged')
-    return { db, dispose: proxy.dispose, sessionCookie: SESSION_COOKIE }
+    const readMail = async (recipient: string) => {
+      const token = 'synthetic-mailbox-secret-at-least-32'
+      const response = await mailbox.fetch(new Request('http://127.0.0.1/messages?' + new URLSearchParams({ recipient }), {
+        headers: { Authorization: 'Bearer ' + token },
+      }), { DB: db, STAGE: 'test', DEV_MAILBOX_TOKEN: token })
+      assert.equal(response.status, 200, 'Installed mailbox handler must read the shared D1')
+      return (await response.json()).messages
+    }
+    return { readMail, dispose: proxy.dispose, sessionCookie: SESSION_COOKIE }
   } catch (error) { await proxy.dispose(); throw error }
 }
 `)
   const { open } = await import(pathToFileURL(bridge).href)
-  const proxy: { db: D1Database; sessionCookie: string; dispose(): Promise<void> } = await open()
+  const proxy: { readMail(recipient: string): Promise<{ body: string }[]>; sessionCookie: string; dispose(): Promise<void> } = await open()
   let worker: ChildProcess | undefined, browser: Browser | undefined, logs = ''
   const startWorker = async () => {
     logs = ''
@@ -285,16 +296,24 @@ export async function open() {
     const signIn = async (email: string) => {
       const context = await newContext()
       await call(context, '/auth/sign-in/magic-link', 'POST', { email, callbackURL: '/me' })
-      const mail = await proxy.db.prepare('SELECT body FROM email_outbox WHERE recipient=? ORDER BY rowid DESC LIMIT 1').bind(email).first<{ body: string }>()
-      assert(mail, 'Magic link must come from the real mail outbox')
+      const [mail] = await proxy.readMail(email)
+      assert(mail, 'Magic link must come through the installed mailbox handler')
       assert.equal(new URL(mail.body).origin, origin)
       await call(context, mail.body, 'GET', undefined, undefined, {}, 302)
       assert((await context.cookies()).some(cookie => cookie.name === proxy.sessionCookie))
       await call(context, '/me/profile', 'PATCH', { firstName: 'Synthetic', lastName: 'Person' })
       return context
     }
+    const provisionOrganization = async (name: string, ownerEmail: string) => {
+      const response = await fetch(origin + '/internal/organizations', { method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Internal-Token': opsToken }, body: JSON.stringify({ name, ownerEmail }),
+      })
+      assert.equal(response.status, 201, 'Operator provisioning must create the organization')
+      return await response.json() as { id: string; role: string }
+    }
     const admin = await signIn('admin@example.test')
-    const orgA = await (await call(admin, '/orgs', 'POST', { name: 'Organization A' }, undefined, {}, 201)).json()
+    await call(admin, '/orgs', 'POST', { name: 'Self-service forbidden' }, undefined, {}, 403)
+    const orgA = await provisionOrganization('Organization A', 'admin@example.test')
     assert.equal(orgA.role, 'admin')
     const memberships = (await (await call(admin, '/me')).json()).memberships
     assert(memberships.some((membership: { role: string; organization_id: string }) => membership.role === 'admin' && membership.organization_id === orgA.id))
@@ -315,7 +334,11 @@ export async function open() {
     assert.equal((await (await call(admin, rowPath, 'GET', undefined, orgA.id)).json()).name, 'Persistent renamed')
     const invite = await (await call(admin, rowPath + '/actions/invite', 'POST', { email: 'staff@example.test' }, orgA.id, {}, 201)).json()
     const staff = await signIn('staff@example.test')
-    const token = new URL(invite.accept_url).searchParams.get('token')
+    const invitationMail = (await proxy.readMail('staff@example.test')).find(mail => mail.body.startsWith('Accept: '))
+    assert(invitationMail, 'Invitation link must come through the installed mailbox handler')
+    const invitationUrl = new URL(invitationMail.body.slice('Accept: '.length))
+    assert.equal(invitationUrl.origin, origin)
+    const token = invitationUrl.searchParams.get('token')
     assert(token)
     await call(staff, '/invitations/resolve', 'POST', { token })
     await call(staff, '/invitations/' + invite.invitation_id + '/accept', 'POST', {}, undefined, {}, 201)
@@ -323,7 +346,7 @@ export async function open() {
     assert(staffMe.memberships.some((membership: { role: string; organization_id: string }) => membership.role === 'staff' && membership.organization_id === orgA.id))
     assert.equal((await (await call(staff, rowPath, 'GET', undefined, orgA.id)).json()).id, row.id)
     const other = await signIn('other@example.test')
-    const orgB = await (await call(other, '/orgs', 'POST', { name: 'Organization B' }, undefined, {}, 201)).json()
+    const orgB = await provisionOrganization('Organization B', 'other@example.test')
     assert.notEqual(orgA.id, orgB.id)
     for (const org of [orgA.id, orgB.id]) {
       for (const method of ['GET', 'PATCH']) {
@@ -343,7 +366,7 @@ export async function open() {
     assert.equal(new Set([...first.data, ...next.data].map(item => item.id)).size, 26)
     const searched = await (await call(admin, '/query', 'POST', { ...query, search: { text: 'Persistent renamed', fields: [manifest.entities.worker.displayField] } }, orgA.id)).json()
     assert.deepEqual(searched.data.map((item: { id: string }) => item.id), [row.id])
-    console.log('Step 8: local Worker/D1; real admin/staff magic links + invite/accept; cross-org denial; restart persistence; omitted/null/conflict; 26-row cursor + display search')
+    console.log('Step 8: local Worker/D1; mailbox handler magic links + invite/accept; allowCreate=false, ops-provisioned organizations; cross-org denial; restart persistence; omitted/null/conflict; 26-row cursor + display search')
 
     // Hash the HTTP responses, including the SPA fallback, against the installed
     // SDK bytes already compared to the archive in step 4. No consumer build exists.

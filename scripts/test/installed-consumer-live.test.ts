@@ -6,8 +6,8 @@ import { join, resolve } from 'node:path'
 import { applyInstalledConsumerFixture, assertInstalledArtifacts, evidenceDirectory } from '../lib/installed-consumer-live'
 
 const scratch = mkdtempSync(join(tmpdir(), 'workbase-installed-tests-'))
-// Keep Unix socket paths below the OS length limit even with macOS's long TMPDIR.
-const sockets = mkdtempSync('/tmp/wb-sockets-')
+// Relative socket names in a private cwd also work with macOS's long TMPDIR.
+const sockets = mkdtempSync(join(tmpdir(), 'wb-sockets-'))
 afterAll(() => { rmSync(scratch, { recursive: true, force: true }); rmSync(sockets, { recursive: true, force: true }) })
 const put = (path: string, value: unknown) => { mkdirSync(resolve(path, '..'), { recursive: true }); writeFileSync(path, JSON.stringify(value)) }
 
@@ -36,7 +36,7 @@ test('evidence path rejects repository, archive and symlink escapes before writi
 function artifacts(name: string) {
   const consumer = join(scratch, name)
   put(join(consumer, 'package-lock.json'), { packages: Object.fromEntries(['core', 'mcp', 'plugins'].map(name => ['node_modules/@workbasehq/' + name, { version: '0.2.15' }])) })
-  put(join(consumer, '.mcp.json'), { mcpServers: { workbase_data: { args: ['data'] } } })
+  put(join(consumer, '.mcp.json'), { mcpServers: { workbase_data: { args: ['data'] }, workbase_ops: { args: ['ops'] } } })
   const paths = ['/workers', '/workers/$workerId', '/workers/$workerId/edit', '/workers/new']
   put(join(consumer, '.workbase-ui/manifest.json'), { entities: { worker: { fields: { name: {}, note: {}, user: {} } } }, routes: paths.map(path => ({ path })) })
   writeFileSync(join(consumer, '.workbase-ui/routeTree.gen.ts'), paths.map(path => `fullPath: '${path}'`).join('\n'))
@@ -109,13 +109,13 @@ const port=server.address().port;
 for(const args of [[{port,host:'127.0.0.1'}],[{port:String(port),host:'127.0.0.1'}],[port,'127.0.0.1'],[String(port),'127.0.0.1']]) await reach(args);
 for(const args of [[{port,host:'127.0.0.1'}],[port,'127.0.0.1'],[String(port),'127.0.0.1']]) await reach([...args,()=>{}]);
 await close();
-const path=${JSON.stringify(join(sockets, api.replace(/\W/g, '')))};
+const path=${JSON.stringify(api.replace(/\W/g, ''))};
 await listen(path);
 await reach([path]);await reach([{path}]);
 await reach([path,()=>{}]);await reach([{path},()=>{}]);
 await close();
 console.log('all overloads passed');`
-    const result = spawnSync('node', ['--require', guard, '-e', `(async () => { ${script} })().catch(e=>{console.error(e);process.exit(1)})`], { encoding: 'utf8', timeout: 5000 })
+    const result = spawnSync('node', ['--require', guard, '-e', `(async () => { ${script} })().catch(e=>{console.error(e);process.exit(1)})`], { cwd: sockets, encoding: 'utf8', timeout: 5000 })
     expect(result.stderr).toBe('')
     expect(result.status).toBe(0)
     expect(result.stdout).toContain('all overloads passed')

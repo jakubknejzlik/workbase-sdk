@@ -72,7 +72,14 @@ it('creates registry-only files, substitutes ids and resolves the release versio
   expect((await bootstrapInstance(root, input)).files).toEqual(files.map(path => ({ path, status: 'unchanged' })))
   expect((await readFile(join(root, 'proposals/log.jsonl'), 'utf8')).trim().split('\n').map(line => JSON.parse(line).tool)).toEqual(['bootstrap_instance', 'bootstrap_instance'])
 })
-it('passes the installed SDK console directory to provision when the generated SST config runs', async () => {
+it.each([
+  { stage: 'trial', email: 'login@example.test', mailbox: '', error: undefined },
+  { stage: 'dev', email: '', mailbox: 'synthetic-mailbox-secret-at-least-32', error: undefined },
+  { stage: 'test', email: '', mailbox: 'synthetic-mailbox-secret-at-least-32', error: undefined },
+  { stage: 'dev', email: 'login@example.test', mailbox: 'synthetic-mailbox-secret-at-least-32', error: 'EMAIL_FROM cannot be combined with WORKBASE_DEV_MAILBOX_TOKEN' },
+  { stage: 'production', email: '', mailbox: 'synthetic-mailbox-secret-at-least-32', error: 'WORKBASE_DEV_MAILBOX_TOKEN requires dev or test stage' },
+  { stage: 'dev', email: '', mailbox: '', error: 'Set EMAIL_FROM before running SST' },
+])('runs the generated SST config with deployment inputs %j', async ({ stage, email, mailbox, error }) => {
   const root = await empty()
   await bootstrapInstance(root, input)
   await symlink(resolve('node_modules'), join(root, 'node_modules'))
@@ -81,23 +88,34 @@ import { consoleAssetsDir } from '@workbasehq/plugins/console/assets'
 let options
 mock.module('@workbasehq/core/infra/provision', () => ({ provision: async value => {
   options = value
-  return { url: 'https://example.test', databaseId: 'test-db' }
+  return { url: 'https://example.test', databaseId: 'test-db', ...(value.devMailbox ? { devMailboxUrl: 'https://mailbox.example.test' } : {}) }
 } }))
 globalThis.$config = value => value
-globalThis.$app = { stage: 'trial' }
+globalThis.$app = { stage: ${JSON.stringify(stage)} }
 const { default: config } = await import('./sst.config.ts')
-const result = await config.run()
-console.log(JSON.stringify({ options, expected: consoleAssetsDir(), result }))`
+try {
+  const result = await config.run()
+  console.log(JSON.stringify({ options, expected: consoleAssetsDir(), result }))
+} catch (error) { console.log(JSON.stringify({ error: error.message, called: Boolean(options) })) }`
   const result = spawnSync('bun', ['--no-install', '--eval', script], { cwd: root, encoding: 'utf8', env: {
     ...process.env, WORKBASE_RESOURCE_PREFIX: 'test-instance', BETTER_AUTH_SECRET: 'test-secret',
-    AUTH_BASE_URL: 'https://{stage}.example.test', EMAIL_FROM: 'login@example.test',
+    AUTH_BASE_URL: 'https://{stage}.example.test', EMAIL_FROM: email,
+    WORKBASE_OPS_TOKEN: 'example-ops', WORKBASE_DEV_MAILBOX_TOKEN: mailbox,
   } })
   expect(result.status, result.stderr).toBe(0)
+  if (error) {
+    expect(JSON.parse(result.stdout)).toEqual({ error, called: false })
+    return
+  }
   const { options, expected, result: deployed } = JSON.parse(result.stdout)
   expect(options.assetsDir).toBe(expected)
   expect(options.configPath).toBe('./runtime.ts')
-  expect(options.authBaseUrl).toBe('https://trial.example.test')
-  expect(deployed).toEqual({ url: 'https://example.test', databaseId: 'test-db' })
+  expect(options.authBaseUrl).toBe(`https://${stage}.example.test`)
+  expect(options.opsToken).toBe('example-ops')
+  expect(options.email).toEqual(email ? { from: email } : undefined)
+  expect(options.devMailbox).toEqual(mailbox ? { token: mailbox } : undefined)
+  expect(deployed).toEqual({ url: 'https://example.test', databaseId: 'test-db',
+    ...(mailbox ? { devMailboxUrl: 'https://mailbox.example.test' } : {}) })
 })
 it('ships authored V3 sources and excludes Instance-generated artifacts', async () => {
   const root = await empty()
@@ -110,7 +128,14 @@ it('ships authored V3 sources and excludes Instance-generated artifacts', async 
     'src/console.tsx', 'vite.config.ts', 'index.html',
     'scripts/initial-migrations.ts', 'scripts/check-migrations.ts', 'scripts/ci-config.ts', 'scripts/deploy.ts']) expect(paths).not.toContain(path)
   const servers = JSON.parse(await readFile(join(root, '.mcp.json'), 'utf8')).mcpServers
-  expect(Object.keys(servers)).toEqual(['workbase_data'])
+  expect(Object.keys(servers)).toEqual(['workbase_data', 'workbase_ops'])
+  expect(servers.workbase_ops.args).toEqual(['./node_modules/@workbasehq/mcp/src/bin.ts', 'ops'])
+  expect(servers.workbase_ops.env).toEqual({
+    WORKBASE_BASE_URL: '${WORKBASE_BASE_URL}', WORKBASE_OPS_TOKEN: '${WORKBASE_OPS_TOKEN}',
+    WORKBASE_DEV_MAILBOX_URL: '${WORKBASE_DEV_MAILBOX_URL:-}', WORKBASE_DEV_MAILBOX_TOKEN: '${WORKBASE_DEV_MAILBOX_TOKEN:-}',
+  })
+  expect(await readFile(join(root, 'runtime.ts'), 'utf8')).toContain('createOrganizations({ allowCreate: false })')
+  expect(await readFile(join(root, 'config.ts'), 'utf8')).toContain("registration: 'open'")
   const guide = await readFile(join(root, 'README.md'), 'utf8')
   expect(guide.indexOf('bun run migrate:plan --init')).toBeLessThan(guide.indexOf('bun run access:lock'))
   expect(guide.indexOf('bun run access:lock')).toBeLessThan(guide.indexOf('bun run openapi:write'))
@@ -294,4 +319,35 @@ it.each(['bun', 'node'])('init does not load Worker, core or server modules unde
   expect(JSON.parse(result.stdout).ok).toBe(true)
   const manifest = JSON.parse(await readFile(join(root, 'instance/package.json'), 'utf8'))
   for (const name of ['core', 'plugins', 'mcp']) expect(manifest.dependencies[`@workbasehq/${name}`]).toBe('0.2.0-test')
+})
+it.each([false, true])('starts generated workbase_ops after client interpolation (mailbox configured=%s)', async mailbox => {
+  const root = await empty()
+  await bootstrapInstance(root, input)
+  await mkdir(join(root, 'node_modules/@workbasehq'), { recursive: true })
+  await symlink(resolve('packages/mcp'), join(root, 'node_modules/@workbasehq/mcp'))
+  const { workbase_ops: config } = JSON.parse(await readFile(join(root, '.mcp.json'), 'utf8')).mcpServers as Record<string, {
+    command: string; args: string[]; env: Record<string, string>
+  }>
+  // Model Claude Code's documented .mcp.json interpolation.
+  // Unset references remain literal unless a default is present; empty strings count as set.
+  const shell: Record<string, string> = {
+    WORKBASE_BASE_URL: 'https://example.test', WORKBASE_OPS_TOKEN: 'example-ops',
+    ...(mailbox ? { WORKBASE_DEV_MAILBOX_URL: 'https://mailbox.example.test',
+      WORKBASE_DEV_MAILBOX_TOKEN: 'synthetic-mailbox-secret-at-least-32' } : {}),
+  }
+  const expand = (value: string) => value.replace(/\$\{([^}:]+)(?::-([^}]*))?\}/g,
+    (literal, key: string, fallback: string | undefined) => shell[key] ?? fallback ?? literal)
+  const transport = new StdioClientTransport({
+    command: expand(config.command), args: config.args.map(expand), cwd: root, stderr: 'pipe',
+    env: { ...(process.env.PATH === undefined ? {} : { PATH: process.env.PATH }),
+      ...(process.env.TMPDIR === undefined ? {} : { TMPDIR: process.env.TMPDIR }),
+      ...Object.fromEntries(Object.entries(config.env).map(([key, value]) => [key, expand(value)])) },
+  })
+  transport.stderr?.on('data', () => {})
+  const client = new Client({ name: 'generated-ops-config', version: '1' })
+  try {
+    await client.connect(transport)
+    expect((await client.listTools()).tools.map(tool => tool.name))
+      .toEqual(['provision_organization', ...(mailbox ? ['read_dev_mail'] : [])])
+  } finally { await client.close(); await transport.close() }
 })

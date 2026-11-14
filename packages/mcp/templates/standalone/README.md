@@ -91,10 +91,38 @@ For staging, set `AUTH_BASE_URL` to the canonical origin: native Worker requests
 redirect there, so it must be reachable and must not redirect to itself.
 No deploy is performed by init. No preview workflow or deployment wrapper ships here.
 
+## First owner without real mail
+
+For a disposable `dev` or `test` stage, set independent `WORKBASE_OPS_TOKEN` and
+`WORKBASE_DEV_MAILBOX_TOKEN` secrets in private `.env`, alongside the auth and
+Cloudflare inputs. Leave `EMAIL_FROM` empty: the SST config rejects it together
+with the mailbox token. Every other stage rejects the mailbox; without that
+token, an authorized `EMAIL_FROM` is required. Deployment returns `devMailboxUrl`.
+
+Export `WORKBASE_BASE_URL` (the canonical app origin), `WORKBASE_OPS_TOKEN`,
+`WORKBASE_DEV_MAILBOX_URL` (that output) and `WORKBASE_DEV_MAILBOX_TOKEN` to your
+MCP client. `.mcp.json` registers `workbase ops` beside the data server with
+environment-only credentials; SST's `.env` is not automatically the MCP environment.
+
+Request the owner's magic link in the browser, call
+`read_dev_mail({ recipient: "owner@example.test", limit: 1 })`, open the returned
+sign-in message's `body` URL and complete the profile. Then call
+`provision_organization({ name: "First organization", ownerEmail: "owner@example.test" })`
+and refresh the console. Invite staff through a worker's invite action and read
+their sign-in/invitation links with `read_dev_mail` in a separate browser profile.
+Registration stays open for that initial sign-in; `allowCreate: false` keeps org
+provisioning on the protected ops route. Do not enable self-service creation as
+the onboarding path. See `docs/sdk/onboarding.md` in the SDK repository for the
+full flow and `docs/sdk/dev-mailbox.md` for the mailbox contract.
+
+The ops server needs no data token or org ID. The data server separately needs
+`WORKBASE_TOKEN` and `WORKBASE_ORG_ID` and defaults to read-only access. Production
+uses real mail and ops provisioning with both mailbox MCP variables omitted.
+
 Init creates missing files and reports `created`, `unchanged` or `conflict`.
 It preserves existing bytes. Rewritten SDK dependencies and authored schema files
 therefore report conflicts on repeated init.
 
 For later Manager operation use the established MCP/PR process; Managers do not
-edit code directly. This template's MCP config contains only the data server;
+edit code directly. This template's MCP config contains data and ops servers;
 legacy schema-discovery tools are not the V3 authoring workflow.

@@ -92,7 +92,7 @@ deployed environment), using the same port as the Worker:
 cat > .dev.vars <<'ENV'
 BETTER_AUTH_SECRET=synthetic-access-secret-at-least-32
 AUTH_BASE_URL=http://127.0.0.1:9290
-EMAIL_FROM=login@example.test
+OPS_TOKEN=example-ops
 ENV
 chmod 600 .dev.vars
 mkdir -p .smoke
@@ -147,29 +147,15 @@ WRANGLER_SEND_METRICS=false node node_modules/wrangler/bin/wrangler.js dev \
 ```
 
 Open `http://127.0.0.1:9290` for same-origin console and API requests. No Vite server
-or console build is needed. The smoke chooses a free port, waits for `/health`, then
-signs in through `/auth/sign-in/magic-link`, reads the resulting URL from local
-`email_outbox.body` and verifies it. It completes `/me/profile`, creates an
-organization for admin membership, then invites and accepts a staff account
-through the supported APIs. There are no identity SQL seeds or role selector.
-Sources: [live sessions](../../scripts/lib/installed-consumer-live.ts),
+or console build is needed. For sign-in, first-owner ops provisioning and staff
+invitations, follow [onboarding without real mail](onboarding.md); the
+[mailbox contract](dev-mailbox.md) describes a local sidecar sharing this D1 state.
+The smoke invokes the installed mailbox handler against that shared database,
+completes `/me/profile`, provisions organizations through `/internal/organizations`
+with `allowCreate: false`, then checks staff invite/accept and isolation.
+There are no identity SQL seeds or role selector. Sources:
+[live sessions](../../scripts/lib/installed-consumer-live.ts),
 [runtime composition](../../packages/mcp/templates/standalone/runtime.ts).
-
-For manual local sign-in, request the magic link in the console, then read its URL
-in a second terminal from the same D1 binding and open the matching URL:
-
-```sh
-WRANGLER_SEND_METRICS=false node --import tsx --input-type=module <<'JS'
-import { getPlatformProxy } from 'wrangler'
-const proxy = await getPlatformProxy({ configPath: './wrangler.jsonc',
-  persist: { path: '.wrangler/state/v3' }, remoteBindings: false })
-try {
-  console.log((await proxy.env.DB.prepare(
-    'SELECT recipient,body FROM email_outbox ORDER BY rowid DESC LIMIT 1'
-  ).first()))
-} finally { await proxy.dispose() }
-JS
-```
 
 Treat outbox links as credentials. The automated harness explicitly forwards the
 real Secure cookies for Playwright API calls over HTTP loopback; this is not an
@@ -188,7 +174,7 @@ cross-org denial, and loss of staff row access after unlink. Sixteen renders cov
 four routes × 1280/390 widths × cs/en with translated headings, no horizontal
 overflow or page errors. Protected account fields stay out of new/edit forms;
 routes/fields match the manifest, generated route tree, lock and OpenAPI. It checks
-data-only MCP configuration and absence of archive/versions directories.
+separate data and ops MCP configuration and absence of archive/versions directories.
 Sources: [smoke](../../scripts/smoke-template.ts),
 [live assertions](../../scripts/lib/installed-consumer-live.ts).
 

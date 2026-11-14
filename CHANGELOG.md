@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Standalone dev/test onboarding can use the development mailbox instead of
+  `EMAIL_FROM`, with mutually exclusive mail inputs and a separate ops MCP server.
+  Open registration establishes identities; `allowCreate: false` reserves org
+  provisioning for ops. The installed-consumer proof reads sign-in/invitation
+  links through the mailbox handler and provisions through the ops route before
+  checking CRUD, roles and isolation. See [onboarding](docs/sdk/onboarding.md). (#43 s4)
 - Add the separate `workbase ops` MCP server for operator-provisioned organizations
   and optional development mailbox reads using the s2 sidecar. Environment-only
   credentials, loopback-only HTTP, fixed errors and token redaction keep operator

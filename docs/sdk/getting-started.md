@@ -111,12 +111,12 @@ remote `DATABASE_ID`, using `runtime.ts`.
 For deployment, copy `deploy.env.example` to private `.env`. Configure
 `CLOUDFLARE_DEFAULT_ACCOUNT_ID`, `CLOUDFLARE_API_TOKEN`, stable `BETTER_AUTH_SECRET`,
 `WORKBASE_RESOURCE_PREFIX`, exact HTTPS `AUTH_BASE_URL`, and an authorized
-`EMAIL_FROM`. Optional `WORKBASE_DOMAIN` must match that origin. URL/domain may
+`EMAIL_FROM` (or a dev/test mailbox token), plus `WORKBASE_OPS_TOKEN`.
+Optional `WORKBASE_DOMAIN` must match that origin. URL/domain may
 contain `{stage}`. `WORKBASE_OWNER_EMAIL` is a manual login address, not a seed
-or authorization grant. Registration is enabled and the creator becomes organization
-owner; review that policy before opening the Instance to public traffic.
-For operator-controlled first-owner provisioning without real mail in a disposable
-dev/test stage, see [development mailbox and onboarding](dev-mailbox.md).
+or authorization grant. Registration is open for first sign-in; self-service
+organization creation is disabled. Follow [first-owner onboarding](onboarding.md)
+to sign in, provision through ops and invite staff without real mail on dev/test.
 
 Run `bun x --no-install sst install` to fetch providers and generate provider types; this step needs
 network access. Commit authored files and generated artifacts before deployment.
@@ -143,8 +143,10 @@ resources. Remove disposable stages with `bun run remove --stage <stage>` after
 acceptance. Live deployment and remote acceptance require the operator's account.
 No preview workflow or deployment wrapper is included in this template.
 
-The generated `.mcp.json` registers only data MCP, using `WORKBASE_BASE_URL`,
-`WORKBASE_TOKEN` and `WORKBASE_ORG_ID`, with read-only mode by default. Keep
+The generated `.mcp.json` registers separate data and ops MCP servers with
+environment-only credentials. Data uses `WORKBASE_TOKEN` and `WORKBASE_ORG_ID`,
+with read-only mode by default; ops uses `WORKBASE_OPS_TOKEN` and optional mailbox
+inputs. Both use `WORKBASE_BASE_URL`. See [onboarding](onboarding.md). Keep
 credentials private. Legacy config-writer proposal/promotion and schema discovery
 are not the V3 authoring flow. Managers operating the Instance later use the
 approved MCP/PR process and do not edit code directly.
