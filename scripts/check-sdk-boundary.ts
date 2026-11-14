@@ -20,6 +20,7 @@ export const uiOptionalPeers = [
   '@tanstack/router-generator',
   'es-module-lexer',
   'react',
+  'react-dom',
   '@tanstack/react-query',
   '@tanstack/react-router',
 ] as const

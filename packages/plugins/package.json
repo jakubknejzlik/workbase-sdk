@@ -43,6 +43,7 @@
     "@tanstack/router-generator": "^1.146.2",
     "es-module-lexer": "^2.3.2",
     "react": "^19.2.8",
+    "react-dom": "^19.2.8",
     "@tanstack/react-query": "^5.90.21",
     "@tanstack/react-router": "^1.170.41",
     "i18next": "^25.10.10"
@@ -98,6 +99,9 @@
       "optional": true
     },
     "react": {
+      "optional": true
+    },
+    "react-dom": {
       "optional": true
     },
     "@tanstack/react-query": {
