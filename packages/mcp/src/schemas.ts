@@ -52,6 +52,23 @@ const setLabel = z.strictObject({
 const setLocale = z.strictObject({
   kind: z.literal('set_locale'), locale: consoleLocaleSchema.optional(), defaultLanguage: consoleLocaleSchema.optional(),
 }).refine(change => change.locale !== undefined || change.defaultLanguage !== undefined, 'Provide locale and/or defaultLanguage')
+// Composition inputs are exported for planning; legacy propose_change stays unchanged.
+export const identityOptionsSchema = z.strictObject({
+  trustedIssuers: z.record(z.string().url(), z.array(z.string().min(1))).optional(),
+})
+export const organizationsOptionsSchema = z.strictObject({ allowCreate: z.boolean().optional() })
+export const localAuthOptionsSchema = z.strictObject({ methods: z.tuple([z.literal('magic-link')]) })
+export const setPluginSchema = z.discriminatedUnion('plugin', [
+  z.strictObject({ kind: z.literal('set_plugin'), plugin: z.literal('identity'), options: identityOptionsSchema.optional() }),
+  z.strictObject({ kind: z.literal('set_plugin'), plugin: z.literal('organizations'), options: organizationsOptionsSchema.optional() }),
+  z.strictObject({ kind: z.literal('set_plugin'), plugin: z.literal('local-auth'), options: localAuthOptionsSchema.optional() }),
+  ...(['members', 'mail-outbox', 'audit', 'machine-credentials', 'console'] as const).map(plugin =>
+    z.strictObject({ kind: z.literal('set_plugin'), plugin: z.literal(plugin) })),
+])
+export const setInteractiveSchema = z.strictObject({ kind: z.literal('set_interactive'), interactive: z.boolean() })
+export const compositionChangeSchema = z.union([setPluginSchema, setInteractiveSchema])
+export type CompositionChange = z.infer<typeof compositionChangeSchema>
+
 export const changeSchema = z.discriminatedUnion('kind', [
   setLabel,
   setLocale,
