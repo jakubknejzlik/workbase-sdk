@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, readdir, rename, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { execFileSync } from 'node:child_process'
@@ -128,6 +128,61 @@ it('rejects noncanonical runtime without executing it, invalid graphs and stale 
     await writeFile(join(root, 'runtime.ts'), source)
     expect(await call('promote', { proposalId, expectedRevision: 1 })).toMatchObject({ ok: false, error: { code: 'validation_required' } })
     expect(await call('discard', { proposalId })).toMatchObject({ ok: true, status: 'discarded' })
+  } finally { await server.close() }
+})
+it.each(['validate', 'apply_to_disposable'].flatMap(tool =>
+  ['config.ts', 'migrations', 'migrations/0001_r1.sql'].map(path => ({ tool, path })),
+))('revokes composition proofs before $tool fails on $path, including across restart', async ({ tool, path }) => {
+  const { root, server, call, propose } = await fixture()
+  let proposalId: string
+  try {
+    proposalId = await propose()
+    expect(await call('validate', { proposalId })).toMatchObject({ ok: true })
+    expect(await call('apply_to_disposable', { proposalId })).toMatchObject({ ok: true, verified: true })
+    const original = join(root, path), saved = join(root, 'preflight.saved')
+    await rename(original, saved)
+    try {
+      if (path !== 'config.ts') await symlink(saved, original)
+      // Force recovery to inspect the unsafe file before loading the bundle.
+      if (path.endsWith('.sql')) await writeFile(join(root, 'proposals/.promotion.json'), JSON.stringify({
+        files: [{ path, before: await readFile(saved, 'utf8') }],
+      }))
+      expect(await call(tool, { proposalId })).toMatchObject({ ok: false, error: {
+        code: path === 'config.ts' ? 'invalid_instance_directory' : 'unsafe_path',
+      } })
+    } finally {
+      if (path.endsWith('.sql')) await rm(join(root, 'proposals/.promotion.json'))
+      if (path !== 'config.ts') await rm(original)
+      await rename(saved, original)
+    }
+  } finally { await server.close() }
+  const restarted = await createServer({ root })
+  try {
+    const record = JSON.parse(await readFile(join(root, 'proposals', `${proposalId}.json`), 'utf8'))
+    expect(record.status).toBe(tool === 'validate' ? 'proposed' : 'validated')
+    expect(record.verification).toBeUndefined()
+    if (tool === 'validate') expect(record.validation).toBeUndefined()
+    expect(await restarted.workflow.call('promote', { proposalId, expectedRevision: 1 })).toMatchObject({ ok: false,
+      error: { code: tool === 'validate' ? 'validation_required' : 'verification_required' } })
+  } finally { await restarted.server.close() }
+})
+it.each<CompositionChange>([
+  { kind: 'set_plugin', plugin: 'local-auth' },
+  { kind: 'set_interactive', interactive: false },
+])('repairs interactive mode without a login provider using $kind', async change => {
+  const { root, server, call } = await fixture()
+  try {
+    const source = await readFile(join(root, 'runtime.ts'), 'utf8')
+    await writeFile(join(root, 'runtime.ts'), source.replace('...config, plugins:', '...config, interactive: true, plugins:'))
+    const before = await authored(root)
+    const proposal = await call('propose_composition', { instance: 'composition-fixture', baseRevision: 1, changes: [change] })
+    expect(proposal).toMatchObject({ ok: true, status: 'proposed' })
+    const proposalId = proposal.proposalId
+    expect(await call('validate', { proposalId })).toMatchObject({ ok: true, revision: 1 })
+    expect(await call('apply_to_disposable', { proposalId })).toMatchObject({ ok: true, verified: true })
+    expect(await call('promote', { proposalId, expectedRevision: 1 })).toMatchObject({ ok: true, status: 'promoted', revision: 1 })
+    expect(await call('validate', { instance: 'composition-fixture' })).toMatchObject({ ok: true })
+    expect(await authored(root)).toEqual(before)
   } finally { await server.close() }
 })
 it.each(['publication fault', 'new schema input'])('rolls back runtime and proposal together after %s', async fault => {

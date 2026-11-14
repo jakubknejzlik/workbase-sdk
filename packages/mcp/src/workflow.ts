@@ -114,14 +114,16 @@ export class Workflow {
             name === 'promote' ? await this.store.sdkProposalSource(input.proposalId) : undefined, input.expectedRevision)
         })
       }
+      if (input.proposalId && (await this.store.find(input.proposalId)).proposal?.kind === 'composition_change') {
+        return await this.store.lockedProposal(targetInstance, async recover => {
+          const p = parseProposal((await this.store.find(input.proposalId)).proposal)
+          if (p.kind !== 'composition_change' || p.instance !== targetInstance || p.proposalId !== input.proposalId) fail('invalid_proposal', 'Proposal identity mismatch', 409)
+          return executeComposition(this.store, p, name, input, recover, signal)
+        })
+      }
       return await this.store.locked(targetInstance, async () => {
         if (name === 'upgrade_sdk') return proposeSdkUpgrade(this.store, targetInstance, input.baseRevision, input.targetVersion, proposalId!)
         if (name === 'propose_composition') return proposeComposition(this.store, targetInstance, input.baseRevision, input.changes, proposalId!)
-        if (input.proposalId) {
-          const p = parseProposal((await this.store.find(input.proposalId)).proposal)
-          if (p.instance !== targetInstance || p.proposalId !== input.proposalId) fail('invalid_proposal', 'Proposal identity mismatch', 409)
-          if (p.kind === 'composition_change') return executeComposition(this.store, p, name, input, signal)
-        }
         if (name === 'submit_change') {
           const p = parseProposal((await this.store.find(input.proposalId)).proposal)
           if (p.instance !== targetInstance || p.proposalId !== input.proposalId) fail('invalid_proposal', 'Proposal identity mismatch', 409)

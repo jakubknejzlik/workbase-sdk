@@ -9,7 +9,7 @@ import { applyRuntimeChanges, parseRuntimeSource, rewriteRuntimeSource } from '.
 import { hydrateRuntimePlugins } from './registry.ts'
 
 async function save(store: Store, proposal: CompositionProposal) {
-  await durableAtomic(join(await store.directory(proposal.instance), 'proposals', `${proposal.proposalId}.json`), json(proposal))
+  await durableAtomic(join(await store.proposalDirectory(proposal.instance), 'proposals', `${proposal.proposalId}.json`), json(proposal))
 }
 function revision(bundle: Bundle, expected: number) {
   if (bundle.config.revision !== expected) fail('stale_revision', 'Revision changed; inspect and propose against the current revision', 409)
@@ -37,16 +37,11 @@ export async function proposeComposition(store: Store, instance: string, baseRev
   await save(store, proposal)
   return { ok: true, kind: proposal.kind, proposalId, baseRevision, status: proposal.status }
 }
-/** Called under the same instance lock as config and SDK publication. */
+/** Called under the same instance lock as config and SDK publication, before recovery. */
 export async function executeComposition(store: Store, proposal: CompositionProposal, name: string,
-  input: { expectedRevision?: number; keep?: boolean }, signal?: AbortSignal) {
+  input: { expectedRevision?: number; keep?: boolean }, recover: () => Promise<void>, signal?: AbortSignal) {
   if (name === 'submit_change') fail('composition_submit_unsupported', 'Composition submission requires a reviewed source change; local promote is supported', 409)
   if (proposal.status === 'promoted' || proposal.status === 'discarded' && name !== 'discard') fail('proposal_closed', `Proposal is ${proposal.status}`, 409)
-  if (name === 'discard') {
-    proposal.status = 'discarded'; delete proposal.validation; delete proposal.verification
-    await save(store, proposal)
-    return { ok: true, status: proposal.status }
-  }
   // Persist revocation before reading runtime, config, dependencies or migrations.
   // Failed revalidation must never leave an earlier verification consumable.
   if (name === 'validate' || name === 'apply_to_disposable') {
@@ -54,6 +49,12 @@ export async function executeComposition(store: Store, proposal: CompositionProp
     if (name === 'validate') delete proposal.validation
     proposal.status = proposal.validation ? 'validated' : 'proposed'
     await save(store, proposal)
+  }
+  await recover()
+  if (name === 'discard') {
+    proposal.status = 'discarded'; delete proposal.validation; delete proposal.verification
+    await save(store, proposal)
+    return { ok: true, status: proposal.status }
   }
   const bundle = await store.load(proposal.instance, { canonicalRuntime: true })
   if (name === 'promote') revision(bundle, input.expectedRevision!)
@@ -63,7 +64,7 @@ export async function executeComposition(store: Store, proposal: CompositionProp
   if (name !== 'validate' && (!proposal.validation || hash(proposal.validation) !== hash(currentProof))) {
     fail('validation_required', 'Validate this exact composition against the current files first', 409)
   }
-  await instanceMeta(bundle)
+  await instanceMeta(prepared.target)
   // This is the deploy-time engine with the target composition and unchanged
   // committed domain history. Plugin baselines and their receipts are SDK-owned.
   const expected = await replayBundle(prepared.target, db => snapshot(db, true))
