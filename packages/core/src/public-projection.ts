@@ -66,16 +66,25 @@ export function publicCommands(config: InstanceConfig, options: RuntimeOptions, 
 function transformTolerantSchema(input: z.ZodType) {
   return containsTransform(input) ? publicOutputSchema(input) : z.toJSONSchema(input)
 }
-const childKeys = ['innerType', 'element', 'keyType', 'valueType', 'left', 'right', 'rest', 'catchall', 'in', 'out'] as const
+/** Walks every Zod child reachable from a schema definition, whatever key holds it,
+ * so a new or rarely used container type (function args/returns, promise, ...) can
+ * never hide a transform. Accessors are never invoked; object shapes and lazy
+ * schemas are resolved explicitly. */
+const isZod = (value: unknown): value is z.core.$ZodType => !!value && typeof value === 'object' && '_zod' in value
 function containsTransform(schema: z.core.$ZodType, seen = new Set<z.core.$ZodType>()): boolean {
   if (seen.has(schema)) return false
   seen.add(schema)
   const def = schema._zod.def as any
   if (def.type === 'transform') return true
-  const children: z.core.$ZodType[] = childKeys.flatMap(key => def[key] ? [def[key]] : [])
+  const children: z.core.$ZodType[] = []
+  const collect = (value: unknown, depth: number): void => {
+    if (isZod(value)) children.push(value)
+    else if (depth < 2 && Array.isArray(value)) value.forEach(item => collect(item, depth + 1))
+    else if (depth < 2 && value && typeof value === 'object' && Object.getPrototypeOf(value) === Object.prototype) Object.values(value).forEach(item => collect(item, depth + 1))
+  }
+  // Data properties only: accessors such as default/prefault `defaultValue` run user factories.
+  for (const descriptor of Object.values(Object.getOwnPropertyDescriptors(def))) if ('value' in descriptor) collect(descriptor.value, 0)
   if (def.type === 'object') children.push(...Object.values(def.shape as Record<string, z.core.$ZodType>))
-  if (Array.isArray(def.options)) children.push(...def.options)
-  if (Array.isArray(def.items)) children.push(...def.items)
   if (def.type === 'lazy') children.push((schema as z.core.$ZodLazy)._zod.innerType)
   return children.some(child => containsTransform(child, seen))
 }

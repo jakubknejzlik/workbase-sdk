@@ -265,3 +265,14 @@ it('serves representable command inputs on /schema with byte-identical legacy ou
     expect(JSON.stringify(publicSchema(config, options))).toBe(JSON.stringify(legacy))
   }
 })
+it('detects transforms inside function arguments and returns without evaluating default factories', async () => {
+  const config = fixture().config
+  config.commands = ['probe']
+  const transform = z.string().transform(value => value.toUpperCase())
+  for (const fn of [z.function({ input: [transform], output: z.string() }), z.function({ input: [], output: transform })]) {
+    const input = z.object({ value: z.union([z.string(), fn]).pipe(z.string()), label: z.string().default(() => { throw new Error('FACTORY_MUST_NOT_RUN') }) })
+    const options = { commands: new Map([['probe', { name: 'probe', input, permission: { entity: 'worker', operation: 'update' } } as any]]) }
+    expect(() => publicSchema(config, options)).not.toThrow()
+    expect((await schemaResponse(config, options)).status).toBe(200)
+  }
+})
