@@ -3,7 +3,7 @@ import { spawn, execFileSync, type ChildProcess } from 'node:child_process'
 import { once } from 'node:events'
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:net'
-import { platform, release } from 'node:os'
+import { constants, platform, release } from 'node:os'
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { chromium, type Browser, type BrowserContext, type Page } from 'playwright'
@@ -149,9 +149,12 @@ export async function runInstalledConsumerLive(consumer: string, env: NodeJS.Pro
       rmSync(directory, { recursive: true, force: true })
       releaseDirectories()
       if (interruption) {
-        // The existing directory helper now cleans and re-raises the signal.
-        // Keep the event loop alive until the re-raised signal is delivered.
-        setInterval(() => {}, 1000)
+        // Let the directory helper finish now that group cleanup is complete.
+        // If another observer returns, restore the default signal disposition.
+        const exitCode = 128 + constants.signals[interruption]
+        setTimeout(() => process.exit(exitCode), 2000)
+        process.emit(interruption)
+        process.removeAllListeners(interruption)
         process.kill(process.pid, interruption)
         await new Promise<never>(() => {})
       }

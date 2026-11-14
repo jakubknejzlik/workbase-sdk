@@ -5,14 +5,31 @@ const { ChildProcess, execFileSync } = require('node:child_process')
 const registry = process.env.WORKBASE_LIVE_PROCESS_REGISTRY
 const GRACE_MS = 12000 // Must exceed live()'s 10000 ms inner cleanup bound.
 const KILL_MS = 1000
+const retired = new Set()
+
+function leaderStartTime(pid) {
+  try {
+    return execFileSync('ps', ['-o', 'lstart=', '-p', String(pid)], {
+      encoding: 'utf8', timeout: 1000, env: { ...process.env, LC_ALL: 'C' },
+    }).trim() || undefined
+  } catch (error) {
+    if (error.status === 1 && !String(error.stdout).trim()) return undefined
+    throw error
+  }
+}
 
 function register(file, pid) {
-  if (Number.isSafeInteger(pid) && pid > 1) appendFileSync(file, pid + '\n')
+  if (Number.isSafeInteger(pid) && pid > 1) {
+    const start = leaderStartTime(pid)
+    if (start) appendFileSync(file, pid + '\t' + start + '\n')
+  }
 }
 
 if (registry) {
   const originalSpawn = ChildProcess.prototype.spawn
   ChildProcess.prototype.spawn = function (options) {
+    // Bun does not use Node's normalized spawn options. Leave its API alone.
+    if (!options.envPairs) return originalSpawn.call(this, options)
     // Carry ownership even through libraries supplying their own environment.
     const pairs = options.envPairs.filter(pair => !pair.startsWith('WORKBASE_LIVE_PROCESS_REGISTRY='))
     pairs.push('WORKBASE_LIVE_PROCESS_REGISTRY=' + registry)
@@ -29,14 +46,22 @@ if (registry) {
 }
 
 function groups(file) {
-  return [...new Set(readFileSync(file, 'utf8').split('\n').map(Number).filter(pid => Number.isSafeInteger(pid) && pid > 1))]
+  return [...new Set(readFileSync(file, 'utf8').split('\n'))].map(record => {
+    const [pid, start] = record.split('\t')
+    return { pgid: Number(pid), start, key: file + '\0' + record }
+  }).filter(({ pgid, start }) => Number.isSafeInteger(pgid) && pgid > 1 && start)
 }
 function signal(file, name, sent) {
   let alive = false
-  for (const pgid of groups(file)) {
-    try { process.kill(-pgid, sent.has(pgid) ? 0 : name); sent.add(pgid); alive = true }
+  for (const { pgid, start, key } of groups(file)) {
+    if (retired.has(key)) continue
+    const current = leaderStartTime(pgid)
+    if (current && current !== start) { retired.add(key); continue }
+    // A leaderless live group still owns its number: the kernel cannot reuse
+    // that PID while it is a PGID. ESRCH below retires an empty group.
+    try { process.kill(-pgid, sent.has(key) ? 0 : name); sent.add(key); alive = true }
     catch (error) {
-      if (error.code === 'ESRCH') continue
+      if (error.code === 'ESRCH') { retired.add(key); continue }
       // Darwin reports EPERM for a group containing only unreaped zombies.
       // During synchronous exit our own child cannot be reaped by the event
       // loop. Confirm there is no runnable member instead of hiding EPERM.

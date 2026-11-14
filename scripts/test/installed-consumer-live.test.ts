@@ -3,6 +3,8 @@ import { execFileSync, spawnSync } from 'node:child_process'
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+import { runInNewContext } from 'node:vm'
+import type processes from '../lib/installed-consumer-processes.cjs'
 import { applyInstalledConsumerFixture, assertInstalledArtifacts, evidenceDirectory } from '../lib/installed-consumer-live'
 
 const scratch = mkdtempSync(join(tmpdir(), 'workbase-installed-tests-'))
@@ -60,6 +62,40 @@ for (const mutation of ['extra-package', 'workspace', 'config-server', 'archive'
 }
 
 const guard = resolve('scripts/lib/installed-consumer-network.cjs')
+for (const synchronous of [false, true]) {
+  test(`${synchronous ? 'sync' : 'async'} group cleanup checks leader identity and retains leaderless groups`, async () => {
+    const table = new Map([[101, 'original 101'], [102, 'original 102'], [103, 'original 103']])
+    let registry = ''
+    const delivered: [number, string | number][] = []
+    const loaded = { exports: {} as typeof processes }
+    runInNewContext(readFileSync(resolve('scripts/lib/installed-consumer-processes.cjs'), 'utf8'), {
+      module: loaded, setTimeout, Atomics, SharedArrayBuffer, Int32Array,
+      process: { env: {}, platform: process.platform, kill: (pid: number, signal: string | number) => { delivered.push([pid, signal]) } },
+      require: (name: string) => {
+        if (name === 'node:fs') return { appendFileSync: (_file: string, line: string) => { registry += line }, readFileSync: () => registry }
+        if (name === 'node:child_process') return {
+          ChildProcess: class {},
+          execFileSync: (_command: string, args: string[]) => table.get(Number(args.at(-1))) ?? '',
+        }
+        throw Error('Unexpected dependency: ' + name)
+      },
+    })
+    for (const pid of table.keys()) loaded.exports.register('groups', pid)
+    expect(registry).toBe('101\toriginal 101\n102\toriginal 102\n103\toriginal 103\n')
+    table.set(102, 'replacement 102')
+    table.delete(103)
+    const stop = () => synchronous ? loaded.exports.stopGroupsSync('groups', 0, 0) : loaded.exports.stopGroups('groups', 0, 0)
+    await stop()
+    expect(delivered).toEqual([[-101, 'SIGTERM'], [-103, 'SIGTERM'], [-101, 'SIGKILL'], [-103, 'SIGKILL']])
+    // A rejected record stays rejected even if the replacement loses its leader.
+    table.delete(102)
+    table.set(101, 'replacement 101')
+    delivered.length = 0
+    await stop()
+    expect(delivered).toEqual([[-103, 'SIGTERM'], [-103, 'SIGKILL']])
+  })
+}
+
 for (const api of ["net.connect", "net.createConnection", "new net.Socket().connect", "tls.connect"]) {
   test(`${api} checks every TCP overload and preserves Unix IPC overloads`, () => {
     const script = `const assert=require('node:assert/strict'), net=require('node:net'), tls=require('node:tls'), dns=require('node:dns');
@@ -129,6 +165,14 @@ for (const runtime of ['node', 'bun']) {
     expect(result.status, result.stdout + result.stderr).toBe(0)
     expect(result.stdout).toContain('"survivors":[]')
   }, 20000)
+  for (const kind of ['signal-observer', 'signal-fallback']) {
+    test(`${runtime} live cancellation exits with another signal listener (${kind})`, () => {
+      const directory = mkdtempSync(join(scratch, 'signal-'))
+      const result = spawnSync('node', [resolve('scripts/test/fixtures/installed-consumer-lifecycle.cjs'), runtime, directory, 'SIGTERM', kind], { encoding: 'utf8', timeout: 15000 })
+      expect(result.status, result.stdout + result.stderr).toBe(0)
+      expect(result.stdout).toContain('"survivors":[]')
+    }, 20000)
+  }
 }
 
 test('smoke status qualifies post-install isolation and routed HTTP browser coverage', () => {

@@ -78,6 +78,12 @@ if (mode === 'leaf') {
     const { registerTempDir } = await import('../../lib/test-temp-dir.mjs')
     fs.mkdirSync(work); registerTempDir(work)
     const { runInstalledConsumerLive } = await import('../../lib/installed-consumer-live.ts')
+    if (kind.startsWith('signal-')) process.on('SIGTERM', () => {})
+    if (kind === 'signal-fallback') {
+      const actualKill = process.kill
+      // Model a runtime accepting a re-raise without delivering the signal.
+      process.kill = (pid, signal) => pid === process.pid ? true : actualKill(pid, signal)
+    }
     const counts = ['SIGINT', 'SIGTERM', 'SIGHUP', 'exit'].map(name => process.listenerCount(name))
     if (action === 'exit') void waitFor(() => fs.existsSync(record)).then(() => process.exit(23))
     let failure
