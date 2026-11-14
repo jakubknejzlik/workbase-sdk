@@ -314,3 +314,67 @@ it('hashes the exact artifact beside config independently of bundle contents', a
   await rm(path)
   expect((await createProvisionPlan(options)).environment.OPENAPI_SHA256).toBe('unbuilt')
 })
+
+it.each(['production', 'prod', 'staging', 'preview'])('rejects an opted-in dev mailbox in stage %s before registering any resources', async stage => {
+  mockSst()
+  await expect(provision({ ...options, stage, devMailbox: { token: secret('synthetic-mailbox-token-at-least-32-characters') } })).rejects.toMatchObject({ code: 'provision_invalid_dev_mailbox_stage' })
+  expect(records).toEqual([])
+})
+
+it.each(['dev', 'test'])('provisions a separate dev mailbox with only D1, stage and its own secret in %s', async stage => {
+  mockSst()
+  const token = 'synthetic-mailbox-token-at-least-32-characters'
+  const mailboxOptions = { ...options, stage, devMailbox: { token: secret(token) } }
+  const plan = await createProvisionPlan(mailboxOptions)
+  expect(plan.devMailbox).toMatchObject({ handler: expect.stringMatching(/\/core\/src\/dev-mailbox.ts$/), bindingNames: ['DB', 'STAGE', 'DEV_MAILBOX_TOKEN'] })
+  expect(JSON.stringify(plan)).not.toContain(token)
+  expect(plan.devMailbox!.name.length).toBeLessThanOrEqual(54)
+  expect(plan.bindingNames).not.toContain('DEV_MAILBOX_TOKEN')
+  const result = await provision(mailboxOptions)
+  const workers = records.filter(record => record.type === 'worker')
+  expect(workers).toHaveLength(2)
+  const sidecar = workers.find(record => record.args.handler === plan.devMailbox!.handler)!
+  const app = workers.find(record => record !== sidecar)!
+  expect(sidecar.child.args.scriptName).toBe(plan.devMailbox!.name)
+  expect(sidecar.child.args.keepBindings).toEqual([])
+  expect(sidecar.child.args.observability.logs.invocationLogs).toBe(false)
+  expect(sidecar.args.environment).toEqual({ STAGE: stage })
+  expect(sidecar.args.assets).toBeUndefined()
+  expect(sidecar.args.domain).toBeUndefined()
+  const bindings = await sidecar.child.args.bindings.promise()
+  expect(bindings).toEqual([
+    { name: 'STAGE', type: 'plain_text', text: stage },
+    { name: 'DB', type: 'd1', id: await outputValue(result.databaseId) },
+    { name: 'DEV_MAILBOX_TOKEN', type: 'secret_text', text: token },
+  ])
+  expect(await isSecret(sidecar.child.args.bindings)).toBe(true)
+  expect((await app.child.args.bindings.promise()).map((binding: any) => binding.name)).not.toContain('DEV_MAILBOX_TOKEN')
+  const migration = records.find(record => record.type === 'migration')!
+  expect(sidecar.opts.dependsOn).toContain(migration.resource)
+  expect(sidecar.child.opts.dependsOn).toContain(migration.resource)
+  expect(result.resources.devMailbox).toBe(sidecar.resource)
+  expect(result.devMailboxUrl).toBe(sidecar.resource.url)
+})
+
+it('omits the sidecar entirely by default, including production and its returned outputs', async () => {
+  mockSst()
+  const plan = await createProvisionPlan({ ...options, stage: 'production' })
+  expect(plan).not.toHaveProperty('devMailbox')
+  const result = await provision({ ...options, stage: 'production' })
+  expect(result).not.toHaveProperty('devMailboxUrl')
+  expect(result.resources).not.toHaveProperty('devMailbox')
+  expect(records.filter(record => record.type === 'worker')).toHaveLength(1)
+})
+
+it('rejects weak plaintext and resolved mailbox secrets', async () => {
+  for (const token of ['', 'short']) {
+    expect(() => validateProvisionOptions({ ...options, stage: 'dev', devMailbox: { token } })).toThrow('provision_invalid_dev_mailbox_token')
+  }
+  mockSst()
+  const weakToken = secret('short')
+  // Resolve this one input synchronously so Pulumi's parallel bookkeeping promises
+  // do not create unhandled rejections while Vitest observes the validation error.
+  vi.stubGlobal('$util', { output: (value: unknown) => value === weakToken
+    ? { apply: (fn: (text: string) => unknown) => fn('short') } : output(value), secret })
+  await expect(provision({ ...options, stage: 'dev', devMailbox: { token: weakToken } })).rejects.toMatchObject({ code: 'provision_invalid_dev_mailbox_token' })
+})

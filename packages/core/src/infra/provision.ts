@@ -22,9 +22,11 @@ export interface ProvisionResult {
   databaseId: Output<string>
   eventsQueueName: Output<string>
   deadLetterQueueName: Output<string>
+  devMailboxUrl?: Output<string | undefined>
   resources: {
     database: DatabaseResource; audit: KvResource; events: QueueResource; deadLetter: QueueResource
     migrations: local.Command; worker: WorkerResource; consumer: import('@pulumi/pulumi').Resource; cron: CronResource
+    devMailbox?: WorkerResource
   }
 }
 
@@ -61,9 +63,10 @@ export async function provision(options: ProvisionOptions): Promise<ProvisionRes
       triggers: [...plan.migration.triggers, ...(options.migrationTriggers ?? [])],
     }, { protect: false, dependsOn: [db, db.nodes.database] })
 
-    function secret(value: Input<string>, auth = false) {
+    function secret(value: Input<string>, kind?: 'auth' | 'mailbox') {
       return $util.secret($util.output(value).apply(text => {
-        if (auth && (typeof text !== 'string' || text.length < 32)) throw new ProvisionDiagnostic('provision_invalid_auth_secret')
+        if (kind === 'auth' && (typeof text !== 'string' || text.length < 32)) throw new ProvisionDiagnostic('provision_invalid_auth_secret')
+        if (kind === 'mailbox' && (typeof text !== 'string' || !/^[\x21-\x7e]{32,256}$/.test(text))) throw new ProvisionDiagnostic('provision_invalid_dev_mailbox_token')
         return text
       }))
     }
@@ -71,7 +74,7 @@ export async function provision(options: ProvisionOptions): Promise<ProvisionRes
       { name: 'DB', type: 'd1', id: db.databaseId },
       { name: 'AUDIT_KV', type: 'kv_namespace', namespaceId: audit.namespaceId },
       { name: 'EVENTS_QUEUE', type: 'queue', queueName: events.nodes.queue.queueName },
-      { name: 'BETTER_AUTH_SECRET', type: 'secret_text', text: secret(options.authSecret, true) },
+      { name: 'BETTER_AUTH_SECRET', type: 'secret_text', text: secret(options.authSecret, 'auth') },
       ...(options.internalToken ? [{ name: 'INTERNAL_TOKEN', type: 'secret_text', text: secret(options.internalToken) }] : []),
       ...(options.opsToken ? [{ name: 'OPS_TOKEN', type: 'secret_text', text: secret(options.opsToken) }] : []),
       ...(options.webhook ? [
@@ -105,10 +108,29 @@ export async function provision(options: ProvisionOptions): Promise<ProvisionRes
     const cron = new cloudflare.WorkersCronTrigger(`${plan.id}RelayCron`, {
       accountId, scriptName: worker.nodes.worker.scriptName, schedules: [{ cron: '*/5 * * * *' }],
     }, { ...protection, dependsOn: [worker] })
+    // A separate entry and resource, constructed only after the strict dev/test gate.
+    // It receives no application auth/ops secrets, assets, routes, queue or cron.
+    const devMailbox = plan.devMailbox && options.devMailbox ? new sst.cloudflare.Worker(`${plan.id}DevMailbox`, {
+      accountId, handler: plan.devMailbox.handler, url: true, dev: false,
+      compatibility: { date: '2026-08-01', flags: ['nodejs_compat'] },
+      environment: { STAGE: plan.stage },
+      transform: { worker: (args, opts) => {
+        args.scriptName = plan.devMailbox!.name
+        args.keepBindings = []
+        args.observability = { enabled: true, headSamplingRate: 1, logs: { enabled: true, invocationLogs: false, persist: true } }
+        args.bindings = $util.output({ existing: args.bindings, token: secret(options.devMailbox!.token, 'mailbox'), databaseId: db.databaseId })
+          .apply(({ existing, token, databaseId }) => [...(existing ?? []),
+            { name: 'DB', type: 'd1', id: databaseId }, { name: 'DEV_MAILBOX_TOKEN', type: 'secret_text', text: token },
+          ])
+        Object.assign(opts, protection)
+        opts.dependsOn = [migrations]
+      } },
+    }, { ...protection, dependsOn: [migrations] }) : undefined
     return {
       stage: plan.stage, url: worker.url, workerName: worker.nodes.worker.scriptName, databaseId: db.databaseId,
       eventsQueueName: events.nodes.queue.queueName, deadLetterQueueName: deadLetter.nodes.queue.queueName,
-      resources: { database: db, audit, events, deadLetter, migrations, worker, consumer, cron },
+      ...(devMailbox ? { devMailboxUrl: devMailbox.url } : {}),
+      resources: { database: db, audit, events, deadLetter, migrations, worker, consumer, cron, ...(devMailbox ? { devMailbox } : {}) },
     }
   } catch (error) { throw provisionFailure(error) }
 }

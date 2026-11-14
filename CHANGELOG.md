@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Add an opt-in development mailbox sidecar Worker for the exact `dev`/`test`
+  stages, with a dedicated secret and bounded, read-only recipient lookup.
+  Production provisioning rejects the option and application bundles exclude the
+  mailbox entry. See [first-owner onboarding](docs/sdk/dev-mailbox.md). (#43 s2)
 - V3 standalone authoring uses literal config/schema/access/UI/locales, then
   schema planning → access lock → OpenAPI → checks/typecheck → an Instance-owned
   Vite console and Worker. Init copies authored files without generating artifacts;

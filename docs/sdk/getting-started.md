@@ -122,6 +122,8 @@ For deployment, copy `deploy.env.example` to private `.env`. Configure
 contain `{stage}`. `WORKBASE_OWNER_EMAIL` is a manual login address, not a seed
 or authorization grant. Registration is enabled and the creator becomes organization
 owner; review that policy before opening the Instance to public traffic.
+For operator-controlled first-owner provisioning without real mail in a disposable
+dev/test stage, see [development mailbox and onboarding](dev-mailbox.md).
 
 Run `bun x --no-install sst install` to fetch providers and generate provider types; this step needs
 network access. Commit authored files and generated artifacts before deployment.

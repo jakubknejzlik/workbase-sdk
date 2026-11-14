@@ -74,6 +74,7 @@ The API does not discover the account subdomain or generate an auth secret.
 | `webhook?: { url, allowedHosts, service?, events? }` | Explicit URL/host allowlist, optional existing Worker service name and event filter |
 | `internalToken?` | Optional secret `INTERNAL_TOKEN` for protected operations |
 | `opsToken?` | Optional secret `OPS_TOKEN` for protected operations; takes precedence over `INTERNAL_TOKEN` |
+| `devMailbox?: { token }` | Opt-in separate credential-reading Worker, only for exact `dev`/`test` stages; returns `devMailboxUrl` |
 | `accountId?`, `projectRoot?` | Override account environment value or path root; SST normally runs in the app root |
 | `protect?` | Protect/retain primary resources; defaults to true for `production` |
 | `migrationTriggers?` | Extra fingerprints for imported application/plugin verification code |
@@ -152,7 +153,11 @@ This provisioner does not change SST state storage.
 
 Email requires an authorized Cloudflare sender. With magic-link login, configure
 working email delivery or another supported transport even on workers.dev. Omitting
-`email` does not provide a substitute login transport. Omitting `assetsDir` leaves
+`email` alone does not provide a substitute login transport. For disposable dev/test
+stages, explicitly opt into the [development mailbox sidecar](../../../../docs/sdk/dev-mailbox.md)
+for operator-authorized outbox retrieval and first-owner onboarding. Its dedicated
+secret is never bound to the application Worker; production cannot provision it.
+Omitting `assetsDir` leaves
 the API available while the runtime reports `console_not_built` for the console.
 
 Offline tests verify the graph, dependency ordering and installed package bytes.
