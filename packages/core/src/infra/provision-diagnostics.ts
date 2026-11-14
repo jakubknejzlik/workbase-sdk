@@ -5,6 +5,7 @@ const codes = [
   'provision_invalid_config_path', 'provision_invalid_migrations_dir', 'provision_invalid_assets_dir',
   'provision_invalid_auth_secret', 'provision_invalid_auth_base_url', 'provision_invalid_domain',
   'provision_invalid_email', 'provision_invalid_webhook', 'provision_invalid_account_id',
+  'provision_invalid_dev_mailbox_stage', 'provision_invalid_dev_mailbox_token',
   'provision_config_load_failed', 'provision_invalid_config', 'provision_inputs_unreadable',
   'provision_requires_sst', 'provision_requires_command', 'provision_failed',
 ] as const

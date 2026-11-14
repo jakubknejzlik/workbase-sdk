@@ -24,6 +24,7 @@
     "./kernel/schema-check": "./src/kernel/schema-check.ts",
     "./kernel/plugin": "./src/kernel/plugin.ts",
     "./worker-fetch": "./src/worker-fetch.ts",
+    "./dev-mailbox": "./src/dev-mailbox.ts",
     "./schema-compatibility": "./src/schema-compatibility.ts",
     "./migrations/versions": "./src/migrations/versions.ts",
     "./config-proposals": "./src/config-proposals.ts",

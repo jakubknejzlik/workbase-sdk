@@ -2,6 +2,7 @@ import type { Input } from '@pulumi/pulumi'
 import { createHash } from 'node:crypto'
 import { readFile, readdir, stat } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import type { SchemaRevision } from '../schema-compatibility'
 import { migrationHash, readMigrationFiles, sha256 } from './migration-files'
 import { ProvisionDiagnostic, provisionFailure } from './provision-diagnostics'
@@ -27,6 +28,8 @@ export interface ProvisionOptions {
   internalToken?: Input<string>
   /** Secret OPS_TOKEN for protected operations; takes precedence over INTERNAL_TOKEN. */
   opsToken?: Input<string>
+  /** Opt-in, separate credential-reading Worker. Only the exact dev and test stages are permitted. */
+  devMailbox?: { token: Input<string> }
   /** Defaults to CLOUDFLARE_DEFAULT_ACCOUNT_ID. Credentials stay in the deploy environment. */
   accountId?: string
   /** Defaults to the SST app root (process.cwd() inside SST run()). */
@@ -50,6 +53,7 @@ export interface ProvisionPlan {
   schema: SchemaRevision
   environment: Record<string, string>
   bindingNames: string[]
+  devMailbox?: { name: string; handler: string; bindingNames: string[] }
   migration: { command: string; bin: string; triggers: string[] }
 }
 
@@ -61,6 +65,10 @@ function label(value: unknown, limit: number): value is string {
 /** No values supplied by callers are included in validation messages. */
 export function validateProvisionOptions(options: ProvisionOptions): void {
   if (!options || !label(options.stage, 32)) throw new ProvisionDiagnostic('provision_invalid_stage')
+  if (options.devMailbox !== undefined) {
+    if (options.stage !== 'dev' && options.stage !== 'test') throw new ProvisionDiagnostic('provision_invalid_dev_mailbox_stage')
+    if (!options.devMailbox?.token || (typeof options.devMailbox.token === 'string' && !/^[\x21-\x7e]{32,256}$/.test(options.devMailbox.token))) throw new ProvisionDiagnostic('provision_invalid_dev_mailbox_token')
+  }
   if (!label(options.resourcePrefix, 63)) throw new ProvisionDiagnostic('provision_invalid_prefix')
   if (!nonempty(options.handler)) throw new ProvisionDiagnostic('provision_invalid_handler')
   if (!nonempty(options.configPath)) throw new ProvisionDiagnostic('provision_invalid_config_path')
@@ -85,7 +93,7 @@ export function validateProvisionOptions(options: ProvisionOptions): void {
 function resourceName(prefix: string, stage: string, suffix: string) {
   const hash = sha256(JSON.stringify([prefix, stage, suffix])).slice(0, 12)
   const stem = `${prefix}-${stage}-${suffix}`
-  const limit = suffix === 'worker' ? 54 : 63
+  const limit = suffix === 'worker' || suffix === 'dev-mailbox' ? 54 : 63
   return `${stem.slice(0, limit - hash.length - 1).replace(/-+$/, '')}-${hash}`
 }
 
@@ -115,7 +123,7 @@ export async function createProvisionPlan(options: ProvisionOptions): Promise<Pr
   try {
     if (!(await stat(handler)).isFile() || !(await stat(configPath)).isFile() || !(await stat(migrationsDir)).isDirectory() || (assetsDir && !(await stat(assetsDir)).isDirectory())) throw 0
   } catch { throw new ProvisionDiagnostic('provision_inputs_unreadable') }
-  const secrets = [options.authSecret, options.internalToken, options.opsToken, options.webhook?.url, options.webhook?.allowedHosts, options.webhook?.service]
+  const secrets = [options.authSecret, options.internalToken, options.opsToken, options.devMailbox?.token, options.webhook?.url, options.webhook?.allowedHosts, options.webhook?.service]
     .filter((value): value is string => typeof value === 'string' && value.length > 0)
   const schema = await provisionConfigSchema(root, configPath, migrationsDir, secrets)
   try {
@@ -130,6 +138,7 @@ export async function createProvisionPlan(options: ProvisionOptions): Promise<Pr
       stage: options.stage, root, configPath, handler, migrationsDir, ...(assetsDir ? { assetsDir } : {}),
       names: { database: name('db'), audit: name('audit'), events: name('events'), deadLetter: name('events-dlq'), worker: name('worker') },
       id: `Workbase${sha256(JSON.stringify([options.resourcePrefix, options.stage])).slice(0, 20)}`,
+      ...(options.devMailbox ? { devMailbox: { name: name('dev-mailbox'), handler: fileURLToPath(import.meta.resolve('@workbasehq/core/dev-mailbox')), bindingNames: ['DB', 'STAGE', 'DEV_MAILBOX_TOKEN'] } } : {}),
       schema,
       environment: { STAGE: options.stage, SCHEMA_EXPECTED: JSON.stringify(schema), OPENAPI_SHA256: openapi, AUTH_BASE_URL: options.authBaseUrl,
         ...(options.email ? { EMAIL_FROM: options.email.from } : {}),

@@ -11,6 +11,7 @@ it('keeps Node/SST tooling and optional deployment peers outside the Worker entr
     if (visited.has(path)) return
     visited.add(path)
     expect(path).not.toContain('/src/infra/')
+    expect(path).not.toContain('/src/dev-mailbox')
     if (!/\.tsx?$/.test(path)) return
     for (const imported of ts.preProcessFile(readFileSync(path, 'utf8'), true, true).importedFiles) {
       const name = imported.fileName
