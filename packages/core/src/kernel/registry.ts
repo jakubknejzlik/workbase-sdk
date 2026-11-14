@@ -182,8 +182,10 @@ export class KernelRegistry {
     return fields
   }
   commandGuard(command: KernelCommand, scope: Scope, input: unknown) {
-    // Only the existing trusted identity writer can use this service permission.
-    const internal = scope.actor.type === 'service' && 'system' in command.permission && command.permission.system === 'identity.write'
+    // Service authority is limited to the two trusted internal writers, even in trust mode.
+    const servicePermission = 'system' in command.permission && ['identity.write', 'organizations.provision'].includes(command.permission.system)
+    const internal = scope.actor.type === 'service' && servicePermission
+    if ((scope.actor.type === 'service' || servicePermission) && !internal) throw new ApiError(403, 'permission_denied')
     if (!internal && !this.trust && !this.hasAuthorization) throw new ApiError(403, 'permission_denied')
     // Credential restrictions and entity-scope provenance survive provider removal and trust.
     if (scope.actor.type === 'agent' || command.kind === 'entity') authorizeOperation(scope, operationName(command))
