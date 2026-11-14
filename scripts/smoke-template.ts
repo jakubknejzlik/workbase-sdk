@@ -1,3 +1,4 @@
+import { applyInstalledConsumerFixture, runInstalledConsumerLive, type BuildTimings } from './lib/installed-consumer-live'
 import { registerTempDir, cleanupTempDir } from './lib/test-temp-dir.mjs'
 import { assertSmokeNetworkIsolation, isolateSmokeNetwork } from './lib/smoke-network'
 import assert from 'node:assert/strict'
@@ -6,7 +7,8 @@ import { createHash } from 'node:crypto'
 import { cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
-// Only archives enter this non-git consumer; all post-install commands run offline.
+// Only archives enter this non-git consumer. Steps 1–7 keep OS network isolation;
+// the subsequent live phase permits loopback under a separate JavaScript guard.
 const root = resolve(import.meta.dirname, '..')
 const args = process.argv.slice(2)
 if (args.length && (args.length !== 2 || args[0] !== '--directory' || !args[1])) throw new Error('Usage: bun scripts/smoke-template.ts [--directory dist-sdk]')
@@ -18,6 +20,12 @@ const env: NodeJS.ProcessEnv = { ...process.env, NODE_PATH: '', NODE_OPTIONS: ''
   WORKBASE_RESOURCE_PREFIX: 'neutral-smoke', AUTH_BASE_URL: 'https://neutral.example.test',
   EMAIL_FROM: 'login@example.test', BETTER_AUTH_SECRET: 'synthetic-access-secret-at-least-32',
   WORKBASE_DOMAIN: 'neutral.example.test', SST_TELEMETRY_DISABLED: '1', WORKBASE_BUILD_SHA: '0'.repeat(40),
+}
+const timings = {} as BuildTimings
+const timed = (key: keyof BuildTimings, action: () => string) => {
+  const started = performance.now(), output = action()
+  timings[key] = Math.round(performance.now() - started)
+  return output
 }
 let offline = false
 const guard = join(scratch, 'offline.mjs')
@@ -56,6 +64,7 @@ try {
     const archive = join(directory, matches[0])
     const manifest = JSON.parse(execFileSync('tar', ['-xOf', archive, 'package/package.json'], { encoding: 'utf8' }))
     assert.equal(manifest.name, `@workbasehq/${name}`)
+    assert(!execFileSync('tar', ['-tf', archive], { encoding: 'utf8' }).includes('installed-consumer'), 'Live fixture must never be packed')
     versions[name] = manifest.version
     archives[name] = archive
   }
@@ -75,6 +84,7 @@ try {
   for (const path of generated) assert(!existsSync(join(consumer, path)), `Init must not copy generated ${path}`)
   console.log(`Step 1: packed init created ${report.files.length} files; no placeholders or generated artifacts`)
 
+  const fixtureEdits = applyInstalledConsumerFixture(consumer)
   const vendor = join(consumer, 'vendor/sdk')
   mkdirSync(vendor, { recursive: true })
   const localCandidates = Object.fromEntries(Object.entries(archives).map(([name, archive]) => {
@@ -90,9 +100,9 @@ try {
   Object.assign(manifest.dependencies, localCandidates)
   manifest.overrides = localCandidates
   put(manifestPath, manifest)
-  npm(['install', '--ignore-scripts'])
+  timed('npm_install_ms', () => npm(['install', '--ignore-scripts']))
   const lockHash = digest(join(consumer, 'package-lock.json'))
-  npm(['ci', '--ignore-scripts'])
+  timed('npm_ci_ms', () => npm(['ci', '--ignore-scripts']))
   assert.equal(digest(join(consumer, 'package-lock.json')), lockHash)
   const lock = json(join(consumer, 'package-lock.json'))
   for (const name of ['core', 'plugins', 'mcp']) {
@@ -136,8 +146,11 @@ try {
   console.log(run('bun', ['--eval', `import assert from 'node:assert/strict'; import { createApp } from '@workbasehq/core/app'; import config from './runtime'; const app = createApp(config, { DB: { prepare() { throw Error('unexpected DB access') } }, BETTER_AUTH_SECRET: process.env.BETTER_AUTH_SECRET, AUTH_BASE_URL: process.env.AUTH_BASE_URL }); const response = await app.request('https://neutral.example.test/schema'); assert.equal(response.status, 200); const schema = await response.json(); assert.equal(schema.instance, ${JSON.stringify(id)}); assert(schema.commands.some(command => command.name === 'worker/access_invite')); console.log('Packed runtime GET /schema: 200 + valid JSON with account-link commands')`]).trim())
   console.log('Step 3: schema → access → OpenAPI generated twice; all bytes match; identity verified via runtime/spec')
   console.log(run('bun', ['run', 'check']).trim())
-  console.log(run('bun', ['run', 'typecheck']).trim())
-  console.log(run('bun', ['run', 'build:console']).trim())
+  console.log(timed('typecheck_ms', () => run('bun', ['run', 'typecheck'])).trim())
+  rmSync(join(consumer, '.workbase-ui'), { recursive: true, force: true })
+  rmSync(join(consumer, 'node_modules/.vite'), { recursive: true, force: true })
+  console.log(timed('cold_build_ms', () => run('bun', ['run', 'build:console'])).trim())
+  console.log(timed('warm_build_ms', () => run('bun', ['run', 'build:console'])).trim())
   assert.equal(json(join(consumer, 'dist/build-meta.json')).sha, '0'.repeat(40))
   const html = readFileSync(join(consumer, 'dist/index.html'), 'utf8')
   const scripts = [...html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/g)]
@@ -214,12 +227,12 @@ console.log('Bundled SST config imported; packaged assets/migration tool and bin
   console.log('Step 6: SST bundle imported and createProvisionPlan verified offline; no resources registered')
   const edited = join(consumer, 'schema/worker.ts')
   writeFileSync(edited, readFileSync(edited, 'utf8') + '\n// Authored Instance bytes must survive init.\n')
-  const preserved = Object.fromEntries(['package.json', 'schema/worker.ts', ...generated, 'package-lock.json'].map(path => [path, readFileSync(join(consumer, path))]))
+  const preserved = Object.fromEntries(['package.json', ...fixtureEdits, ...generated, 'package-lock.json'].map(path => [path, readFileSync(join(consumer, path))]))
   const second = init()
   assert(second.ok)
-  assert.deepEqual(second.files, report.files.map(file => ({ path: file.path, status: ['package.json', 'schema/worker.ts'].includes(file.path) ? 'conflict' : 'unchanged' })))
+  assert.deepEqual(second.files, report.files.map(file => ({ path: file.path, status: ['package.json', ...fixtureEdits].includes(file.path) ? 'conflict' : 'unchanged' })))
   for (const [path, bytes] of Object.entries(preserved)) assert.deepEqual(readFileSync(join(consumer, path)), bytes, `Init changed ${path}`)
-  console.log(`Step 7: second init: ${second.files.length - 2} unchanged, 2 documented conflicts; all edited/generated bytes intact`)
+  console.log(`Step 7: second init: ${second.files.length - fixtureEdits.length - 1} unchanged, ${fixtureEdits.length + 1} documented conflicts (dependency pins + fixture edits); all edited/generated bytes intact`)
   // The data MCP starts and lists tools without loading or editing the V3 config.
   writeFileSync(join(consumer, '.smoke/data.ts'), `import assert from 'node:assert/strict'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
@@ -231,7 +244,8 @@ try { await client.connect(transport); assert.equal(client.getServerVersion()?.v
 finally { await client.close(); await transport.close() }
 `)
   console.log(run('bun', ['.smoke/data.ts']).trim())
-  console.log(`V3 packed template smoke passed: 7/7 steps; SDK ${versions.mcp}; lock sha256=${lockHash}; post-install IP network blocked by OS isolation for commands and descendants; JS fetch/http/https/net/tls/dgram guarded; no deploy`)
+  await runInstalledConsumerLive(consumer, env, timings, directory)
+  console.log(`V3 packed template smoke passed: 9/9 steps; SDK ${versions.mcp}; lock sha256=${lockHash}; steps 1–7 IP network blocked by OS isolation for commands and descendants; JS fetch/http/https/net/tls/dgram guarded; steps 8–9 loopback-only JS guard + browser origin allowlist; no deploy`)
 } catch (error) {
   if (error && typeof error === 'object' && 'stderr' in error) console.error(String(error.stderr))
   throw error
