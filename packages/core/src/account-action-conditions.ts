@@ -4,8 +4,8 @@ import { quote } from './migrations/schema'
 import { userLinks } from './user-link-fields'
 
 export type AccountCondition = { opaque: true; kind: 'unlinked' | 'linked' | 'pending' | 'clear'; reason: string }
-export const accountActionNames = ['invite', 'cancel_invite', 'link_account', 'unlink_account'] as const
-export const accountCommand = (entity: string, action: string) => `${entity}/access_${action}`
+export { accountActionNames, accountCommand } from './account-command'
+import { accountActionNames, accountCommand } from './account-command'
 /** Compiler-only macros; authored conditions remain strict {when, reason} data. */
 export function accountActions(entity: string): EffectiveRecordAction[] {
   const unlinked: AccountCondition = { opaque: true, kind: 'unlinked', reason: 'access.already_linked' }

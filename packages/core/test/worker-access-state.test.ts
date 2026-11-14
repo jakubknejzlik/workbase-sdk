@@ -78,3 +78,81 @@ it('persisted role tampering or issuer demotion denies acceptance without linkin
     await env.DB.prepare('DELETE FROM invitations WHERE id=?').bind(invitation.id).run()
   }
 })
+
+it('live admin/staff detail, list, query, capabilities and shell samples conform to committed OpenAPI', async () => {
+  const { responseContract } = await import('./fixtures/openapi-contract')
+  const cases = [
+    ['/api/worker/linked', '/api/worker/{id}', 'GET'],
+    ['/api/worker?limit=1', '/api/worker', 'GET'],
+    ['/query', '/query', 'POST', { entity: 'worker', limit: 1 }],
+    ['/query', '/query', 'POST', { entity: 'worker', limit: 1, select: ['id'], include: { user_account: {} } }],
+    ['/o/org-a/capabilities', '/o/{org}/capabilities', 'GET'],
+    ['/me', '/me', 'GET'], ['/me/profile', '/me/profile', 'GET'],
+  ] as const
+  for (const role of ['admin', 'staff']) for (const [url, path, method, body] of cases) {
+    const response = await request(url, role, method, body)
+    if (role === 'staff' && body && 'include' in body) {
+      expect(response.status).toBe(403)
+      expect(responseContract('/query', 'post', 'default').safeParse(await response.json()).success).toBe(true)
+      continue
+    }
+    expect(response.status, `${role} ${url}: ${await response.clone().text()}`).toBe(200)
+    const sample = await response.json()
+    const result = responseContract(path, method.toLowerCase()).safeParse(sample)
+    expect(result.success, `${role} ${url}: ${JSON.stringify(result.error)}`).toBe(true)
+    if (role === 'staff' && path === '/api/worker/{id}') expect(sample).not.toHaveProperty('access')
+    if (url === '/api/worker?limit=1' && role === 'admin') expect((sample as any).next_cursor).toBe((sample as any).data.at(-1).id)
+    if (url === '/query' && role === 'admin' && (sample as any).next_cursor) expect((sample as any).next_cursor).not.toBe((sample as any).data.at(-1).id)
+  }
+})
+
+it('generator bytes are identical for anonymous, org-A admin, org-B staff and before/after row seeding', async () => {
+  const { generate } = await import('../src/openapi/generate')
+  const { KernelRegistry } = await import('../src/kernel/registry')
+  const kernel = new KernelRegistry(workerAccessFixture())
+  const expected = generate(kernel.config, kernel, '0'.repeat(64))
+  const snapshot = () => generate(kernel.config, kernel, '0'.repeat(64))
+  await env.DB.exec("DELETE FROM worker; INSERT INTO memberships VALUES ('staff','org-b','staff')")
+  for (const actor of [undefined, 'admin', 'staff']) {
+    await app.fetch(new Request('http://localhost/me', { headers: actor ? { Authorization: `Bearer synthetic-${actor}`, 'X-Organization-Id': actor === 'staff' ? 'org-b' : 'org-a' } : {} }))
+    if (actor) {
+      const org = actor === 'staff' ? 'org-b' : 'org-a'
+      expect((await app.fetch(new Request(`http://localhost/o/${org}/capabilities`, { headers: { Authorization: `Bearer synthetic-${actor}` } }))).status).toBe(200)
+    }
+    expect(snapshot()).toBe(expected)
+    await env.DB.prepare('INSERT INTO worker (id,organization_id,name,created_at,updated_at) VALUES (?,?,?,?,?)').bind(`probe-${actor ?? 'anonymous'}`, actor === 'staff' ? 'org-b' : 'org-a', 'synthetic-access-secret-at-least-32', 'now', 'now').run()
+    expect(snapshot()).toBe(expected)
+  }
+  expect(expected).not.toContain('synthetic-access-secret-at-least-32')
+})
+
+
+it('explicit staff field masks omit fields while detail/list/query samples still conform', async () => {
+  const { responseContract } = await import('./fixtures/openapi-contract')
+  const config = workerAccessFixture()
+  config.effectiveAccess!.entities.find(rule => rule.entity === 'worker' && rule.role === 'staff' && rule.operation === 'read')!.fields = ['id', 'name', 'version']
+  app = createApp(config, runtime())
+  for (const [path, schema, method, body] of [
+    ['/api/worker/linked', '/api/worker/{id}', 'GET'],
+    ['/api/worker', '/api/worker', 'GET'],
+    ['/query', '/query', 'POST', { entity: 'worker', limit: 10 }],
+  ] as const) {
+    const response = await request(path, 'staff', method, body)
+    expect(response.status, await response.clone().text()).toBe(200)
+    const sample = await response.json() as any
+    const result = responseContract(schema, method.toLowerCase()).safeParse(sample)
+    expect(result.success, JSON.stringify(result.error)).toBe(true)
+    for (const row of sample.data ?? [sample]) { expect(row).not.toHaveProperty('user'); expect(row).not.toHaveProperty('organization_id') }
+  }
+})
+
+
+it('query label projections conform for visible references', async () => {
+  const { responseContract } = await import('./fixtures/openapi-contract')
+  const response = await request('/query', 'admin', 'POST', { entity: 'worker', limit: 1, where: { id: { eq: 'linked' } }, labels: ['user'] })
+  expect(response.status, await response.clone().text()).toBe(200)
+  const sample = await response.json() as any
+  expect(sample.data[0].__labels.user.status).toBe('ok')
+  const parsed = responseContract('/query', 'post').safeParse(sample)
+  expect(parsed.success, JSON.stringify(parsed.error)).toBe(true)
+})

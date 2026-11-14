@@ -158,3 +158,13 @@ it('CI reaches the single UI validator through root invariants', () => {
   expect(manifest.scripts['check:ui']).toBe('bun packages/plugins/console/ui/src/cli.ts')
   expect(workflow('ci').parsed.jobs.check.steps.some(step => step.run === 'bun run check:ci-invariants')).toBe(true)
 })
+
+it('CI checks the committed worker OpenAPI after the access lock', () => {
+  const manifest = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
+  const invariants = readFileSync(join(root, 'scripts/sdk-ci-invariants.ts'), 'utf8')
+  expect(manifest.scripts['check:openapi']).toBe('bun scripts/check-openapi.ts')
+  expect(manifest.scripts['openapi:write']).toBe('bun scripts/check-openapi.ts --write')
+  expect(invariants.indexOf('await runOpenApiCli(')).toBeGreaterThan(invariants.indexOf('await runAccessCli('))
+  expect(invariants).toContain("'packages/core/test/fixtures/worker-access/config.ts'")
+  expect(JSON.parse(readFileSync(join(root, 'packages/core/package.json'), 'utf8')).exports['./openapi/cli']).toBe('./src/openapi/cli.ts')
+})

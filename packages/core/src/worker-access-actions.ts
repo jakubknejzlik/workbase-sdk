@@ -12,9 +12,7 @@ import { actorAccountId } from './policies'
 import { ApiError } from './errors'
 import { randomToken, sha256, ulid } from './crypto'
 
-export function isAccountAccessCommand(config: InstanceConfig, name: string) {
-  return Object.keys(config.effectiveAccess?.accountLinks ?? {}).some(entity => ['invite', 'cancel_invite', 'link_account', 'unlink_account'].some(action => name === accountCommand(entity, action)))
-}
+export { isAccountAccessCommand } from './account-command'
 /** Internal command schemas own the path id. HTTP input is parsed separately,
  * and cannot supply selectors, grants or server credential destinations. */
 export function workerAccessCommands(config: InstanceConfig, env?: RuntimeEnv): AtomicOperation<any>[] {
