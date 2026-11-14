@@ -170,7 +170,11 @@ export function normalizeInstance(input: InstanceDefinitionInput, exactRoles = f
     ...(Object.hasOwn(input, 'baseline') ? { baseline: (input as InstanceInput).baseline } : {}),
   }) as InstanceConfig
   // Generated spec data survives normalization, copies and serialized configs.
-  if ('openapi' in input) config.openapi = (input as InstanceConfig).openapi
+  // Only SDK-era configs carry a bound spec (bindOpenApi requires the baseline); legacy inputs cannot author one.
+  if ('openapi' in input) {
+    if (config.baseline !== 'workbase-sdk') throw new Error('openapi is generated into openapi.json and bound with bindOpenApi; legacy configs cannot carry it')
+    config.openapi = (input as InstanceConfig).openapi
+  }
   // Re-normalizing an executable config retains its already-compiled access policy.
   if ('effectiveAccess' in input) config.effectiveAccess = (input as InstanceConfig).effectiveAccess
   for (const name of Object.keys(config.pluginConfig ?? {})) {

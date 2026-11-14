@@ -22,7 +22,7 @@ export function bindOpenApi<T extends InstanceConfig>(config: T, spec: unknown):
 
 /** Public, independent of identity, database contents and ASSETS. */
 export function openApiRoutes(app: App, config: InstanceConfig): void {
-  const bytes = validSpec(config.openapi, config.revision) ? JSON.stringify(canonical(config.openapi), null, 2) + '\n' : undefined
+  const bytes = config.baseline === 'workbase-sdk' && validSpec(config.openapi, config.revision) ? JSON.stringify(canonical(config.openapi), null, 2) + '\n' : undefined
   app.get('/openapi.json', c => bytes === undefined
     ? c.json({ error: 'openapi_not_bound' }, 503)
     : c.body(bytes, 200, { 'Content-Type': 'application/json; charset=UTF-8', 'Cache-Control': 'no-store' }))

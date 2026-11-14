@@ -64,3 +64,9 @@ it('adds the disk hash to both build metadata paths, preserving existing keys an
     if (method === 'GET') expect(JSON.parse(text)).toEqual({ sha: env.BUILD_SHA, builtAt: env.BUILD_AT, revision: config.revision, openapi: env.OPENAPI_SHA256 })
   }
 })
+
+it('rejects an authored openapi on legacy defineInstance/normalizeInstance (PR #33 verify1)', async () => {
+  const { defineInstance, normalizeInstance } = await import('../src/config')
+  const input = { id: 'legacy', revision: 1, roles: ['admin'], organizationOwnerRole: 'admin', entities: {}, permissions: {}, openapi: { ...spec } }
+  for (const normalize of [defineInstance, normalizeInstance]) expect(() => normalize(input as never)).toThrow(/legacy configs cannot carry it/)
+})
