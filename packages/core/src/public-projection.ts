@@ -66,25 +66,38 @@ export function publicCommands(config: InstanceConfig, options: RuntimeOptions, 
 function transformTolerantSchema(input: z.ZodType) {
   return containsTransform(input) ? publicOutputSchema(input) : z.toJSONSchema(input)
 }
-/** Walks every Zod child reachable from a schema definition, whatever key holds it,
- * so a new or rarely used container type (function args/returns, promise, ...) can
- * never hide a transform. Accessors are never invoked; object shapes and lazy
- * schemas are resolved explicitly. */
-const isZod = (value: unknown): value is z.core.$ZodType => !!value && typeof value === 'object' && '_zod' in value
+/** Follow only known type-def children: enum/literal data and checks are leaves.
+ * Data descriptors skip executable accessors. Shape and lazy resolution use Zod's
+ * caches; a failed resolution leaves legacy conversion to decide the outcome. */
 function containsTransform(schema: z.core.$ZodType, seen = new Set<z.core.$ZodType>()): boolean {
   if (seen.has(schema)) return false
   seen.add(schema)
-  const def = schema._zod.def as any
-  if (def.type === 'transform') return true
+  const def = schema._zod.def
+  const read = (key: string) => Object.getOwnPropertyDescriptor(def, key)?.value
   const children: z.core.$ZodType[] = []
-  const collect = (value: unknown, depth: number): void => {
-    if (isZod(value)) children.push(value)
-    else if (depth < 2 && Array.isArray(value)) value.forEach(item => collect(item, depth + 1))
-    else if (depth < 2 && value && typeof value === 'object' && Object.getPrototypeOf(value) === Object.prototype) Object.values(value).forEach(item => collect(item, depth + 1))
+  const add = (value: unknown) => {
+    if ((value as z.core.$ZodType | null)?._zod?.def) children.push(value as z.core.$ZodType)
   }
-  // Data properties only: accessors such as default/prefault `defaultValue` run user factories.
-  for (const descriptor of Object.values(Object.getOwnPropertyDescriptors(def))) if ('value' in descriptor) collect(descriptor.value, 0)
-  if (def.type === 'object') children.push(...Object.values(def.shape as Record<string, z.core.$ZodType>))
-  if (def.type === 'lazy') children.push((schema as z.core.$ZodLazy)._zod.innerType)
+  const addList = (value: unknown) => { if (Array.isArray(value)) value.forEach(add) }
+  switch (read('type')) {
+    case 'transform': return true
+    case 'optional': case 'nullable': case 'default': case 'prefault':
+    case 'nonoptional': case 'success': case 'catch': case 'readonly': case 'promise':
+      add(read('innerType')); break
+    case 'array': add(read('element')); break
+    case 'object':
+      try { Object.values((schema as z.core.$ZodObject)._zod.def.shape).forEach(add) } catch { /* Unresolvable shape. */ }
+      add(read('catchall')); break
+    case 'union': addList(read('options')); break
+    case 'intersection': add(read('left')); add(read('right')); break
+    case 'tuple': addList(read('items')); add(read('rest')); break
+    case 'record': case 'map': add(read('keyType')); add(read('valueType')); break
+    case 'set': add(read('valueType')); break
+    case 'pipe': add(read('in')); add(read('out')); break
+    case 'function': add(read('input')); add(read('output')); break
+    case 'lazy':
+      try { add((schema as z.core.$ZodLazy)._zod.innerType) } catch { /* Unresolvable lazy. */ }
+      break
+  }
   return children.some(child => containsTransform(child, seen))
 }
