@@ -54,7 +54,7 @@ flow. `limit` defaults to 20 and accepts integers 1–50. Messages are newest fi
 with insertion order breaking timestamp ties. The JSON response is:
 
 ```json
-{"messages":[{"id":"…","recipient":"owner@example.test","subject":"Workbase sign-in","body":"https://…","created_at":"…","expires_at":"…"}]}
+{"messages":[{"id":"…","recipient":"owner@example.test","subject":"Workbase sign-in","body":"https://app.example.test/…","created_at":"…","expires_at":"…"}]}
 ```
 
 An empty mailbox returns `{"messages":[]}`. Reads never send, consume or mutate
