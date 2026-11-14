@@ -10,11 +10,12 @@ import { replayInstance, readInstanceMeta, usesBaseline, MigrationReplayError, p
 import { WorkflowError, type Index } from './schemas.ts'
 import { rebuildBlock, rebuildBlockMessage } from './planning.ts'
 import { noLink } from './storage.ts'
+import type { PluginMigrationRow } from '@workbasehq/core/kernel/migrations'
 
 // Trusted operator setting, never accepted through MCP tool arguments.
 export const stateRoot = process.env.WORKBASE_MCP_STATE_ROOT ?? '/tmp/codex/mcp-state'
 export type Verification = { verified: boolean; diffs: unknown[]; directory?: string }
-export type Prepared = { target: Bundle['config']; indexes: Index[]; sql: string; composition?: boolean }
+export type Prepared = { target: Bundle['config']; indexes: Index[]; sql: string; composition?: { statements: { sql: string; name: string }[]; ledger: PluginMigrationRow[] } }
 const require = createRequire(import.meta.url)
 const wrangler = () => join(dirname(require.resolve('wrangler/package.json')), 'bin', 'wrangler.js')
 async function migrate(config: string, persistence: string, cwd: string, entities: readonly string[], signal?: AbortSignal) {
@@ -87,11 +88,15 @@ export async function applyDisposable(bundle: Bundle, prepared: Prepared, expect
     const number = Math.max(0, ...bundle.migrations.map(m => Number(m.name.slice(0, 4)))) + 1
     if (number > 9999) throw new WorkflowError('migration_limit', 'Migration number exceeds four digits')
     const proposal = { name: `${String(number).padStart(4, '0')}_proposal.sql`, sql: prepared.sql, syntheticRevision: prepared.target.revision }
-    if (usesBaseline(bundle.config)) {
+    if (prepared.composition) {
+      for (const [i, statement] of prepared.composition.statements.entries()) {
+        await writeFile(join(migrations, `${String(i + 1).padStart(4, '0')}_${statement.name}.sql`), statement.sql + '\n;\n')
+      }
+    } else if (usesBaseline(bundle.config)) {
       // Capture actual engine SQL, including baseline/domain receipts, then let
       // Wrangler execute those exact bytes in the disposable D1.
       const db = new DatabaseSync(':memory:'), statements: { sql: string; name: string }[] = []
-      try { await replayInstance(db, prepared.composition ? bundle.migrations : [...bundle.migrations, proposal], replayEngine(prepared.target, bundle.runtime), {
+      try { await replayInstance(db, [...bundle.migrations, proposal], replayEngine(prepared.target, bundle.runtime), {
         mode: 'synthetic', record: (sql, context) => statements.push({ sql, name: (context?.migration ?? 'ledger').replace(/[^a-z0-9_]/gi, '_') }),
       }) }
       finally { db.close() }
@@ -111,6 +116,10 @@ export async function applyDisposable(bundle: Bundle, prepared: Prepared, expect
     const db = new DatabaseSync(files[0], { readOnly: true })
     try {
       const diffs = compare(expected, snapshot(db, usesBaseline(bundle.config)))
+      if (prepared.composition) {
+        const ledger = db.prepare('SELECT namespace,name,position,checksum FROM _plugin_migrations ORDER BY namespace,position').all()
+        if (JSON.stringify(ledger) !== JSON.stringify(prepared.composition.ledger)) diffs.push({ code: 'plugin_ledger_mismatch', expected: prepared.composition.ledger, actual: ledger })
+      }
       const meta = readInstanceMeta(db)
       if (meta?.revision !== prepared.target.revision || meta?.core_version !== CORE_VERSION) diffs.push({ instance_meta: meta ?? null, expectedRevision: prepared.target.revision })
       return { verified: diffs.length === 0, diffs, ...(keep ? { directory: scratch } : {}) }

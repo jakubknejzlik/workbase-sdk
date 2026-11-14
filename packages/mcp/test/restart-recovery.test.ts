@@ -623,3 +623,31 @@ it('rejects a symlinked proposals directory before creating a recovery lock outs
   await expect(new Store(root).recover(root)).rejects.toMatchObject({ code: 'unsafe_path' })
   expect(await fs.readdir(outside)).toEqual([])
 })
+
+it('restores runtime and access lock after SIGKILL during composition commit', async () => {
+  const originals = { 'runtime.ts': 'export default { plugins: [] }\n', 'access.lock.json': '{"original":true}\n' }
+  for (const [path, data] of Object.entries(originals)) await fs.writeFile(join(root, path), data)
+  const script = join(scratch, 'composition-crash.mjs')
+  await fs.writeFile(script, `
+    import { Store } from ${JSON.stringify(resolve('packages/mcp/src/storage.ts'))}
+    const store = new Store(${JSON.stringify(root)}); await store.init()
+    await store.commit('sample', [
+      { path: 'runtime.ts', data: 'partial runtime' },
+      { path: 'access.lock.json', data: 'partial lock' },
+    ], (await store.load('sample')).guards, async () => { process.send('published'); await new Promise(resolve => process.on('message', resolve)) })
+  `)
+  const child = spawn(process.execPath, ['--import', resolve('node_modules/tsx/dist/loader.mjs'), script], { stdio: ['ignore', 'pipe', 'pipe', 'ipc'] })
+  children.push(child)
+  let stderr = ''; child.stderr!.on('data', data => { stderr += data })
+  expect(await Promise.race([
+    once(child, 'message').then(([message]) => message),
+    once(child, 'exit').then(() => `child exited: ${stderr}`),
+  ])).toBe('published')
+  expect((await bytes('runtime.ts'))!.toString()).toBe('partial runtime')
+  expect(await bytes('proposals/.promotion.json')).not.toBeNull()
+  await kill(child)
+  expect(child.signalCode).toBe('SIGKILL')
+  await restart()
+  for (const [path, data] of Object.entries(originals)) expect((await bytes(path))!.toString()).toBe(data)
+  expect(await bytes('proposals/.promotion.json')).toBeNull()
+})

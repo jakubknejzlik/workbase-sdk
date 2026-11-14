@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, readdir, rename, rm, symlink, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, readdir, rename, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { execFileSync } from 'node:child_process'
@@ -6,6 +6,7 @@ import { afterEach, expect, it } from 'vitest'
 import { createServer } from '../src/server.ts'
 import { parseProposal } from '../src/proposals.ts'
 import { parseRuntimeSource } from '../src/composition/runtime-source.ts'
+import { captureSdkInputs } from '../src/sdk-target.ts'
 import { replayBundle } from '../src/offline.ts'
 import type { CompositionChange } from '../src/schemas.ts'
 
@@ -62,15 +63,17 @@ it('validates, verifies and promotes composition across restart, preserving all 
     expect(await call('validate', { proposalId })).toMatchObject({ ok: true, revision: 1 })
     expect(await call('promote', { proposalId, expectedRevision: 1 })).toMatchObject({ ok: false, error: { code: 'verification_required' } })
     const preview = await call('preview_migration', { proposalId })
-    expect(preview).toMatchObject({ ok: true, kind: 'composition_change', revision: 1, sql: '', files: [{ path: 'runtime.ts', data: expect.any(String) }] })
+    expect(preview).toMatchObject({ ok: true, kind: 'composition_change', revision: 1, sql: '', files: [{ path: 'runtime.ts', data: expect.any(String) }, { path: 'access.lock.json', data: expect.any(String) }] })
+    expect([...new Set(preview.pluginMigrations.filter((step: any) => step.status === 'new').map((step: any) => step.namespace))].sort()).toEqual(['mail-outbox', 'organizations'])
+    expect(preview.pluginSql).toContain('INSERT INTO _plugin_migrations')
     expect(await call('apply_to_disposable', { proposalId })).toMatchObject({ ok: true, verified: true, diffs: [] })
     expect(await authored(root)).toEqual(before)
     expect(await readFile(join(root, 'runtime.ts'), 'utf8')).toBe(runtime)
-    for (const path of ['runtime.ts', 'config.ts', 'access.ts', 'schema/worker.ts', 'schema.lock.json', 'package.json', 'bun.lock', 'migrations/0001_r1.sql']) {
+    for (const path of ['runtime.ts', 'access.lock.json', 'config.ts', 'access.ts', 'schema/worker.ts', 'schema.lock.json', 'package.json', 'bun.lock', 'migrations/0001_r1.sql']) {
       const old = await readFile(join(root, path), 'utf8').catch(() => undefined)
       try {
         await writeFile(join(root, path), (old ?? '') + '\n')
-        expect(await call('promote', { proposalId, expectedRevision: 1 }), path).toMatchObject({ ok: false, error: { code: 'validation_required' } })
+        expect(await call('promote', { proposalId, expectedRevision: 1 }), path).toMatchObject({ ok: false, error: { code: 'stale_revision' } })
       } finally {
         if (old === undefined) await rm(join(root, path))
         else await writeFile(join(root, path), old)
@@ -85,15 +88,23 @@ it('validates, verifies and promotes composition across restart, preserving all 
     expect(preview.files[0].data).toContain('// authored footer')
     expect(parseRuntimeSource(preview.files[0].data)).toMatchObject({ interactive: true, plugins: expect.arrayContaining([{ plugin: 'mail-outbox' }]) })
     expect(await authored(root)).toEqual(before)
+    const lock = await readFile(join(root, 'access.lock.json'), 'utf8')
+    expect(lock).toBe(preview.files.find((file: any) => file.path === 'access.lock.json').data)
+    // Keep the Markdown oracle outside the promoted files: this slice writes JSON only.
+    await mkdir(join(root, 'access-oracle'))
+    execFileSync('bun', [resolve('packages/core/src/access-lock/cli.ts'), '--root', root, '--config', 'runtime.ts', '--directory', 'access-oracle', '--write'])
+    expect(await readFile(join(root, 'access-oracle/access.lock.json'), 'utf8')).toBe(lock)
+    expect(execFileSync('bun', [resolve('packages/core/src/access-lock/cli.ts'), '--root', root, '--config', 'runtime.ts', '--directory', 'access-oracle'], { encoding: 'utf8' })).toContain('check:access: lock files match')
+    expect(execFileSync('bun', [resolve('packages/core/src/migrations/schema-cli.ts'), 'check', '--root', root], { encoding: 'utf8' })).toContain('check:schema: schema, bundles')
     const current = await store.load('composition-fixture')
     expect(await replayBundle(current, db => db.prepare('SELECT DISTINCT namespace FROM _plugin_migrations ORDER BY namespace').all().map(row => row.namespace)))
       .toEqual(['identity', 'machine-credentials', 'mail-outbox', 'members', 'organizations', 'workbase-sdk'])
     expect(await call('validate', { instance: 'composition-fixture' })).toMatchObject({ ok: true })
     expect(await call('submit_change', { instance: 'composition-fixture', proposalId, expectedBaseSha: 'a'.repeat(40) }))
-      .toMatchObject({ ok: false, error: { code: 'composition_submit_unsupported' } })
+      .toMatchObject({ ok: false, error: { code: 'github_not_configured' } })
   } finally { await server.close() }
 })
-it.each(['runtime.ts', 'access.ts', 'schema/worker.ts', 'schema.lock.json', 'package.json', 'bun.lock', 'migrations/0001_r1.sql'])(
+it.each(['runtime.ts', 'access.lock.json', 'access.ts', 'schema/worker.ts', 'schema.lock.json', 'package.json', 'bun.lock', 'migrations/0001_r1.sql'])(
   'rejects promotion after %s changes without publishing runtime', async path => {
     const { root, server, call, propose } = await fixture()
     try {
@@ -103,7 +114,7 @@ it.each(['runtime.ts', 'access.ts', 'schema/worker.ts', 'schema.lock.json', 'pac
       const original = await readFile(join(root, 'runtime.ts'), 'utf8')
       const old = await readFile(join(root, path), 'utf8').catch(() => '')
       await writeFile(join(root, path), old + (path.endsWith('.json') ? ' ' : '\n'))
-      expect(await call('promote', { proposalId, expectedRevision: 1 })).toMatchObject({ ok: false, error: { code: 'validation_required' } })
+      expect(await call('promote', { proposalId, expectedRevision: 1 })).toMatchObject({ ok: false, error: { code: 'stale_revision' } })
       if (path !== 'runtime.ts') expect(await readFile(join(root, 'runtime.ts'), 'utf8')).toBe(original)
     } finally { await server.close() }
   },
@@ -201,5 +212,17 @@ it.each(['publication fault', 'new schema input'])('rolls back runtime and propo
     expect(await readFile(join(root, 'proposals/.promotion.json')).catch(() => undefined)).toBeUndefined()
     await store.recover(root)
     if (fault === 'new schema input') expect(await readFile(join(root, 'schema/new.ts'), 'utf8')).toBe('// concurrent authored input\n')
+  } finally { await server.close() }
+})
+
+it('keeps SDK source capture compatible when a composition access lock exists', async () => {
+  const { root, server } = await fixture()
+  try {
+    await writeFile(join(root, 'bun.lock'), 'capture fixture lock\n')
+    await writeFile(join(root, 'access.lock.json'), '{}\n')
+    const inputs = await captureSdkInputs(root)
+    expect(inputs).toHaveProperty('runtime.ts')
+    expect(inputs).toHaveProperty('schema.lock.json')
+    expect(inputs).not.toHaveProperty('access.lock.json')
   } finally { await server.close() }
 })

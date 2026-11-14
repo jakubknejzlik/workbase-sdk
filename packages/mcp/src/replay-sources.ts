@@ -3,15 +3,16 @@ import { readFile, readdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { noLink } from './paths.ts'
 
-/** Authored V3 inputs needed to load the template's deploy-time composition. */
-export async function replaySources(root: string): Promise<Record<string, Buffer>> {
+/** Authored V3 inputs; composition guards may also capture the JSON audit artifact.
+ * SDK upgrade capture retains its existing source-only protocol. */
+export async function replaySources(root: string, options: { accessLock?: boolean } = {}): Promise<Record<string, Buffer>> {
   const sources: Record<string, Buffer> = {}
   const read = async (path: string) => {
     await noLink(join(root, path), true)
     try { sources[path] = await readFile(join(root, path), { flag: constants.O_RDONLY | constants.O_NOFOLLOW }) }
     catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error }
   }
-  for (const path of ['runtime.ts', 'access.ts', 'schema.lock.json']) await read(path)
+  for (const path of ['runtime.ts', 'access.ts', 'schema.lock.json', ...(options.accessLock ? ['access.lock.json'] : [])]) await read(path)
   const schema = async (directory: string): Promise<void> => {
     await noLink(join(root, directory), true)
     let entries
