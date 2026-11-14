@@ -9,8 +9,8 @@ export async function targetProof(options: TargetOptions) {
   manifest.dependencies = Object.fromEntries(names.map(name => [name, options.targetVersion]))
   const inputs: Record<string, Buffer> = { ...options.inputs, 'package.json': Buffer.from(JSON.stringify(manifest)), 'bun.lock': Buffer.from('target fixture lock\n') }
   const inputHashes = Object.fromEntries(Object.keys(inputs).sort().map(path => [path, digestBytes(inputs[path])]))
-  const path = `migrations/${String(Object.keys(inputs).filter(path => path.startsWith('migrations/')).length + 1).padStart(4, '0')}_sdk_upgrade.sql`
-  const marker = Buffer.from(`-- target ${options.targetVersion} at revision ${options.base.baseRevision}\nUPDATE instance_meta SET core_version = '${options.targetVersion}' WHERE revision = ${options.base.baseRevision};\n`)
+  const path = `migrations/${String(Object.keys(inputs).filter(path => path.startsWith('migrations/')).length + 1).padStart(4, '0')}_${options.baseline === 'workbase-sdk' ? `r${options.base.baseRevision}` : 'sdk_upgrade'}.sql`
+  const marker = options.baseline === 'workbase-sdk' ? Buffer.from('-- SDK stamp is owned by deployment.\n') : Buffer.from(`-- target ${options.targetVersion} at revision ${options.base.baseRevision}\nUPDATE instance_meta SET core_version = '${options.targetVersion}' WHERE revision = ${options.base.baseRevision};\n`)
   const result: UpgradeResult = {
     kind: 'verified', identity: { ...options.base, targetVersion: options.targetVersion, runId: crypto.randomUUID(), bridgeVersion: BRIDGE_VERSION,
       bridgeDigest: await bridgeDigest(resolve('packages/mcp/src')) }, inputHashes,

@@ -60,8 +60,9 @@ const sdkUpgradeSchema = z.strictObject({
   }
   if (result.packages.some(pkg => pkg.version !== proposal.targetVersion)) reject()
   const paths = ['package.json', 'bun.lock', result.stage.marker.path]
-  if (!/^migrations\/[0-9]{4}_sdk_upgrade\.sql$/.test(result.stage.marker.path)
-    || Object.keys(artifacts).length !== 3 || paths.some(path => !artifacts[path])) { reject(); return }
+  const validMarker = /^migrations\/[0-9]{4}_sdk_upgrade\.sql$/.test(result.stage.marker.path)
+    || new RegExp(`^migrations/[0-9]{4}_r${proposal.baseRevision}\\.sql$`).test(result.stage.marker.path)
+  if (!validMarker || Object.keys(artifacts).length !== 3 || paths.some(path => !artifacts[path])) { reject(); return }
   for (const path of paths) {
     const file = artifacts[path]
     if (digestBytes(Buffer.from(file.data, 'base64')) !== file.sha256

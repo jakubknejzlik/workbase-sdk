@@ -107,6 +107,6 @@ export function plan(fromConfig: InstanceConfig | null, toConfig: InstanceConfig
     sql.push('PRAGMA defer_foreign_keys = OFF;')
   }
   sql.push(...referenceBackfills)
-  sql.push(rebuilds.size ? revisionSQL(to.revision).replace('INSERT INTO', 'INSERT OR IGNORE INTO') : revisionSQL(to.revision))
+  if (to.baseline !== 'workbase-sdk') sql.push(rebuilds.size ? revisionSQL(to.revision).replace('INSERT INTO', 'INSERT OR IGNORE INTO') : revisionSQL(to.revision))
   return { sql: `-- ${from.id}: revision ${from.revision} -> ${to.revision}\n${sql.join('\n')}\n`, destructive, blocked, warnings }
 }
