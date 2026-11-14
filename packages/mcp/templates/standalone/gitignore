@@ -6,5 +6,5 @@ proposals/
 .sst/
 .env
 .env.*
-.workbase-ui/
+.workbase-ui*
 dist/

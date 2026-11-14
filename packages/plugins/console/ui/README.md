@@ -109,10 +109,11 @@ must provide the required keys, plural forms and matching interpolation variable
 Non-goals:
 - No action nodes or reason keys (slice 10).
 - No `/me`, profile storage, capability hiding or access card (slice 12).
-- No template or Instance script wiring (slice 16).
 - No MCP translation operations, `CustomTypeOptions` typing, ICU, nested keys or contexts.
 - No languages beyond cs/en, no date/number formatting helpers, no visual/axe checks.
 - No list-column completeness and no `frontend-console` changes.
+
+The V3 standalone template wires this validator through its `check:ui` script.
 
 `/i18n` uses the optional `i18next` ([configuration](https://www.i18next.com/overview/configuration-options)) and React peers.
 Import bundled resources from `.workbase-ui/locales.json`, then call
@@ -255,7 +256,8 @@ bundle and emit `dist/build-meta.json` with `{ sha, builtAt }`. SHA precedence i
 `WORKBASE_BUILD_SHA`, then `GITHUB_SHA`, then `git rev-parse HEAD` from the
 **consumer root**. A supplied invalid value fails the build instead of silently
 falling back. SHAs must be exactly 40 hex characters and are emitted lowercase.
-Development builds use `unbuilt`. Build the Instance with `vite build`, then pass
+Development builds use `unbuilt`. The V3 template's `bun run build:console` runs
+`bun --bun vite build`; then pass
 `assetsDir: './dist'` to provision (or match a customized Vite outDir). These are
 the Instance's assets; do not use the legacy `consoleAssetsDir()`.
 
@@ -269,8 +271,9 @@ assertCleanDeploy(process.cwd())
 
 The guard includes untracked files. Ignore `node_modules/`, `dist/` and
 `.workbase-ui*`; commit authored layout changes before deployment so they get a
-new SHA even when schema revision is unchanged. This slice supplies and tests
-the guard; template deployment wiring belongs to slice 16. Keep any explicit
+new SHA even when schema revision is unchanged. The V3 template checks/builds
+before SST deployment but does not call this optional guard in its deploy script
+or Vite config; ensure the worktree is clean before deploying. Keep any explicit
 server BUILD_SHA/BUILD_AT bindings consistent with the emitted metadata.
 
 `AuthShell` fetches `/build.json` separately at boot and on visibility. On a valid
