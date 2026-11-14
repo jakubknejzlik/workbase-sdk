@@ -1,10 +1,8 @@
 import { afterAll, expect, test } from 'vitest'
 import { execFileSync, spawnSync } from 'node:child_process'
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
-import { runInNewContext } from 'node:vm'
-import type processes from '../lib/installed-consumer-processes.cjs'
 import { applyInstalledConsumerFixture, assertInstalledArtifacts, evidenceDirectory } from '../lib/installed-consumer-live'
 
 const scratch = mkdtempSync(join(tmpdir(), 'workbase-installed-tests-'))
@@ -62,39 +60,30 @@ for (const mutation of ['extra-package', 'workspace', 'config-server', 'archive'
 }
 
 const guard = resolve('scripts/lib/installed-consumer-network.cjs')
-for (const synchronous of [false, true]) {
-  test(`${synchronous ? 'sync' : 'async'} group cleanup checks leader identity and retains leaderless groups`, async () => {
-    const table = new Map([[101, 'original 101'], [102, 'original 102'], [103, 'original 103']])
-    let registry = ''
-    const delivered: [number, string | number][] = []
-    const loaded = { exports: {} as typeof processes }
-    runInNewContext(readFileSync(resolve('scripts/lib/installed-consumer-processes.cjs'), 'utf8'), {
-      module: loaded, setTimeout, Atomics, SharedArrayBuffer, Int32Array,
-      process: { env: {}, platform: process.platform, kill: (pid: number, signal: string | number) => { delivered.push([pid, signal]) } },
-      require: (name: string) => {
-        if (name === 'node:fs') return { appendFileSync: (_file: string, line: string) => { registry += line }, readFileSync: () => registry }
-        if (name === 'node:child_process') return {
-          ChildProcess: class {},
-          execFileSync: (_command: string, args: string[]) => table.get(Number(args.at(-1))) ?? '',
-        }
-        throw Error('Unexpected dependency: ' + name)
-      },
-    })
-    for (const pid of table.keys()) loaded.exports.register('groups', pid)
-    expect(registry).toBe('101\toriginal 101\n102\toriginal 102\n103\toriginal 103\n')
-    table.set(102, 'replacement 102')
-    table.delete(103)
-    const stop = () => synchronous ? loaded.exports.stopGroupsSync('groups', 0, 0) : loaded.exports.stopGroups('groups', 0, 0)
-    await stop()
-    expect(delivered).toEqual([[-101, 'SIGTERM'], [-103, 'SIGTERM'], [-101, 'SIGKILL'], [-103, 'SIGKILL']])
-    // A rejected record stays rejected even if the replacement loses its leader.
-    table.delete(102)
-    table.set(101, 'replacement 101')
-    delivered.length = 0
-    await stop()
-    expect(delivered).toEqual([[-103, 'SIGTERM'], [-103, 'SIGKILL']])
-  })
-}
+test('scripts/lib never signals a stored process group or invokes ps', () => {
+  for (const file of readdirSync(resolve('scripts/lib')).filter(file => /\.(?:[cm]?js|ts)$/.test(file))) {
+    const source = readFileSync(resolve('scripts/lib', file), 'utf8')
+    expect(source, file).not.toMatch(/process\.kill\s*\(\s*-/)
+    expect(source, file).not.toMatch(/['"`](?:[^'"`\r\n]*\/)?ps(?:['"`\s])/)
+  }
+})
+
+test('preload forces non-detach and survives fresh-env spawn, execFile and fork', () => {
+  const result = spawnSync('node', ['--require', resolve('scripts/lib/installed-consumer-processes.cjs'), '-e', `
+    (async () => {
+      const cp = require('node:child_process'), assert = require('node:assert/strict');
+      for (const api of ['spawn', 'execFile', 'fork']) {
+        const args = ['-e', 'console.log(process.env.NODE_OPTIONS)'];
+        const options = { detached: true, env: {}, silent: true };
+        const child = api === 'fork' ? cp.fork(args[1], [], { ...options, execArgv: ['-e'] }) : cp[api](process.execPath, args, options);
+        let output = ''; child.stdout.on('data', data => { output += data; assert.throws(() => process.kill(-child.pid, 0), { code: 'ESRCH' }); });
+        await new Promise((resolve, reject) => { child.on('error', reject); child.on('close', code => code === 0 ? resolve() : reject(Error(String(code)))) });
+        if (!output.includes('installed-consumer-processes.cjs')) throw Error(api + ': preload missing');
+      }
+    })().catch(error => { console.error(error); process.exitCode = 1 });
+  `], { encoding: 'utf8' })
+  expect(result.status, result.stderr).toBe(0)
+})
 
 for (const api of ["net.connect", "net.createConnection", "new net.Socket().connect", "tls.connect"]) {
   test(`${api} checks every TCP overload and preserves Unix IPC overloads`, () => {
@@ -143,8 +132,8 @@ for (const mode of ['child', 'no-exit']) {
 }
 
 for (const runtime of ['node', 'bun']) {
-  for (const action of ['SIGINT', 'SIGTERM', 'SIGHUP', 'timeout', 'success', 'error', 'exit']) {
-    test(`${runtime} live ${action} reaps every group before removing directories`, () => {
+  for (const action of ['SIGINT', 'SIGTERM', 'SIGHUP', 'SIGKILL', 'timeout', 'success', 'error', 'exit', 'spawn-error', 'missing-result']) {
+    test(`${runtime} live ${action} cleans its supervised tree and preserves exit status`, () => {
       const directory = mkdtempSync(join(scratch, 'lifecycle-'))
       const result = spawnSync('node', [resolve('scripts/test/fixtures/installed-consumer-lifecycle.cjs'), runtime, directory, action, 'tree'], { encoding: 'utf8', timeout: 15000 })
       expect(result.status, result.stdout + result.stderr).toBe(0)
@@ -159,7 +148,15 @@ for (const runtime of ['node', 'bun']) {
       expect(result.stdout).toContain('"survivors":[]')
     }, 20000)
   }
-  test(`${runtime} live shutdown reaps groups registered during termination`, () => {
+  for (const [action, kind] of [['success', 'browser-close'], ['supervisor-kill', 'tree']]) {
+    test(`${runtime} live ${action} exercises ${kind} with explicit survivor cleanup`, () => {
+      const directory = mkdtempSync(join(scratch, 'supervisor-'))
+      const result = spawnSync('node', [resolve('scripts/test/fixtures/installed-consumer-lifecycle.cjs'), runtime, directory, action, kind], { encoding: 'utf8', timeout: 15000 })
+      expect(result.status, result.stdout + result.stderr).toBe(0)
+      expect(result.stdout).toContain('"survivors":[]')
+    }, 20000)
+  }
+  test(`${runtime} live shutdown reaps descendants launched during termination`, () => {
     const directory = mkdtempSync(join(scratch, 'late-'))
     const result = spawnSync('node', [resolve('scripts/test/fixtures/installed-consumer-lifecycle.cjs'), runtime, directory, 'timeout', 'late'], { encoding: 'utf8', timeout: 15000 })
     expect(result.status, result.stdout + result.stderr).toBe(0)

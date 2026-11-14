@@ -18,21 +18,18 @@ if (mode === 'grandchild') {
 } else {
   const actualSpawn = cp.spawn, actualSetTimeout = global.setTimeout
   let child, output = '', descendant, kills = []
-  cp.spawn = (_command, _args, options) => {
+  cp.spawn = (_command, args, options) => {
     if (mode === 'no-exit') {
-      child = Object.assign(new EventEmitter(), { exitCode: null, signalCode: null, kill: signal => { kills.push(signal); return true } })
+      child = Object.assign(new EventEmitter(), { pid: 123, stdin: { on() {}, destroy() { kills.push('EOF') } }, exitCode: null, signalCode: null })
     } else {
-      child = actualSpawn(process.execPath, [__filename, 'stubborn'], { ...options, env: { ...process.env, NODE_OPTIONS: '' }, stdio: ['ignore', 'pipe', 'pipe'] })
+      child = actualSpawn('node', ['--require', __dirname + '/installed-consumer-timers.cjs', ...args.slice(0, 2), '--require', require.resolve('../../lib/installed-consumer-processes.cjs'), __filename, 'stubborn'], { ...options, stdio: ['pipe', 'pipe', 'pipe'] })
       child.stdout.on('data', data => { output += data; descendant = Number(output.match(/grandchild ready (\d+)/)?.[1]) })
       child.stderr.on('data', data => { output += data })
     }
     return child
   }
   syncBuiltinESMExports()
-  const processes = require('../../lib/installed-consumer-processes.cjs')
-  const stopGroups = processes.stopGroups
-  processes.stopGroups = file => stopGroups(file, 100, 100)
-  global.setTimeout = (fn, ms, ...args) => actualSetTimeout(fn, ms === 240000 ? 300 : [5000, 1000, 10000].includes(ms) ? 100 : ms, ...args)
+  global.setTimeout = (fn, ms, ...args) => actualSetTimeout(fn, ms === 240000 ? 300 : ms === 13000 ? (mode === 'no-exit' ? 100 : 700) : ms, ...args)
   ;(async () => {
     const { runInstalledConsumerLive } = await import(pathToFileURL(resolve(__dirname, '../../lib/installed-consumer-live.ts')).href)
     let settled = false, failure
@@ -45,7 +42,7 @@ if (mode === 'grandchild') {
     assert(settled, 'live deadline and cleanup must settle without waiting indefinitely for exit')
     assert.match(failure?.message ?? '', /Installed consumer live timed out/)
     assert(Date.now() - started < 1500)
-    if (mode === 'no-exit') assert.deepEqual(kills, ['SIGTERM', 'SIGKILL'])
+    if (mode === 'no-exit') assert.deepEqual(kills, ['EOF'])
     else {
       assert.match(output, /child ignored SIGTERM/)
       assert.match(output, /grandchild ignored SIGTERM/)
@@ -60,7 +57,7 @@ if (mode === 'grandchild') {
     }
     console.log('bounded timeout passed: ' + mode)
   })().catch(error => { console.error(error); process.exitCode = 1 }).finally(() => {
-    if (child?.pid) {
+    if (mode !== 'no-exit' && child?.pid) {
       try { process.kill(-child.pid, 'SIGKILL') } catch { child.kill('SIGKILL') }
     }
     if (descendant) { try { process.kill(descendant, 'SIGKILL') } catch {} }

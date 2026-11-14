@@ -1,4 +1,4 @@
-// Actual supervisor, directory helper, inherited launch registry and Chromium;
+// Actual supervisor, directory helper, inherited preload and Chromium;
 // only the live workload and supervisor timers are replaced for determinism.
 const assert = require('node:assert/strict')
 const cp = require('node:child_process')
@@ -13,7 +13,7 @@ const termRecord = directory && join(directory, 'term.json')
 const work = directory && join(directory, 'work')
 const alive = pid => { try { process.kill(pid, 0); return true } catch (e) { if (e.code === 'ESRCH') return false; throw e } }
 async function waitFor(predicate) {
-  for (let i = 0; i < 400; i++) { if (predicate()) return; await delay(20) }
+  for (let i = 0; i < 1000; i++) { if (predicate()) return; await delay(20) }
   throw Error('lifecycle fixture readiness/termination timed out')
 }
 
@@ -35,7 +35,7 @@ if (mode === 'leaf') {
     const [data] = await once(detached.stdout, 'data')
     const pids = [process.pid, same.pid, ...JSON.parse(String(data))]
     let browser, context, browserPid
-    if (kind === 'chromium') {
+    if (kind === 'chromium' || kind === 'browser-close') {
       const original = cp.spawn
       cp.spawn = (...args) => {
         const child = original(...args)
@@ -47,7 +47,8 @@ if (mode === 'leaf') {
       context = await browser.newContext()
       assert(browserPid)
       pids.push(browserPid)
-      process.kill(browserPid, 'SIGSTOP')
+      if (kind === 'chromium') process.kill(browserPid, 'SIGSTOP')
+      else { assert.throws(() => process.kill(-browserPid, 'SIGKILL'), { code: 'ESRCH' }); await context.close(); await browser.close(); assert(!alive(browserPid), 'browser.close left Chromium alive') }
     }
     process.on('SIGTERM', () => {
       fs.writeFileSync(termRecord, JSON.stringify({ directoryStillExists: fs.existsSync(work) }))
@@ -57,7 +58,7 @@ if (mode === 'leaf') {
         fs.writeFileSync(record, JSON.stringify(pids))
       }
       // Match production ordering; a stopped browser cannot complete this.
-      if (context) void context.close().then(() => browser.close()).catch(() => {})
+      if (context && kind !== 'browser-close') void context.close().then(() => browser.close()).catch(() => {})
     })
     fs.writeFileSync(record, JSON.stringify(pids))
     if (action === 'success' || action === 'error') process.exit(action === 'success' ? 0 : 7)
@@ -65,12 +66,15 @@ if (mode === 'leaf') {
   })().catch(error => { console.error(error); process.exit(1) })
 } else if (mode === 'parent') {
   const actualSpawn = cp.spawn, actualTimeout = setTimeout
-  cp.spawn = (_command, _args, options) => actualSpawn('node', [__filename, 'live', directory, action, kind], options)
+  cp.spawn = (_command, args, options) => {
+    if (action === 'spawn-error') return actualSpawn('/nonexistent/workbase-node', [], options)
+    if (action === 'missing-result') return actualSpawn('node', ['-e', ''], options)
+    const prefix = process.env.WORKBASE_PROBE_FULL_GRACE === '1' ? [] : ['--require', join(__dirname, 'installed-consumer-timers.cjs')]
+    const child = actualSpawn('node', [...prefix, ...args.slice(0, -4), __filename, 'live', directory, action, kind], options)
+    fs.writeFileSync(join(directory, 'supervisor.json'), JSON.stringify({ pid: child.pid, result: args[1] }))
+    return child
+  }
   syncBuiltinESMExports()
-  const processes = require('../../lib/installed-consumer-processes.cjs')
-  const stop = processes.stopGroups, stopSync = processes.stopGroupsSync
-  processes.stopGroups = file => stop(file, 250, 250)
-  processes.stopGroupsSync = file => stopSync(file, 250, 250)
   global.setTimeout = (fn, ms, ...args) => ms === 240000 && action === 'timeout'
     ? actualTimeout(async () => { await waitFor(() => fs.existsSync(record)); fn(...args) }, 10)
     : actualTimeout(fn, ms, ...args)
@@ -78,7 +82,7 @@ if (mode === 'leaf') {
     const { registerTempDir } = await import('../../lib/test-temp-dir.mjs')
     fs.mkdirSync(work); registerTempDir(work)
     const { runInstalledConsumerLive } = await import('../../lib/installed-consumer-live.ts')
-    if (kind.startsWith('signal-')) process.on('SIGTERM', () => {})
+    if (kind.startsWith('signal-')) for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(signal, () => {})
     if (kind === 'signal-fallback') {
       const actualKill = process.kill
       // Model a runtime accepting a re-raise without delivering the signal.
@@ -90,6 +94,8 @@ if (mode === 'leaf') {
     try { await runInstalledConsumerLive(directory, process.env, {}, directory) } catch (error) { failure = error }
     if (action === 'timeout') assert.match(failure?.message ?? '', /Installed consumer live timed out/)
     else if (action === 'error') assert.match(failure?.message ?? '', /Installed consumer live failed \(7\)/)
+    else if (action === 'missing-result' || action === 'supervisor-kill') assert.match(failure?.message ?? '', /result missing/)
+    else if (action === 'spawn-error') assert.match(failure?.message ?? '', /ENOENT/)
     else if (failure) throw failure
     assert.deepEqual(['SIGINT', 'SIGTERM', 'SIGHUP', 'exit'].map(name => process.listenerCount(name)), counts, 'supervisor listeners leaked')
   })().catch(error => { console.error(error); process.exitCode = 1 })
@@ -104,21 +110,32 @@ if (mode === 'leaf') {
     parent.stdout.on('data', data => { output += data })
     parent.stderr.on('data', data => { output += data })
     const exited = once(parent, 'exit')
-    const watchdog = setTimeout(() => parent.kill('SIGKILL'), 12000)
+    const watchdog = setTimeout(() => parent.kill('SIGKILL'), 35000)
+    const started = Date.now()
     try {
-      await waitFor(() => fs.existsSync(record))
-      pids = JSON.parse(fs.readFileSync(record))
+      if (action !== 'spawn-error' && action !== 'missing-result') {
+        await waitFor(() => fs.existsSync(record))
+        pids = JSON.parse(fs.readFileSync(record))
+      }
       if (action.startsWith('SIG')) process.kill(-parent.pid, action)
+      if (action === 'supervisor-kill') process.kill(JSON.parse(fs.readFileSync(join(directory, 'supervisor.json'))).pid, 'SIGKILL')
       const [code, signal] = await exited
-      pids = JSON.parse(fs.readFileSync(record))
+      const parentExitMs = Date.now() - started
+      if (action === 'exit') assert(parentExitMs < 5000, 'sync exit blocked for cleanup')
+      if (fs.existsSync(record)) pids = JSON.parse(fs.readFileSync(record))
       if (action.startsWith('SIG')) assert(signal === action || code === 128 + require('node:os').constants.signals[action], JSON.stringify({ code, signal, output }))
       else assert.equal(code, action === 'exit' ? 23 : 0, output)
+      if (action === 'supervisor-kill') {
+        assert(pids.some(alive), 'supervisor SIGKILL must expose the documented leak')
+        for (const pid of pids) { try { process.kill(pid, 'SIGKILL') } catch {} }
+      }
       await waitFor(() => pids.every(pid => !alive(pid)))
-      assert(!fs.existsSync(work), 'consumer directory remains after parent exit')
-      if (action.startsWith('SIG') || action === 'timeout' || action === 'exit') {
+      if (action === 'SIGKILL') assert(fs.existsSync(work), 'SIGKILL cannot run parent directory cleanup')
+      else assert(!fs.existsSync(work), 'consumer directory remains after parent exit')
+      if ((action.startsWith('SIG') && action !== 'SIGKILL') || action === 'timeout') {
         assert.deepEqual(JSON.parse(fs.readFileSync(termRecord)), { directoryStillExists: true }, 'directory cleanup preceded group termination')
       }
-      console.log(JSON.stringify({ runtime, action, kind, survivors: pids.filter(alive), directoryRemoved: true, listenersRemoved: !action.startsWith('SIG') && action !== 'exit' }))
+      console.log(JSON.stringify({ runtime, action, kind, code, signal, parentExitMs, survivors: pids.filter(alive), directoryRemoved: !fs.existsSync(work), listenersRemoved: !action.startsWith('SIG') && action !== 'exit' }))
     } finally {
       clearTimeout(watchdog)
       for (const pid of pids) { try { process.kill(-pid, 'SIGKILL') } catch {} try { process.kill(pid, 'SIGKILL') } catch {} }

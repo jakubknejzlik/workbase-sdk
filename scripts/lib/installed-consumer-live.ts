@@ -8,7 +8,6 @@ import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'nod
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { chromium, type Browser, type BrowserContext, type Page } from 'playwright'
 import type { Manifest } from '../../packages/plugins/console/ui/src/check'
-import processes from './installed-consumer-processes.cjs'
 import { deferTempDirCleanup } from './test-temp-dir.mjs'
 
 declare const document: { documentElement: { scrollWidth: number } }
@@ -17,6 +16,7 @@ declare const localStorage: { setItem(key: string, value: string): void }
 const root = resolve(import.meta.dirname, '../..')
 const guard = join(root, 'scripts/lib/installed-consumer-network.cjs')
 const processGuard = join(root, 'scripts/lib/installed-consumer-processes.cjs')
+const supervisor = join(root, 'scripts/lib/installed-consumer-supervisor.cjs')
 const json = (file: string) => JSON.parse(readFileSync(file, 'utf8'))
 export type BuildTimings = { npm_install_ms: number; npm_ci_ms: number; typecheck_ms: number; cold_build_ms: number; warm_build_ms: number }
 
@@ -107,13 +107,8 @@ async function stop(child: ChildProcess | undefined) {
 /** Node owns the live phase so its socket guard also covers Wrangler and Playwright. */
 export async function runInstalledConsumerLive(consumer: string, env: NodeJS.ProcessEnv, timings: BuildTimings, archives: string) {
   const started = performance.now()
-  const directory = mkdtempSync('/tmp/workbase-live-processes-'), registry = join(directory, 'groups')
-  writeFileSync(registry, '', { mode: 0o600 })
+  const directory = mkdtempSync('/tmp/workbase-live-processes-'), resultFile = join(directory, 'result.json')
   const releaseDirectories = deferTempDirCleanup()
-  // exit cannot await promises. Run the same bounded group cleanup synchronously
-  // before test-temp-dir's exit listener can remove the consumer directory.
-  const exiting = () => { try { processes.stopGroupsSync(registry) } finally { rmSync(directory, { recursive: true, force: true }) } }
-  process.prependOnceListener('exit', exiting)
   let interruption: NodeJS.Signals | undefined
   let cancel!: () => void
   const canceled = new Promise<void>(resolve => { cancel = resolve })
@@ -127,24 +122,30 @@ export async function runInstalledConsumerLive(consumer: string, env: NodeJS.Pro
   let timeout: ReturnType<typeof setTimeout> | undefined
   let child: ChildProcess | undefined
   try {
-    child = spawn('node', ['--require', processGuard, '--require', guard, '--import', join(root, 'node_modules/tsx/dist/esm/index.mjs'), fileURLToPath(import.meta.url), consumer, JSON.stringify(timings), archives], {
-      cwd: consumer, env: { ...env, WORKBASE_LIVE_PROCESS_REGISTRY: registry, NODE_OPTIONS: '--require=' + JSON.stringify(processGuard) + ' --require=' + JSON.stringify(guard), WRANGLER_SEND_METRICS: 'false', CI: 'true', BROWSER: 'none' }, stdio: 'inherit', detached: true,
+    child = spawn('node', [supervisor, resultFile, '--require', processGuard, '--require', guard, '--import', join(root, 'node_modules/tsx/dist/esm/index.mjs'), fileURLToPath(import.meta.url), consumer, JSON.stringify(timings), archives], {
+      cwd: consumer, env: { ...env, NODE_OPTIONS: '--require=' + JSON.stringify(processGuard) + ' --require=' + JSON.stringify(guard), WRANGLER_SEND_METRICS: 'false', CI: 'true', BROWSER: 'none' }, stdio: ['pipe', 'inherit', 'inherit'], detached: true,
     })
-    processes.register(registry, child.pid)
+    // The pipe is a lifeline, not a request/response channel. A dead supervisor
+    // may close it before our finalizer does.
+    child.stdin!.on('error', () => {})
     const deadline = new Promise<never>((_, reject) => { timeout = setTimeout(() => reject(Error('Installed consumer live timed out after 240000 ms')), 240000) })
     const result = await Promise.race([once(child, 'exit', { signal: controller.signal }), deadline, canceled])
-    if (result) {
-      const [code, signal] = result
-      assert.equal(code, 0, `Installed consumer live failed (${signal ?? code})`)
+    if (result && !interruption) {
+      assert(existsSync(resultFile), 'Installed consumer live result missing')
+      const status = json(resultFile)
+      assert.equal(status.code, 0, `Installed consumer live failed (${status.error ?? status.signal ?? status.code})`)
     }
   } finally {
-    clearTimeout(timeout); controller.abort()
+    clearTimeout(timeout)
     try {
-      await processes.stopGroups(registry)
-      // A spawn error has no PID; keep the event wait bounded in that case too.
-      if (child && !child.pid) await stop(child)
+      // EOF also happens if this parent crashes or is SIGKILLed. The supervisor
+      // owns escalation, including sweeping descendants after a successful run.
+      child?.stdin?.destroy()
+      if (child?.pid && child.exitCode === null && child.signalCode === null) {
+        await settlesWithin(once(child, 'exit', { signal: controller.signal }), 13000)
+      }
     } finally {
-      process.off('exit', exiting)
+      controller.abort()
       signals.forEach((signal, index) => process.off(signal, listeners[index]))
       rmSync(directory, { recursive: true, force: true })
       releaseDirectories()
