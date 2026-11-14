@@ -50,7 +50,7 @@ it('requires recipient, rejects browser origins and mutations, and has no CORS o
 it('returns bounded, deterministic recipient-only mail without modifying delivery state', async () => {
   for (let i = 0; i < 55; i++) await env.DB.prepare('INSERT INTO email_outbox (id,recipient,subject,body,created_at) VALUES (?,?,?,?,?)')
     .bind(`mail-${i}`, i === 54 ? 'other@example.test' : 'first@example.test', 'Subject', `credential-${i}`, '2026-11-14T00:00:00.000Z').run()
-  const before = await env.DB.prepare('SELECT * FROM email_outbox ORDER BY rowid').all()
+  const before = (await env.DB.prepare('SELECT * FROM email_outbox ORDER BY rowid').all()).results
   const response = await read()
   const { messages } = await json(response)
   expect(messages).toHaveLength(20)
@@ -60,7 +60,8 @@ it('returns bounded, deterministic recipient-only mail without modifying deliver
   expect((await json(await read('?recipient=first@example.test&limit=1'))).messages).toHaveLength(1)
   expect((await json(await read('?recipient=missing@example.test'))).messages).toEqual([])
   expect((await read('?recipient=' + encodeURIComponent("x' OR 1=1 --@example.test"))).status).toBe(400)
-  expect(await env.DB.prepare('SELECT * FROM email_outbox ORDER BY rowid').all()).toEqual(before)
+  const after = (await env.DB.prepare('SELECT * FROM email_outbox ORDER BY rowid').all()).results
+  expect(after).toEqual(before)
 })
 
 it('suppresses database error details', async () => {
