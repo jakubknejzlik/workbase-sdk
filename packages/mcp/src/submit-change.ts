@@ -38,7 +38,7 @@ export async function submitChange(directory: string, p: Submission, expectedBas
   if (p.status !== 'promoted') fail('promotion_required', 'Změna musí být nejprve povýšena pomocí promote.', 409)
   if (!p.validation || !p.verification || hash(p.validation) !== hash(p.verification)) fail('verification_required', 'Chybí ověření této změny.', 409)
   if (!p.promotedFiles || !p.migrationPreview || p.promotionHash !== promotionHash(p)) fail('promotion_snapshot_required', 'Chybí platný záznam souborů povýšené změny.', 409)
-  const allowed = new Set(p.kind === 'composition_change' ? ['runtime.ts', 'access.lock.json'] : ['config.ts', 'config.indexes.json', 'config.versions.json', `config.v${p.baseRevision}.ts`, `config.v${p.promotedRevision}.ts`, `migrations/${p.migration}`])
+  const allowed = new Set(p.kind === 'composition_change' ? ['runtime.ts', 'access.lock.json', 'access.lock.md'] : ['config.ts', 'config.indexes.json', 'config.versions.json', `config.v${p.baseRevision}.ts`, `config.v${p.promotedRevision}.ts`, `migrations/${p.migration}`])
   const paths = new Set<string>()
   for (const file of p.promotedFiles) {
     if (!allowed.has(file.path) || paths.has(file.path)) fail('file_not_allowed', 'Změna obsahuje soubor mimo povolený seznam.', 409)

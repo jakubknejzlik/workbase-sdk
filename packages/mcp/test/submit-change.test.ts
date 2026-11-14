@@ -417,7 +417,7 @@ async function compositionSubmission() {
   p.changes = [{ kind: 'set_plugin', plugin: 'organizations', options: { allowCreate: true } }, { kind: 'set_interactive', interactive: true }]
   p.promotedRevision = p.baseRevision
   delete p.migration
-  p.promotedFiles = [{ path: 'runtime.ts', data: 'export default {}\n' }, { path: 'access.lock.json', data: '{}\n' }]
+  p.promotedFiles = [{ path: 'runtime.ts', data: 'export default {}\n' }, { path: 'access.lock.json', data: '{}\n' }, { path: 'access.lock.md', data: '# Access lock\n' }]
   p.migrationPreview = { sql: '', configDiff: { plugins: ['organizations'], interactive: true }, revision: p.baseRevision }
   p.promotionHash = promotionHash(p)
   for (const file of p.promotedFiles) await writeFile(join(dir(), file.path), file.data)

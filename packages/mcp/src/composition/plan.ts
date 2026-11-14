@@ -43,15 +43,15 @@ export async function compositionPlan(base: Bundle, target: Bundle, source: stri
   // module is evaluated; configSources reads this canonical object export.
   await mkdir(stateRoot, { recursive: true }); await noLink(stateRoot)
   const scratch = await realpath(await mkdtemp(join(stateRoot, 'composition-')))
-  let lock: string
+  let lock: ReturnType<typeof serializeAccessLock>
   try {
     await writeFile(join(scratch, 'runtime.ts'), source)
     const sources = Object.fromEntries(Object.entries(configSources(join(scratch, 'runtime.ts')))
       .map(([key, location]) => [key, { ...location, file: join(root, relative(scratch, location.file)) }]))
-    lock = serializeAccessLock(engine.kernel, { root, sources }).json
+    lock = serializeAccessLock(engine.kernel, { root, sources })
   } finally { await rm(scratch, { recursive: true, force: true }) }
   return {
-    files: [{ path: 'runtime.ts', data: source }, { path: 'access.lock.json', data: lock }],
+    files: [{ path: 'runtime.ts', data: source }, { path: 'access.lock.json', data: lock.json }, { path: 'access.lock.md', data: lock.md }],
     expected: expected.schema, statements, ledger,
     pluginMigrations: ledger.map(row => ({ ...row, status: applied.some(previous => previous.namespace === row.namespace && previous.name === row.name) ? 'applied' : 'new' })),
     pluginSql: statements.slice(upgradeStart).map(statement => statement.sql).join('\n'),

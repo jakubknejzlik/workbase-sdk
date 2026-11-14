@@ -624,9 +624,10 @@ it('rejects a symlinked proposals directory before creating a recovery lock outs
   expect(await fs.readdir(outside)).toEqual([])
 })
 
-it('restores runtime and access lock after SIGKILL during composition commit', async () => {
-  const originals = { 'runtime.ts': 'export default { plugins: [] }\n', 'access.lock.json': '{"original":true}\n' }
-  for (const [path, data] of Object.entries(originals)) await fs.writeFile(join(root, path), data)
+it.each([true, false])('restores all composition files after SIGKILL with existing Markdown: %s', async existingMarkdown => {
+  const originals = { 'runtime.ts': 'export default { plugins: [] }\n', 'access.lock.json': '{"original":true}\n', 'access.lock.md': '# Original access lock\n' }
+  if (!existingMarkdown) await fs.rm(join(root, 'access.lock.md'), { force: true })
+  for (const [path, data] of Object.entries(originals)) if (path !== 'access.lock.md' || existingMarkdown) await fs.writeFile(join(root, path), data)
   const script = join(scratch, 'composition-crash.mjs')
   await fs.writeFile(script, `
     import { Store } from ${JSON.stringify(resolve('packages/mcp/src/storage.ts'))}
@@ -634,6 +635,7 @@ it('restores runtime and access lock after SIGKILL during composition commit', a
     await store.commit('sample', [
       { path: 'runtime.ts', data: 'partial runtime' },
       { path: 'access.lock.json', data: 'partial lock' },
+      { path: 'access.lock.md', data: 'partial Markdown' },
     ], (await store.load('sample')).guards, async () => { process.send('published'); await new Promise(resolve => process.on('message', resolve)) })
   `)
   const child = spawn(process.execPath, ['--import', resolve('node_modules/tsx/dist/loader.mjs'), script], { stdio: ['ignore', 'pipe', 'pipe', 'ipc'] })
@@ -644,10 +646,12 @@ it('restores runtime and access lock after SIGKILL during composition commit', a
     once(child, 'exit').then(() => `child exited: ${stderr}`),
   ])).toBe('published')
   expect((await bytes('runtime.ts'))!.toString()).toBe('partial runtime')
+  expect((await bytes('access.lock.json'))!.toString()).toBe('partial lock')
+  expect((await bytes('access.lock.md'))!.toString()).toBe('partial Markdown')
   expect(await bytes('proposals/.promotion.json')).not.toBeNull()
   await kill(child)
   expect(child.signalCode).toBe('SIGKILL')
   await restart()
-  for (const [path, data] of Object.entries(originals)) expect((await bytes(path))!.toString()).toBe(data)
+  for (const [path, data] of Object.entries(originals)) expect(await bytes(path)).toEqual(path === 'access.lock.md' && !existingMarkdown ? null : Buffer.from(data))
   expect(await bytes('proposals/.promotion.json')).toBeNull()
 })
