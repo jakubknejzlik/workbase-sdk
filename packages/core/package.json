@@ -40,7 +40,9 @@
     "./access/lock/cli": "./src/access-lock/cli.ts",
     "./migrations/schema-lock": "./src/migrations/schema-lock.ts",
     "./migrations/schema-cli": "./src/migrations/schema-cli.ts",
-    "./schema/load": "./src/schema/load.ts"
+    "./schema/load": "./src/schema/load.ts",
+    "./openapi/routes": "./src/openapi/routes.ts",
+    "./openapi/cli": "./src/openapi/cli.ts"
   },
   "dependencies": {
     "hono": "4.13.13",

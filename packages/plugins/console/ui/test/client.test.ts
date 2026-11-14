@@ -87,3 +87,71 @@ test('successful mutation seeds detail, invalidates other entries and supersedes
   await client.one('test', { id: 'y' }, signal())
   expect(fetch).toHaveBeenCalledTimes(4)
 })
+
+test('act writes a returned detail into cache and failure surfaces reason without overwriting detail', async () => {
+  const initial = { id: 'x', version: 1, actions: { close: { enabled: true } } }
+  const updated = { id: 'x', version: 2, actions: { close: { enabled: false, reason: 'record.closed' } } }
+  const fetch = vi.fn().mockResolvedValueOnce(response(initial)).mockResolvedValueOnce(response(updated)).mockResolvedValueOnce(response({ error: 'action_unavailable', reason: 'record.closed' }, 409))
+  const client = createClient({ baseURL: '', actorId: 'a', orgId: 'one', fetch })
+  await client.one('record', { id: 'x' }, signal())
+  expect(await client.act('record', 'x', 'close', signal())).toEqual(updated)
+  expect(await client.one('record', { id: 'x' }, signal())).toEqual(updated)
+  await expect(client.act('record', 'x', 'close', signal())).rejects.toMatchObject({ status: 409, code: 'action_unavailable', reason: 'record.closed' })
+  expect(await client.one('record', { id: 'x' }, signal())).toEqual(updated)
+  expect(fetch).toHaveBeenCalledTimes(3)
+  expect(fetch.mock.calls[1][0]).toBe('/api/record/x/actions/close')
+  expect(fetch.mock.calls[1][1]).toMatchObject({ method: 'POST', credentials: 'same-origin', body: '{}' })
+})
+test('act refetches detail after a command response without a returned row', async () => {
+  const fetch = vi.fn().mockResolvedValueOnce(response({ ok: true })).mockResolvedValueOnce(response({ id: 'x', version: 2, actions: {} }))
+  const client = createClient({ baseURL: '', actorId: 'a', orgId: 'one', fetch })
+  expect(await client.act('record', 'x', 'close', signal())).toMatchObject({ id: 'x', version: 2 })
+  expect(await client.one('record', { id: 'x' }, signal())).toMatchObject({ version: 2 })
+  expect(fetch.mock.calls.map(([url]) => url)).toEqual(['/api/record/x/actions/close', '/api/record/x'])
+})
+test('actWith returns the command result and fresh detail, without caching the invitation credential', async () => {
+  const result = { invitation_id: 'inv', expires_at: '2099', accept_url: 'https://example.test/invitations/accept?token=synthetic' }
+  const record = { id: 'x', version: 1, access: { state: 'invited' }, actions: {} }
+  const fetch = vi.fn().mockResolvedValueOnce(response(result)).mockResolvedValueOnce(response(record))
+  const client = createClient({ baseURL: '', actorId: 'a', orgId: 'one', fetch })
+  expect(await client.actWith('worker', 'x', 'invite', { email: 'a@example.test' }, signal())).toEqual({ record, result })
+  expect(fetch.mock.calls[0][1].body).toBe('{"email":"a@example.test"}')
+  expect(await client.one('worker', { id: 'x' }, signal())).toEqual(record)
+  expect(JSON.stringify(await client.one('worker', { id: 'x' }, signal()))).not.toContain('accept_url')
+  expect(fetch).toHaveBeenCalledTimes(2)
+})
+test('authorization failures notify even for non-JSON bodies, but an aborted old scope cannot notify', async () => {
+  const onAuthorizationFailure = vi.fn(), abort = new AbortController()
+  let release: (response: Response) => void = () => {}
+  const fetch = vi.fn(() => new Promise<Response>(resolve => { release = resolve }))
+  const client = createClient({ baseURL: '', orgId: 'one', actorId: 'a', fetch, onAuthorizationFailure })
+  const old = client.one('test', { id: 'old' }, abort.signal).catch(error => error)
+  abort.abort(); release(new Response('expired', { status: 401 })); await old
+  expect(onAuthorizationFailure).not.toHaveBeenCalled()
+  const current = client.one('test', { id: 'current' }, signal()).catch(error => error)
+  release(new Response('denied', { status: 403 })); await current
+  expect(onAuthorizationFailure).toHaveBeenCalledWith(403)
+})
+test('list projection excludes unreadable fields, sorts and searches even when forged into bindings', async () => {
+  const fetch = vi.fn(async (_url: string, _init: ClientRequestInit) => response({ data: [], next_cursor: null }))
+  const client = createClient({ baseURL: '', orgId: 'one', actorId: 'a', fetch })
+  await client.list('test', meta, ['id', 'extra']).load({ sort: 'user', search: 'secret' }, signal())
+  const body = JSON.parse(String(fetch.mock.calls[0][1].body))
+  expect(body.select).toEqual(['id', 'extra']); expect(body.orderBy).toEqual([{ field: 'id', dir: 'asc' }]); expect(body.search).toBeUndefined()
+})
+test('native-style transport receives no client-options receiver', async () => {
+  const fetch = async function(this: unknown, _url: string, _init: ClientRequestInit) {
+    expect(this).toBeUndefined()
+    return response({ id: 'x', version: 1 })
+  }
+  const client = createClient({ baseURL: '', orgId: 'one', actorId: 'a', fetch })
+  await client.one('test', { id: 'x' }, signal())
+})
+test('renderer detail mode refetches a bare mutation response while ordinary one() keeps its cache contract', async () => {
+  const fetch = vi.fn(async (_url: string, init: ClientRequestInit) => response({ id: 'x', version: 1, ...(init.method === 'GET' ? { actions: {}, access: { state: 'no_account' } } : {}) }))
+  const client = createClient({ baseURL: '', orgId: 'one', actorId: 'a', fetch })
+  await client.create('test', { name: 'New' }, 'draft', signal())
+  expect(await client.one('test', { id: 'x' }, signal())).not.toHaveProperty('actions'); expect(fetch).toHaveBeenCalledTimes(1)
+  expect(await client.one('test', { id: 'x' }, signal(), true)).toHaveProperty('actions')
+  await client.one('test', { id: 'x' }, signal(), true); expect(fetch).toHaveBeenCalledTimes(2)
+})

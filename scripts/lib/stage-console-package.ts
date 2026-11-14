@@ -22,6 +22,9 @@ export function stageConsolePackage(root: string, name: 'core' | 'plugins', dest
       const src = join(source, entry.name, 'src')
       if (readdirSync(join(source, entry.name)).includes('src')) cpSync(src, join(destination, entry.name, 'src'), { recursive: true })
     }
+    // The V3 browser/build source lives one level below the Console plugin.
+    cpSync(join(source, 'console/ui/src'), join(destination, 'console/ui/src'), { recursive: true })
+    cpSync(join(source, 'console/ui/README.md'), join(destination, 'console/ui/README.md'))
     const assets = join(source, 'console/assets')
     const metadata = JSON.parse(readFileSync(join(assets, 'build-meta.json'), 'utf8'))
     if (metadata.version !== manifest.version || metadata.primitivesProof) throw new Error('Rebuild console assets for the plugins version before packing')

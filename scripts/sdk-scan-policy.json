@@ -623,25 +623,25 @@
     {
       "pathDigest": "31aa36cf687fe2d5a590cddf304be798fb4a42fdd3a9f367c277b75fc47bf853",
       "lineDigest": "0f2547e960229e72c59de250641eaa1222fde52383888163c36f4eab1ae1e33b",
-      "lineNumber": 46,
+      "lineNumber": 47,
       "reason": "Required public npm dependency/import; exact package identity, not an owner deployment."
     },
     {
       "pathDigest": "31aa36cf687fe2d5a590cddf304be798fb4a42fdd3a9f367c277b75fc47bf853",
       "lineDigest": "86bf7c56d5374a156088ad84ea3e1823a1a0276f3582c476e922cc3e02dc6d45",
-      "lineNumber": 1844,
+      "lineNumber": 1849,
       "reason": "Required public npm dependency/import; exact package identity, not an owner deployment."
     },
     {
       "pathDigest": "31aa36cf687fe2d5a590cddf304be798fb4a42fdd3a9f367c277b75fc47bf853",
       "lineDigest": "b9540f355daf10044f1b61506226f04a5228478133772ae53fe0b761c99d1bde",
-      "lineNumber": 1845,
+      "lineNumber": 1850,
       "reason": "Required public npm dependency/import; exact package identity, not an owner deployment."
     },
     {
       "pathDigest": "616e9a931a0c7bea02752f9e4b81381f577c1cdd03da8446ff2678f5303fe79c",
       "lineDigest": "287d257e475c66b73fa7c092cc997054530b79ddfc76103475c89b53ed04e6ef",
-      "lineNumber": 48,
+      "lineNumber": 50,
       "reason": "Required public npm dependency/import; exact package identity, not an owner deployment."
     },
     {
@@ -653,7 +653,7 @@
     {
       "pathDigest": "f06b688867f786d268328fc2c79b0eb405fff41bacdee92c32ddbed5fd24a37c",
       "lineDigest": "04ea09f3521d4207e11f9fca7440fde19fa5f997df7020ec330e927f311a14d6",
-      "lineNumber": 4,
+      "lineNumber": 7,
       "reason": "Required public npm dependency/import; exact package identity, not an owner deployment."
     },
     {

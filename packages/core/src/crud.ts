@@ -1,3 +1,7 @@
+import { readRecord } from './record-read'
+import { accountAccessState, canReadAccountAccess } from './worker-access'
+import { recordActionRoutes } from './record-action-routes'
+import { recordActions } from './record-actions'
 import { assertActorFields } from './policies'
 import { enforcePlan, writeFilter } from './execution/policies'
 import { compile } from './execution/compiler'
@@ -27,6 +31,7 @@ export function serialize(config: InstanceConfig, name: string, row: Row) {
   return out
 }
 export function crudRoutes(app: App, config: InstanceConfig, env: RuntimeEnv) {
+  recordActionRoutes(app, config, env)
   const kernel = kernelFor(config)
   const storedFields = (name: string) => fieldsFor(config, name).filter(field => !config.entities[name].fields[field]?.computed).filter(field => !config.entities[name].label || field !== config.entities[name].displayField)
   const responseRow = async (name: string, scope: Scope, row: Row) => {
@@ -79,10 +84,11 @@ export function crudRoutes(app: App, config: InstanceConfig, env: RuntimeEnv) {
   }))
   app.get('/api/:entity/:id', c => observeQuery(env.DB, c.get('scope'), async (writeLog, rejectedInput) => {
     await rejectedInput({ entity: c.req.param('entity'), id: c.req.param('id'), params: c.req.query() })
-    const { name, scope } = entity(c, 'read')
-    const result = await executeQuery(kernel, scope, env.DB, await cursorSecret(env), restQuery(config, name, c.req.query(), c.req.param('id')), { legacyErrors: true, writeLog })
-    if (!result.data.length) throw new ApiError(404, 'not_found')
-    return c.json(result.data[0])
+    const name = c.req.param('entity')!, scope = c.get('scope')
+    const row = await readRecord(config, scope, env, name, c.req.param('id')!, c.req.query(), writeLog)
+    if (config.baseline === 'workbase-sdk') row.actions = await recordActions(config, scope, env.DB, name, c.req.param('id')!)
+    if (config.baseline === 'workbase-sdk' && canReadAccountAccess(config, scope, name)) row.access = await accountAccessState(config, scope, env.DB, name, c.req.param('id')!)
+    return c.json(row)
   }))
   app.post('/api/:entity', async c => {
     const { name, definition, scope, table } = entity(c, 'create')

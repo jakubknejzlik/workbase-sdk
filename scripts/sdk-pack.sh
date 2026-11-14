@@ -79,4 +79,11 @@ writeSdkProvenance(root, source)
 JS
 
 bun "$root/scripts/check-sdk-boundary.ts"
-if [[ "$pack_only" == false ]]; then bun "$root/scripts/sdk-smoke.ts"; fi
+if [[ "$pack_only" == false ]]; then
+  (
+    cd "$root"
+    bun x --no-install vitest run --config packages/plugins/console/ui/test/browser/vitest.config.ts
+  )
+  bun "$root/scripts/sdk-smoke.ts"
+  bun "$root/scripts/smoke-template.ts"
+fi

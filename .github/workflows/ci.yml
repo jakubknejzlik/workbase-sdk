@@ -1,13 +1,18 @@
 name: SDK CI
 on:
+  # Full CI runs automatically only for PRs into main (e.g. the integration PR).
+  # PRs into integration/* branches use targeted local checks; run this
+  # workflow manually (workflow_dispatch) on any ref when a full run is needed.
   pull_request:
+    branches: [main]
   push:
     branches: [main]
+  workflow_dispatch:
 permissions:
   contents: read
 jobs:
   check:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -28,6 +33,7 @@ jobs:
           tar -xzf "$tools/gitleaks.tar.gz" -C "$tools" gitleaks
           echo "$tools" >> "$GITHUB_PATH"
       - run: bun install --frozen-lockfile
+      - run: bun x --no-install playwright install --with-deps chromium
       - run: bun run lint
       - run: bun run typecheck
       - run: bun run check:ci-invariants

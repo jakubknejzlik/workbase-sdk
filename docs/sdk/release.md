@@ -4,7 +4,7 @@ Run the checks in CONTRIBUTING.md. The public CI workflow builds and packs exact
 @workbasehq/core, @workbasehq/plugins and @workbasehq/mcp, then scans the source
 and archives. The release.yml workflow performs the same checks and rehearses
 with `bun scripts/smoke-mcp-template.ts --directory dist-sdk` before publishing
-the same archives from its single ubuntu-latest job. Dispatch with dry_run=true
+the same archives from its single ubuntu-24.04 job. Dispatch with dry_run=true
 (the default) to validate without uploading, or use an sdk-v<version> tag.
 
 The first public release is sdk-v0.2.11. Bump the three SDK manifest versions

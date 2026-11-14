@@ -221,3 +221,65 @@ Installed consumers invoke `@workbasehq/core/migrations/schema-cli` with `plan` 
 `check`; repository scripts only supply paths and the CI base.
 Runtime builds bind the lock with `bindSchemaLock`; direct `defineConfig`
 declarations remain unbound until a lock is supplied.
+
+Record actions are strict entity data pointing at registered commands:
+
+```ts
+actions: {
+  close: {
+    command: 'record/close',
+    available: [{ when: { state: { eq: 'open' } }, reason: 'record.closed' }],
+  },
+}
+```
+
+`when` uses access predicates, including `{ use: 'name' }`. Compilation rejects
+unregistered, unallowlisted and system-permission commands. Expanded conditions,
+field dependencies and declaration sources live in `effectiveAccess.actions` and
+both access locks; command bodies remain opaque guards. `actionReasonKeys(config)`
+from `@workbasehq/core/schema` exposes the finite authored reason keys.
+
+SDK-era detail GETs include an `actions` map, independent of projection. Forbidden
+or masked-dependency actions are omitted. SQL evaluates availability and selects
+the first failing reason. List, query and generic mutation responses omit the map.
+The SDK era marker is `baseline: 'workbase-sdk'`; domain fields and relations named
+`actions` and `access` are reserved in that era, including declarations without compiled access.
+Legacy configurations retain their existing response and naming contracts.
+
+`POST /api/:entity/:id/actions/:name` accepts `{}` for input-less commands.
+Object-shaped command schemas declare other accepted body keys; body `id`,
+`rowId` and `role` are rejected. Values/defaults/transforms run once through the
+command schema, with the path supplying `id`. Role permission runs before record access; the first rule of
+one atomic batch rechecks read/write predicates and conditions with `expectRows: 1`.
+A hidden/unknown/masked action returns GET's `404 not_found` body. A readable,
+unavailable action returns `409 {error: 'action_unavailable', reason}`. Diagnosis
+is read-only after rollback. `client.act(entity, id, name, signal)` caches a returned
+detail row or refetches detail; failures expose `ApiFailure.reason`.
+
+Account links opt in with `defineAccess({ accountLinks: { worker: {
+invitationRole: 'staff' } }, ... })`. The role must exist, differ from the owner,
+and have read access to the linked entity. Legacy instances retain `member`.
+The mapping registers `invite`, `cancel_invite`, `link_account` and
+`unlink_account`; their core SQL conditions are recorded as `opaque: true` in
+lock version 1. These adapter commands are reachable through the record
+dispatcher. The existing legacy `link_account`/`remove_access` commands keep their
+original `rowId`/`userId` inputs and behavior.
+
+For mapped links, detail includes `access` only with `invitations.read`:
+`{state, account, invitation}`, with states `no_account`, `invited`, `expired`,
+`linked`. Account is `{id, display_name, email}`; invitation is
+`{id, email, expires_at}`. Linked state has no invitation. Staff read scope and
+mutation grants remain authored instance policy; the fixture grants self-read.
+
+The invite body is strictly `{email}`, link is `{user_id}`, cancel and unlink
+are `{}`. Body selectors and roles are rejected; the route owns the record id. Invitation
+credentials/selectors in a card body receive the same `404 not_found` regardless
+of their existence; they can never select another invitation.
+Invite returns `{invitation_id, expires_at, accept_url}` with `Cache-Control:
+no-store`; the credential is absent from detail, audit and locks. It queues one
+outbox intent in the same D1 batch. Expired history is superseded by migration
+004's trigger before its partial unique index is checked. Delivery is separate.
+Unlink clears links and pending account invitations, retaining membership and
+independently granted access. `client.actWith(entity, id, name, body, signal)`
+returns `{record, result}` after the same cache refresh as `act()`; credentials
+stay in the result and are never cached as record data.

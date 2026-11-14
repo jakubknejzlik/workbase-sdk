@@ -6,6 +6,7 @@ import { queryRoutes } from './query/routes'
 import { QueryError } from './query/errors'
 import { validatedBrowserDispatch } from './browser-dispatch'
 import { consoleRoutes } from './console'
+import { openApiRoutes } from './openapi/routes'
 import { jsonCookieCSRF } from './json-csrf'
 import { KernelRegistry } from './kernel/registry'
 import { workflowRoutes } from './workflow-routes'
@@ -90,6 +91,7 @@ function buildApp(input: InstanceInput, env: RuntimeEnv, options: RuntimeOptions
   // Public build metadata only: never include runtime bindings, credentials or records.
   app.get('/console-info', c => c.json({ instance: config.id, displayName: config.displayName, roles: config.roles, locale: config.locale, ui: { defaultLanguage: config.ui?.defaultLanguage } }))
   app.get('/schema', c => c.json(publicSchema(config, options)))
+  openApiRoutes(app, config)
   consoleRoutes(app, config, env)
   for (const path of ['/api/*', '/commands/*', '/workflows/*', '/query', '/orgs', '/orgs/*', '/organizations/*', '/me/profile', '/invitations/*']) app.use(path, jsonCookieCSRF(env))
   adminRoutes(validatedBrowserDispatch(app, env), config, env, options.commands, options.workflows)

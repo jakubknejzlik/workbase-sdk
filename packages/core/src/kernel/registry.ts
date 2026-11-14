@@ -1,4 +1,6 @@
 import { assertSchemaLockBound } from '../schema/revision'
+import { workerAccessCommands } from '../worker-access-actions'
+import { bindActionPolicy } from '../record-actions'
 import { accessGuards } from '../access-guards'
 import { isBuiltinPlugin } from './builtin-source'
 import { baseFields, defineInstance, normalizeInstance, type InstanceConfig, type InstanceInput, type Operation } from '../config'
@@ -70,13 +72,14 @@ export class KernelRegistry {
       ...(config.pluginConfig || Object.keys(pluginConfig).length ? { pluginConfig } : {}) })
     if (config.effectiveAccess) { this.config.effectiveAccess = config.effectiveAccess; validatePolicies(this.config) }
     this.providers.get('console')?.[0]?.validateConsole?.(this.config)
-    for (const command of userLinkCommands(this.config)) {
+    for (const command of [...userLinkCommands(this.config), ...workerAccessCommands(this.config, env)]) {
       commands.push(command)
       if (!this.config.commands.includes(command.name)) this.config.commands.push(command.name)
     }
     this.commands = createCommandRegistry(commands)
     this.workflows = createWorkflowRegistry(workflows)
     if (this.config.effectiveAccess) this.config.effectiveAccess = accessGuards(this.config.effectiveAccess, this.config.commands, [...this.commands.values()], this.plugins)
+    if (this.config.effectiveAccess) bindActionPolicy(this.config.effectiveAccess, this.config)
     // migrations: append hooks to the supplied chain. Applying D1 migrations remains an operator action.
     this.migrations = Object.freeze([...(options.migrations ?? []), ...this.plugins.flatMap(plugin => (plugin.migrations ?? []).map(migration => ({ ...migration, name: `${plugin.name}/${migration.name}` })))])
     if (new Set(this.migrations.map(migration => migration.name)).size !== this.migrations.length) throw new Error('Duplicate plugin migration')

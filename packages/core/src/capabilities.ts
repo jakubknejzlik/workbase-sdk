@@ -37,5 +37,5 @@ export function capabilities(kernel: KernelRegistry, scope: Scope) {
   return { revision: kernel.config.revision, entities, commands, workflows, resources, organization: { role: scope.role } }
 }
 export function capabilityRoutes(app: App, kernel: KernelRegistry, env: RuntimeEnv) {
-  app.get('/o/:org/capabilities', scopeMiddleware(env, kernel.config, kernel), c => c.json(capabilities(kernel, c.get('scope'))))
+  app.get('/o/:org/capabilities', scopeMiddleware(env, kernel.config, kernel), c => { c.header('Cache-Control', 'no-store'); return c.json(capabilities(kernel, c.get('scope'))) })
 }

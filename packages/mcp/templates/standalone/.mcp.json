@@ -1,13 +1,5 @@
 {
   "mcpServers": {
-    "workbase_config": {
-      "command": "bun",
-      "args": [
-        "./node_modules/@workbasehq/mcp/src/stdio.ts",
-        "--root",
-        "."
-      ]
-    },
     "workbase_data": {
       "command": "bun",
       "args": [

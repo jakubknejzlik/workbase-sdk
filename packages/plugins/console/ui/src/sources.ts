@@ -19,6 +19,7 @@ function fail(node: ts.Node, message: string): never { throw new SourceError(loc
 export function routePath(source: string): string {
   const parts = source.replace(/^ui\//, '').replace(/\.ts$/, '').split('/')
   if (parts.some(part => !/^(?:[a-zA-Z][a-zA-Z0-9-]*|\$[a-zA-Z][a-zA-Z0-9]*)$/.test(part) || part === 'route') || parts.slice(0, -1).includes('index')) throw new Error(`Unsupported route filename: ${source}`)
+  if (['sign-in', 'invitation', 'auth'].includes(parts[0])) throw new Error(`Reserved SDK route: ${source}`)
   return '/' + parts.filter(part => part !== 'index').join('/')
 }
 function files(dir: string): string[] {
@@ -63,13 +64,13 @@ export function checkSources(root: string): Sources {
     if (extname(file) !== '.ts') fail(tree, 'Unclassified UI source extension')
     const bindings = namedBindings(tree)
     const exported = tree.statements.find(ts.isExportAssignment), call = exported?.expression
-    const expected = local === 'nav.ts' ? ['defineNav'] : helpers
+    const expected = local === 'nav.ts' ? ['defineNav'] : local === 'keys.ts' ? ['defineKeys'] : helpers
     if (!call || !ts.isCallExpression(call) || !ts.isIdentifier(call.expression)) fail(exported ?? tree, 'Default export must directly call a named SDK helper')
     const binding = bindings.get(call.expression.text)
     const helper = expected.find(name => sdkBinding(binding, file, name, sdk, sdkFile))
     if (!helper || exported!.isExportEquals) fail(call, 'Default export must directly call a named SDK helper')
     let path: string | undefined
-    if (local !== 'nav.ts') try { path = routePath(source) } catch (error) { fail(call, String(error)) }
+    if (!['nav.ts', 'keys.ts'].includes(local)) try { path = routePath(source) } catch (error) { fail(call, String(error)) }
     entries.push({ file, source, location: location(call), helper, ...(path !== undefined ? { path } : {}) })
   }
   const slots = resolve(ui, '-slots.ts')
@@ -87,6 +88,7 @@ export function checkSources(root: string): Sources {
     const tree = read(file)
     function edge(node: ts.Node, id: string, typeOnly: boolean) {
       if (id === sdk) return
+      if (id === sdk + '/react' && (allowComponent || isBrowser)) return
       if (!id.startsWith('.')) {
         if (isBrowser && ts.resolveModuleName(id, file, { moduleResolution: ts.ModuleResolutionKind.Bundler }, ts.sys).resolvedModule) return
         fail(node, `Unresolved or unclassified package import: ${id}`)
@@ -125,12 +127,15 @@ export function checkSources(root: string): Sources {
         const typeOnly = clause.isTypeOnly
         if (!typeOnly && node.moduleSpecifier.text === sdk) {
           if (clause.name || !names || !ts.isNamedImports(names)) fail(node, 'Expected named SDK imports')
-          for (const item of names.elements) if (!item.isTypeOnly && ![...helpers, 'defineNav', 'defineSlots', 'param', 'one', 'list', 'p', 'layout', 'slot', 'link', 'buildPath', 'parseParams'].includes((item.propertyName ?? item.name).text)) fail(item, `${(item.propertyName ?? item.name).text} is not in slice 7`)
+          for (const item of names.elements) if (!item.isTypeOnly && ![...helpers, 'defineNav', 'defineSlots', 'defineKeys', 'col', 'param', 'one', 'list', 'p', 'layout', 'slot', 'action', 'link', 'buildPath', 'parseParams'].includes((item.propertyName ?? item.name).text)) fail(item, `${(item.propertyName ?? item.name).text} is not in slice 7`)
+        }
+        if (!typeOnly && node.moduleSpecifier.text === sdk + '/react' && !isBrowser) {
+          if (!allowComponent || clause.name || !names || !ts.isNamedImports(names) || names.elements.some(item => !item.isTypeOnly && (item.propertyName ?? item.name).text !== 'AccessCard')) fail(node, 'Only the SDK AccessCard is allowed as a registered component')
         }
         edge(node.moduleSpecifier, node.moduleSpecifier.text, typeOnly)
       }
       if (ts.isCallExpression(node) && (node.expression.kind === ts.SyntaxKind.ImportKeyword || /^(?:require|eval|Function)$/.test(node.expression.getText(tree)))) fail(node, 'Dynamic imports and unclassified evaluation are prohibited')
-      if (ts.isCallExpression(node) && /^(?:query|action)$/.test(node.expression.getText(tree))) fail(node, `${node.expression.getText(tree)} is not in slice 7`)
+      if (ts.isCallExpression(node) && /^(?:query)$/.test(node.expression.getText(tree))) fail(node, `${node.expression.getText(tree)} is not in slice 7`)
       ts.forEachChild(node, visit)
     }
     visit(tree)

@@ -1,0 +1,8 @@
+[
+  { "path": "config.ts", "before": "languages: ['en']", "after": "languages: ['cs', 'en']" },
+  { "path": "schema/worker.ts", "before": "user: accountLink()", "after": "user: accountLink(), note: { type: 'text' }" },
+  { "path": "ui/workers/-form.layout.ts", "before": "(['name'])", "after": "(['name', 'note'])" },
+  { "path": "ui/workers/-detail.layout.ts", "before": "(['name',", "after": "(['name', 'note'," },
+  { "path": "ui/workers/index.ts", "before": "layout: ['name']", "after": "layout: ['name', 'note']" },
+  { "path": "locales/en/domain.json", "before": "\"field.worker.name\": \"Name\",", "after": "\"field.worker.name\": \"Name\",\n  \"field.worker.note\": \"Note\"," }
+]

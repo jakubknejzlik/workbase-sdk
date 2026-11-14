@@ -1,0 +1,32 @@
+{
+  "id": "wrk_1",
+  "organization_id": "org_a",
+  "name": "Jana",
+  "user": null,
+  "version": 3,
+  "access": {
+    "state": "expired",
+    "account": null,
+    "invitation": {
+      "id": "inv_1",
+      "email": "jana@example.test",
+      "expires_at": "2026-11-01T10:00:00.000Z"
+    }
+  },
+  "actions": {
+    "invite": {
+      "enabled": true
+    },
+    "cancel_invite": {
+      "enabled": false,
+      "reason": "access.no_invitation"
+    },
+    "link_account": {
+      "enabled": true
+    },
+    "unlink_account": {
+      "enabled": false,
+      "reason": "access.not_linked"
+    }
+  }
+}

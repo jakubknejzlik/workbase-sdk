@@ -12,7 +12,7 @@ import { assertUnprotectedFields, userLinkWriter, userLinkPolicyFilter } from '.
 export type WriteGuard = PolicyWriteGuard
 export const writeGuard = (statement: GuardedStatement) => Object.hasOwn(statement, 'policyGuard') ? statement.policyGuard : undefined
 /** Same structured predicate semantics as query table sources, including scoped EXISTS. */
-export function writeFilter(kernel: KernelRegistry, scope: Scope, entity: string, alias = entity, operation: import('../config').Operation = 'read'): SqlStatement {
+export function writeFilter(kernel: KernelRegistry, scope: Scope, entity: string, alias = entity, operation: import('../config').Operation = 'read', rootFilter?: TableFilter): SqlStatement {
   const bindings: SqlValue[] = []; let references = 0
   const bind = (value: string | number | boolean) => { bindings.push(typeof value === 'boolean' ? Number(value) : value); return '?' }
   function render(filter: TableFilter, table: string): string {
@@ -30,7 +30,12 @@ export function writeFilter(kernel: KernelRegistry, scope: Scope, entity: string
     return `${negated ? 'NOT ' : ''}EXISTS(SELECT 1 FROM (SELECT ${quote(child)}.${quote(node.field)} AS ${quote('policy_key')} FROM ${quote(node.entity)} AS ${quote(child)} WHERE ${explicit}) AS ${quote(visible)} WHERE ${quote(visible)}.${quote('policy_key')}=${quote(parent)}.${quote(node.parentField)})`
   }
   let filter: TableFilter
-  try { filter = expandPolicyFilter(entity, child => kernel.tableFilter(child, scope, operation), 128) }
+  let root = true
+  try { filter = expandPolicyFilter(entity, child => {
+    const selected = root && rootFilter ? rootFilter : kernel.tableFilter(child, scope, operation)
+    root = false
+    return selected
+  }, 128) }
   catch { throw new ApiError(403, 'policy_violation') }
   let sql = render(filter, alias)
   if (kernel.config.effectiveAccess) { sql = `(${sql}) AND ${quote(alias)}.organization_id=?`; bindings.push(scope.organizationId) }
