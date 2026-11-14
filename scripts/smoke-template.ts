@@ -5,7 +5,8 @@ import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, writeFileSync } from 'node:fs'
-import { join, resolve } from 'node:path'
+import { join, relative, resolve } from 'node:path'
+import { tmpdir } from 'node:os'
 
 // Only archives enter this non-git consumer. Post-install commands in steps 1–7 keep OS network isolation;
 // the subsequent live phase permits loopback under a separate JavaScript guard.
@@ -13,13 +14,13 @@ const root = resolve(import.meta.dirname, '..')
 const args = process.argv.slice(2)
 if (args.length && (args.length !== 2 || args[0] !== '--directory' || !args[1])) throw new Error('Usage: bun scripts/smoke-template.ts [--directory dist-sdk]')
 const directory = resolve(args[1] ?? join(root, 'dist-sdk'))
-const rawScratch = registerTempDir(mkdtempSync('/tmp/workbase-mcp-packed-')), scratch = realpathSync(rawScratch)
+const rawScratch = registerTempDir(mkdtempSync(join(tmpdir(), 'workbase-mcp-packed-'))), scratch = realpathSync(rawScratch)
 const consumer = join(scratch, 'instance'), id = 'packed_template_smoke'
 const env: NodeJS.ProcessEnv = { ...process.env, NODE_PATH: '', NODE_OPTIONS: '', npm_config_cache: join(scratch, 'npm-cache'), npm_config_userconfig: join(scratch, 'npmrc'),
   CLOUDFLARE_API_TOKEN: '', CLOUDFLARE_DEFAULT_ACCOUNT_ID: '0'.repeat(32),
   WORKBASE_RESOURCE_PREFIX: 'neutral-smoke', AUTH_BASE_URL: 'https://neutral.example.test',
   EMAIL_FROM: 'login@example.test', BETTER_AUTH_SECRET: 'synthetic-access-secret-at-least-32',
-  WORKBASE_DOMAIN: 'neutral.example.test', SST_TELEMETRY_DISABLED: '1', WORKBASE_BUILD_SHA: '0'.repeat(40),
+  WORKBASE_DOMAIN: 'neutral.example.test', SST_TELEMETRY_DISABLED: '1',
 }
 const timings = {} as BuildTimings
 const timed = (key: keyof BuildTimings, action: () => string) => {
@@ -147,15 +148,19 @@ try {
   console.log('Step 3: schema → access → OpenAPI generated twice; all bytes match; identity verified via runtime/spec')
   console.log(run('bun', ['run', 'check']).trim())
   console.log(timed('typecheck_ms', () => run('bun', ['run', 'typecheck'])).trim())
-  rmSync(join(consumer, '.workbase-ui'), { recursive: true, force: true })
-  rmSync(join(consumer, 'node_modules/.vite'), { recursive: true, force: true })
-  console.log(timed('cold_build_ms', () => run('bun', ['run', 'build:console'])).trim())
-  console.log(timed('warm_build_ms', () => run('bun', ['run', 'build:console'])).trim())
-  assert.equal(json(join(consumer, 'dist/build-meta.json')).sha, '0'.repeat(40))
-  const html = readFileSync(join(consumer, 'dist/index.html'), 'utf8')
+  const assets = join(consumer, 'node_modules/@workbasehq/plugins/console/assets')
+  const packedPlugins = join(scratch, 'packed-plugins')
+  mkdirSync(packedPlugins)
+  execFileSync('tar', ['-xzf', archives.plugins, '-C', packedPlugins])
+  for (const path of files(assets)) assert.equal(digest(path), digest(join(packedPlugins, 'package/console/assets', relative(assets, path))), 'Installed console must equal the SDK archive')
+  assert.equal(json(join(assets, 'build-meta.json')).version, versions.plugins)
+  assert.equal(manifest.scripts['build:console'], undefined)
+  assert.equal(manifest.scripts.deploy, 'bun run check && sst deploy')
+  for (const path of ['dist', 'vite.config.ts', 'index.html', 'src/console.tsx']) assert(!existsSync(join(consumer, path)), `Unexpected template console build: ${path}`)
+  const html = readFileSync(join(assets, 'index.html'), 'utf8')
   const scripts = [...html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/g)]
   assert(scripts.length > 0 && scripts.every(([, attrs, body]) => /\bsrc=/.test(attrs) && !body.trim()), 'Console has only external scripts')
-  console.log('Step 4: check + typecheck + console build; 40-zero build SHA; external scripts only')
+  console.log('Step 4: check + typecheck; prebuilt console hashes match the SDK archive; no consumer build; external scripts only')
   mkdirSync(join(consumer, '.smoke'))
   writeFileSync(join(consumer, '.smoke/worker.mjs'), `import { build } from 'esbuild'
 await build({ entryPoints: ['src/index.ts'], outfile: '.smoke/worker/index.mjs', platform: 'browser', format: 'esm', bundle: true, conditions: ['workerd', 'worker', 'browser'], external: ['node:*', 'cloudflare:*'], target: 'es2022' })
@@ -208,11 +213,12 @@ console.log('Generated SST config bundled with installed provisioner')
   // Dry plan verifies installed tools/assets/schema without contacting Cloudflare.
   writeFileSync(join(consumer, '.smoke/plan.ts'), `import assert from 'node:assert/strict'
 import { createProvisionPlan } from '@workbasehq/core/infra/provision'
+import { consoleAssetsDir } from '@workbasehq/plugins/console/assets'
 globalThis.$config = value => value
 const { default: config } = await import('../.sst/platform/sst.config.smoke.mjs')
 assert.equal(config['app']({ stage: 'production' }).protect, true)
 assert.equal(config['app']({ stage: 'trial' }).removal, 'remove')
-const assets = process.cwd() + '/dist'
+const assets = consoleAssetsDir().replace(/\\/$/, '')
 const plan = await createProvisionPlan({ configPath: './runtime.ts', handler: './src/index.ts', migrationsDir: './migrations', resourcePrefix: process.env.WORKBASE_RESOURCE_PREFIX, stage: 'trial', authSecret: process.env.BETTER_AUTH_SECRET, authBaseUrl: process.env.AUTH_BASE_URL, domain: process.env.WORKBASE_DOMAIN, email: { from: process.env.EMAIL_FROM }, assetsDir: assets })
 for (const binding of ['DB', 'AUDIT_KV', 'EVENTS_QUEUE', 'ASSETS', 'EMAIL', 'EMAIL_FROM', 'SCHEMA_EXPECTED']) assert(plan.bindingNames.includes(binding))
 assert.equal(plan.assetsDir, assets)

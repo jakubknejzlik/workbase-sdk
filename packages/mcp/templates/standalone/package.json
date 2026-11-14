@@ -13,11 +13,10 @@
     "check": "bun run check:schema && bun run check:access && bun run check:openapi && bun run check:ui",
     "generate:ui": "bun scripts/generate-ui.ts",
     "typecheck": "bun run generate:ui && bun scripts/typecheck.ts",
-    "build:console": "bun --bun vite build",
-    "dev": "bun --bun vite --host 127.0.0.1",
+    "dev": "bun run dev:worker",
     "dev:worker": "wrangler dev --local --ip 127.0.0.1 --port 9290 --inspector-port 9291 --persist-to .wrangler/state",
     "migrate:remote": "workbase-migrate migrate \"$DATABASE_ID\" ./migrations --config ./runtime.ts",
-    "deploy": "bun run check && bun run build:console && sst deploy",
+    "deploy": "bun run check && sst deploy",
     "remove": "sst remove"
   },
   "dependencies": {

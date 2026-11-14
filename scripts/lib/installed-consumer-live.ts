@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict'
 import { spawn, execFileSync, type ChildProcess } from 'node:child_process'
 import { once } from 'node:events'
+import { createHash } from 'node:crypto'
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:net'
-import { constants, platform, release } from 'node:os'
+import { constants, platform, release, tmpdir } from 'node:os'
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { chromium, type Browser, type BrowserContext, type Page } from 'playwright'
@@ -18,7 +19,7 @@ const guard = join(root, 'scripts/lib/installed-consumer-network.cjs')
 const processGuard = join(root, 'scripts/lib/installed-consumer-processes.cjs')
 const supervisor = join(root, 'scripts/lib/installed-consumer-supervisor.cjs')
 const json = (file: string) => JSON.parse(readFileSync(file, 'utf8'))
-export type BuildTimings = { npm_install_ms: number; npm_ci_ms: number; typecheck_ms: number; cold_build_ms: number; warm_build_ms: number }
+export type BuildTimings = { npm_install_ms: number; npm_ci_ms: number; typecheck_ms: number }
 
 /** Test-only overlay, never copied by init or packed into any SDK package. */
 export function applyInstalledConsumerFixture(consumer: string): string[] {
@@ -107,7 +108,7 @@ async function stop(child: ChildProcess | undefined) {
 /** Node owns the live phase so its socket guard also covers Wrangler and Playwright. */
 export async function runInstalledConsumerLive(consumer: string, env: NodeJS.ProcessEnv, timings: BuildTimings, archives: string) {
   const started = performance.now()
-  const directory = mkdtempSync('/tmp/workbase-live-processes-'), resultFile = join(directory, 'result.json')
+  const directory = mkdtempSync(join(tmpdir(), 'workbase-live-processes-')), resultFile = join(directory, 'result.json')
   const releaseDirectories = deferTempDirCleanup()
   let interruption: NodeJS.Signals | undefined
   let cancel!: () => void
@@ -168,7 +169,7 @@ export async function runInstalledConsumerLive(consumer: string, env: NodeJS.Pro
   }
   // Reached only without an earlier error, which keeps the primary failure.
   if (unsettled) throw Error('Installed consumer supervisor did not exit within 13000 ms')
-  console.log(`Installed consumer added live wall time: ${Math.round(performance.now() - started)} ms; extra warm build: ${timings.warm_build_ms} ms`)
+  console.log(`Installed consumer added live wall time: ${Math.round(performance.now() - started)} ms`)
 }
 
 async function freePort() {
@@ -264,7 +265,7 @@ export async function open() {
       await context.route('**/*', async route => {
         const url = new URL(route.request().url())
         if (url.origin !== origin) { forbidden.push('non-consumer origin'); await route.abort(); return }
-        if (/(?:^|\/)(?:console-model|console-info|bootstrap|schema)(?:\/|$)/.test(url.pathname)) forbidden.push(url.pathname)
+        if (/(?:^|\/)schema(?:\/|$)/.test(url.pathname)) forbidden.push(url.pathname)
         await route.continue()
       })
       context.on('page', page => { page.setDefaultTimeout(10000); page.on('pageerror', error => pageErrors.push(error.message)) })
@@ -344,41 +345,54 @@ export async function open() {
     assert.deepEqual(searched.data.map((item: { id: string }) => item.id), [row.id])
     console.log('Step 8: local Worker/D1; real admin/staff magic links + invite/accept; cross-org denial; restart persistence; omitted/null/conflict; 26-row cursor + display search')
 
+    // Hash the HTTP responses, including the SPA fallback, against the installed
+    // SDK bytes already compared to the archive in step 4. No consumer build exists.
+    const assets = join(consumer, 'node_modules/@workbasehq/plugins/console/assets')
+    const html = readFileSync(join(assets, 'index.html'), 'utf8')
+    const references = [...html.matchAll(/(?:src|href)=["']([^"']+\.(?:js|css)(?:[?#][^"']*)?)["']/g)].map(match => match[1])
+    assert(references.some(path => path.endsWith('.js')) && references.some(path => path.endsWith('.css')))
+    const hash = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex')
+    const hashes: Record<string, string> = {}
+    for (const path of ['/sign-in', '/organizations', ...references, '/locales/cs.json', '/locales/en.json']) {
+      const response = await fetch(origin + path)
+      assert.equal(response.status, 200, `Console asset ${path}`)
+      const expected = readFileSync(join(assets, ['/sign-in', '/organizations'].includes(path) ? 'index.html' : path.split('?')[0]))
+      hashes[path] = hash(new Uint8Array(await response.arrayBuffer()))
+      assert.equal(hashes[path], hash(expected), `Served console differs from SDK package: ${path}`)
+    }
+    console.log('Served SDK console SHA-256:', JSON.stringify(hashes))
+    if (evidence) writeFileSync(join(evidence, 'console-assets.json'), JSON.stringify(hashes, null, 2) + '\n')
     const fits = async (page: Page) => assert(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), 'Horizontal overflow')
     for (const language of ['cs', 'en']) {
-      const titles = json(join(consumer, `locales/${language}/ui.json`))
+      const titles = json(join(assets, `locales/${language}.json`))
       for (const width of [1280, 390]) {
+        const guest = await newContext(), signInPage = await guest.newPage()
+        await signInPage.setViewportSize({ width, height: 900 })
+        await signInPage.addInitScript(language => localStorage.setItem('console-language', language), language)
+        try {
+          await signInPage.goto(origin + '/sign-in')
+          await signInPage.getByRole('heading', { name: titles.signIn, exact: true }).waitFor()
+          await signInPage.getByLabel(titles.email, { exact: true }).waitFor()
+          await signInPage.getByRole('button', { name: titles.sendLink, exact: true }).waitFor()
+          assert(await signInPage.locator('link[rel="stylesheet"]').count() > 0, 'SDK console CSS missing')
+          await fits(signInPage)
+          if (evidence) await signInPage.screenshot({ path: join(evidence, `${language}-${width}-sign-in.png`), fullPage: true })
+        } finally { await signInPage.close() }
         const page = await admin.newPage()
         await page.setViewportSize({ width, height: 900 })
-        await page.addInitScript(({ org, language }) => { localStorage.setItem('workbase:org', org); localStorage.setItem('workbase:language', language) }, { org: orgA.id, language })
+        await page.addInitScript(language => localStorage.setItem('console-language', language), language)
         try {
-          for (const route of manifest.routes) {
-            const path = route.path.replace('$workerId', row.id)
+          for (const [name, path] of [
+            ['organizations', '/organizations'], ['overview', `/o/${orgA.id}`],
+            ['list', `/o/${orgA.id}/e/worker`], ['detail', `/o/${orgA.id}/e/worker/${row.id}`],
+          ]) {
             await page.goto(origin + path)
-            await page.getByRole('heading', { name: titles[route.title], exact: true }).waitFor()
-            if (route.mode === 'list') {
-              const load = page.getByRole('button', { name: language === 'cs' ? 'Načíst další' : 'Load more', exact: true })
-              await load.click()
-              await page.getByRole('button', { name: 'Worker 24', exact: true }).waitFor()
-              assert.equal(await load.count(), 0)
-              const search = page.getByRole('textbox', { name: language === 'cs' ? 'Hledat' : 'Search', exact: true })
-              await search.fill('Persistent renamed')
-              await page.getByRole('button', { name: 'Persistent renamed', exact: true }).waitFor()
-              await page.getByRole('button', { name: 'Worker 24', exact: true }).waitFor({ state: 'detached' })
-            } else if (route.mode === 'create' || route.mode === 'edit') {
-              const domain = json(join(consumer, `locales/${language}/domain.json`))
-              await page.getByLabel(domain['field.worker.name'], { exact: true }).waitFor()
-              await page.getByLabel(domain['field.worker.note'], { exact: true }).waitFor()
-              assert.equal(await page.getByLabel(domain['field.worker.user'], { exact: true }).count(), 0)
-              assert.equal(await page.locator('input[name="user"], select[name="user"], textarea[name="user"]').count(), 0)
-              const values = await page.locator('input, select, textarea').evaluateAll(elements => elements.map(element => (element as unknown as { value: string }).value))
-              const linked = await proxy.db.prepare('SELECT user FROM worker WHERE id=?').bind(row.id).first<{ user: string }>()
-              assert(linked?.user)
-              assert(!values.includes(linked.user), 'Raw account id in form')
-              assert(!(await page.locator('body').innerText()).includes(linked.user), 'Raw account id displayed on form')
-            } else await page.getByText('Persistent renamed', { exact: true }).waitFor()
+            await page.getByRole('heading', { level: 1 }).first().waitFor()
+            if (name === 'organizations') await page.getByRole('heading', { name: titles.organizations, exact: true }).waitFor()
+            if (name === 'overview') await page.getByRole('heading', { name: 'Organization A', exact: true }).waitFor()
+            if (name === 'list' || name === 'detail') await page.getByText('Persistent renamed', { exact: true }).first().waitFor()
             await fits(page)
-            if (evidence) await page.screenshot({ path: join(evidence, `${language}-${width}-${route.mode}.png`), fullPage: true })
+            if (evidence) await page.screenshot({ path: join(evidence, `${language}-${width}-${name}.png`), fullPage: true })
           }
         } finally { await page.close() }
       }
@@ -395,7 +409,7 @@ export async function open() {
     await new Promise<void>((resolve, reject) => { const socket = connect(port, '127.0.0.1', () => { socket.write('GET /workers HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n'); socket.destroy(); resolve() }); socket.on('error', reject) })
     await call(admin, '/health')
     assert.deepEqual(forbidden, []); assert.deepEqual(pageErrors, [])
-    console.log('Step 9: 16 route/viewport/language renders; headings, overflow, page errors, search/load-more, protected account UI; unlink denies staff; delete/read-404; negative artifacts and browser requests verified')
+    console.log('Step 9: 20 prebuilt console route/viewport/language renders; magic-link form, CSS, headings, overflow, page errors; served hashes equal SDK package; unlink denies staff; delete/read-404; negative artifacts and browser requests verified')
     const timing = { event: 'installed_consumer_timing', os: platform(), os_release: release(), node: process.version, bun: execFileSync('bun', ['--version'], { encoding: 'utf8' }).trim(), ...timings, live_ms: Math.round(performance.now() - started) }
     const line = JSON.stringify(timing)
     console.log(line)

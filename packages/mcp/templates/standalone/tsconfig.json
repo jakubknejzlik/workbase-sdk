@@ -27,9 +27,7 @@
     "schema/**/*.ts",
     "ui/**/*.ts",
     "src/**/*.ts",
-    "src/**/*.tsx",
     "scripts/**/*.ts",
-    "vite.config.ts",
     "sst.config.ts"
   ]
 }

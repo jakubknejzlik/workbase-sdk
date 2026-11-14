@@ -22,13 +22,16 @@ bun run access:lock --write
 bun run openapi:write
 bun run check
 bun run typecheck
-WORKBASE_BUILD_SHA=<40-character-commit-sha> bun run build:console
 ```
 
 Commit the schema lock, `migrations/0001_r1.sql`, access locks, `openapi.json`
 and lockfile. After configuring deployment and installing SST providers, run
-`bun run deploy --stage <stage>`; it checks, builds `dist/` and runs SST with
-`configPath: './runtime.ts'` and `assetsDir: './dist'`. SDK `provision()` applies
+`bun run deploy --stage <stage>`; it checks and runs SST with
+`configPath: './runtime.ts'` and `assetsDir: consoleAssetsDir()` from
+`@workbasehq/plugins/console/assets`. The SDK supplies the prebuilt console,
+including CSS, cs/en and magic-link sign-in, without an Instance console build.
+`provision()` uses `htmlHandling: 'none'`, `notFoundHandling: 'none'` and
+`runWorkerFirst: true`. SDK `provision()` applies
 SDK, plugin and Instance migrations before upload. Init only copies files,
 preserves existing bytes and reports `created`, `unchanged` or `conflict`.
 

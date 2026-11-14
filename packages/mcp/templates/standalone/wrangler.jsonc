@@ -37,7 +37,7 @@
     ]
   },
   "assets": {
-    "directory": "./dist",
+    "directory": "./node_modules/@workbasehq/plugins/console/assets",
     "binding": "ASSETS",
     "html_handling": "none",
     "not_found_handling": "none",
