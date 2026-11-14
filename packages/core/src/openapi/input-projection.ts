@@ -97,6 +97,12 @@ export function publicInputSchema(input: z.ZodType): Schema {
   const result = z.toJSONSchema(project(input), { io: 'input', metadata, override({ zodSchema, jsonSchema }) {
     const restricted = restrictedSchemas.has(zodSchema)
     for (const key of Object.keys(jsonSchema)) if (!structural.has(key) && !annotations.includes(key as any) && !(constraints.has(key) && !restricted)) delete (jsonSchema as any)[key]
+    if (restricted) {
+      // Broadening must stay a widening: omitted private keys may still be required at
+      // runtime, and broadened branches can overlap, so neither closure nor exclusivity holds.
+      if ((jsonSchema as any).additionalProperties === false) delete (jsonSchema as any).additionalProperties
+      if (Array.isArray((jsonSchema as any).oneOf)) { (jsonSchema as any).anyOf = (jsonSchema as any).oneOf; delete (jsonSchema as any).oneOf }
+    }
   } }) as Schema
   delete result.$schema
   return result

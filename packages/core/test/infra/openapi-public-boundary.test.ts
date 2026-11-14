@@ -149,3 +149,19 @@ it('keeps the generator import graph free of runtime command handlers', async ()
     for (const file of ['worker-access-actions.ts', 'kernel/registry.ts', 'commands.ts', 'workflow-runtime.ts', 'crypto.ts', 'request-timing.ts']) expect(inputs.some(path => path.endsWith(`/${file}`)), file).toBe(false)
   } finally { await rm(temp, { recursive: true, force: true }) }
 })
+
+it('keeps broadened pipeline inputs open and non-exclusive so runtime-valid requests stay valid', () => {
+  const find = (node: any, key: string): any[] => !node || typeof node !== 'object' ? [] : [...(key in node ? [node] : []), ...Object.values(node).flatMap(child => find(child, key))]
+  const cases = [
+    z.strictObject({ public: z.string(), private: z.string() }).transform(v => ({ public: v.public })).pipe(z.object({ public: z.string() })),
+    z.discriminatedUnion('kind', [z.object({ kind: z.literal('a'), a: z.string() }), z.object({ kind: z.literal('b'), b: z.number() })]).pipe(z.any()),
+  ]
+  for (const payload of cases) {
+    const config = base()
+    config.commands = ['probe']
+    const doc = document(config, registry([command('probe', z.object({ payload }))]))
+    const contract = doc.components.schemas.CommandInput_probe.properties.payload
+    expect(find(contract, 'oneOf')).toEqual([])
+    expect(find(contract, 'additionalProperties').filter(node => node.additionalProperties === false)).toEqual([])
+  }
+})
