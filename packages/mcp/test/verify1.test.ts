@@ -19,14 +19,16 @@ import { prepare } from '../src/planning'
 import { Store, configSource } from '../src/storage'
 import { Workflow, errorResult } from '../src/workflow'
 import { sdkWorkflowError } from '../src/sdk-upgrade'
+import { pluginRegistry } from '../src/composition/registry'
 import { registerTempDir, cleanupTempDir } from '../../../scripts/lib/test-temp-dir.mjs'
 
 const roots: string[] = []
 afterEach(() => { vi.restoreAllMocks(); for (const root of roots.splice(0)) cleanupTempDir(root) })
+const sharedAccess = () => defineAccess({ predicates: {}, entities: Object.fromEntries(accessEntities.map(entity => [entity, { owner: 'deny' }])),
+  roles: { owner: { system: Object.fromEntries(accessSystemActions.map(action => [action, 'deny'])) } } })
 const config = (plugins: WorkbasePlugin[] = []) => {
   const current = defineConfig({ id: 'replay_fixture', interactive: false, languages: ['en'], roles: ['owner'], organizationOwnerRole: 'owner', entities: {}, plugins,
-    access: defineAccess({ predicates: {}, entities: Object.fromEntries(accessEntities.map(entity => [entity, { owner: 'deny' }])),
-      roles: { owner: { system: Object.fromEntries(accessSystemActions.map(action => [action, 'deny'])) } } }),
+    access: sharedAccess(),
   })
   return bindSchemaLock(current, schemaLock(current))
 }
@@ -60,19 +62,34 @@ it.each([
   await mkdir(join(dir, 'migrations'), { recursive: true })
   await symlink(resolve('node_modules'), join(root, 'node_modules'))
   await writeFile(join(root, 'package.json'), '{"type":"module"}')
-  await writeFile(join(dir, 'config.ts'), configSource(current))
-  await writeFile(join(dir, 'runtime.ts'), `import config from './config.ts'; export default {...config, plugins: [{name: 'target_check', version: '1.0.0', async checkSchema(db, target) {if (target.locale === 'cs') await db.prepare('SELECT * FROM required_after_change').all()}}]};`)
+  let rejectLocale = true
+  const checkSchema = vi.fn<NonNullable<WorkbasePlugin['checkSchema']>>(async (db, target) => {
+    if (rejectLocale && (target as { locale?: string }).locale === 'cs') await db.prepare('SELECT * FROM required_after_change').all()
+  })
+  const targetCheck: WorkbasePlugin = { name: 'target_check', version: '1.0.0', checkSchema }
+  if (format === 'V3') {
+    await writeFile(join(dir, 'access.ts'), `import { defineAccess } from '@workbasehq/core/schema'; export default defineAccess(${JSON.stringify(sharedAccess())});`)
+    await writeFile(join(dir, 'config.ts'), `import { defineConfig, bindSchemaLock } from '@workbasehq/core/schema';
+import access from './access.ts';
+import lock from './schema.lock.json';
+export default bindSchemaLock(defineConfig({ id: 'replay_fixture', interactive: false, languages: ['en'], roles: ['owner'], organizationOwnerRole: 'owner', entities: {}, access }), lock);`)
+    await writeFile(join(dir, 'schema.lock.json'), JSON.stringify(schemaLock(current)))
+    await writeFile(join(dir, 'runtime.ts'), `import config from './config.ts'; import { consoleUI } from '@workbasehq/plugins/console'; export default { ...config, plugins: [consoleUI()] };`)
+    // V3 locale uses canonical composition. Inject the deploy hook at built-in
+    // hydration rather than authoring a custom plugin outside that source boundary.
+    vi.spyOn(pluginRegistry.console, 'hydrate').mockReturnValue(targetCheck)
+  } else await writeFile(join(dir, 'config.ts'), configSource(current))
   await writeFile(join(dir, 'migrations/0001_r1.sql'), initialSchema(current))
   const store = new Store(root, new Set(['probe'])); await store.init()
-  const workflow = new Workflow(store), bundle = await store.load('probe')
+  const workflow = new Workflow(store), bundle = await store.load('probe', { canonicalRuntime: format === 'V3' })
   expect(bundle.config.baseline).toBe(format === 'V3' ? 'workbase-sdk' : undefined)
   const planned = prepare(bundle.config, [], [{ kind: 'set_locale', locale: 'cs' }])
-  const migrations = [...bundle.migrations, { name: '0002_r2.sql', sql: planned.sql }]
+  // Composition keeps the V3 domain revision and migration history unchanged.
+  const target = format === 'V3' ? { ...bundle.config, locale: 'cs' as const } : planned.target
+  const migrations = format === 'V3' ? bundle.migrations : [...bundle.migrations, { name: '0002_r2.sql', sql: planned.sql }]
   // Legacy Store.load ignores runtime.ts; supply its deploy hook explicitly.
-  const runtime: typeof bundle.config = bundle.runtime ?? { ...bundle.config, plugins: [{ name: 'target_check', version: '1.0.0', checkSchema: async (db, target) => {
-    if ((target as { locale?: string }).locale === 'cs') await db.prepare('SELECT * FROM required_after_change').all()
-  } }] }
-  const engine = replayEngine(planned.target, runtime), db = new DatabaseSync(':memory:')
+  const runtime = bundle.runtime ?? { ...bundle.config, plugins: [targetCheck] }
+  const engine = replayEngine(target, runtime), db = new DatabaseSync(':memory:')
   let deployError: unknown
   try { deployError = await rejected(() => migrateInstance(replayQuery(db, migrations), migrations.map(m => ({ filename: m.name, sql: m.sql, checksum: createHash('sha256').update(m.sql).digest('hex') })), engine.kernel)) }
   finally { db.close() }
@@ -81,18 +98,27 @@ it.each([
   expect(deployCode).toBe('migration_replay_failed')
   expect(deployFailure.diagnostic.migration).toBe('target_check/checkSchema')
   const proposal = await workflow.call('propose_change', { instance: 'probe', baseRevision: 1, changes: [{ kind: 'set_locale', locale: 'cs' }] })
-  expect(proposal).toMatchObject({ ok: true })
+  expect(proposal, JSON.stringify(proposal)).toMatchObject({ ok: true, ...(format === 'V3' ? { kind: 'composition_change' } : {}) })
   if (format === 'V3') {
-    if (tool === 'apply_to_disposable' || tool === 'promote') await workflow.call('validate', { proposalId: proposal.proposalId })
-    if (tool === 'promote') await workflow.call('apply_to_disposable', { proposalId: proposal.proposalId })
+    // Establish real prerequisites before testing each later boundary, then make
+    // the same target check fail without changing the proposal's source graph.
+    rejectLocale = false
+    if (tool !== 'validate') expect(await workflow.call('validate', { proposalId: proposal.proposalId })).toMatchObject({ ok: true })
+    if (tool === 'promote') expect(await workflow.call('apply_to_disposable', { proposalId: proposal.proposalId })).toMatchObject({ ok: true, verified: true })
+    rejectLocale = true
+    checkSchema.mockClear()
   }
   // Legacy replay does not run plugin hooks. Inject the real deploy checkSchema
   // failure at its replay boundary to retain promote's public error parity check.
   const snapshot = format === 'legacy' ? vi.spyOn(offline, 'expectedSnapshot').mockRejectedValue(deployFailure) : undefined
   const configBefore = await readFile(join(dir, 'config.ts'))
   const result = await workflow.call(tool, { proposalId: proposal.proposalId, ...(tool === 'promote' ? { expectedRevision: 1 } : {}) })
-  const code = format === 'V3' && tool === 'promote' ? 'v3_promote_unsupported' : deployCode
-  expect(result).toMatchObject(tool === 'validate' ? { ok: false, errors: [{ code }] } : { ok: false, error: { code } })
+  expect(result, JSON.stringify(result)).toMatchObject({ ok: false, error: { code: deployCode } })
+  if (format === 'V3') {
+    expect(checkSchema).toHaveBeenCalled()
+    expect(checkSchema.mock.calls.at(-1)?.[1]).toMatchObject({ locale: 'cs' })
+    expect(result).toMatchObject({ error: { details: { migration: 'target_check/checkSchema' } } })
+  }
   if (snapshot) {
     expect(snapshot).toHaveBeenCalledOnce()
     expect(snapshot).toHaveBeenCalledWith(expect.objectContaining({ config: bundle.config }),

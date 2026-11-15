@@ -41,6 +41,9 @@ Supported kinds, as defined in [schemas.ts](../../packages/mcp/src/schemas.ts):
   `"deny"`, or `{ "where": { ... }, "fields": [ ... ] }` with optional `fields`.
   Domain access lives in `schema/<entity>.ts`; system entity access in `access.ts`.
 - `set_account_link` takes `entity` and `invitationRole` and updates `access.ts`.
+- `set_locale` takes `locale`, `defaultLanguage` and/or `languages` (`en`/`cs`).
+  V3 language changes require a separate proposal and preserve the domain revision
+  and schema lock. See the language example below.
 
 The access compiler checks roles, actions and entity matrices. Composition and
 access kinds can share a proposal; `propose_change` also accepts these V3 kinds.
