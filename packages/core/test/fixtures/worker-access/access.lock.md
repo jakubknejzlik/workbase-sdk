@@ -153,9 +153,11 @@ Selected resolved kernel/config inputs used alongside the compiled grants (curat
 | account | {"entity":"users"} |
 | authorization | {"permissionsActive":true,"providers":{"identity":[{"name":"identity","version":"0.1.0"}],"login":[{"name":"local-auth","version":"0.1.0"}],"mail-outbox":[{"name":"mail-outbox","version":"0.1.0"}],"members":[{"name":"members","version":"0.1.0"}],"organizations":[{"name":"organizations","version":"0.1.0"}],"permissions":[{"name":"rbac","version":"0.1.0"}]},"trust":false} |
 | users / commandsOnly | false |
+| users / displayField | "name" (packages/core/test/fixtures/worker-access.ts:1) |
 | users / fields | {"name":{"readOnly":false,"sensitive":false,"type":"string","userLink":false},"role":{"readOnly":false,"sensitive":false,"type":"enum","userLink":false,"values":["admin","staff"]}} |
 | users / relations | {} |
 | worker / commandsOnly | false |
+| worker / displayField | "name" (packages/core/test/fixtures/worker-access.ts:1) |
 | worker / fields | {"name":{"readOnly":false,"sensitive":false,"type":"text","userLink":false},"user":{"entity":"users","readOnly":true,"sensitive":false,"type":"ref","userLink":true}} |
 | worker / relations | {"user_account":{"entity":"users","field":"user"}} |
 | organizationOwnerRole | "admin" |

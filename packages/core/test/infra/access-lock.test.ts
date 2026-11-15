@@ -10,8 +10,15 @@ import { loadConfig } from '../../src/schema/load'
 import { KernelRegistry } from '../../src/kernel/registry'
 import { createCommandRegistry } from '../../src/commands'
 import { effectiveEntityGrants } from '../../src/access-evaluator'
-import { serializeAccessLock, syncAccessLock } from '../../src/access-lock'
+import { serializeAccessLock, syncAccessLock, type AccessLockOptions } from '../../src/access-lock'
 import { enforcementInputs } from '../../src/access-inputs'
+import { Cond, Fn, Q } from '../../src/config'
+import { sealActor, requireScope } from '../../src/authorization'
+import { loadActorProjection } from '../../src/policies'
+import { expressionInfo, readableComputed } from '../../src/query/expressions'
+import { labelDependencies, labelPath, readableDisplay, readableLabel } from '../../src/query/labels'
+import { validateQuery } from '../../src/query/schema'
+import { compileRoot } from '../../src/query/compiler'
 
 const roots: string[] = []
 afterEach(() => roots.splice(0).forEach(root => rmSync(root, { recursive: true, force: true })))
@@ -246,4 +253,130 @@ export default defineInstance({ id: 'legacy', revision: 1, entities: {} })
 it('refuses source locations outside the repository instead of emitting host paths', async () => {
   const options = await consumer().load()
   expect(() => serializeAccessLock(options.kernel, { ...options, root: join(options.root, 'schema') })).toThrow('outside the repository root')
+})
+
+// Real authored declarations and loader source maps; labels are attached only at the
+// supported normalized/runtime seam (defineEntity intentionally rejects inline labels).
+async function queryConsumer() {
+  const fixture = consumer()
+  const matrix = { admin: all, staff: all, worker: { ...all, read: { where: { id: { ne: '' } }, fields: ['id', 'name', 'label_value', 'contact_id'] } } }
+  const entity = (fields: unknown, displayField: string, access: unknown = matrix) =>
+    `import { defineEntity } from '@workbasehq/core/schema'\nexport default defineEntity(${JSON.stringify({ fields, displayField, access })})\n`
+  const fields = { name: { type: 'string' }, private_name: { type: 'string' }, label_value: { type: 'string', readOnly: true } }
+  writeFileSync(join(fixture.root, 'schema/contacts.ts'), entity(fields, 'name', { ...matrix, worker: { ...all, read: { where: { id: { ne: '' } }, fields: ['id', 'name', 'label_value'] } } }))
+  writeFileSync(join(fixture.root, 'schema/clients.ts'), entity({ ...fields, contact_id: { type: 'ref', entity: 'contacts' }, hidden_contact_id: { type: 'ref', entity: 'contacts' } }, 'name'))
+  writeFileSync(join(fixture.root, 'schema/jobs.ts'), entity({ title: { type: 'string' }, client_id: { type: 'ref', entity: 'clients' }, description: { type: 'string', computed: '#client_id#' }, summary: { type: 'string', computed: Q.expr('description').serialize() } }, 'title', { admin: all, staff: all, worker: all }))
+  const config = join(fixture.root, 'config.ts')
+  writeFileSync(config, readFileSync(config, 'utf8').replace("import worker from './schema/worker'", "import clients from './schema/clients'\nimport contacts from './schema/contacts'\nimport jobs from './schema/jobs'").replace('entities: { worker }', 'entities: { clients, contacts, jobs }'))
+  const load = async (labels: Record<string, ReturnType<typeof Q.expr>> = {}) => {
+    const options = await fixture.load()
+    writeFileSync(join(fixture.root, 'labels.ts'), `import { Q } from '@workbasehq/core/config'\n${['clients', 'contacts'].map(name => labels[name] ? `export const ${name} = Q.expr(${JSON.stringify(labels[name].serialize())})` : `// No ${name} label`).join('\n')}\n`)
+    for (const [name, label] of Object.entries(labels)) {
+      options.kernel.config.entities[name].displayField = 'label_value'
+      options.kernel.config.entities[name].label = label
+      // Equivalent executable registrations can supply exact label source metadata.
+      options.sources[`entities.${name}.label`] = { file: 'labels.ts', line: name === 'clients' ? 2 : 3, column: 1 }
+    }
+    return { ...options, kernel: new KernelRegistry(options.kernel.config, { plugins: [{ name: 'query_audit', version: '1', provides: { permissions: '1.x' }, authorization: true, tableFilter: () => ({ kind: 'all' }), commandGuard: () => ({ allow: true }) }] }) }
+  }
+  const env: any = { DB: { prepare: () => ({ bind: () => ({ first: async () => ({ user_id: 'worker', organization_id: 'org-a', role: 'worker' }) }) }) } }
+  const actor = sealActor({ actor: { type: 'user', id: 'worker' }, user: { id: 'worker', email: 'worker@example.test' }, organizations: [] },
+    { env, hash: 'synthetic', session: { valid: async () => true, verified: async () => true, recipientVerification: 'local-profile' } })
+  const scope = await requireScope(actor, 'org-a', undefined, 'lock_probe')
+  const initial = await load()
+  await loadActorProjection(initial.kernel.config, scope, async <T>() => ({ id: 'worker', role: 'worker', organization_id: 'org-a' }) as T, { user_id: 'worker', organization_id: 'org-a', role: 'worker' })
+  return { ...fixture, load, scope }
+}
+async function expectQueryDrift(before: AccessLockOptions & { kernel: KernelRegistry }, after: typeof before, path: string, source: string) {
+  const file = source.endsWith('.label') ? 'labels.ts' : source.startsWith('ui.') ? 'config.ts' : 'schema/clients.ts'
+  const line = source.endsWith('.label') ? source.includes('contacts') ? 3 : 2 : source.startsWith('ui.') ? 7 : 2
+  const old = serializeAccessLock(before.kernel, before)
+  const current = serializeAccessLock(after.kernel, after)
+  await syncAccessLock({ ...before, write: true })
+  const stale = await syncAccessLock(after)
+  // Assert stale first so the pre-fix red run exposes the false-negative check.
+  expect(stale.ok, stale.message).toBe(false)
+  expect(stale.message).toContain(path)
+  expect(stale.message).toContain(`${file}:${line}`)
+  expect(current.json).not.toBe(old.json)
+  expect(current.md).not.toBe(old.md)
+  expect(JSON.parse(current.json).effectiveAccess).toEqual(JSON.parse(old.json).effectiveAccess)
+  expect(JSON.parse(current.json).sources).toMatchObject({ [source]: { file, line } })
+  expect(current.md).toContain(`${file}:${line}`)
+  expect(['access.lock.json', 'access.lock.md'].map(file => readFileSync(join(before.root, file), 'utf8'))).toEqual([old.json, old.md])
+  expect(serializeAccessLock(after.kernel, after)).toEqual(current)
+  await syncAccessLock({ ...after, write: true })
+  expect((await syncAccessLock(after)).ok).toBe(true)
+}
+it('displayField drift masks an unchanged computed expression and its transitive consumer; check is nonwriting', async () => {
+  const fixture = await queryConsumer(); const before = await fixture.load()
+  const file = join(fixture.root, 'schema/clients.ts')
+  writeFileSync(file, readFileSync(file, 'utf8').replace('"displayField":"name"', '"displayField":"private_name"'))
+  const after = await fixture.load()
+  for (const field of ['description', 'summary']) {
+    expect(before.kernel.config.entities.jobs.fields[field].computed).toBe(after.kernel.config.entities.jobs.fields[field].computed)
+    expect(readableComputed(before.kernel, fixture.scope, 'jobs', field)).toBe(true)
+    expect(readableComputed(after.kernel, fixture.scope, 'jobs', field)).toBe(false)
+  }
+  const sql = (kernel: KernelRegistry) => {
+    const { query, cost } = validateQuery(kernel, fixture.scope, { entity: 'jobs', select: ['id', 'description'], limit: 10 })
+    return compileRoot(kernel, fixture.scope, query, undefined, cost).sql
+  }
+  expect(sql(before.kernel)).not.toContain('NULL AS `description`')
+  expect(sql(after.kernel)).toContain('NULL AS `description`')
+  expect(expressionInfo(before.kernel.config, 'jobs', 'description', '#client_id#').dependencies[0].field).toBe('name')
+  expect(expressionInfo(after.kernel.config, 'jobs', 'description', '#client_id#').dependencies[0].field).toBe('private_name')
+  await expectQueryDrift(before, after, 'clients / displayField: "name" -> "private_name"', 'entities.clients.displayField')
+})
+it.each(['operand', 'hop', 'transitive'] as const)('structured label %s drift changes runtime readability and fails the lock', async mutation => {
+  const fixture = await queryConsumer()
+  const label = (column: string) => Fn.concat(column, Q.value('!'))
+  const a = mutation === 'operand' ? label('name') : mutation === 'hop' ? label('contact_id.name') : label('contact_id.label_value')
+  const b = mutation === 'operand' ? label('private_name') : mutation === 'hop' ? label('hidden_contact_id.name') : a
+  const before = await fixture.load({ clients: a, ...(mutation === 'transitive' ? { contacts: label('name') } : {}) })
+  const after = await fixture.load({ clients: b, ...(mutation === 'transitive' ? { contacts: label('private_name') } : {}) })
+  expect(readableDisplay(before.kernel, fixture.scope, 'clients')).toBe('label_value')
+  expect(readableDisplay(after.kernel, fixture.scope, 'clients')).toBeUndefined()
+  expect(readableComputed(before.kernel, fixture.scope, 'jobs', 'summary')).toBe(true)
+  expect(readableComputed(after.kernel, fixture.scope, 'jobs', 'summary')).toBe(false)
+  expect(labelDependencies(before.kernel.config, 'clients')).not.toEqual(labelDependencies(after.kernel.config, 'clients'))
+  const target = mutation === 'transitive' ? 'contacts' : 'clients'
+  await expectQueryDrift(before, after, `${target} / label`, `entities.${target}.label`)
+  expect(JSON.parse(serializeAccessLock(after.kernel, after).json).enforcementInputs.entities[target].label).toBe(after.kernel.config.entities[target].label!.serialize())
+})
+it('relatedColumns drift resolves a different masked hop and retains the UI registration source', async () => {
+  const fixture = await queryConsumer()
+  const config = join(fixture.root, 'config.ts')
+  const text = readFileSync(config, 'utf8').replace("id: 'lock_probe'", "ui: { entities: { jobs: { list: { relatedColumns: { contact: { via: 'client_id', field: 'contact_id' } } } } } }, id: 'lock_probe'")
+  writeFileSync(config, text)
+  const before = await fixture.load()
+  writeFileSync(config, text.replace("field: 'contact_id'", "field: 'hidden_contact_id'"))
+  const after = await fixture.load()
+  expect(labelPath(before.kernel.config, 'jobs', 'contact')!.hops[1].field).toBe('contact_id')
+  expect(labelPath(after.kernel.config, 'jobs', 'contact')!.hops[1].field).toBe('hidden_contact_id')
+  expect(readableLabel(before.kernel, fixture.scope, 'jobs', 'contact')!.display).toBe('name')
+  expect(readableLabel(after.kernel, fixture.scope, 'jobs', 'contact')).toBeUndefined()
+  await expectQueryDrift(before, after, 'ui / entities / jobs / list / relatedColumns / contact / field', 'ui.entities.jobs.list.relatedColumns.contact')
+})
+
+it('normalized display expressions, structured conditional labels and related bindings are deterministic across declaration order and locale', async () => {
+  const fixture = await queryConsumer()
+  const file = join(fixture.root, 'schema/jobs.ts')
+  const display = Fn.concat('title', Q.value('!')).serialize()
+  writeFileSync(file, readFileSync(file, 'utf8').replace('"displayField":"title"', `"displayField":${JSON.stringify(display)}`))
+  const options = await fixture.load({ clients: Fn.if(Cond.isNotNull('name'), Fn.concat('name', Q.value('!')), Q.value('unknown')) })
+  const config = options.kernel.config
+  config.ui = { entities: { jobs: { list: { relatedColumns: { aa: { via: 'client_id', field: 'contact_id' }, zz: { via: 'client_id', field: 'contact_id' } } } }, contacts: { list: { relatedColumns: {} } } } }
+  const before = serializeAccessLock(options.kernel, options)
+  const inputs = JSON.parse(before.json).enforcementInputs
+  expect(inputs.entities.jobs.displayField).toBe(config.entities.jobs.displayField)
+  expect(inputs.entities.jobs.displayField).not.toBe(display)
+  expect(inputs.entities.jobs.fields[config.entities.jobs.displayField!].computed).toBe(display)
+  const reverse = <T>(value: Record<string, T>) => Object.fromEntries(Object.entries(value).reverse())
+  const shuffled = new KernelRegistry({ ...config, roles: [...config.roles].reverse(),
+    entities: reverse(Object.fromEntries(Object.entries(config.entities).map(([name, entity]) => [name, { ...entity, fields: reverse(entity.fields) }]))),
+    ui: { entities: { contacts: config.ui.entities!.contacts, jobs: { list: { relatedColumns: reverse(config.ui.entities!.jobs.list!.relatedColumns!) } } } },
+  }, { plugins: options.kernel.plugins })
+  const locale = vi.spyOn(String.prototype, 'localeCompare').mockImplementation(function (this: string, other: string) { return this < other ? 1 : this > other ? -1 : 0 })
+  try { expect(serializeAccessLock(shuffled, options)).toEqual(before) } finally { locale.mockRestore() }
 })
