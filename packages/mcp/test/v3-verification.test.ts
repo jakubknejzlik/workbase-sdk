@@ -28,6 +28,56 @@ const bundle = (current = config()) => ({ config: current, runtime: current, mig
 const caught = async (run: () => unknown) => { try { await run() } catch (error) { return error }; throw new Error('Expected failure') }
 afterEach(() => vi.restoreAllMocks())
 
+it.each([
+  'CREATE TABLE unsupported (id TEXT COLLATE NOCASE)',
+  'CREATE TABLE unsupported (id TEXT UNIQUE ON CONFLICT IGNORE)',
+  'CREATE TABLE unsupported (id TEXT REFERENCES users(id) DEFERRABLE INITIALLY DEFERRED)',
+  'CREATE TABLE unsupported (id INTEGER PRIMARY KEY AUTOINCREMENT)',
+  'CREATE VIRTUAL TABLE unsupported USING fts5(id)',
+  'CREATE VIEW unsupported AS SELECT 1',
+  'CREATE TEMP TABLE unsupported (id TEXT)',
+])('fails closed even when both schemas contain an unrepresented construct: %s', async sql => {
+  const current = bundle(config([{ name: 'unsupported', version: '1.0.0', migrations: [{ name: '001_table', sql }] }]))
+  await expect(instanceMeta(current)).rejects.toMatchObject({ code: 'config_schema_mismatch', details: { phase: 'verification' } })
+})
+
+const fingerprint = (sql: string) => {
+  const db = new DatabaseSync(':memory:')
+  try { db.exec(sql); return snapshot(db) } finally { db.close() }
+}
+it('compares automatic UNIQUE and PK indexes independently of generated names and constraint order', () => {
+  expect(fingerprint('CREATE TABLE t (a TEXT, b TEXT, PRIMARY KEY(a), UNIQUE(b), UNIQUE(a,b))'))
+    .toEqual(fingerprint('CREATE TABLE t (a TEXT, b TEXT, UNIQUE(a,b), UNIQUE(b), PRIMARY KEY(a))'))
+})
+it.each([
+  ['index uniqueness', 'CREATE INDEX i ON t(a)', 'CREATE UNIQUE INDEX i ON t(a)'],
+  ['index collation and direction', 'CREATE INDEX i ON t(a)', 'CREATE INDEX i ON t(a COLLATE NOCASE DESC)'],
+  ['partial index predicate', 'CREATE INDEX i ON t(a) WHERE a IS NOT NULL', 'CREATE INDEX i ON t(a) WHERE a IS NULL'],
+  ['expression index', 'CREATE INDEX i ON t(lower(a))', 'CREATE INDEX i ON t(upper(a))'],
+  ['rowid option', '', ''],
+] as const)('retains %s semantics in the fingerprint', (label, before, after) => {
+  const table = 'CREATE TABLE t(a TEXT PRIMARY KEY, b TEXT)'
+  expect(fingerprint(`${table}; ${before}`)).not.toEqual(fingerprint(`${table}${label === 'rowid option' ? ' WITHOUT ROWID' : ''}; ${after}`))
+})
+it('retains generated column expressions and storage modes omitted by table_xinfo', () => {
+  const table = 'CREATE TABLE t(a TEXT, b TEXT GENERATED ALWAYS AS '
+  expect(fingerprint(`${table}(lower(a)) VIRTUAL)`)).not.toEqual(fingerprint(`${table}(upper(a)) VIRTUAL)`))
+  expect(fingerprint(`${table}(lower(a)) VIRTUAL)`)).not.toEqual(fingerprint(`${table}(lower(a)) STORED)`))
+})
+it('does not hide domain objects or triggers behind transport and receipt names', () => {
+  expect(fingerprint('CREATE TABLE _cf_domain (id TEXT)')).not.toEqual(fingerprint(''))
+  for (const name of ['_cf_trigger', '_migrations', 'd1_migrations']) {
+    expect(fingerprint(`CREATE TABLE t(id TEXT); CREATE TRIGGER ${name} BEFORE INSERT ON t BEGIN SELECT RAISE(ABORT, 'blocked'); END;`))
+      .not.toEqual(fingerprint('CREATE TABLE t(id TEXT)'))
+  }
+})
+it('retains composite foreign key grouping when SQLite reassigns constraint IDs', () => {
+  const table = 'CREATE TABLE t(a TEXT, b TEXT, '
+  const first = 'FOREIGN KEY(a,b) REFERENCES p(a,b)', second = 'FOREIGN KEY(b,a) REFERENCES p(b,a)'
+  expect(fingerprint(`${table}${first}, ${second})`)).toEqual(fingerprint(`${table}${second}, ${first})`))
+  expect(fingerprint(`${table}${first}, ${second})`)).not.toEqual(fingerprint(`${table}FOREIGN KEY(a,b) REFERENCES p(b,a), FOREIGN KEY(b,a) REFERENCES p(a,b))`))
+})
+
 it('keeps receipts stable on retry and reports domain and plugin checksum drift separately from physical schema', async () => {
   const current = bundle(), db = new DatabaseSync(':memory:')
   const engine = replayEngine(current.config, current.runtime)
@@ -98,6 +148,8 @@ it('rejects committed physical drift during V3 inspection as well as proposal ve
 })
 
 const schemaDrifts = [
+  ['added inline UNIQUE', (sql: string) => sql.replace('"name" TEXT NOT NULL', '"name" TEXT NOT NULL UNIQUE')],
+  ['removed composite UNIQUE', (sql: string) => sql.replace(/,\n  UNIQUE \(organization_id, id\)/, '')],
   ['boolean CHECK', (sql: string) => sql.replace(' CHECK ("active" IN (0,1))', '')],
   ['changed boolean CHECK', (sql: string) => sql.replace('CHECK ("active" IN (0,1))', 'CHECK ("active" IN (0,2))')],
   ['enum CHECK', (sql: string) => sql.replace(/ CHECK \("state" IN \([^)]*\)\)/, '')],

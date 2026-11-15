@@ -34,11 +34,12 @@ const config = (plugins: WorkbasePlugin[] = []) => {
 }
 it.each(['0001_initial.sql', '0001_r9007199254740992.sql', '0002_sdk_upgrade.sql'])('rejects committed %s with the deploy diagnostic', async name => {
   const migrations = [{ name, sql: 'SELECT 1;' }], current = config()
+  const code = name.startsWith('0002_') ? 'migration_sequence_gap_or_duplicate' : 'migration_instance_revision_mismatch'
   const db = new DatabaseSync(':memory:')
   try {
     const files = migrations.map(m => ({ filename: m.name, sql: m.sql, checksum: createHash('sha256').update(m.sql).digest('hex') }))
     await expect(migrateInstance(replayQuery(db, migrations), files, replayEngine(current).kernel)).rejects.toThrow('migration_instance_revision_mismatch')
-    await expect(replayBundle({ config: current, migrations }, () => {})).rejects.toThrow('migration_instance_revision_mismatch')
+    await expect(replayBundle({ config: current, migrations }, () => {})).rejects.toThrow(code)
   } finally { db.close() }
   const root = await scratch(), dir = join(root, 'examples/probe')
   await mkdir(join(dir, 'migrations'), { recursive: true })
@@ -47,7 +48,7 @@ it.each(['0001_initial.sql', '0001_r9007199254740992.sql', '0002_sdk_upgrade.sql
   await writeFile(join(dir, 'config.ts'), configSource(current))
   await writeFile(join(dir, 'migrations', name), 'SELECT 1;')
   const store = new Store(root, new Set(['probe'])); await store.init()
-  expect(await new Workflow(store).call('validate', { instance: 'probe' })).toMatchObject({ ok: false, errors: [{ code: 'migration_instance_revision_mismatch' }] })
+  expect(await new Workflow(store).call('validate', { instance: 'probe' })).toMatchObject({ ok: false, errors: [{ code }] })
 })
 it('runs deploy plugin schema checks during committed replay', async () => {
   const current = config([{ name: 'requires_table', version: '1.0.0', checkSchema: async db => { await db.prepare('SELECT * FROM required_plugin_table').all() } }])

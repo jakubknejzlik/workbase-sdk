@@ -46,7 +46,7 @@ export function sqliteKind(error: unknown): ReplayErrorKind {
 }
 
 export type ReplayMigration = { name: string; sql: string; syntheticRevision?: number }
-export type ReplayEngine = Pick<typeof infra, 'migrateD1' | 'migrateInstance' | 'instanceMigrationReceipt' | 'queryDatabase'> & Pick<typeof schema, 'revisionSQL'> & Partial<Pick<typeof infra, 'migrationErrorMessage'>> & Partial<Pick<typeof pluginMigrations, 'PluginMigrationError' | 'PluginMigrationHistoryError'>> & { kernel: KernelRegistry }
+export type ReplayEngine = Pick<typeof infra, 'migrateD1' | 'migrateInstance' | 'instanceMigrationReceipt' | 'queryDatabase' | 'validateMigrationFilenames'> & Pick<typeof schema, 'revisionSQL'> & Partial<Pick<typeof infra, 'migrationErrorMessage'>> & Partial<Pick<typeof pluginMigrations, 'PluginMigrationError' | 'PluginMigrationHistoryError'>> & { kernel: KernelRegistry }
 export const replayPhases = ['sdk', 'plugin', 'domain', 'verification'] as const
 type ReplayContext = { file: string; migration: string; namespace?: string; phase?: typeof replayPhases[number] }
 export type ReplayDiagnostic = ReplayContext & { kind: ReplayErrorKind; sqlError: string; phase: typeof replayPhases[number]; hint: string }
@@ -172,6 +172,10 @@ export function replayQuery(db: DatabaseSync, migrations: readonly ReplayMigrati
 export async function replayInstance(db: DatabaseSync, migrations: readonly ReplayMigration[], engine: ReplayEngine,
   options: { mode?: 'synthetic' | 'schema'; legacyLedger?: boolean; record?: ReplayRecorder; verifyExisting?: boolean } = {}) {
   const sdk = usesBaseline(engine.kernel.config)
+  if (sdk) {
+    try { engine.validateMigrationFilenames(migrations.filter(m => !options.mode || m.syntheticRevision === undefined).map(m => m.name)) }
+    catch (error) { throw replayError(error, engine, migrations) }
+  }
   if (sdk) db.exec('PRAGMA foreign_keys=ON')
   // Synthetic inputs still deploy through the real kernel. Only their filenames
   // are constructed here so deployment owns every revision receipt and check.

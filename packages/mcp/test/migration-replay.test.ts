@@ -1,4 +1,8 @@
 import { DatabaseSync } from 'node:sqlite'
+import { mkdtemp, writeFile, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { readMigrationFiles } from '@workbasehq/core/infra'
 import { afterEach, expect, it, vi } from 'vitest'
 import { CORE_VERSION, defineInstance } from '@workbasehq/core/config'
 import { defineConfig, bindSchemaLock, defineAccess, accessEntities, accessSystemActions } from '@workbasehq/core/schema'
@@ -11,6 +15,31 @@ import { MigrationReplayError, readInstanceMeta, replayInstance } from '../src/m
 import { sdkWorkflowError } from '../src/sdk-upgrade'
 
 afterEach(() => vi.restoreAllMocks())
+
+it.each([
+  ['missing first number', ['0002_r1.sql'], '0002_r1.sql'],
+  ['internal gap', ['0001_r1.sql', '0003_r2.sql'], '0003_r2.sql'],
+  ['duplicate prefix', ['0001_r1.sql', '0001_r2.sql'], '0001_r2.sql'],
+] as const)('shares deploy preflight for %s before SQL or synthetic renaming', async (_label, names, invalid) => {
+  const directory = await mkdtemp(join(tmpdir(), 'replay-sequence-'))
+  const migrations = names.map(name => ({ name, sql: 'SELECT 1;' }))
+  try {
+    await Promise.all(migrations.map(m => writeFile(join(directory, m.name), m.sql)))
+    await expect(readMigrationFiles(directory)).rejects.toThrow(`migration_sequence_gap_or_duplicate:${invalid}`)
+    for (const mode of [undefined, 'synthetic', 'schema'] as const) {
+      const db = new DatabaseSync(':memory:')
+      const engine = replayEngine(config()), apply = vi.spyOn(engine.kernel, 'applyMigrations')
+      try {
+        const inputs = mode ? [...migrations, { name: 'proposal.sql', sql: 'SELECT 1;', syntheticRevision: 2 }] : migrations
+        await expect(replayInstance(db, inputs, engine, { mode })).rejects.toMatchObject({
+          code: 'migration_sequence_gap_or_duplicate', diagnostic: { phase: 'verification', file: `migrations/${invalid}`, migration: invalid },
+        })
+        expect(apply).not.toHaveBeenCalled()
+        expect(db.prepare('SELECT name FROM sqlite_master').all()).toEqual([])
+      } finally { db.close() }
+    }
+  } finally { await rm(directory, { recursive: true, force: true }) }
+})
 const config = (plugins: WorkbasePlugin[] = []) => {
   const current = defineConfig({ id: 'replay_fixture', interactive: false, languages: ['en'], roles: ['owner'], organizationOwnerRole: 'owner', entities: {}, plugins,
     access: defineAccess({ predicates: {}, entities: Object.fromEntries(accessEntities.map(entity => [entity, { owner: 'deny' }])),

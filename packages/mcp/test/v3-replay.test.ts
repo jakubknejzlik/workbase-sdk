@@ -1,5 +1,5 @@
 import { registerTempDir, cleanupTempDir } from '../../../scripts/lib/test-temp-dir.mjs'
-import { appendFile, mkdtemp, readFile, symlink, writeFile } from 'node:fs/promises'
+import { appendFile, mkdtemp, readFile, symlink, writeFile, rename, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { execFileSync } from 'node:child_process'
@@ -9,7 +9,7 @@ import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { createServer } from '../src/server'
 import { replayBundle, replayEngine } from '../src/offline'
-import { migrateInstance } from '@workbasehq/core/infra'
+import { migrateInstance, readMigrationFiles } from '@workbasehq/core/infra'
 import { replayQuery } from '../src/migration-replay'
 import { DatabaseSync } from 'node:sqlite'
 import { createHash } from 'node:crypto'
@@ -72,6 +72,8 @@ it.each(['node', 'bun'])('validates a proposal on a V3 instance created through 
     } finally { deploy.close() }
     const domainFile = join(root, 'migrations/0001_r1.sql'), domainSQL = await readFile(domainFile, 'utf8')
     for (const drifted of [
+      domainSQL.replace('"name" TEXT NOT NULL', '"name" TEXT NOT NULL UNIQUE'),
+      domainSQL.replace(/,\n  UNIQUE \(organization_id, id\)/, ''),
       domainSQL + '\nCREATE TABLE unconfigured_table (id TEXT);\n',
       domainSQL.replace(' CHECK ("active" IN (0,1))', ''),
       domainSQL.replace(/ CHECK \("state" IN \([^)]*\)\)/, ''),
@@ -87,6 +89,23 @@ it.each(['node', 'bun'])('validates a proposal on a V3 instance created through 
       }
     }
     await writeFile(domainFile, domainSQL)
+    for (const names of [
+      ['0002_r1.sql'],
+      ['0001_r1.sql', '0003_r2.sql'],
+      ['0001_r1.sql', '0001_r2.sql'],
+    ]) {
+      const invalid = names.at(-1)!
+      if (names.length === 1) await rename(domainFile, join(root, 'migrations', invalid))
+      else await writeFile(join(root, 'migrations', invalid), 'SELECT 1;')
+      await expect(readMigrationFiles(join(root, 'migrations'))).rejects.toThrow(`migration_sequence_gap_or_duplicate:${invalid}`)
+      expect(await call('validate', { instance: 'replay-fixture' })).toMatchObject({ ok: false, errors: [{ code: 'migration_sequence_gap_or_duplicate', details: { phase: 'verification' } }] })
+      expect(await call('validate', { proposalId: proposal.proposalId })).toMatchObject({ ok: false, errors: [{ code: 'migration_sequence_gap_or_duplicate', details: { phase: 'verification' } }] })
+      for (const tool of ['preview_migration', 'apply_to_disposable']) {
+        expect(await call(tool, { proposalId: proposal.proposalId })).toMatchObject({ ok: false, error: { code: 'migration_sequence_gap_or_duplicate', details: { phase: 'verification' } } })
+      }
+      if (names.length === 1) await rename(join(root, 'migrations', invalid), domainFile)
+      else await rm(join(root, 'migrations', invalid))
+    }
     await appendFile(join(root, 'migrations/0001_r1.sql'), '\nSELECT * FROM missing_domain_source;\n')
     const failure = await call('validate', { instance: 'replay-fixture' })
     expect(failure).toMatchObject({ ok: false, errors: [{ code: 'migration_replay_failed',

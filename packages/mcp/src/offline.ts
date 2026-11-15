@@ -3,7 +3,7 @@ import type { Bundle, Migration } from './storage.ts'
 import { CORE_VERSION } from '@workbasehq/core/config'
 import { KernelRegistry } from '@workbasehq/core/kernel/registry'
 import { PluginMigrationError, PluginMigrationHistoryError } from '@workbasehq/core/kernel/migrations'
-import { migrateD1, migrateInstance, instanceMigrationReceipt, migrationErrorMessage, queryDatabase } from '@workbasehq/core/infra'
+import { migrateD1, migrateInstance, instanceMigrationReceipt, migrationErrorMessage, queryDatabase, validateMigrationFilenames } from '@workbasehq/core/infra'
 import { replayInstance, replayError, readInstanceMeta, usesBaseline, MigrationReplayError, privateReplayMessage, sqliteKind, type ReplayMigration } from './migration-replay.ts'
 import { initialSchema, revisionSQL } from '@workbasehq/core/migrations/schema'
 import { fail, WorkflowError } from './schemas.ts'
@@ -29,7 +29,7 @@ const engineDiagnostics = { PluginMigrationError, PluginMigrationHistoryError, m
 export function replayEngine(config: Bundle['config'], runtime?: Bundle['runtime']) {
   try {
     return { kernel: new KernelRegistry(runtime ? { ...runtime, ...config, plugins: runtime.plugins, interactive: runtime.interactive } : config),
-      migrateD1, migrateInstance, instanceMigrationReceipt, queryDatabase, revisionSQL, ...engineDiagnostics }
+      migrateD1, migrateInstance, instanceMigrationReceipt, queryDatabase, validateMigrationFilenames, revisionSQL, ...engineDiagnostics }
   } catch (error) { throw replayError(error, engineDiagnostics) }
 }
 export async function replayBundle<T>(bundle: Pick<Bundle, 'config' | 'runtime'> & { migrations: ReplayMigration[]; currentConfig?: Bundle['config'] }, fn: (db: DatabaseSync) => T, options: Parameters<typeof replayInstance>[3] = {}): Promise<T> {
@@ -46,7 +46,6 @@ export async function replayBundle<T>(bundle: Pick<Bundle, 'config' | 'runtime'>
   } finally { db.close() }
 }
 const q = (name: string) => `"${name.replaceAll('"', '""')}"`
-const normalize = (sql: string) => sql.trim().replace(/;$/, '').replace(/('(?:''|[^'])*')|"(?:""|[^"])*"|\s+/g, match => /^\s/.test(match) ? ' ' : match)
 // Token boundaries and string literals matter; whitespace, comments, keyword
 // case and identifier quoting do not. Do not strip quotes from literal values.
 function sqlTokens(sql: string) {
@@ -95,17 +94,124 @@ function checkConstraints(sql: string) {
   // CHECKs are a conjunction, independent of column/constraint declaration order.
   return checks.sort()
 }
+function unsupportedSchema(): never {
+  throw new WorkflowError('config_schema_mismatch', 'Schema contains semantics unsupported by offline verification', 400,
+    { phase: 'verification', hint: 'Use schema constructs covered by offline verification before retrying.' })
+}
+// PRAGMAs omit column collations, conflict policies, generated expressions and
+// FK deferral. Retain generated SQL and reject clauses not otherwise covered.
+// This is a consumption grammar: an unknown clause fails, even on both sides.
+function assertRepresentableTable(sql: string, columns: { name: unknown; type: unknown }[]) {
+  const raw = sqlTokens(sql.replace(/;\s*$/, '')), tokens = raw.map(canonicalToken)
+  const generated: { name: string; expression: string }[] = []
+  let at = 0
+  const take = (token: string) => tokens[at] === token ? (++at, true) : false
+  const need = (token: string) => { if (!take(token)) unsupportedSchema() }
+  const identifier = () => { if (tokens[at] === undefined) unsupportedSchema(); at++ }
+  const group = () => {
+    const start = at
+    need('(')
+    let depth = 1
+    while (depth && at < tokens.length) {
+      const token = tokens[at++]
+      depth += token === '(' ? 1 : token === ')' ? -1 : 0
+    }
+    if (depth) unsupportedSchema()
+    return JSON.stringify(raw.slice(start, at))
+  }
+  const reference = () => {
+    identifier()
+    if (tokens[at] === '(') group()
+    while (take('on')) {
+      if (!take('delete') && !take('update')) unsupportedSchema()
+      if (take('set')) { if (!take('null') && !take('default')) unsupportedSchema() }
+      else if (take('no')) need('action')
+      else if (!take('cascade') && !take('restrict')) unsupportedSchema()
+    }
+  }
+  need('create'); need('table'); identifier(); need('(')
+  do {
+    if (take('constraint')) identifier()
+    if (take('primary')) { need('key'); group() }
+    else if (take('unique') || take('check')) group()
+    else if (take('foreign')) { need('key'); group(); need('references'); reference() }
+    else {
+      const name = tokens[at++]
+      const column = columns.find(c => canonicalToken(String(c.name)) === name)
+      if (!column) unsupportedSchema()
+      for (const token of sqlTokens(String(column.type)).map(canonicalToken)) need(token)
+      while (tokens[at] !== ',' && tokens[at] !== ')' && at < tokens.length) {
+        if (take('constraint')) identifier()
+        else if (take('not')) need('null')
+        else if (take('null') || take('unique')) { /* represented in column/index metadata */ }
+        else if (take('primary')) { need('key'); take('asc') || take('desc') }
+        else if (take('check')) group()
+        else if (take('references')) reference()
+        else if (tokens[at] === 'generated' || tokens[at] === 'as') {
+          if (take('generated')) take('always')
+          need('as')
+          generated.push({ name, expression: group() })
+          take('virtual') || take('stored')
+        }
+        else if (take('default')) {
+          if (tokens[at] === '(') group()
+          else {
+            take('+') || take('-')
+            if (tokens[at] === 'x' && raw[at + 1]?.startsWith("'")) at++
+            identifier()
+          }
+        } else unsupportedSchema()
+      }
+    }
+  } while (take(','))
+  need(')')
+  if (at < tokens.length) do {
+    if (take('without')) need('rowid')
+    else need('strict')
+  } while (take(','))
+  if (at !== tokens.length) unsupportedSchema()
+  return sorted(generated)
+}
+const sorted = <T>(values: T[]) => values.sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)))
 export function snapshot(db: DatabaseSync, domainLedger = false) {
-  const master = db.prepare("SELECT type,name,tbl_name,sql FROM sqlite_master WHERE type IN ('table','index','trigger') AND name NOT GLOB 'sqlite_*' AND name NOT GLOB '_cf_*' AND name != 'd1_migrations' AND tbl_name != 'd1_migrations'" + (domainLedger ? " AND name != '_migrations' AND tbl_name != '_migrations'" : '') + ' ORDER BY type,name').all()
-  return master.map(row => ({
-    type: row.type, name: row.name, table: row.tbl_name, sql: row.type === 'trigger' ? canonicalSQL(String(row.sql)) : normalize(String(row.sql)),
-    // Column/FK/index metadata is stable across SQLite's ALTER formatting changes.
-    ...(row.type === 'table' ? {
-      checks: checkConstraints(String(row.sql)),
-      columns: db.prepare(`PRAGMA table_info(${q(String(row.name))})`).all().map(({ cid: _cid, ...c }) => c),
-      foreignKeys: db.prepare(`PRAGMA foreign_key_list(${q(String(row.name))})`).all(),
-    } : row.type === 'index' ? { columns: db.prepare(`PRAGMA index_info(${q(String(row.name))})`).all().map(({ cid: _cid, ...c }) => c) } : {}),
-  }))
+  if (db.prepare('PRAGMA database_list').all().some(row => row.name !== 'main' && row.name !== 'temp')
+    || db.prepare('SELECT 1 FROM sqlite_temp_master LIMIT 1').get()) unsupportedSchema()
+  // Exclude only known transport/receipt tables and their indexes. A trigger's
+  // name (or a reserved-looking prefix) must never hide its behavior.
+  const master = db.prepare("SELECT type,name,tbl_name,sql FROM sqlite_master WHERE name NOT GLOB 'sqlite_*' AND NOT (type IN ('table','index') AND tbl_name IN ('_cf_KV','_cf_METADATA','d1_migrations'" + (domainLedger ? ",'_migrations'" : '') + ')) ORDER BY type,name').all()
+  const tables = db.prepare('PRAGMA table_list').all()
+  return master.map(row => {
+    const base = { type: row.type, name: row.name, table: row.tbl_name }
+    if (row.type === 'trigger' || row.type === 'index') {
+      if (typeof row.sql !== 'string') unsupportedSchema()
+      return { ...base, sql: canonicalSQL(row.sql) }
+    }
+    if (row.type !== 'table' || typeof row.sql !== 'string') unsupportedSchema()
+    const table = tables.find(t => t.schema === 'main' && t.name === row.name)
+    if (table?.type !== 'table') unsupportedSchema()
+    const columns = db.prepare(`PRAGMA table_xinfo(${q(String(row.name))})`).all()
+    if (!columns.length || columns.some(c => ![0, 2, 3].includes(Number(c.hidden)))) unsupportedSchema()
+    const generated = assertRepresentableTable(row.sql, columns.map(c => ({ name: c.name, type: c.type })))
+    const indexes = db.prepare(`PRAGMA index_list(${q(String(row.name))})`).all().map(index => {
+      if (!['c', 'u', 'pk'].includes(String(index.origin))) unsupportedSchema()
+      return {
+        // Autoindex numbers depend on constraint declaration order.
+        name: index.origin === 'c' ? index.name : null, origin: index.origin, unique: index.unique, partial: index.partial,
+        columns: db.prepare(`PRAGMA index_xinfo(${q(String(index.name))})`).all().map(({ cid, ...c }) => ({ ...c, ...(Number(cid) < 0 ? { cid } : {}) })),
+      }
+    })
+    const foreignKeys = new Map<unknown, Record<string, unknown>[]>()
+    for (const { id, ...fk } of db.prepare(`PRAGMA foreign_key_list(${q(String(row.name))})`).all()) {
+      const group = foreignKeys.get(id) ?? []
+      group.push(fk); foreignKeys.set(id, group)
+    }
+    return { ...base, checks: checkConstraints(row.sql), generated, withoutRowid: table.wr, strict: table.strict,
+      columns: sorted(columns.map(({ cid: _cid, ...c }) => ({ ...c, type: canonicalSQL(String(c.type)),
+        // A quoted DEFAULT is a literal even when it spells CURRENT_TIME.
+        dflt_value: c.dflt_value === null ? null : JSON.stringify(sqlTokens(String(c.dflt_value))) }))),
+      indexes: sorted(indexes), foreignKeys: sorted([...foreignKeys.values()]),
+    }
+  })
 }
 export async function instanceMeta(bundle: Bundle, supportedVersion: string | null = CORE_VERSION, options: { verifySchema?: boolean } = {}) {
   const { meta, physical } = await replayBundle(bundle, db => {
@@ -133,15 +239,6 @@ function desiredSnapshot(bundle: Pick<Bundle, 'config' | 'runtime'>, prepared: {
   return replayBundle({ config: prepared.target, currentConfig: bundle.config, runtime: bundle.runtime, migrations: [{ name: 'desired.sql', syntheticRevision: prepared.target.revision, sql: initialSchema(prepared.target) + prepared.indexes.map(indexSQL).join('\n') }] }, db => snapshot(db, usesBaseline(prepared.target)), { mode: 'schema' })
 }
 function assertSnapshot(planned: ReturnType<typeof snapshot>, desired: ReturnType<typeof snapshot>, message = 'Planned schema differs from resulting config') {
-  // Compare logical config semantics without column ordinals or SQLite-assigned FK IDs.
-  const logical = (rows: ReturnType<typeof snapshot>) => rows.map(({ sql, ...r }) => ({ ...r,
-    ...(r.type === 'index' ? { sql: sql.replaceAll('"', '').replace(/\s+/g, '') } : {}),
-    ...(r.type === 'trigger' ? { sql } : {}),
-    ...('columns' in r ? { columns: [...r.columns!].sort((a, b) => String(a.name).localeCompare(String(b.name))) } : {}),
-    ...('foreignKeys' in r ? { foreignKeys: r.foreignKeys!.map(({ id: _id, ...fk }) => fk)
-      .sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))) } : {}),
-  }))
-  const canonical = (rows: ReturnType<typeof snapshot>) => JSON.stringify(logical(rows))
-  if (canonical(planned) !== canonical(desired)) throw new WorkflowError('config_schema_mismatch', message, 400,
+  if (JSON.stringify(planned) !== JSON.stringify(desired)) throw new WorkflowError('config_schema_mismatch', message, 400,
     { phase: 'verification', hint: 'Review domain migrations against the bound schema lock and authored configuration.' })
 }

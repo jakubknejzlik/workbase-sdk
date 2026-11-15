@@ -58,7 +58,7 @@ async function executeBridge(root: string, raw: unknown) {
   const { CORE_VERSION, defineInstance } = await load('@workbasehq/core/config') as typeof import('@workbasehq/core/config')
   const { initialSchema, coreVersionSQL, revisionSQL, quote } = await load('@workbasehq/core/migrations/schema') as typeof import('@workbasehq/core/migrations/schema')
   const { KernelRegistry } = await load('@workbasehq/core/kernel/registry') as typeof import('@workbasehq/core/kernel/registry')
-  const { migrateD1, migrateInstance, instanceMigrationReceipt, sdkStampSQL, queryDatabase, readMigrationFiles, migrationErrorMessage } = await load('@workbasehq/core/infra') as typeof import('@workbasehq/core/infra')
+  const { migrateD1, migrateInstance, instanceMigrationReceipt, sdkStampSQL, queryDatabase, readMigrationFiles, migrationErrorMessage, validateMigrationFilenames } = await load('@workbasehq/core/infra') as typeof import('@workbasehq/core/infra')
   const { pluginMigrationStatus, PluginMigrationError, PluginMigrationHistoryError } = await load('@workbasehq/core/kernel/migrations') as typeof import('@workbasehq/core/kernel/migrations')
   if (CORE_VERSION !== request.identity.targetVersion) throw new Error('Target CORE_VERSION mismatch')
   const literal = (await import(pathToFileURL(join(root, 'config.ts')).href)).default
@@ -66,7 +66,7 @@ async function executeBridge(root: string, raw: unknown) {
     ? (await import(pathToFileURL(join(root, 'runtime.ts')).href)).default : literal)
   if (config.id !== request.identity.instanceId || config.revision !== request.identity.baseRevision) throw new Error('Captured configuration identity mismatch')
   const kernel = new KernelRegistry(config)
-  const engine = { kernel, migrateD1, migrateInstance, instanceMigrationReceipt, queryDatabase, revisionSQL, PluginMigrationError, PluginMigrationHistoryError, migrationErrorMessage }
+  const engine = { kernel, migrateD1, migrateInstance, instanceMigrationReceipt, queryDatabase, validateMigrationFilenames, revisionSQL, PluginMigrationError, PluginMigrationHistoryError, migrationErrorMessage }
   // Validate archived sources with the target SDK as well. JSON history hydrates
   // only canonical published exports, never serialized executable hooks.
   const descriptors: Record<string, [specifier: string, exported: string]> = {
