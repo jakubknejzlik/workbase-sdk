@@ -8,6 +8,7 @@ import type { CompositionProposal } from '../proposals.ts'
 import { applyRuntimeChanges, parseRuntimeSource, rewriteRuntimeSource } from './runtime-source.ts'
 import { hydrateRuntimePlugins } from './registry.ts'
 import { compositionPlan } from './plan.ts'
+import { compositionRequirements, assertCompositionRequirements } from './requirements.ts'
 import { promotionHash, submitChange } from '../submit-change.ts'
 import type { GitHubConfiguration } from '../github.ts'
 
@@ -27,8 +28,8 @@ function prepare(bundle: Bundle, changes: CompositionChange[]) {
   catch { fail('invalid_composition', 'The target plugin composition is invalid; check required providers and interactive login', 400) }
   return { target, files: [{ path: 'runtime.ts', data: source }], model }
 }
-function proof(bundle: Bundle, prepared: ReturnType<typeof prepare> & Awaited<ReturnType<typeof compositionPlan>>, changes: CompositionChange[]) {
-  return { fingerprint: bundle.fingerprint, planHash: hash({ files: prepared.files, ledger: prepared.ledger, statements: prepared.statements, model: prepared.model, changes }),
+function proof(bundle: Bundle, prepared: ReturnType<typeof prepare> & Awaited<ReturnType<typeof compositionPlan>>, changes: CompositionChange[], requirementGuards: Bundle['guards']) {
+  return { fingerprint: bundle.fingerprint, planHash: hash({ files: prepared.files, ledger: prepared.ledger, statements: prepared.statements, model: prepared.model, changes, requirementGuards }),
     ...(bundle.dependencyDigest === undefined ? {} : { dependencyDigest: bundle.dependencyDigest }) }
 }
 export async function proposeComposition(store: Store, instance: string, baseRevision: number, changes: CompositionChange[], proposalId: string) {
@@ -68,7 +69,9 @@ export async function executeComposition(store: Store, proposal: CompositionProp
   if (name === 'promote' && proposal.validation && proposal.validation.fingerprint !== bundle.fingerprint) fail('stale_revision', 'Instance files changed since validation', 409)
   const target = prepare(bundle, proposal.changes)
   const prepared = { ...target, ...await compositionPlan(bundle, target.target, target.files[0].data, await store.directory(proposal.instance)) }
-  const currentProof = proof(bundle, prepared, proposal.changes)
+  const { requirements, guards: requirementGuards } = await compositionRequirements(await store.directory(proposal.instance), prepared.model)
+  assertCompositionRequirements(requirements)
+  const currentProof = proof(bundle, prepared, proposal.changes, requirementGuards)
   if (name !== 'validate' && (!proposal.validation || hash(proposal.validation) !== hash(currentProof))) {
     fail('validation_required', 'Validate this exact composition against the current files first', 409)
   }
@@ -77,7 +80,7 @@ export async function executeComposition(store: Store, proposal: CompositionProp
   if (name === 'validate') {
     proposal.validation = currentProof; proposal.status = 'validated'
     await save(store, proposal)
-    return { ok: true, kind: proposal.kind, revision: bundle.config.revision, errors: [] }
+    return { ok: true, kind: proposal.kind, revision: bundle.config.revision, errors: [], requirements }
   }
   if (name === 'preview_migration') return { ok: true, kind: proposal.kind, revision: bundle.config.revision,
     sql: '', files: prepared.files, composition: prepared.model, pluginMigrations: prepared.pluginMigrations, pluginSql: prepared.pluginSql }
@@ -100,7 +103,7 @@ export async function executeComposition(store: Store, proposal: CompositionProp
     if (bundle.dependencyDigest !== undefined) proposal.dependencyDigest = bundle.dependencyDigest
     proposal.promotionHash = promotionHash(proposal)
     await store.commit(proposal.instance, [...prepared.files,
-      { path: `proposals/${proposal.proposalId}.json`, data: json(proposal) }], latest.guards)
+      { path: `proposals/${proposal.proposalId}.json`, data: json(proposal) }], { ...latest.guards, ...requirementGuards })
     return { ok: true, kind: proposal.kind, status: proposal.status, revision: bundle.config.revision, files: prepared.files.map(file => file.path), appliesToDatabase: false }
   }
   return fail('unknown_tool', 'Unknown tool', 404)
