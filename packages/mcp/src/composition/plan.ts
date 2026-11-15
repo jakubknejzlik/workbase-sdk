@@ -76,11 +76,12 @@ async function loadEditedConfig(root: string, inputs: Record<string, Buffer>, fi
       await mkdir(dirname(join(scratch, path)), { recursive: true })
       await writeFile(join(scratch, path), files.get(path) ?? bytes)
     }
-    const loaded = await loadConfig(join(scratch, 'config.ts'))
+    const loadOptions = { sdkResolutionRoot: root }
+    const loaded = await loadConfig(join(scratch, 'config.ts'), loadOptions)
     // Presence in the captured instance graph is the artifact opt-in. Never
     // introduce OpenAPI into an instance that does not already maintain it.
     if (inputs['openapi.json']) {
-      await runOpenApiCli(['--root', scratch, '--write'])
+      await runOpenApiCli(['--root', scratch, '--write'], loadOptions)
       files.set('openapi.json', await readFile(join(scratch, 'openapi.json'), 'utf8'))
     }
     return { config: loaded.config, files: [...files].map(([path, data]) => ({ path, data })) }

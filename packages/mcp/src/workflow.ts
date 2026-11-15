@@ -165,7 +165,8 @@ export class Workflow {
             indexes: bundle.indexes, pendingProposals: pending }
         }
         if (name === 'propose_change') {
-          if (bundle.config.baseline === 'workbase-sdk' && input.changes.every((change: { kind: string }) => change.kind === 'set_locale')) {
+          if (bundle.config.baseline === 'workbase-sdk' && input.changes.some((change: { kind: string }) => change.kind === 'set_locale')) {
+            if (!input.changes.every((change: { kind: string }) => change.kind === 'set_locale')) fail('mixed_change_kinds', 'Propose V3 language changes separately from legacy config changes')
             return proposeComposition(this.store, targetInstance, input.baseRevision, input.changes, proposalId!)
           }
           guardV3LegacyWrite(bundle.config, 'propose', input.changes)

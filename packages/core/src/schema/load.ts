@@ -120,7 +120,7 @@ function entityPath(binding: Binding, entry: string, name: string, directory = '
   }
 }
 /** Only these statements and imports belong to the declaration syntax. */
-function moduleBoundary(file: ts.SourceFile, declaration: ts.Expression, helpers: string[], entityImports = new Set<string>()) {
+function moduleBoundary(file: ts.SourceFile, declaration: ts.Expression, helpers: string[], entityImports = new Set<string>(), isSdk = sdkBinding) {
   for (const statement of file.statements) {
     if (ts.isImportDeclaration(statement)) {
       const clause = statement.importClause
@@ -133,7 +133,7 @@ function moduleBoundary(file: ts.SourceFile, declaration: ts.Expression, helpers
       if (!names.length) fail(statement, 'Expected a direct named SDK or entity import')
       for (const [local, binding] of names) {
         if (entityImports.has(local)) continue
-        if (!helpers.some(name => sdkBinding(binding, file.fileName, name))) fail(statement, 'Expected a direct named SDK or entity import')
+        if (!helpers.some(name => isSdk(binding, file.fileName, name))) fail(statement, 'Expected a direct named SDK or entity import')
       }
       continue
     }
@@ -175,7 +175,7 @@ function remap(error: unknown, sources: SourceMap, prefix = ''): never {
   throw new SourceError(nearest(sources, prefix), error instanceof Error ? error.message : String(error))
 }
 /** Evaluate only literal syntax already accepted by the boundary, never JavaScript code. */
-function literal(node: ts.Expression, bindings: Map<string, Binding>, path: string[] = []): unknown {
+function literal(node: ts.Expression, bindings: Map<string, Binding>, path: string[] = [], isSdk = sdkBinding): unknown {
   node = unwrap(node)
   if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) return node.text
   if (ts.isNumericLiteral(node)) return Number(node.text)
@@ -183,7 +183,7 @@ function literal(node: ts.Expression, bindings: Map<string, Binding>, path: stri
   if (node.kind === ts.SyntaxKind.FalseKeyword) return false
   if (node.kind === ts.SyntaxKind.NullKeyword) return null
   if (ts.isPrefixUnaryExpression(node) && [ts.SyntaxKind.MinusToken, ts.SyntaxKind.PlusToken].includes(node.operator) && ts.isNumericLiteral(node.operand)) return (node.operator === ts.SyntaxKind.MinusToken ? -1 : 1) * Number(node.operand.text)
-  if (ts.isArrayLiteralExpression(node)) return node.elements.map((element, i) => literal(element, bindings, [...path, String(i)]))
+  if (ts.isArrayLiteralExpression(node)) return node.elements.map((element, i) => literal(element, bindings, [...path, String(i)], isSdk))
   if (ts.isObjectLiteralExpression(node)) {
     // Plain objects, as JavaScript evaluation of the same literal would produce.
     const result: Record<string, unknown> = {}
@@ -193,13 +193,13 @@ function literal(node: ts.Expression, bindings: Map<string, Binding>, path: stri
       const name = key(property.name)
       if (name === '__proto__') fail(property, '__proto__ is outside the literal boundary')
       if (Object.hasOwn(result, name)) fail(property, `Duplicate literal property: ${name}`)
-      result[name] = literal(property.initializer, bindings, [...path, name])
+      result[name] = literal(property.initializer, bindings, [...path, name], isSdk)
     }
     return result
   }
   if (ts.isCallExpression(node)) {
     if (path.join('.') === 'fields.user' && ts.isIdentifier(node.expression)
-      && sdkBinding(bindings.get(node.expression.text), node.getSourceFile().fileName, 'accountLink') && !node.arguments.length && !node.typeArguments?.length) return accountLink()
+      && isSdk(bindings.get(node.expression.text), node.getSourceFile().fileName, 'accountLink') && !node.arguments.length && !node.typeArguments?.length) return accountLink()
     return fail(node, 'Function call is outside the literal boundary; only SDK accountLink() at fields.user is allowed')
   }
   return fail(node, 'Expected a literal value; variables and expressions are outside the literal boundary')
@@ -255,6 +255,12 @@ export function configSources(file: string): SourceMap {
   return sources
 }
 
+export interface LoadConfigOptions {
+  /** Original config directory when interpreting a staged graph. Only SDK import
+   * resolution moves; graph reads, source locations and hashes retain staged bytes. */
+  sdkResolutionRoot?: string
+}
+
 /**
  * Interpret literal declarations and return the one kernel schema without executing
  * consumer modules or asking the host runtime to resolve their imports.
@@ -262,8 +268,10 @@ export function configSources(file: string): SourceMap {
  * default or named defineEntity({...}) exports from schema/<entity>.ts.
  * Legacy defineInstance remains available through its existing runtime entry.
  */
-export async function loadConfig(file: string): Promise<{ config: InstanceConfig; sources: SourceMap; configHash: string; authoredAccess: { shared?: AccessInput; entities: Record<string, EntityAccess | undefined> } }> {
+export async function loadConfig(file: string, options: LoadConfigOptions = {}): Promise<{ config: InstanceConfig; sources: SourceMap; configHash: string; authoredAccess: { shared?: AccessInput; entities: Record<string, EntityAccess | undefined> } }> {
   const entry = realpathSync(resolve(file))
+  const isSdk: typeof sdkBinding = (binding, file, name, ...args) => sdkBinding(binding,
+    options.sdkResolutionRoot ? resolve(options.sdkResolutionRoot, relative(dirname(entry), file)) : file, name, ...args)
   const readSet = new Map<string, string>()
   const read = (file: string) => {
     const source = readSource(file)
@@ -277,7 +285,7 @@ export async function loadConfig(file: string): Promise<{ config: InstanceConfig
   let declaration = exportedConfig
   let specImport: string | undefined
   if (declaration && ts.isCallExpression(declaration) && ts.isIdentifier(declaration.expression)
-    && sdkBinding(bindings.get(declaration.expression.text), entry, 'bindOpenApi')) {
+    && isSdk(bindings.get(declaration.expression.text), entry, 'bindOpenApi')) {
     const [inner, spec] = declaration.arguments
     const binding = spec && ts.isIdentifier(spec) ? bindings.get(spec.text) : undefined
     if (declaration.arguments.length !== 2 || !inner || binding?.module !== './openapi.json' || binding.imported !== 'default') fail(declaration, 'bindOpenApi requires a config and an imported ./openapi.json')
@@ -286,7 +294,7 @@ export async function loadConfig(file: string): Promise<{ config: InstanceConfig
   }
   let lockImport: string | undefined
   if (declaration && ts.isCallExpression(declaration) && ts.isIdentifier(declaration.expression)
-    && sdkBinding(bindings.get(declaration.expression.text), entry, 'bindSchemaLock')) {
+    && isSdk(bindings.get(declaration.expression.text), entry, 'bindSchemaLock')) {
     const [inner, lock] = declaration.arguments
     const binding = lock && ts.isIdentifier(lock) ? bindings.get(lock.text) : undefined
     if (declaration.arguments.length !== 2 || !inner || binding?.module !== './schema.lock.json' || binding.imported !== 'default') fail(declaration, 'bindSchemaLock requires defineConfig({...}) and an imported ./schema.lock.json')
@@ -294,7 +302,7 @@ export async function loadConfig(file: string): Promise<{ config: InstanceConfig
     declaration = unwrap(inner)
   }
   if (!declaration || !ts.isCallExpression(declaration) || !ts.isIdentifier(declaration.expression)) fail(source, 'Config must default-export a direct SDK defineConfig({...}) call')
-  if (!sdkBinding(bindings.get(declaration.expression.text), entry, 'defineConfig')) fail(declaration, 'Expected a direct named SDK defineConfig import')
+  if (!isSdk(bindings.get(declaration.expression.text), entry, 'defineConfig')) fail(declaration, 'Expected a direct named SDK defineConfig import')
   const arg = declaration.arguments[0]
   if (declaration.arguments.length !== 1 || !arg || !ts.isObjectLiteralExpression(unwrap(arg))) fail(declaration, 'defineConfig requires a literal object')
   const config = unwrap(arg) as ts.ObjectLiteralExpression
@@ -317,9 +325,9 @@ export async function loadConfig(file: string): Promise<{ config: InstanceConfig
   if (specImport) entityImports.add(specImport)
   // The generated spec is never read here: missing/stale artifacts must remain repairable,
   // and hashing the artifact would make its embedded configHash self-referential.
-  moduleBoundary(source, exportedConfig!, ['defineConfig', 'bindSchemaLock', 'bindOpenApi'], entityImports)
+  moduleBoundary(source, exportedConfig!, ['defineConfig', 'bindSchemaLock', 'bindOpenApi'], entityImports, isSdk)
   const data: Record<string, unknown> = Object.create(null)
-  for (const [name, property] of props) if (name !== 'entities' && name !== 'access') data[name] = literal(value(property)!, new Map())
+  for (const [name, property] of props) if (name !== 'entities' && name !== 'access') data[name] = literal(value(property)!, new Map(), [], isSdk)
   if (accessRef && ts.isIdentifier(accessRef)) {
     const binding = bindings.get(accessRef.text)
     if (!binding || !['./access', './access.ts'].includes(binding.module)) fail(accessRef, 'access must be imported from ./access.ts')
@@ -328,12 +336,12 @@ export async function loadConfig(file: string): Promise<{ config: InstanceConfig
     const expression = exported(accessSource, binding.imported)
     const accessBindings = imports(accessSource)
     if (!expression || !ts.isCallExpression(expression) || !ts.isIdentifier(expression.expression)
-      || !sdkBinding(accessBindings.get(expression.expression.text), path, 'defineAccess')) fail(accessSource, 'Expected an exported defineAccess({...}) declaration')
+      || !isSdk(accessBindings.get(expression.expression.text), path, 'defineAccess')) fail(accessSource, 'Expected an exported defineAccess({...}) declaration')
     const arg = expression.arguments[0]
     if (expression.arguments.length !== 1 || !arg || !ts.isObjectLiteralExpression(unwrap(arg))) fail(expression, 'defineAccess requires a literal object')
-    moduleBoundary(accessSource, expression, ['defineAccess'])
+    moduleBoundary(accessSource, expression, ['defineAccess'], new Set(), isSdk)
     index(arg, 'access', sources)
-    try { data.access = defineAccess(literal(arg, accessBindings) as Parameters<typeof defineAccess>[0]) } catch (error) { remap(error, sources, 'access') }
+    try { data.access = defineAccess(literal(arg, accessBindings, [], isSdk) as Parameters<typeof defineAccess>[0]) } catch (error) { remap(error, sources, 'access') }
   }
   const entities: Record<string, ReturnType<typeof defineEntity>> = Object.create(null)
   for (const [name, property] of properties(entityMap)) {
@@ -347,12 +355,12 @@ export async function loadConfig(file: string): Promise<{ config: InstanceConfig
     const entityBindings = imports(entitySource)
     const expression = exported(entitySource, binding.imported)
     if (!expression || !ts.isCallExpression(expression) || !ts.isIdentifier(expression.expression)
-      || !sdkBinding(entityBindings.get(expression.expression.text), path, 'defineEntity')) fail(entitySource, 'Expected an exported defineEntity({...}) declaration')
+      || !isSdk(entityBindings.get(expression.expression.text), path, 'defineEntity')) fail(entitySource, 'Expected an exported defineEntity({...}) declaration')
     const entity = expression.arguments[0]
     if (expression.arguments.length !== 1 || !entity || !ts.isObjectLiteralExpression(unwrap(entity))) fail(expression, 'defineEntity requires a literal object')
     const prefix = `entities.${name}`
-    const entityData = literal(entity, entityBindings)
-    moduleBoundary(entitySource, expression, ['defineEntity', 'accountLink'])
+    const entityData = literal(entity, entityBindings, [], isSdk)
+    moduleBoundary(entitySource, expression, ['defineEntity', 'accountLink'], new Set(), isSdk)
     index(unwrap(entity), prefix, sources)
     try { entities[name] = defineEntity(entityData as Parameters<typeof defineEntity>[0]) } catch (error) { remap(error, sources, prefix) }
   }
