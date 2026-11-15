@@ -1,3 +1,7 @@
+import type { RowAccessStatus } from '../../../core/src/row-access'
+import { executeQuery } from '../../../core/src/query/executor'
+import { cursorSecret } from '../../../core/src/query/routes'
+import { readableDisplay } from '../../../core/src/query/labels'
 import { invitationRole, latestRowInvitation } from '../../../core/src/worker-access'
 import { actorAccountId } from '../../../core/src/policies'
 import { rowTargetSchema, rowLink, rowInvitationGuard } from './row-invitations'
@@ -133,8 +137,24 @@ export function memberRoutes(app: App, config: InstanceConfig, env: RuntimeEnv) 
     const canInvite = invitePermission && kernelFor(config).can(scope, target.entity, 'create') && !!await env.DB.prepare(`SELECT 1 WHERE ${guard.sql}`).bind(...guard.values).first()
     let canCancel = false
     try { kernelFor(config).resourcePermission(scope, 'invitations.revoke'); organizationPermission(config, scope, 'invitations.revoke'); canCancel = true } catch {}
-    return c.json({ can_cancel: canCancel, state: row.user ? 'signed_in' : invitation ? invitation.expired_at || invitation.expires_at <= nowISO() ? 'expired' : 'invited' : 'no_account',
-      ...(invitation && (canInvite || canCancel) ? { invitation: { id: invitation.id, email: invitation.email, expires_at: invitation.expires_at } } : {}), can_invite: canInvite })
+    // Status itself keeps its existing invitations.read + row read gates. Account
+    // identity additionally needs the link field, target field masks and target
+    // row visibility; never infer disclosure permission from invitation management.
+    const kernel = kernelFor(config)
+    const accountEntity = config.entities[target.entity].fields[link.field].entity!
+    let linkedAccounts: RowAccessStatus['linked_accounts']
+    if (kernel.fieldMask(target.entity, scope).includes(link.field) && kernel.can(scope, accountEntity, 'read') && kernel.fieldMask(accountEntity, scope).includes('id')) {
+      linkedAccounts = []
+      if (row.user) {
+        const display = readableDisplay(kernel, scope, accountEntity)
+        const result = await executeQuery(kernel, scope, env.DB, await cursorSecret(env), {
+          entity: accountEntity, select: ['id', ...(display ? [display] : [])], where: { id: { eq: row.user } }, limit: 1,
+        })
+        linkedAccounts = result.data.map(account => ({ id: account.id, ...(display && account[display] != null ? { label: String(account[display]) } : {}) }))
+      }
+    }
+    return c.json({ inconsistency: null, ...(linkedAccounts ? { linked_accounts: linkedAccounts } : {}), can_cancel: canCancel, state: row.user ? 'signed_in' : invitation ? invitation.expired_at || invitation.expires_at <= nowISO() ? 'expired' : 'invited' : 'no_account',
+      ...(invitation && (canInvite || canCancel) ? { invitation: { id: invitation.id, email: invitation.email, expires_at: invitation.expires_at } } : {}), can_invite: canInvite } satisfies RowAccessStatus)
   })
   app.post('/orgs/:orgId/invitations', scoped, async c => {
     const scope = scopeFor(c, 'invitations.create')

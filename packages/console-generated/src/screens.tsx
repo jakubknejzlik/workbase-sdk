@@ -1,3 +1,4 @@
+import { accountLinkField, accountLinkRelation } from './account-link'
 import { EntityCalendar } from './calendar'
 import { availableCalendar } from './calendar-model'
 import { relationEmptyKey } from './many-to-many'
@@ -21,7 +22,7 @@ import { DetailGroups } from './detail-groups'
 import { detailPlan, detailReadableField } from './detail-plan'
 import { selectedReferenceRow } from './use-selected-references'
 import { shortRecordId } from './labels'
-import { GeneratedRowInvitation, GeneratedInlineEdit, type WriteRequest } from './write-screens'
+import { ApplicationAccessCard, GeneratedRowInvitation, GeneratedInlineEdit, type WriteRequest } from './write-screens'
 const queryCodes = ['query_invalid', 'field_forbidden', 'relation_forbidden', 'query_too_expensive', 'entity_not_found', 'policy_violation'] as const
 export { formatValue } from './labels'
 export function signedValue(row: Record<string, any>, field: Field, value: ReactNode, locale: string): ReactNode {
@@ -43,7 +44,7 @@ function GeneratedDetailPage({ model, caps, orgId, entity, id, request, actions,
   const breadcrumbStatus = !allowed || result.error ? 'unavailable' : result.isPending || result.isFetching ? 'pending' : record?.id === id ? 'ready' : 'unavailable'
   usePublishRecordBreadcrumb({ orgId, entity, id: id!, status: breadcrumbStatus, label: breadcrumbStatus === 'ready' ? breadcrumbRecordLabel(model, entity, record!, caps, i18n.language, t) : undefined })
   const includedFields = Object.keys(query.include ?? {}).map(name => definition.relations[name].field)
-  const hydrated = useRelationLabels(model, entity, caps, orgId, plan ? [] : projection(model, entity, caps).filter(field => !includedFields.includes(field)), result.data?.data ?? [], request)
+  const hydrated = useRelationLabels(model, entity, caps, orgId, plan ? [] : projection(model, entity, caps).filter(field => !accountLinkField(model, entity, field) && !includedFields.includes(field)), result.data?.data ?? [], request)
   const fieldLabel = (field: string) => t(`field_${field}`)
   const rowName = (target: string, row: Record<string, any>) => recordLabel(model, target, row, caps, i18n.language, t)
   const rowLink = (target: string, row: Record<string, any>, name = false) => <Link data-row-name={name ? '' : undefined} to="/o/$orgId/e/$entity/$id" params={{ orgId, entity: target, id: String(row.id) }}>{rowName(target, row)}</Link>
@@ -70,7 +71,7 @@ function GeneratedDetailPage({ model, caps, orgId, entity, id, request, actions,
   if (id && result.data && !result.data.data.length) return notFound()
   const code = (result.error as { code?: string } | null)?.code
   const error = result.error ? new Error(t(queryCodes.includes(code as any) ? `query_${code}` : 'requestFailed')) : null
-  const readable = projection(model, entity, caps)
+  const readable = projection(model, entity, caps).filter(field => !accountLinkField(model, entity, field))
   if (id) {
     const row = result.data?.data[0]
     const edit = (field: string, content: ReactNode, label: string) => row && write ? <GeneratedInlineEdit key={field} model={model} caps={caps} orgId={orgId} entity={entity} request={request} write={write} onDenied={onDenied} row={row} field={field} label={label} value={content} refresh={async () => {
@@ -88,10 +89,10 @@ function GeneratedDetailPage({ model, caps, orgId, entity, id, request, actions,
         </div>)}</dl>}
         <DetailCards sections={definition.detail?.sections} cards={[
           { key: 'info', content: <Card className="min-w-0">{informationTitle && <CardHeader><CardTitle>{informationTitle}</CardTitle></CardHeader>}<CardContent>{information}</CardContent></Card> },
-          ...(definition.rowInvitations && write ? [{ key: '_row_access', content: <Card><CardHeader><CardTitle>{t('rowAccess')}</CardTitle></CardHeader><CardContent><GeneratedRowInvitation model={model} caps={caps} orgId={orgId} entity={entity} request={request} write={write} onDenied={onDenied} row={row} /></CardContent></Card> }] : []),
-          ...(plan?.relations ?? readableRelations(model, entity, caps).filter(([, relation]) => relation.cardinality === '1:n' || (separateRelations(model) || definition.detail || Object.values(definition.relations).some(relation => relation.through)) && !(definition.detail?.fields ?? readable).includes(relation.field))).filter(([name]) => !definition.detail?.lists?.[name]).map(([name, relation]) => ({ key: name, content: <SeparateRelation model={model} caps={caps} orgId={orgId} entity={entity} name={name} row={row} request={request} link={related => rowLink(relation.entity, related)} /> })),
+          ...(definition.accountLink ? [{ key: '_row_access', content: <ApplicationAccessCard model={model} caps={caps} orgId={orgId} entity={entity} request={request} write={write} onDenied={onDenied} row={row} /> }] : []),
+          ...(plan?.relations ?? readableRelations(model, entity, caps).filter(([, relation]) => relation.cardinality === '1:n' || (separateRelations(model) || definition.detail || Object.values(definition.relations).some(relation => relation.through)) && !(definition.detail?.fields ?? readable).includes(relation.field))).filter(([name, relation]) => !accountLinkRelation(model, entity, relation) && !definition.detail?.lists?.[name]).map(([name, relation]) => ({ key: name, content: <SeparateRelation model={model} caps={caps} orgId={orgId} entity={entity} name={name} row={row} request={request} link={related => rowLink(relation.entity, related)} /> })),
           ...Object.entries(definition.detail?.lists ?? {}).filter(([, list]) => caps.entities[list.entity]?.operations.includes('read') && caps.entities[list.entity]?.readable.includes('id') && caps.entities[list.entity]?.readable.includes(list.bind.field)).map(([name, list]) => ({ key: name, content: <ContextList key={`${entity}/${row.id}/${name}`} model={model} caps={caps} orgId={orgId} entity={entity} id={String(row.id)} name={name} request={request} create={embeddedCreate} /> })),
-          ...Object.entries(query.include ?? {}).map(([name, selection]) => { const relation = definition.relations[name]; const rows = row[name] ? Array.isArray(row[name]) ? row[name] : [row[name]] : []
+          ...Object.entries(query.include ?? {}).filter(([name]) => !accountLinkRelation(model, entity, definition.relations[name])).map(([name, selection]) => { const relation = definition.relations[name]; const rows = row[name] ? Array.isArray(row[name]) ? row[name] : [row[name]] : []
           return { key: name, content: <Card className="c2-relations"><CardHeader><CardTitle className="flex flex-wrap items-center gap-2"><h2>{t(`relation_${name}`)}</h2><Badge variant="secondary">{rows.length}{relation.cardinality === '1:n' && rows.length >= (selection.limit ?? Infinity) ? '+' : ''}</Badge></CardTitle></CardHeader><CardContent className="space-y-3">{rows.length ? <ul>{rows.map((related: Record<string, any>) => <li key={related.id}>{rowLink(relation.entity, related)}</li>)}</ul> : <p>{relationEmptyText(entity, name, relation.through?.entity ?? relation.entity, t)}</p>}{relation.cardinality === '1:n' && <p>{t('relatedLimit', { count: selection.limit })}</p>}</CardContent></Card> }
         })]} />
       </>}</QueryBoundary>

@@ -1,5 +1,6 @@
 import type { ConsoleDetailItem } from '../../plugins/console/src/contract'
 import type { Capabilities, Model } from './read'
+import { accountLinkField, accountLinkRelation } from './account-link'
 
 export function detailReadableField(model: Model, name: string, caps: Capabilities, field: string, allowLabel = true): boolean {
   const target = model.entities[name]
@@ -17,12 +18,12 @@ export function detailPlan(model: Model, entity: string, caps: Capabilities) {
   const definition = model.entities[entity]; const detail = definition.detail
   if (!detail?.groups) return undefined
   const readable = (name: string, field: string) => detailReadableField(model, name, caps, field)
-  const items = (items: ConsoleDetailItem[]) => items.map(detailItem).filter(item => readable(entity, item.field) && (!item.when || readable(entity, item.when.field)) && (!definition.fields[item.field]?.ui?.signedBy || readable(entity, definition.fields[item.field].ui!.signedBy!.field)))
+  const items = (items: ConsoleDetailItem[]) => items.map(detailItem).filter(item => !accountLinkField(model, entity, item.field) && readable(entity, item.field) && (!item.when || readable(entity, item.when.field)) && (!definition.fields[item.field]?.ui?.signedBy || readable(entity, definition.fields[item.field].ui!.signedBy!.field)))
   const summary = items(detail.summary ?? [])
   const groups = detail.groups.map(group => ({ ...group, fields: items(group.fields) })).filter(group => group.fields.length)
-  const metrics = (detail.metrics ?? []).filter(metric => readable(entity, metric.field) && (!metric.unitField || caps.entities[entity]?.readable.includes(metric.unitField)))
+  const metrics = (detail.metrics ?? []).filter(metric => !accountLinkField(model, entity, metric.field) && readable(entity, metric.field) && (!metric.unitField || caps.entities[entity]?.readable.includes(metric.unitField)))
   const relations = Object.entries(definition.relations).filter(([name, relation]) => {
-    if (!Object.hasOwn(detail.relations ?? {}, name)) return false
+    if (accountLinkRelation(model, entity, relation) || !Object.hasOwn(detail.relations ?? {}, name)) return false
     const target = caps.entities[relation.entity]
     return target?.operations.includes('read') && target.readable.includes('id') && caps.entities[relation.cardinality === '1:n' ? relation.entity : entity]?.readable.includes(relation.field)
       && (!relation.through || caps.entities[relation.through.entity]?.operations.includes('read') && caps.entities[relation.through.entity]?.readable.includes('id') && target.readable.includes(relation.through.field))
@@ -35,7 +36,7 @@ export function detailPlan(model: Model, entity: string, caps: Capabilities) {
     ...fields.flatMap(item => [item.field, ...item.when ? [item.when.field] : [], ...definition.fields[item.field]?.ui?.signedBy ? [definition.fields[item.field].ui!.signedBy!.field] : []]),
     ...metrics.flatMap(metric => [metric.field, ...metric.unitField ? [metric.unitField] : []]),
     ...relations.filter(([, relation]) => relation.cardinality !== '1:n').map(([, relation]) => relation.field),
-  ])].filter(field => caps.entities[entity]?.readable.includes(field))
+  ])].filter(field => !accountLinkField(model, entity, field) && caps.entities[entity]?.readable.includes(field))
   const labels = fields.filter(item => definition.fields[item.field]?.type === 'ref').map(item => item.field)
   return { summary, groups, metrics, relations, select, labels: [...new Set(labels)] }
 }

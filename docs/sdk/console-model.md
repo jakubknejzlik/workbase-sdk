@@ -61,9 +61,30 @@ Each entity provides:
   `columns`, configured `listColumns`, `listLimit`, route templates and the
   configured list/form/detail/section/calendar/lookup hints.
 
-The document contains only authorized metadata. Read fields, enum choices and
-labels, columns, checks, indexes, relation/FK targets, display fields and expression
-dependencies require live read access to every referenced field/entity. Reference
+For an entity with `userLink`, `accountLink: { field, entity }` describes the
+protected FK and its target independently of invitation or account read rights.
+This structural marker remains present when the FK/target is absent from readable
+metadata. It grants no access to field values. `rowAccess` reports whether Members
+status can be read under the current grants; `rowInvitations` retains its existing
+invitation-management meaning. Generated detail uses one Application access card
+and excludes the FK and all matching to-one relation aliases from generic fields,
+groups and relation cards. Other references to the same target remain visible.
+
+Members `GET /orgs/:orgId/row-access/:entity/:rowId` keeps invitation-read and
+source-row read gates. It adds `inconsistency` (`null` or
+`multiple_linked_accounts`) and optional `linked_accounts` entries with `id` and
+an authorized display `label`. Identity disclosure also requires the link field,
+target read/masks and target row visibility. Status-only readers can receive
+`signed_in` without an account identity. `signed_in` means a linked account, not a
+recent login. Current scalar storage returns at most one summary; invitation
+history is not a source of multiple linked accounts. The card defensively warns
+and withholds account actions for an explicit inconsistency or multiple summaries.
+Loading, denied, missing and failed status remain distinct from no access.
+Create/edit invitation controls and email prefill are outside this detail slice.
+
+Read/write metadata retains its existing authorization requirements. Read fields,
+enum choices and labels, columns, checks, indexes, relation/FK targets, display
+fields and expression dependencies require live read access to every referenced field/entity. Reference
 fields also require a readable target ID; a source mask alone cannot authorize
 target literals, predicates or ordering. A check or index with any excluded field
 is omitted. Create/update schema properties and

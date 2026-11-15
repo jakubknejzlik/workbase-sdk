@@ -1,3 +1,5 @@
+import type { RowAccessStatus } from '../../core/src/row-access'
+import { Card, CardHeader, CardTitle, CardContent } from '@workbasehq/ui/components/ui/card'
 import { Badge } from '@workbasehq/ui/components/ui/badge'
 import { editableManyRelations, memberships, syncMemberships } from './many-to-many'
 import { ManyRelationField } from './many-relation-field'
@@ -69,7 +71,7 @@ export function GeneratedActions(props: Context & { row?: Record<string, any> })
     {createCommand && <CreateCommandDialog {...props} command={createCommand} />}
     {(!row ? ['create'] : ['update']).filter(operation => operations.includes(operation) && (operation !== 'update' || caps.entities[entity].readable.includes('version'))).map(operation => <ResourceFormDialog entity={entity} outcome={row ? 'updated' : 'created'} schema={writeSchema(model, entity, caps, row ? 'edit' : 'create')} compact={!!row} key={operation} trigger={operation === 'create' ? createLabel : t('edit', { context: '' })} triggerIcon={row ? 'edit' : undefined} triggerVariant={row ? 'secondary' : undefined} title={t(operation === 'create' ? 'createEntity' : 'editEntity', { entity: t(`entitySingular_${entity}`) })} description={t(operation === 'create' ? 'createEntityDescription' : 'editEntityDescription', { entity: t(`entitySingular_${entity}`) })} cancelLabel={t('cancel')}>{controls => <EntityMutation {...props} row={row} controls={controls} />}</ResourceFormDialog>)}
     {row && operations.includes('delete') && <ResourceDeleteDialog entity={entity} entityType={t(`entity_${entity}`, { defaultValue: entity })} entityName={recordLabel(model, entity, row, caps, i18n.language, t)} targetDescription={t('deleteTarget')} warningMessage={t('deleteDescription')} confirmText={t('delete')} compact trigger={t('delete', { context: '' })} triggerIcon="delete" triggerVariant="destructive" title={t('deleteRecord')} description={t('deleteDescription')} cancelLabel={t('cancel')} destructive>{controls => <DeleteMutation {...props} row={row} close={controls.close} />}</ResourceDeleteDialog>}
-    {row ? commandDefinitions(model, entity, caps).filter(command => !!commandRowField(command, entity) && !(model.entities[entity].rowInvitations && command.name === `${entity}/remove_access`)).map(command => {
+    {row ? commandDefinitions(model, entity, caps).filter(command => !!commandRowField(command, entity) && !(model.entities[entity].accountLink && [`${entity}/link_account`, `${entity}/remove_access`].includes(command.name)) && !(model.entities[entity].rowInvitations && command.name === `${entity}/remove_access`)).map(command => {
       const replacement = command.ui?.replacesCrud
       const label = commandLabel(command, i18n.language, t)
       return <ResourceFormDialog entity={command.permission.entity} outcome={command.name.endsWith('/create') ? 'created' : command.name.endsWith('/delete') ? 'deleted' : undefined} schema={commandFormSchema(command.inputSchema)} compact key={command.name}
@@ -274,32 +276,44 @@ export function ContextCreateAction(props: Context & { lockedValues: Record<stri
   return <><Button onClick={() => setOpen(true)}>{resourceCreateLabel(props.model, props.entity, i18n.language, t, props.caps)}</Button><GeneratedCreateDialog {...props} open={open} onOpenChange={setOpen} /></>
 }
 
-interface RowAccess {
-  state: 'invited' | 'expired' | 'signed_in' | 'no_account'
-  can_invite: boolean; can_cancel: boolean
-  invitation?: { id: string; email: string; expires_at: string }
-}
-/** Status is read from the server; the protected field is never submitted by a form. */
+type AccessContext = Omit<Context, 'write'> & { write?: WriteRequest; row: Record<string, any>; disabled?: boolean }
+
+/** The same status controller/view serves the compact list and the detail card. */
 export function GeneratedRowInvitation(props: Context & { row: Record<string, any>; disabled?: boolean }) {
-  const enabled = !props.disabled && !!props.model.entities[props.entity]?.rowInvitations
+  return props.disabled || !props.model.entities[props.entity]?.rowInvitations ? null : <ApplicationAccess {...props} />
+}
+export function ApplicationAccessCard(props: AccessContext) {
   const { t } = useTranslation()
-  const status = useQuery<RowAccess>({ queryKey: ['row-access', props.orgId, props.entity, props.row.id, props.caps],
-    queryFn: () => props.write(`/orgs/${encodeURIComponent(props.orgId)}/row-access/${encodeURIComponent(props.entity)}/${encodeURIComponent(props.row.id)}`, 'GET'), enabled, retry: false })
-  if (!enabled) return null
-  if (status.error) return <span role="alert">{t('requestFailed')}</span>
-  if (!status.data) return <span role="status">{t('loading')}</span>
+  return <Card data-application-access=""><CardHeader><CardTitle>{t('rowAccess')}</CardTitle></CardHeader><CardContent><ApplicationAccess {...props} /></CardContent></Card>
+}
+function ApplicationAccess(props: AccessContext) {
+  const definition = props.model.entities[props.entity]
+  const enabled = !props.disabled && !!props.write && !!(definition?.rowAccess ?? definition?.rowInvitations)
+  const { t } = useTranslation()
+  const status = useQuery<RowAccessStatus>({ queryKey: ['row-access', props.orgId, props.entity, props.row.id, props.caps],
+    queryFn: () => props.write!(`/orgs/${encodeURIComponent(props.orgId)}/row-access/${encodeURIComponent(props.entity)}/${encodeURIComponent(props.row.id)}`, 'GET'), enabled, retry: false })
+  if (!enabled) return <span role="status">{t('rowAccessUnavailable')}</span>
+  if (status.error) {
+    const code = (status.error as { status?: number }).status
+    return <span role="alert">{t(code === 403 ? 'rowAccessDenied' : code === 404 ? 'rowAccessUnavailable' : 'requestFailed')}</span>
+  }
+  if (status.isFetching || !status.data) return <span role="status">{t('loading')}</span>
   const data = status.data
+  if (data.inconsistency === 'multiple_linked_accounts' || (data.linked_accounts?.length ?? 0) > 1) return <span role="alert">{t('rowAccessMultiple')}</span>
+  if (!['no_account', 'invited', 'expired', 'signed_in'].includes(data.state) || data.inconsistency != null) return <span role="alert">{t('requestFailed')}</span>
   const pending = data.invitation
-  const actions = props.disabled ? [] : data.state === 'no_account' && data.can_invite ? ['invite'] : ['invited', 'expired'].includes(data.state) && pending
+  const account = data.linked_accounts?.[0]
+  const actions = props.disabled || !props.write ? [] : data.state === 'no_account' && data.can_invite ? ['invite'] : ['invited', 'expired'].includes(data.state) && pending
     ? [...(data.can_invite ? ['resend', ...(data.state === 'invited' ? ['copy'] : [])] : []), ...(data.can_cancel ? ['cancel'] : [])]
     : data.state === 'signed_in' && props.caps.commands?.includes(`${props.entity}/remove_access`) ? ['remove'] : []
   return <div className="flex flex-wrap items-center gap-2" aria-label={t('rowAccess')}>
     <Badge role="status" variant="secondary" className={data.state === 'expired' ? 'bg-red-100 text-red-800' : data.state === 'invited' ? 'bg-amber-100 text-amber-800' : data.state === 'signed_in' ? 'bg-green-100 text-green-800' : undefined}>{t(`rowAccess_${data.state}`)}</Badge>
+    {account && <span className="text-sm break-all">{account.label ?? account.id}</span>}
     {pending && <span className="text-sm break-all">{pending.email}</span>}
     {actions.map(action => <ResourceFormDialog key={action} entity={props.entity} compact
       schema={action === 'invite' ? rowInviteSchema : emptyRowSchema} trigger={t(`rowInvite_${action}`)} triggerLabel={t(`rowInvite_${action}`)}
       title={t(`rowInvite_${action}`)} description={t(action === 'remove' ? 'rowInviteRemoveDescription' : 'rowInviteDescription')} cancelLabel={t('cancel')}>
-      {controls => <RowInvitationMutation {...props} action={action} invitationId={pending?.id} controls={controls} />}
+      {controls => <RowInvitationMutation {...props} write={props.write!} action={action} invitationId={pending?.id} controls={controls} />}
     </ResourceFormDialog>)}
   </div>
 }
