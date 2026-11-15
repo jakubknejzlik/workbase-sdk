@@ -21,10 +21,13 @@ effective access is unchanged.
 - Executable bodies: hooks, command plans, workflow run/recover/compensation bodies,
   input validators, named predicates and whatever config they read.
 - Runtime data: credentials, memberships, actor attributes, rows.
-- Any SDK enforcement read not listed below; the list is curated, not derived.
+- Unexercised enforcement branches: the recorder checks the scenarios described
+  below, rather than proving coverage of every possible SDK execution path.
 
-Completeness by construction is tracked in
-[workbase-sdk#20](https://github.com/jakubknejzlik/workbase-sdk/issues/20).
+The exercised read-set and the display/workflow coverage follow-up are described
+in [workbase-sdk#20](https://github.com/jakubknejzlik/workbase-sdk/issues/20). A
+single normalized enforcement value remains a possible future design, rather
+than a completeness guarantee of this lock.
 
 For this repository's synthetic config-era fixture:
 
@@ -88,8 +91,8 @@ name the workflow, step, role and changed permission with registration source;
 removal retains the previous source. Workflow occurrences are separate from
 `effectiveAccess.guards`: sharing an operation name never registers or overrides a
 command guard. Scheduling/control metadata beyond these listed fields is outside
-this projection. The independent enforcement read-set recorder remains tracked in
-#20; this slice does not establish a mechanically checked coverage invariant.
+this projection. The test-only recorder checks the exercised operation-authorization
+paths against the serialized occurrences, separately from command guards.
 
 Normalized entity `displayField` selectors and supported structured labels (via
 `label.serialize()`) are included, along with `ui.entities.*.list.relatedColumns`,
@@ -99,6 +102,52 @@ Runtime expression/label resolvers continue to decide readability and SQL maskin
 the audit does not derive dependencies or grants independently. This covers the
 supported normalized/runtime label form; `defineEntity` still rejects inline labels.
 Only related-column bindings are projected from UI config, not presentation settings.
+
+## Independent enforcement read-set check
+
+`packages/core/test/infra/access-read-set.test.ts` instruments fresh composed
+configs, plugins and command/workflow/provider registries. It exercises actor and
+account projection, row/write policies, deny/intersection and field masks, command
+and workflow forward/compensation guards, capabilities, computed dependencies,
+structured/transitive labels, related columns, query validation and SQL compilation.
+The same scenarios run with plugin workflows, supplied runtime registries and an
+environment workflow factory. Workflow scheduling/control paths and arbitrary
+executable bodies are outside these scenarios.
+
+The recorder captures property reads (including absent properties), enumeration
+and membership. Map adapters retain native receivers and instrument iterator
+values, including empty-registry enumeration. Replacement config identities are
+bound to the original kernel; each scenario starts with fresh configs/expressions
+so caches cannot conceal the initial reads. Structured label library objects are
+recorded as their complete serialized wire at the config boundary, preserving their
+method receivers and caches. The fixture uses custom plugin descriptors; builtin
+plugin provenance, which uses WeakSet identity, is not reclassified by instrumentation.
+
+A separate test adapter maps observed paths to **parsed lock values**, including
+workflow occurrence IDs/roles and command guard names. It does not import
+`enforcementInputs` or record serialization reads. Leaf values and dictionary
+membership must match; a covered parent cannot excuse an unrepresented leaf.
+Negative tests add a temporary input read by an actual plugin guard, query an
+unrepresented absent property and remove serialized leaves. They must fail with
+the scenario, read kind and config/registry path. Production enforcement needs no
+instrumentation hook.
+
+The explicit exception manifest lives beside the tests and is limited to:
+
+- `config.revision`: capability response metadata, without authorization effects.
+- `config.commands` and its array indices/length: the capability advertisement
+  filter. Actual execution permissions are checked against the separately
+  serialized guard registry; supplied runtime commands can be guarded without
+  being advertised. The lock does not distinguish that publication subset.
+- `commands.<name>.plan` and each workflow operation occurrence's `.plan`: the
+  operation-name resolver inspects executable plan presence; bodies remain opaque.
+- Absent `toJSON` protocol lookups beneath effective/compatibility row predicates:
+  these come from `JSON.stringify`, without a custom serializer.
+
+There is no exception for arbitrary unlisted enforcement inputs. New exercised
+reads require a matching serialized projection/mapping or a precise, justified
+exception. This establishes coverage for the exercised read-set, not completeness
+by construction or coverage of absent runtime compositions.
 
 Covered inputs (not exhaustive; see Scope above). Read sites as of this change, under `packages/core/src`:
 
