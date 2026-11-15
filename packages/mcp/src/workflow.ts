@@ -118,7 +118,7 @@ export class Workflow {
         return await this.store.lockedProposal(targetInstance, async recover => {
           const p = parseProposal((await this.store.find(input.proposalId)).proposal)
           if (p.kind !== 'composition_change' || p.instance !== targetInstance || p.proposalId !== input.proposalId) fail('invalid_proposal', 'Proposal identity mismatch', 409)
-          return executeComposition(this.store, p, name, input, recover, signal)
+          return executeComposition(this.store, p, name, input, recover, signal, this.github)
         })
       }
       return await this.store.locked(targetInstance, async () => {

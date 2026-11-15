@@ -136,7 +136,7 @@ async function dependencyHash(path: string) {
   const bytes = await fileBytes(path)
   return bytes === null ? null : byteHash(bytes)
 }
-const transactionPath = z.string().regex(/^(runtime\.ts|package\.json|bun\.lock|config(?:\.v[1-9][0-9]*)?\.ts|config\.(?:indexes|versions)\.json|migrations\/\d{4}_[a-z0-9_]+\.sql|proposals\/[a-f0-9-]+\.json)$/)
+const transactionPath = z.string().regex(/^(runtime\.ts|access\.lock\.(?:json|md)|package\.json|bun\.lock|config(?:\.v[1-9][0-9]*)?\.ts|config\.(?:indexes|versions)\.json|migrations\/\d{4}_[a-z0-9_]+\.sql|proposals\/[a-f0-9-]+\.json)$/)
 const digest = z.string().regex(/^[a-f0-9]{64}$/)
 const base64 = z.string().refine(value => Buffer.from(value, 'base64').toString('base64') === value)
 const identityPart = z.union([z.string().regex(/^(0|[1-9][0-9]*)$/), z.number().int().nonnegative().transform(String)])
@@ -455,7 +455,7 @@ export class Store {
     const sources: Record<string, string> = {}
     for (const name of names) { await noLink(join(dir, name)); sources[name] = await readFile(join(dir, name), 'utf8') }
     // Hash the complete tracked graph before evaluating either entrypoint.
-    const inputs = await replaySources(dir)
+    const inputs = await replaySources(dir, { accessLock: true })
     const runtimeSource = inputs['runtime.ts']?.toString('utf8')
     if (options.canonicalRuntime && runtimeSource === undefined) fail('runtime_not_canonical', 'runtime.ts is required for composition changes')
     // Interpret before any runtime import; custom expressions must never execute
@@ -858,7 +858,7 @@ export class Store {
         ...Object.keys(expected),
         // Composition publication must also reject newly added authored graph
         // inputs, as well as edits/deletions of the originally guarded paths.
-        ...(Object.hasOwn(guards, 'runtime.ts') ? Object.keys(await replaySources(dir)) : []),
+        ...(Object.hasOwn(guards, 'runtime.ts') ? Object.keys(await replaySources(dir, { accessLock: true })) : []),
         ...(await readdir(dir)).filter(n => /^config(?:\.[a-z0-9_-]+)?\.(ts|json)$/.test(n)),
         ...(await readdir(join(dir, 'migrations'))).filter(n => n !== '.gitkeep').map(n => `migrations/${n}`),
       ])

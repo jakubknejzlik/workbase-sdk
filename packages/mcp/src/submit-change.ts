@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { z } from 'zod'
 import { hash } from './planning.ts'
-import { fail, type Change } from './schemas.ts'
+import { fail, type Change, type CompositionChange } from './schemas.ts'
 import { noLink } from './storage.ts'
 import type { GitHubConfiguration, CheckRun } from './github.ts'
 
@@ -10,22 +10,23 @@ export const promotedFilesSchema = z.array(z.strictObject({ path: z.string(), da
 export type PromotedFiles = z.infer<typeof promotedFilesSchema>
 export const migrationPreviewSchema = z.strictObject({ sql: z.string(), configDiff: z.unknown(), revision: z.number().int() })
 type Submission = {
-  proposalId: string; instance: string; createdAt: string; baseRevision: number; promotedRevision?: number; migration?: string
-  changes: Change[]; status: string; validation?: { fingerprint: string; planHash: string; dependencyDigest?: string }; verification?: { fingerprint: string; planHash: string; dependencyDigest?: string }
+  kind?: 'config_change' | 'composition_change'; proposalId: string; instance: string; createdAt: string; baseRevision: number; promotedRevision?: number; migration?: string
+  changes: (Change | CompositionChange)[]; status: string; validation?: { fingerprint: string; planHash: string; dependencyDigest?: string }; verification?: { fingerprint: string; planHash: string; dependencyDigest?: string }
   dependencyDigest?: string; promotedFiles?: PromotedFiles; migrationPreview?: z.infer<typeof migrationPreviewSchema>; promotionHash?: string
 }
 export function promotionHash(p: Submission) {
   return hash({ files: p.promotedFiles, preview: p.migrationPreview, verification: p.verification, ...(p.dependencyDigest !== undefined ? { dependencyDigest: p.dependencyDigest } : {}) })
 }
-const changeLabels: Record<Change['kind'], string> = {
+const changeLabels: Record<Change['kind'] | CompositionChange['kind'], string> = {
+  set_plugin: 'Úprava pluginu', set_interactive: 'Úprava interactive',
   set_label: 'Úprava popisku', set_locale: 'Úprava jazyka', add_role: 'Přidání role', remove_role: 'Odebrání role',
   set_permissions: 'Úprava oprávnění', set_organization_permissions: 'Úprava oprávnění organizace',
   add_entity: 'Přidání entity', set_policy: 'Úprava pravidla přístupu', set_display_field: 'Úprava zobrazeného názvu',
   add_field: 'Přidání pole', add_computed_field: 'Přidání vypočteného pole', set_computed_field: 'Úprava výpočtu pole',
   rename_field: 'Přejmenování pole', add_relation: 'Přidání vazby', add_user_link: 'Přidání vazby na uživatele', add_index: 'Přidání indexu',
 }
-function changeSummary(change: Change) {
-  const details = ['entity' in change ? change.entity : '', 'field' in change ? change.field : '', 'role' in change ? change.role : '',
+function changeSummary(change: Change | CompositionChange) {
+  const details = ['plugin' in change ? change.plugin : '', 'interactive' in change ? String(change.interactive) : '', 'entity' in change ? change.entity : '', 'field' in change ? change.field : '', 'role' in change ? change.role : '',
     'from' in change ? `${change.from} → ${change.to}` : ''].filter(Boolean).join(' / ')
   return `- ${changeLabels[change.kind]}${details ? `: ${details}` : ''}`
 }
@@ -37,7 +38,7 @@ export async function submitChange(directory: string, p: Submission, expectedBas
   if (p.status !== 'promoted') fail('promotion_required', 'Změna musí být nejprve povýšena pomocí promote.', 409)
   if (!p.validation || !p.verification || hash(p.validation) !== hash(p.verification)) fail('verification_required', 'Chybí ověření této změny.', 409)
   if (!p.promotedFiles || !p.migrationPreview || p.promotionHash !== promotionHash(p)) fail('promotion_snapshot_required', 'Chybí platný záznam souborů povýšené změny.', 409)
-  const allowed = new Set(['config.ts', 'config.indexes.json', 'config.versions.json', `config.v${p.baseRevision}.ts`, `config.v${p.promotedRevision}.ts`, `migrations/${p.migration}`])
+  const allowed = new Set(p.kind === 'composition_change' ? ['runtime.ts', 'access.lock.json', 'access.lock.md'] : ['config.ts', 'config.indexes.json', 'config.versions.json', `config.v${p.baseRevision}.ts`, `config.v${p.promotedRevision}.ts`, `migrations/${p.migration}`])
   const paths = new Set<string>()
   for (const file of p.promotedFiles) {
     if (!allowed.has(file.path) || paths.has(file.path)) fail('file_not_allowed', 'Změna obsahuje soubor mimo povolený seznam.', 409)
@@ -93,7 +94,8 @@ export async function submitChange(directory: string, p: Submission, expectedBas
   const prs = await github.findPullRequests(branch)
   if (prs.length > 1) fail('submission_conflict', 'Pro tuto změnu existuje více PR.', 409)
   const title = `Změna konfigurace instance ${p.instance}`
-  const body = `## Shrnutí změny\n\nInstance ${p.instance}, revize ${p.baseRevision} → ${p.promotedRevision}.\n\n${p.changes.map(changeSummary).join('\n')}\n\nZměny konfigurace:\n\n\`\`\`json\n${JSON.stringify(p.migrationPreview.configDiff, null, 2)}\n\`\`\`\n\nSoubory změny:\n${p.promotedFiles.map(f => `- ${f.path}`).join('\n')}\n\n## Shrnutí migrace\n\nMigrace ${p.migration}:\n\n\`\`\`sql\n${p.migrationPreview.sql}\n\`\`\`\n\nPR čeká na kontrolu. Tento nástroj neslučuje PR ani nenasazuje změnu.`
+  const migrationSummary = p.kind === 'composition_change' ? 'Kroky pluginů se provedou při nasazení; revize domény se nemění.' : `Migrace ${p.migration}:`
+  const body = `## Shrnutí změny\n\nInstance ${p.instance}, revize ${p.baseRevision} → ${p.promotedRevision}.\n\n${p.changes.map(changeSummary).join('\n')}\n\nZměny konfigurace:\n\n\`\`\`json\n${JSON.stringify(p.migrationPreview.configDiff, null, 2)}\n\`\`\`\n\nSoubory změny:\n${p.promotedFiles.map(f => `- ${f.path}`).join('\n')}\n\n## Shrnutí migrace\n\n${migrationSummary}\n\n\`\`\`sql\n${p.migrationPreview.sql}\n\`\`\`\n\nPR čeká na kontrolu. Tento nástroj neslučuje PR ani nenasazuje změnu.`
   let pr = prs[0]
   if (!pr) {
     pr = await github.createPullRequest(branch, target.baseBranch, title, body, assertDependenciesUnchanged)

@@ -23,7 +23,8 @@ const compositionProposalSchema = z.strictObject({
   status: z.enum(['proposed', 'validated', 'verified', 'promoted', 'discarded']),
   changes: z.array(compositionChangeSchema).min(1).max(50),
   validation: proofSchema.optional(), verification: proofSchema.optional(),
-  promotedFiles: promotedFilesSchema.optional(),
+  promotedFiles: promotedFilesSchema.optional(), migrationPreview: migrationPreviewSchema.optional(), promotionHash: z.string().optional(),
+  dependencyDigest: z.string().optional(), promotedRevision: z.number().int().optional(),
 })
 const digest = z.string().regex(/^[a-f0-9]{64}$/).refine(value => !/\s/.test(value))
 const packageName = z.enum(['@workbasehq/core', '@workbasehq/plugins', '@workbasehq/mcp'])
