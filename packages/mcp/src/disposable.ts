@@ -73,8 +73,10 @@ async function sqliteFiles(dir: string): Promise<string[]> {
 }
 export function compare(expected: ReturnType<typeof snapshot>, actual: ReturnType<typeof snapshot>) {
   const diffs: unknown[] = []
-  for (const name of new Set([...expected.map(r => r.name), ...actual.map(r => r.name)])) {
-    const a = expected.find(r => r.name === name), b = actual.find(r => r.name === name)
+  // Triggers have their own SQLite namespace and may share a table/index name.
+  const objects = new Map([...expected, ...actual].map(row => [JSON.stringify([row.type, row.name]), row]))
+  for (const { type, name } of objects.values()) {
+    const a = expected.find(r => r.type === type && r.name === name), b = actual.find(r => r.type === type && r.name === name)
     if (JSON.stringify(a) !== JSON.stringify(b)) diffs.push({ name, expected: a ?? null, actual: b ?? null })
   }
   return diffs

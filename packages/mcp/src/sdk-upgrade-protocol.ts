@@ -1,4 +1,4 @@
-import { replayMessages, type ReplayErrorKind } from './migration-replay.ts'
+import { engineFailureCodes, replayMessages, type ReplayErrorKind } from './migration-replay.ts'
 import { z } from 'zod'
 import { createHash } from 'node:crypto'
 import { lstat, readFile, realpath } from 'node:fs/promises'
@@ -25,6 +25,7 @@ export const requestSchema = z.strictObject({
 }).refine(value => (value.action === 'verify') === !!value.stage, 'Only verification has a bound stage')
 export const replayFailureSchema = z.strictObject({
   identity: identitySchema, inputHashes: inputHashesSchema,
+  code: z.enum(['migration_replay_failed', ...engineFailureCodes]),
   diagnostic: z.strictObject({ file: z.string().min(1).max(512), migration: z.string().min(1).max(256), kind: z.enum(Object.keys(replayMessages) as [ReplayErrorKind, ...ReplayErrorKind[]]), sqlError: z.string().min(1).max(2048),
     phase: z.enum(['sdk', 'plugin', 'domain', 'verification']).optional(), namespace: z.string().max(128).optional(), hint: z.string().max(512).optional() }),
 })

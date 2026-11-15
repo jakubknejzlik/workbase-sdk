@@ -23,6 +23,11 @@ export type TargetOptions = {
   signal?: AbortSignal; timeoutMs?: number; registry?: string
 }
 const dependencyNames = ['package.json', 'bun.lock']
+export function replayFailureError(failure: ReturnType<typeof replayFailureSchema.parse>, request: Pick<UpgradeRequest, 'identity' | 'inputHashes'>) {
+  assertBound(failure.identity, request.identity, 'replay error identity')
+  assertBound(failure.inputHashes, request.inputHashes, 'replay error inputs')
+  return new MigrationReplayError(failure.diagnostic, undefined, failure.code)
+}
 const hashInputs = (inputs: SdkInputs) => Object.fromEntries(Object.keys(inputs).sort().map(path => [path, digestBytes(inputs[path])]))
 const rawDigest = (inputs: SdkInputs) => digestBytes(JSON.stringify(hashInputs(inputs)))
 async function regular(path: string) {
@@ -164,10 +169,8 @@ export async function runSdkTarget(options: TargetOptions) {
           try { failure = replayFailureSchema.parse(JSON.parse(await regular(join(consumer, '.sdk-bridge/replay-error.json')).then(bytes => bytes.toString('utf8')))) }
           catch { /* Non-replay failures remain private. */ }
           if (failure) {
-            assertBound(failure.identity, identity, 'replay error identity')
             const request = JSON.parse(await readFile(join(consumer, '.sdk-bridge/request.json'), 'utf8'))
-            assertBound(failure.inputHashes, request.inputHashes, 'replay error inputs')
-            throw new MigrationReplayError(failure.diagnostic)
+            throw replayFailureError(failure, { identity, inputHashes: request.inputHashes })
           }
         }
         throw new Error(`SDK target command failed (${result.rc}): ${result.stderr}\n${result.stdout}`)

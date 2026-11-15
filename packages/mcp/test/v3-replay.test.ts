@@ -34,6 +34,8 @@ it.each(['node', 'bun'])('validates a proposal on a V3 instance created through 
     // Use the current checkout as the installed SDK, then follow the template's
     // documented first step to generate the lock and initial domain migration.
     await symlink(resolve('node_modules'), join(root, 'node_modules'))
+    const entityPath = join(root, 'schema/worker.ts')
+    await writeFile(entityPath, (await readFile(entityPath, 'utf8')).replace('fields: {', "fields: { active: { type: 'bool' }, state: { type: 'enum', values: ['open', 'closed'] },"))
     execFileSync('bun', [resolve('packages/core/src/migrations/schema-cli.ts'), 'plan', '--root', root, '--init'], { encoding: 'utf8' })
     const proposal = await call('propose_change', { instance: 'replay-fixture', baseRevision: 1,
       changes: [{ kind: 'add_field', entity: 'worker', field: 'notes', definition: { type: 'text' } }] })
@@ -69,12 +71,20 @@ it.each(['node', 'bun'])('validates a proposal on a V3 instance created through 
       expect(deploy.prepare('SELECT MAX(revision) AS revision FROM instance_meta').get()).toEqual({ revision: 1 })
     } finally { deploy.close() }
     const domainFile = join(root, 'migrations/0001_r1.sql'), domainSQL = await readFile(domainFile, 'utf8')
-    await appendFile(domainFile, '\nCREATE TABLE unconfigured_table (id TEXT);\n')
-    expect(await call('inspect_schema', { instance: 'replay-fixture' })).toMatchObject({ validation: { ok: false, errors: [{ code: 'config_schema_mismatch' }] } })
-    expect(await call('validate', { instance: 'replay-fixture' })).toMatchObject({ ok: false, errors: [{ code: 'config_schema_mismatch' }] })
-    expect(await call('validate', { proposalId: proposal.proposalId })).toMatchObject({ ok: false, errors: [{ code: 'config_schema_mismatch' }] })
-    for (const tool of ['preview_migration', 'apply_to_disposable']) {
-      expect(await call(tool, { proposalId: proposal.proposalId })).toMatchObject({ ok: false, error: { code: 'config_schema_mismatch' } })
+    for (const drifted of [
+      domainSQL + '\nCREATE TABLE unconfigured_table (id TEXT);\n',
+      domainSQL.replace(' CHECK ("active" IN (0,1))', ''),
+      domainSQL.replace(/ CHECK \("state" IN \([^)]*\)\)/, ''),
+      domainSQL + "\nCREATE TRIGGER reject_worker BEFORE INSERT ON worker BEGIN SELECT RAISE(ABORT, 'reject inserts'); END;",
+    ]) {
+      expect(drifted).not.toBe(domainSQL)
+      await writeFile(domainFile, drifted)
+      expect(await call('inspect_schema', { instance: 'replay-fixture' })).toMatchObject({ validation: { ok: false, errors: [{ code: 'config_schema_mismatch' }] } })
+      expect(await call('validate', { instance: 'replay-fixture' })).toMatchObject({ ok: false, errors: [{ code: 'config_schema_mismatch' }] })
+      expect(await call('validate', { proposalId: proposal.proposalId })).toMatchObject({ ok: false, errors: [{ code: 'config_schema_mismatch' }] })
+      for (const tool of ['preview_migration', 'apply_to_disposable']) {
+        expect(await call(tool, { proposalId: proposal.proposalId })).toMatchObject({ ok: false, error: { code: 'config_schema_mismatch' } })
+      }
     }
     await writeFile(domainFile, domainSQL)
     await appendFile(join(root, 'migrations/0001_r1.sql'), '\nSELECT * FROM missing_domain_source;\n')

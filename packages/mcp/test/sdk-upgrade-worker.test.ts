@@ -8,8 +8,8 @@ import { randomUUID } from 'node:crypto'
 import { afterEach, expect, it } from 'vitest'
 import { CORE_VERSION } from '@workbasehq/core/config'
 import { execute } from '../src/sdk-process'
-import { captureSdkInputs, runSdkTarget } from '../src/sdk-target'
-import { acceptUpgradeResult, BRIDGE_VERSION, bridgeDigest, bridgeFiles, consumerModules, digestBytes, preparedSchema, resultSchema, type UpgradeRequest, type UpgradeStage } from '../src/sdk-upgrade-protocol'
+import { captureSdkInputs, runSdkTarget, replayFailureError } from '../src/sdk-target'
+import { acceptUpgradeResult, BRIDGE_VERSION, bridgeDigest, bridgeFiles, consumerModules, digestBytes, preparedSchema, replayFailureSchema, resultSchema, type UpgradeRequest, type UpgradeStage } from '../src/sdk-upgrade-protocol'
 
 const fixture = resolve('packages/mcp/test/fixtures/sdk-upgrade/valid-0.2.9')
 const source = resolve('packages/mcp/src'), checkout = resolve('.')
@@ -253,4 +253,45 @@ it('rejects changed config/history/index/SQL bytes and candidate bridge source',
     await writeFile(join(root, path), (await readFile(join(root, path), 'utf8')) + '\n')
     await expect(bridge(root, request)).rejects.toThrow(/Changed bridge input|source digest/)
   }
+})
+
+it.each([
+  ['plugin verification', "DROP TABLE roundtrip_refs", 'migration_plugin_verification_failed'],
+  ['plugin history', "UPDATE _plugin_migrations SET checksum='changed' WHERE namespace='roundtrip'", 'migration_plugin_history_mismatch'],
+])('preserves a real worker %s failure in its error envelope', async (_name, drift, code) => {
+  const root = await localConsumer(false, true)
+  await writeFile(join(root, 'config.ts'), `import { defineConfig, defineAccess, bindSchemaLock, accessEntities, accessSystemActions } from '@workbasehq/core/schema'
+import { schemaLock } from '@workbasehq/core/migrations/schema-lock'
+const config = defineConfig({ id: 'sdk_upgrade_fixture', interactive: false, languages: ['en'], roles: ['owner'], organizationOwnerRole: 'owner', entities: {},
+  plugins: [{ name: 'roundtrip', version: '1.0.0', migrations: [{ name: '001_refs', sql: 'CREATE TABLE roundtrip_refs (id TEXT);' }],
+    checkSchema: async db => { try { await db.prepare('SELECT id FROM roundtrip_refs').all() } catch { throw new Error('PRIVATE_ROUNDTRIP_CALLBACK') } } }],
+  access: defineAccess({ predicates: {}, entities: Object.fromEntries(accessEntities.map(entity => [entity, { owner: 'deny' }])),
+    roles: { owner: { system: Object.fromEntries(accessSystemActions.map(action => [action, 'deny'])) } } }),
+})
+export default bindSchemaLock(config, schemaLock(config))
+`)
+  await writeFile(join(root, 'config.versions.json'), '[]\n')
+  await writeFile(join(root, 'config.indexes.json'), '[]\n')
+  await rename(join(root, 'migrations/0001_initial.sql'), join(root, 'migrations/0001_r1.sql'))
+  await writeFile(join(root, 'migrations/0001_r1.sql'), 'SELECT 1;\n')
+  const { request, database } = await preparedDatabase(root)
+  const db = new DatabaseSync(database)
+  try { db.exec(drift) } finally { db.close() }
+  await writeFile(join(root, '.sdk-bridge/request.json'), JSON.stringify(request))
+  const modules = await consumerModules(root)
+  const child = await execute([process.execPath, '--import', modules.resolutions.tsx, join(root, '.sdk-bridge/sdk-upgrade-worker.ts')], root,
+    { timeoutMs: 15000, maxOutputBytes: 65536 })
+  expect(child.rc).toBe(1)
+  const raw = JSON.parse(await readFile(join(root, '.sdk-bridge/replay-error.json'), 'utf8'))
+  expect(raw).toMatchObject({ identity: request.identity, inputHashes: request.inputHashes, code })
+  expect(JSON.stringify(raw)).not.toContain('PRIVATE_ROUNDTRIP_CALLBACK')
+  const failure = replayFailureSchema.parse(raw)
+  const returned = replayFailureError(failure, request)
+  expect(returned).toMatchObject({ code, diagnostic: { phase: 'verification', namespace: 'roundtrip', hint: expect.any(String) } })
+  expect(JSON.stringify(returned)).not.toContain('PRIVATE_ROUNDTRIP_CALLBACK')
+  for (const code of [undefined, 'unknown_future_code', 'PRIVATE_ROUNDTRIP_CALLBACK']) {
+    expect(replayFailureSchema.safeParse({ ...raw, code }).success).toBe(false)
+  }
+  expect(() => replayFailureError(failure, { ...request, identity: { ...request.identity, runId: randomUUID() } })).toThrow(/replay error identity/)
+  expect(() => replayFailureError(failure, { ...request, inputHashes: {} })).toThrow(/replay error inputs/)
 })

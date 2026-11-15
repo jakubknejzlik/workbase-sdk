@@ -191,6 +191,7 @@ it.each([false, true])('returns only a request-bound replay diagnostic from a fa
     if (!argv.at(-1)?.endsWith('sdk-upgrade-worker.ts')) return executeMock(argv, cwd, commandOptions)
     const request = JSON.parse(await readFile(join(cwd, '.sdk-bridge/request.json'), 'utf8'))
     await writeFile(join(cwd, '.sdk-bridge/replay-error.json'), JSON.stringify({
+      code: 'migration_replay_failed',
       identity: { ...request.identity, ...(foreign ? { baseFingerprint: '0'.repeat(64) } : {}) }, inputHashes: request.inputHashes,
       diagnostic: { migration: '0001_r1.sql', file: 'migrations/0001_r1.sql', kind: 'sql', sqlError: 'SQLite SQL logic error' },
     }))
@@ -268,4 +269,20 @@ it('waits for cancellation of a real child group and removes scratch before retu
   await expect(run()).rejects.toThrow()
   expect(pid).toBeGreaterThan(0)
   expect(() => process.kill(pid, 0)).toThrow()
+})
+
+it.each(['migration_plugin_verification_failed', 'migration_plugin_history_mismatch', 'migration_instance_revision_mismatch', 'migration_history_mismatch'])('preserves request-bound worker code %s', async code => {
+  const executeMock = vi.mocked(execute).getMockImplementation()!
+  vi.mocked(execute).mockImplementation(async (argv, cwd, commandOptions) => {
+    if (!argv.at(-1)?.endsWith('sdk-upgrade-worker.ts')) return executeMock(argv, cwd, commandOptions)
+    const request = JSON.parse(await readFile(join(cwd, '.sdk-bridge/request.json'), 'utf8'))
+    await writeFile(join(cwd, '.sdk-bridge/replay-error.json'), JSON.stringify({
+      identity: request.identity, inputHashes: request.inputHashes, code,
+      diagnostic: { migration: 'verification', file: '@workbasehq/core/infra', kind: 'verification', sqlError: 'PRIVATE_WORKER_MESSAGE' },
+    }))
+    return { rc: 1, stdout: 'PRIVATE_WORKER_MESSAGE', stderr: 'PRIVATE_WORKER_MESSAGE', timedOut: false }
+  })
+  const error = await run().catch(error => error)
+  expect(error).toMatchObject({ code })
+  expect(JSON.stringify(error)).not.toContain('PRIVATE_WORKER_MESSAGE')
 })

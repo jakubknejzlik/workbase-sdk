@@ -168,7 +168,7 @@ if (process.argv[1] && resolve(process.argv[1]) === resolve(import.meta.filename
     await writeFile(join(root, '.sdk-bridge/result.json'), JSON.stringify(result) + '\n', { flag: 'wx' })
   } catch (error) {
     if (!(error instanceof MigrationReplayError)) throw error
-    await writeFile(join(root, '.sdk-bridge/replay-error.json'), JSON.stringify({ identity: request.identity, inputHashes: request.inputHashes, diagnostic: error.diagnostic }) + '\n', { flag: 'wx' })
+    await writeFile(join(root, '.sdk-bridge/replay-error.json'), JSON.stringify({ identity: request.identity, inputHashes: request.inputHashes, code: error.code, diagnostic: error.diagnostic }) + '\n', { flag: 'wx' })
     process.exitCode = 1
   }
 }

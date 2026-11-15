@@ -18,7 +18,7 @@ const plugin: WorkbasePlugin = { name: 'verification_plugin', version: '1.0.0',
 }
 const config = (plugins = [plugin]) => {
   const current = defineConfig({ id: 'verification_fixture', interactive: false, languages: ['en'], roles: ['owner'], organizationOwnerRole: 'owner', plugins,
-    entities: { worker: defineEntity({ fields: { name: { type: 'text', required: true }, user: accountLink() }, access: { owner: 'deny' } }) },
+    entities: { worker: defineEntity({ fields: { name: { type: 'text', required: true }, active: { type: 'bool' }, state: { type: 'enum', values: ['open', 'closed'] }, user: accountLink() }, access: { owner: 'deny' } }) },
     access: defineAccess({ predicates: {}, entities: Object.fromEntries(accessEntities.map(entity => [entity, { owner: 'deny' }])),
       roles: { owner: { system: Object.fromEntries(accessSystemActions.map(action => [action, 'deny'])) } } }),
   })
@@ -95,4 +95,48 @@ it('rejects committed physical drift during V3 inspection as well as proposal ve
   await expect(instanceMeta(current)).rejects.toMatchObject({ code: 'config_schema_mismatch' })
   const planned = prepare(current.config, [], [{ kind: 'add_field', entity: 'worker', field: 'notes', definition: { type: 'text' } }])
   await expect(expectedSnapshot(current, planned)).rejects.toMatchObject({ code: 'config_schema_mismatch' })
+})
+
+const schemaDrifts = [
+  ['boolean CHECK', (sql: string) => sql.replace(' CHECK ("active" IN (0,1))', '')],
+  ['changed boolean CHECK', (sql: string) => sql.replace('CHECK ("active" IN (0,1))', 'CHECK ("active" IN (0,2))')],
+  ['enum CHECK', (sql: string) => sql.replace(/ CHECK \("state" IN \([^)]*\)\)/, '')],
+  ['unexpected trigger', (sql: string) => sql + "\nCREATE TRIGGER reject_worker BEFORE INSERT ON worker BEGIN SELECT RAISE(ABORT, 'reject inserts'); END;"],
+  ['trigger sharing a table name', (sql: string) => sql + "\nCREATE TRIGGER worker BEFORE INSERT ON worker BEGIN SELECT RAISE(ABORT, 'reject inserts'); END;"],
+] as const
+it.each(schemaDrifts)('rejects %s drift during inspection, planning and disposable verification', async (_name, drift) => {
+  const current = bundle(), planned = prepare(current.config, [], [{ kind: 'add_field', entity: 'worker', field: 'notes', definition: { type: 'text' } }])
+  const expected = await expectedSnapshot(current, planned)
+  const original = current.migrations[0].sql
+  current.migrations[0].sql = drift(original)
+  expect(current.migrations[0].sql).not.toBe(original)
+  const inspection = await caught(() => instanceMeta(current)).catch(error => error)
+  const planning = await caught(() => expectedSnapshot(current, planned)).catch(error => error)
+  // Use an independently generated desired schema, never the drifted replay.
+  const disposable = await applyDisposable(current, planned, expected, false)
+  expect.soft(inspection).toMatchObject({ code: 'config_schema_mismatch' })
+  expect.soft(planning).toMatchObject({ code: 'config_schema_mismatch' })
+  expect.soft(disposable.verified).toBe(false)
+})
+
+it('accepts harmless CHECK formatting, quoting and constraint order', async () => {
+  const current = bundle()
+  const original = current.migrations[0].sql
+  current.migrations[0].sql = original
+    .replace(' CHECK ("active" IN (0,1))', '')
+    .replace(/ CHECK \("state" IN \([^)]*\)\)/, '')
+    .replace(/(CREATE TABLE "worker" \([\s\S]*?)(\n\);)/, "$1,\n  CHECK ((state in ('closed', 'open'))),\n  check ( [active] in ( 1 , 0 ) )$2")
+  expect(current.migrations[0].sql).not.toBe(original)
+  await expect(instanceMeta(current)).resolves.toMatchObject({ revision: 1 })
+  await expect(expectedSnapshot(current, prepare(current.config, [], [{ kind: 'add_field', entity: 'worker', field: 'notes', definition: { type: 'text' } }]))).resolves.toEqual(expect.any(Array))
+})
+
+it('compares trigger behavior while ignoring harmless SQL formatting', async () => {
+  const current = bundle(config([{ ...plugin, migrations: [...plugin.migrations!, {
+    name: '002_trigger', sql: "CREATE TRIGGER plugin_trigger BEFORE INSERT ON plugin_refs BEGIN -- retain the newline ending this comment\n SELECT RAISE(ABORT, 'blocked'); END;",
+  }] }]))
+  current.migrations[0].sql += "\nDROP TRIGGER plugin_trigger; create trigger [plugin_trigger] before insert on plugin_refs begin select raise ( ABORT , 'blocked' ) ; end;"
+  await expect(instanceMeta(current)).resolves.toMatchObject({ revision: 1 })
+  current.migrations[0].sql = current.migrations[0].sql.replace("'blocked'", "'different behavior'")
+  await expect(instanceMeta(current)).rejects.toMatchObject({ code: 'config_schema_mismatch' })
 })
