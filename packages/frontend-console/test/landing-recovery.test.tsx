@@ -24,7 +24,7 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-async function mount(path: string, me: Me | null) {
+async function mount(path: string, me: Me | null, consoleModelFailure = false) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } })
   clients.push(client)
   expect(client.getQueryCache().getAll()).toHaveLength(0)
@@ -41,6 +41,7 @@ async function mount(path: string, me: Me | null) {
     if (url === '/me/profile') return Response.json({ displayName: 'Admin', completeness: { complete: true } })
     if (url === '/console-info') return Response.json({ instance: 'test', displayName: 'Test', roles: ['admin'], locale: 'en' })
     if (url === '/build.json') return Response.json({ sha: 'a'.repeat(40), builtAt: '2026-11-15T00:00:00Z', revision: 1 })
+    if (consoleModelFailure && url === '/o/instance/console-model') return Response.json({ error: 'internal_error' }, { status: 500 })
     throw new Error(`Unexpected request: ${url}`)
   })
   vi.stubGlobal('fetch', fetch)
@@ -81,4 +82,16 @@ it('an anonymous cold 404 reads identity without navigating on a 401', async () 
   expect(fetch).toHaveBeenCalledWith('/me', expect.anything())
   expect(assign).not.toHaveBeenCalled()
   expect(replace).not.toHaveBeenCalled()
+})
+
+it('a cold scoped bootstrap failure retains successful identity for instance recovery', async () => {
+  const me = { ...account, memberships: [{ organization_id: 'instance', name: 'Instance', role: 'admin' }] }
+  const { client, fetch, replace, assign } = await mount('/o/instance', me, true)
+  await waitFor(() => expect(client.getQueryState(['bootstrap', 'instance'])?.status).toBe('error'))
+  await waitFor(() => expect(within(screen.getByRole('main')).getByRole('link').getAttribute('href')).toBe('/o/instance'))
+  expect(client.getQueryData(['me'])).toEqual(me)
+  expect(client.getQueryData(['profile'])).toMatchObject({ completeness: { complete: true } })
+  expect(fetch.mock.calls.filter(([url]) => url === '/me')).toHaveLength(1)
+  expect(replace).not.toHaveBeenCalled()
+  expect(assign).not.toHaveBeenCalled()
 })
