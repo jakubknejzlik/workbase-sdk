@@ -35,7 +35,7 @@ export function Frame() {
   useConsoleTitle(schema.data?.displayName, location.pathname)
   useEffect(() => { if (schema.data) applyInstanceLanguage(schema.data.ui?.defaultLanguage ?? schema.data.locale) }, [schema.data])
   const orgId = /^\/o\/([^/]+)/.exec(location.pathname)?.[1]
-  const me = useQuery({ ...meOptions, enabled: false })
+  const me = useQuery({ ...meOptions, queryFn: () => api<Me>('/me', { redirect401: false }), enabled: !gated })
   const home = scopeHomeDestination(me.data, orgId ? decodeURIComponent(orgId) : undefined)
   useRuntimeModel(orgId ? decodeURIComponent(orgId) : undefined)
   useEffect(() => { client.removeQueries({ queryKey: ['resource-denied'], type: 'inactive' }) }, [client, location.pathname])
@@ -113,9 +113,10 @@ function FrameContent() {
 }
 export function Overview() {
   const home = useScopeHome()
+  const location = useLocation()
   const { t } = useTranslation(); const me = useQuery({ queryKey: ['me'], queryFn: () => api<Me>('/me', { redirect401: false }) })
   const destination = useInvitationDestination(null, me.data?.memberships, me.data?.organizationsEnabled)
-  useEffect(() => { if (me.data?.user && destination.target) window.location.replace(destination.target) }, [me.data, destination.target])
+  useEffect(() => { if (me.data?.user && destination.target && destination.target !== location.href) window.location.replace(destination.target) }, [me.data, destination.target, location.href])
   const schema = useQuery({ ...instanceOptions, enabled: false })
   if (destination.error) return <QueryError error={destination.error} />
   return <ResourcePage title={t('title', { instanceTitle: instanceTitle(schema.data?.displayName) })}><div className="wb-empty"><h2>{t('welcome')}</h2><p>{t('empty')}</p><Link to={home}>{t(home === '/organizations' ? 'organizations' : 'overview')}</Link><p><Dialog trigger={t('about')} title={t('about')} description={t('description')} closeLabel={t('close')} /></p></div></ResourcePage>

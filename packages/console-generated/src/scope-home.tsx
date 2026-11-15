@@ -6,7 +6,7 @@ export function scopeHomeDestination(me?: ScopeMemberships, activeScope?: string
   if (me?.memberships.length === 1) return `/o/${encodeURIComponent(me.memberships[0].organization_id)}`
   if (me?.organizationsEnabled === false) {
     const scope = activeScope ?? me.memberships[0]?.organization_id
-    return scope ? `/o/${encodeURIComponent(scope)}` : '/'
+    return scope ? `/o/${encodeURIComponent(scope)}` : '/organizations'
   }
   return '/organizations'
 }

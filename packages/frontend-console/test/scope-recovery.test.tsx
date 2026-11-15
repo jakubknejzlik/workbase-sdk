@@ -31,7 +31,7 @@ it.each(cases)('$name keeps its home for authentication and recovery', ({ member
 })
 it('uses the active scope without Organizations and safely encodes scope IDs', () => {
   expect(scopeHomeDestination({ organizationsEnabled: false, memberships: [membership('a'), membership('b')] }, 'b')).toBe('/o/b')
-  expect(scopeHomeDestination({ organizationsEnabled: false, memberships: [] })).toBe('/')
+  expect(scopeHomeDestination({ organizationsEnabled: false, memberships: [] })).toBe('/organizations')
   expect(scopeHomeDestination({ memberships: [membership('scope name')] })).toBe('/o/scope%20name')
 })
 it('rejects unsafe return paths into a scope-aware fallback and preserves invitation returns', () => {
