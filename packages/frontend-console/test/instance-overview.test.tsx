@@ -39,3 +39,9 @@ it('the fallback keeps member navigation limited to readable entities', () => {
   const registry = adaptConsoleModel({ ...document, capabilities: { ...document.capabilities, organization: { role: 'member' } } }).console
   expect(registry.navigation.some(item => item.page === 'core.overview')).toBe(false)
 })
+
+it.each([undefined, false])('the fallback omits Members without a read grant (%s)', grant => {
+  const resources: Record<string, boolean> = grant === undefined ? {} : { 'members.read': grant }
+  const registry = adaptConsoleModel({ ...document, capabilities: { ...document.capabilities, resources } }).console
+  expect(registry.pages.some(page => page.id === 'members.list')).toBe(false)
+})

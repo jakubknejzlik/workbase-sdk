@@ -5,16 +5,14 @@ import { builtinPlugin } from '@workbasehq/core/kernel/builtin-source'
 import type { WorkbasePlugin } from '@workbasehq/core/kernel/plugin'
 import { memberRoutes } from './routes'
 import { recipientPendingIndexSQL, recipientExpiryTriggerSQL } from './migrations/003-recipients'
+import { membersConsoleContribution } from './console-contribution'
 export { renderInvitationEmail, type InvitationEmailInput, type RenderedInvitationEmail } from './emails/invitation-email'
 
 /** Memberships and invitations work independently of multi-tenant organization UI. */
 export const members: WorkbasePlugin = builtinPlugin({
   name: 'members', version: '0.1.0', provides: { members: '1.x' },
   requires: { identity: '^1', permissions: '^1' }, optionalRequires: { organizations: '^1', 'mail-outbox': '^1', console: '^1' },
-  contributes: { console: {
-    pages: [{ id: 'members.list', path: '/settings/workspace-members', label: 'members', grant: 'members.read', renderer: 'members.list' }],
-    navigation: [{ id: 'members.list', placement: 'settings', page: 'members.list', label: 'members', order: 30, grant: 'members.read' }],
-  } },
+  contributes: { console: membersConsoleContribution },
   migrations,
   async checkSchema(db) {
     await db.prepare('SELECT scope_id FROM memberships LIMIT 0').all()

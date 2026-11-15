@@ -2,6 +2,8 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { createMemoryHistory, createRouter, RouterProvider } from '@tanstack/react-router'
+import userEvent from '@testing-library/user-event'
+import type { ConsoleModelContract } from '@workbasehq/core/console-contract'
 import { routeTree } from '../src/routeTree.gen'
 import type { Me } from '../src/api/queries'
 
@@ -24,7 +26,7 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-async function mount(path: string, me: Me | null, consoleModelFailure = false) {
+async function mount(path: string, me: Me | null, consoleModel?: ConsoleModelContract | 'failure') {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } })
   clients.push(client)
   expect(client.getQueryCache().getAll()).toHaveLength(0)
@@ -41,7 +43,12 @@ async function mount(path: string, me: Me | null, consoleModelFailure = false) {
     if (url === '/me/profile') return Response.json({ displayName: 'Admin', completeness: { complete: true } })
     if (url === '/console-info') return Response.json({ instance: 'test', displayName: 'Test', roles: ['admin'], locale: 'en' })
     if (url === '/build.json') return Response.json({ sha: 'a'.repeat(40), builtAt: '2026-11-15T00:00:00Z', revision: 1 })
-    if (consoleModelFailure && url === '/o/instance/console-model') return Response.json({ error: 'internal_error' }, { status: 500 })
+    if (consoleModel && url === '/o/instance/console-model') return consoleModel === 'failure'
+      ? Response.json({ error: 'internal_error' }, { status: 500 }) : Response.json(consoleModel)
+    if (consoleModel && consoleModel !== 'failure') {
+      if (url === '/me?scope=organization') return Response.json(me)
+      if (url === '/orgs/instance/members?include=pending') return Response.json({ data: [{ user_id: 'admin', email: 'admin@example.test', role: 'admin' }], role_options: [], default_role: 'admin' })
+    }
     throw new Error(`Unexpected request: ${url}`)
   })
   vi.stubGlobal('fetch', fetch)
@@ -86,12 +93,35 @@ it('an anonymous cold 404 reads identity without navigating on a 401', async () 
 
 it('a cold scoped bootstrap failure retains successful identity for instance recovery', async () => {
   const me = { ...account, memberships: [{ organization_id: 'instance', name: 'Instance', role: 'admin' }] }
-  const { client, fetch, replace, assign } = await mount('/o/instance', me, true)
+  const { client, fetch, replace, assign } = await mount('/o/instance', me, 'failure')
   await waitFor(() => expect(client.getQueryState(['bootstrap', 'instance'])?.status).toBe('error'))
   await waitFor(() => expect(within(screen.getByRole('main')).getByRole('link').getAttribute('href')).toBe('/o/instance'))
   expect(client.getQueryData(['me'])).toEqual(me)
   expect(client.getQueryData(['profile'])).toMatchObject({ completeness: { complete: true } })
   expect(fetch.mock.calls.filter(([url]) => url === '/me')).toHaveLength(1)
+  expect(replace).not.toHaveBeenCalled()
+  expect(assign).not.toHaveBeenCalled()
+})
+
+it('a cold Members-only admin opens Members from the instance Overview without a console provider', async () => {
+  const me = { ...account, role: 'admin', memberships: [{ organization_id: 'instance', name: 'Instance', role: 'admin' }] }
+  const document: ConsoleModelContract = {
+    contractVersion: 1, console: null,
+    model: { instance: 'test', revision: 1, locale: 'en', timeZone: 'UTC', limits: {}, entities: {}, commands: [], workflows: [] },
+    capabilities: { revision: 1, organization: { role: 'admin' }, entities: {}, commands: [], workflows: {}, resources: { 'members.read': true } },
+  }
+  const { router, fetch, replace, assign } = await mount('/o/instance', me, document)
+  expect(await screen.findByRole('heading', { name: 'Overview' })).toBeTruthy()
+  const membersLink = within(screen.getByRole('main')).getByRole('link', { name: 'Members' })
+  expect(membersLink.getAttribute('href')).toBe('/o/instance/settings/workspace-members')
+  await userEvent.click(membersLink)
+  await waitFor(() => expect(router.state.location.pathname).toBe('/o/instance/settings/workspace-members'))
+  expect(screen.queryByRole('heading', { name: 'Page not found' })).toBeNull()
+  expect(await screen.findByRole('heading', { name: 'Members' })).toBeTruthy()
+  expect(await within(screen.getByRole('main')).findByText('admin@example.test')).toBeTruthy()
+  expect(screen.queryByRole('heading', { name: 'Page not found' })).toBeNull()
+  expect(fetch).toHaveBeenCalledWith('/o/instance/console-model', expect.anything())
+  expect(fetch).toHaveBeenCalledWith('/orgs/instance/members?include=pending', expect.anything())
   expect(replace).not.toHaveBeenCalled()
   expect(assign).not.toHaveBeenCalled()
 })

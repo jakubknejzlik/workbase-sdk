@@ -35,11 +35,14 @@ it('Members-only instance scope keeps the packaged console overview for an admin
   expect(home.status).toBe(200)
   expect(await home.json()).toMatchObject({ role: 'admin', memberships: [{ organization_id: 'instance', role: 'admin' }] })
   expect(document.capabilities.organization.role).toBe('admin')
+  expect(document.capabilities.resources['members.read']).toBe(true)
   // No console provider is required to serve the packaged console. Its fallback
   // registry must include the built-in home as well as readable entities.
   expect(document.console).toBeNull()
   const registry = adaptConsoleModel(document).console
   expect(registry.pages).toContainEqual(expect.objectContaining({ id: 'core.overview', path: '/', renderer: 'core.overview' }))
+  expect(registry.pages).toContainEqual(expect.objectContaining({ id: 'members.list', path: '/settings/workspace-members', renderer: 'members.list', grant: 'members.read' }))
+  expect((await request(app, '/orgs/instance/members?include=pending', 'GET', undefined, 'owner-a', 'instance')).status).toBe(200)
   expect(registry.navigation).toContainEqual(expect.objectContaining({ id: 'core.overview', page: 'core.overview', placement: 'sidebar' }))
   expect(registry.navigation).toContainEqual(expect.objectContaining({ entity: 'workers', placement: 'sidebar' }))
 })
