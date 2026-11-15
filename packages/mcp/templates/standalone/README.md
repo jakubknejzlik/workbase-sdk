@@ -124,5 +124,48 @@ It preserves existing bytes. Rewritten SDK dependencies and authored schema file
 therefore report conflicts on repeated init.
 
 For later Manager operation use the established MCP/PR process; Managers do not
-edit code directly. This template's MCP config contains data and ops servers;
-legacy schema-discovery tools are not the V3 authoring workflow.
+edit code directly. Use the V3 authoring workflow below; legacy schema-discovery tools are not its
+replacement.
+
+
+## V3 authoring through MCP
+
+After installation and initial artifact generation, start `workbase_config` from
+this Instance directory. `.mcp.json` runs `workbase config --root .` through the
+installed SDK; this local authoring server needs no API credentials or optional
+environment variables. The existing `workbase_data` and `workbase_ops` servers
+keep their separate data and provisioning responsibilities. For example, their
+canonical app origin can be `https://app.example.test`; it is not needed by config.
+
+Call `inspect_schema` with `instance: "{{INSTANCE_SELECTOR}}"`. At the returned
+revision, call `propose_composition` with `instance`, `baseRevision` and `changes`.
+The supported kinds are:
+
+- `set_plugin`: add a built-in plugin or replace its options. Use plugin `console`
+  to enable the console. Omitted options reset the plugin to defaults.
+- `set_interactive`: set interactive login; enabling it requires a login provider.
+- `set_system_access`: replace a role's system `grants` with allow/deny decisions.
+- `set_entity_access`: replace `entity`/`role` access with `"deny"` or a complete
+  read/create/update/delete object of allow/deny or filtered grants.
+- `set_account_link`: set an entity's `invitationRole`.
+
+Composition and access kinds can share a proposal. `propose_change` accepts the
+same V3 kinds; keep them separate from legacy changes. Continue with `validate` →
+`preview_migration` → `apply_to_disposable` → `promote`, passing `proposalId` at
+each step and the inspected revision as `expectedRevision` to `promote`. Review
+validation requirements, exact file bytes, access-lock changes and plugin SQL
+before verification. After any tracked source or dependency change, validate and
+verify again.
+
+Promotion publishes local sources and regenerated access locks, plus an existing
+OpenAPI artifact for access edits. The domain revision, schema lock and domain
+migration history stay unchanged. Promotion does not deploy or apply to a live
+database. Review and commit the promoted files through the approved PR process;
+the normal SDK deployment applies plugin migrations. Use `discard` to close an
+unpromoted proposal.
+
+V3 domain-change promotion is unsupported (`v3_promote_unsupported`). Physical
+schema changes require reviewed source edits and migration generation. Custom
+plugins/commands, plugin removal and role definitions also require reviewed source
+changes. See `docs/sdk/mcp-composition.md` in the SDK repository for inputs and
+limitations.

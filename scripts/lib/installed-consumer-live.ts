@@ -55,8 +55,9 @@ export function assertInstalledArtifacts(consumer: string) {
   assert.deepEqual(sdk.map(([path]) => path).sort(), ['core', 'mcp', 'plugins'].map(name => 'node_modules/@workbasehq/' + name))
   assert(!/ui-v3|test-support|workspace:/.test(JSON.stringify(lock)))
   const mcp = json(join(consumer, '.mcp.json'))
-  assert.deepEqual(Object.keys(mcp.mcpServers), ['workbase_data', 'workbase_ops'])
-  assert(!/config/.test(JSON.stringify(mcp)))
+  assert.deepEqual(Object.keys(mcp.mcpServers), ['workbase_data', 'workbase_ops', 'workbase_config'])
+  assert.deepEqual(mcp.mcpServers.workbase_config, { command: 'bun',
+    args: ['./node_modules/@workbasehq/mcp/src/bin.ts', 'config', '--root', '.'] })
   // Include hidden directories, but exclude third-party installs and local runtime state.
   const walk = (path: string) => {
     for (const entry of readdirSync(path, { withFileTypes: true })) {
