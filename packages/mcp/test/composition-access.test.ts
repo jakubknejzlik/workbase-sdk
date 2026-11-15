@@ -1,4 +1,4 @@
-import { execFileSync } from 'node:child_process'
+import { execFileSync, spawnSync } from 'node:child_process'
 import { mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -35,6 +35,62 @@ export default { ...config, plugins: [identity, permissions({ roles: ['admin', '
   }
   return { root, server, store, call, propose }
 }
+it.each([false, true])('preserves staged authored source locations through access promote (runtime edit: %s)', async runtimeEdit => {
+  const { root, server, call, propose } = await fixture()
+  try {
+    // Match consumers that compose runtime plugins but audit authored config locations.
+    await writeFile(join(root, 'scripts/check-access.ts'), `import { syncAccessLock } from '@workbasehq/core/access/lock'
+import { KernelRegistry } from '@workbasehq/core/kernel/registry'
+import { configSources } from '@workbasehq/core/schema/load'
+import config from '../runtime'
+const result = await syncAccessLock({ root: process.cwd(), kernel: new KernelRegistry(config), sources: configSources('config.ts'), write: process.argv.includes('--write') })
+console.log(result.message)
+process.exitCode = result.ok ? 0 : 1
+`)
+    const manifest = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'))
+    manifest.scripts['check:access'] = 'bun scripts/check-access.ts'
+    await writeFile(join(root, 'package.json'), JSON.stringify(manifest))
+    const accessPath = join(root, 'access.ts'), entityPath = join(root, 'schema/worker.ts')
+    await writeFile(accessPath, '// authored access header\n' + (await readFile(accessPath, 'utf8'))
+      .replace("  accountLinks: { worker: { invitationRole: 'staff' } },\n", ''))
+    await writeFile(entityPath, '// authored entity header\n' + await readFile(entityPath, 'utf8'))
+    execFileSync('bun', ['scripts/check-access.ts', '--write'], { cwd: root, encoding: 'utf8' })
+    expect(execFileSync('bun', ['run', 'check:access'], { cwd: root, encoding: 'utf8' })).toContain('check:access: lock files match')
+    const immutable = ['config.ts', 'schema.lock.json', 'migrations/0001_r1.sql', ...(!runtimeEdit ? ['runtime.ts'] : [])]
+    const before = await Promise.all(immutable.map(path => readFile(join(root, path))))
+    const proposalId = await propose([
+      { kind: 'set_entity_access', entity: 'worker', role: 'staff', access: {
+        read: { where: { user: { eq: '$actor.id' } } }, create: 'deny', update: 'deny', delete: 'deny',
+      } },
+      { kind: 'set_account_link', entity: 'worker', invitationRole: 'staff' },
+      { kind: 'set_system_access', role: 'admin', grants: { ...grants,
+        'members.read': 'allow', 'members.update': 'allow', 'invitations.create': 'allow', 'invitations.read': 'allow', 'invitations.revoke': 'allow',
+      } },
+      { kind: 'set_entity_access', entity: 'memberships', role: 'admin', access: { read: 'allow', create: 'deny', update: 'allow', delete: 'deny' } },
+      { kind: 'set_entity_access', entity: 'invitations', role: 'admin', access: { read: 'allow', create: 'allow', update: 'deny', delete: 'allow' } },
+      ...(runtimeEdit ? [{ kind: 'set_interactive', interactive: false }] : []),
+    ])
+    expect(await call('validate', { proposalId })).toMatchObject({ ok: true })
+    const preview = await call('preview_migration', { proposalId })
+    expect(await call('apply_to_disposable', { proposalId, keep: false })).toMatchObject({ ok: true, verified: true, diffs: [] })
+    expect(await call('promote', { proposalId, expectedRevision: 1 })).toMatchObject({ ok: true, status: 'promoted', revision: 1 })
+    const check = spawnSync('bun', ['run', 'check:access'], { cwd: root, encoding: 'utf8' })
+    expect(check.status, check.stdout + check.stderr).toBe(0)
+    expect(check.stdout).toContain('check:access: lock files match')
+    expect(await Promise.all(immutable.map(path => readFile(join(root, path))))).toEqual(before)
+    for (const path of ['access.lock.json', 'access.lock.md']) {
+      expect(await readFile(join(root, path), 'utf8')).toBe(preview.files.find((file: any) => file.path === path).data)
+    }
+    const lock = JSON.parse(await readFile(join(root, 'access.lock.json'), 'utf8'))
+    const line = (source: string, text: string) => source.slice(0, source.indexOf(text)).split('\n').length
+    const accessSource = await readFile(accessPath, 'utf8'), entitySource = await readFile(entityPath, 'utf8')
+    expect(lock.sources['access.roles.admin.system.members.read']).toEqual({ file: 'access.ts', line: line(accessSource, '"members.read"') })
+    expect(lock.sources['entities.worker.access.staff.read']).toEqual({ file: 'schema/worker.ts', line: line(entitySource, '"read": {') })
+    expect(lock.sources['access.accountLinks.worker.invitationRole']).toEqual({ file: 'access.ts', line: line(accessSource, '"invitationRole"') })
+    expect(lock.sources['guards.worker/access_invite'].file).toBe('config.ts')
+    expect(Object.values(lock.sources).every((source: any) => ['access.ts', 'schema/worker.ts', 'config.ts'].includes(source.file))).toBe(true)
+  } finally { await server.close() }
+})
 it('promotes SDK users access in access.ts while preserving every other users role', async () => {
   const { root, server, call, propose } = await fixture()
   try {

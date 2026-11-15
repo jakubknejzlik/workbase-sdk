@@ -215,6 +215,16 @@ export function configSources(file: string): SourceMap {
   const sources: SourceMap = { '': location(source) }
   let declaration = exported(source, 'default')
   const bindings = imports(source)
+  // V3 runtime composition inherits its authored declarations from ./config.
+  // Keep audit locations identical whether callers supply config.ts or runtime.ts.
+  if (declaration && ts.isObjectLiteralExpression(declaration)) {
+    const spread = declaration.properties.find(ts.isSpreadAssignment)
+    const binding = spread && ts.isIdentifier(spread.expression) ? bindings.get(spread.expression.text) : undefined
+    if (binding?.imported === 'default' && ['./config', './config.ts'].includes(binding.module)) {
+      const config = entityPath(binding, entry, 'config', '')
+      if (config !== entry) return configSources(config)
+    }
+  }
   while (declaration && ts.isCallExpression(declaration) && ts.isIdentifier(declaration.expression)) {
     const binding = bindings.get(declaration.expression.text)
     if (!['bindOpenApi', 'bindSchemaLock'].some(name => sdkBinding(binding, entry, name))) break

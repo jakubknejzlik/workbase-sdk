@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, realpathSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { compileAccess, type EntityAccess } from '../../src/schema'
-import { loadConfig } from '../../src/schema/load'
+import { configSources, loadConfig } from '../../src/schema/load'
 import { accessEntities, accessSystemActions, type AccessInput } from '../../src/access'
 
 const roots: string[] = []
@@ -25,6 +25,17 @@ export default defineConfig({ id: 'sample', roles: ['admin', 'staff'], organizat
   writeFileSync(join(root, 'schema/worker.ts'), `import { defineEntity, accountLink } from '@workbasehq/core/schema'\nexport default defineEntity({ fields: { name: { type: 'text', required: true }, user: accountLink() }, access: ${JSON.stringify(worker, null, 2)} })`)
   return { root, matrix: worker, load: () => loadConfig(join(root, 'config.ts')) }
 }
+it.each(['./config', './config.ts'])('reads authored access sources through a runtime config spread (%s) without executing modules', configImport => {
+  const { root } = consumer()
+  writeFileSync(join(root, 'runtime.ts'), `import authored from '${configImport}'
+throw new Error('source metadata must not execute runtime')
+export default { ...authored, plugins: [neverExecute()] }
+`)
+  const sources = configSources(join(root, 'runtime.ts'))
+  expect(sources).toEqual(configSources(join(root, 'config.ts')))
+  expect(sources['access.roles.admin.system.members.read'].file).toBe(join(root, 'access.ts'))
+  expect(sources['entities.worker.access.staff.read'].file).toBe(join(root, 'schema/worker.ts'))
+})
 it('rejects missing role × entity entries with role, entity and file:line', async () => {
   const { load } = consumer(shared(), { admin: operations })
   await expect(load()).rejects.toThrow(/schema\/worker.ts:\d+:\d+:.*staff.*worker/)

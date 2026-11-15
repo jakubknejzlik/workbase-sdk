@@ -96,14 +96,19 @@ export async function compositionPlan(base: Bundle, target: Bundle, source: stri
       || JSON.stringify(expected.ledger) !== JSON.stringify(ledger)) fail('composition_migration_divergence', 'Upgrade and fresh composition migrations differ', 422)
   } finally { db.close() }
 
-  // Source metadata must describe the exact bytes being promoted. No consumer
-  // module is evaluated; configSources reads this canonical object export.
+  // Source metadata must describe the exact authored graph being promoted.
+  // Stage the captured graph and overlay edits without evaluating consumer code.
   await mkdir(stateRoot, { recursive: true }); await noLink(stateRoot)
   const scratch = await realpath(await mkdtemp(join(stateRoot, 'composition-')))
   let lock: ReturnType<typeof serializeAccessLock>
   try {
-    await writeFile(join(scratch, 'runtime.ts'), source)
-    const sources = Object.fromEntries(Object.entries(configSources(join(scratch, 'runtime.ts')))
+    const inputs = { ...await replaySources(root), 'config.ts': await readFile(join(root, 'config.ts')), 'runtime.ts': Buffer.from(source) }
+    const edits = new Map(files.map(file => [file.path, file.data]))
+    for (const [path, bytes] of Object.entries(inputs)) {
+      await mkdir(dirname(join(scratch, path)), { recursive: true })
+      await writeFile(join(scratch, path), edits.get(path) ?? bytes)
+    }
+    const sources = Object.fromEntries(Object.entries(configSources(join(scratch, 'config.ts')))
       .map(([key, location]) => [key, { ...location, file: join(root, relative(scratch, location.file)) }]))
     lock = serializeAccessLock(engine.kernel, { root, sources })
   } finally { await rm(scratch, { recursive: true, force: true }) }
