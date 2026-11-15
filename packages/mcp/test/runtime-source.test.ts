@@ -20,7 +20,7 @@ import config from './config'
 export default { ...config, plugins: [identity, members, permissions({ roles: ['admin', 'staff'], ownerRole: 'admin' }), machineCredentials()] }
 `
 const changes: CompositionChange[] = [
-  { kind: 'set_plugin', plugin: 'organizations', options: { allowCreate: true } },
+  { kind: 'set_plugin', plugin: 'organizations', options: { allowCreate: false } },
   { kind: 'set_plugin', plugin: 'local-auth', options: { methods: ['magic-link'] } },
   { kind: 'set_plugin', plugin: 'mail-outbox' },
   { kind: 'set_plugin', plugin: 'audit' },
@@ -44,7 +44,7 @@ it('accepts arbitrary import and plugin order and retains semantic model equalit
   const model = parseRuntimeSource(source)
   const lines = source.split('\n')
   const imports = lines.slice(0, 10)
-  const calls = ['consoleUI()', 'audit()', 'mailOutbox()', 'machineCredentials()', "createLocalAuth({ methods: ['magic-link'] })", 'createOrganizations({ allowCreate: true })', 'createMembers()', "permissions({ roles: ['admin', 'staff'], ownerRole: 'admin' })", 'createIdentity()']
+  const calls = ['consoleUI()', 'audit()', 'mailOutbox()', 'machineCredentials()', "createLocalAuth({ methods: ['magic-link'] })", 'createOrganizations({ allowCreate: false })', 'createMembers()', "permissions({ roles: ['admin', 'staff'], ownerRole: 'admin' })", 'createIdentity()']
   for (let offset = 0; offset < imports.length; offset++) {
     const reordered = [...imports.slice(offset), ...imports.slice(0, offset)].join('\n') + `\nexport default { ...config, plugins: [${calls.join(', ')}], interactive: true }\n`
     expect(parseRuntimeSource(reordered)).toEqual(model)
