@@ -124,6 +124,12 @@ Source locations identify the rule or its enclosing registration declaration. Ex
 | worker/link_account | {"entity":"worker","operation":"update"} | [] | opaque | packages/core/test/fixtures/config-era/config.ts:5 |
 | worker/remove_access | {"entity":"worker","operation":"update"} | [] | opaque | packages/core/test/fixtures/config-era/config.ts:5 |
 
+## Workflow operation occurrences
+
+| Workflow | Step (in execution order) | Role | Operation | Permission | Additional permissions | Executable checks | Registration source |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+None registered.
+
 ## Opaque executable hooks
 
 None registered.

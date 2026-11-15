@@ -6,9 +6,15 @@ import { spawnSync } from 'node:child_process'
 import { z } from 'zod'
 import { defineInstance } from '../../src/config'
 import { accessEntities, accessSystemActions } from '../../src/schema'
-import { loadConfig } from '../../src/schema/load'
+import { configSources, loadConfig } from '../../src/schema/load'
 import { KernelRegistry } from '../../src/kernel/registry'
+import { builtinPlugin } from '../../src/kernel/builtin-source'
 import { createCommandRegistry } from '../../src/commands'
+import { createWorkflowRegistry } from '../../src/workflow-runtime'
+import type { WorkflowDefinition, WorkflowStep } from '../../src/execution/workflow'
+import type { AtomicOperation } from '../../src/execution/types'
+import type { RuntimeEnv } from '../../src/types'
+import { capabilities } from '../../src/capabilities'
 import { effectiveEntityGrants } from '../../src/access-evaluator'
 import { serializeAccessLock, syncAccessLock, type AccessLockOptions } from '../../src/access-lock'
 import { enforcementInputs } from '../../src/access-inputs'
@@ -379,4 +385,166 @@ it('normalized display expressions, structured conditional labels and related bi
   }, { plugins: options.kernel.plugins })
   const locale = vi.spyOn(String.prototype, 'localeCompare').mockImplementation(function (this: string, other: string) { return this < other ? 1 : this > other ? -1 : 0 })
   try { expect(serializeAccessLock(shuffled, options)).toEqual(before) } finally { locale.mockRestore() }
+})
+
+async function workflowConsumer() {
+  const fixture = consumer()
+  fixture.matrix.admin = { read: 'allow', create: 'deny', update: 'deny', delete: 'deny' }
+  writeFileSync(join(fixture.root, 'schema/worker.ts'), fixture.worker())
+  const options = await fixture.load()
+  const operation: AtomicOperation = { name: 'worker/shared', permission: { entity: 'worker', operation: 'read' }, input: z.object({}),
+    plan() { throw new Error('Opaque plan must not execute') } }
+  const step: WorkflowStep = { id: 'probe', operation, policy: { maxAttempts: 1, backoffMs: 0, timeoutMs: 1, deadlineMs: 1 }, sideEffect: true,
+    async run() { throw new Error('Opaque step must not execute') }, compensate: { operation, async run() { throw new Error('Opaque compensation must not execute') } } }
+  const workflow: WorkflowDefinition = { name: 'worker/review', version: '1', input: z.object({}), steps: [step] }
+  const env = { DB: { prepare: () => ({ bind: () => ({ first: async () => ({ user_id: 'admin', organization_id: 'org-a', role: 'admin' }) }) }) } } as unknown as RuntimeEnv
+  const actor = sealActor({ actor: { type: 'user', id: 'admin' }, user: { id: 'admin', email: 'admin@example.test' }, organizations: [] },
+    { env, hash: 'synthetic', session: { valid: async () => true, verified: async () => true, recipientVerification: 'local-profile' } })
+  const scope = await requireScope(actor, 'org-a')
+  const kernel = async (definitions: readonly WorkflowDefinition[], composition: 'plugin' | 'runtime' | 'factory') => {
+    const registry = new KernelRegistry(options.kernel.config, { commands: createCommandRegistry([operation]),
+      plugins: [{ name: 'workflow_probe', version: '1', provides: { permissions: '1.x' }, authorization: true,
+        tableFilter: () => ({ kind: 'all' }), commandGuard: () => ({ allow: true }),
+        ...(composition === 'plugin' ? { workflows: definitions } : {}),
+        ...(composition === 'factory' ? { workflowDefinitions: () => createWorkflowRegistry(definitions) } : {}),
+      }], ...(composition === 'runtime' ? { workflows: createWorkflowRegistry(definitions) } : {}),
+    }, env)
+    await loadActorProjection(registry.config, scope, async <T>() => ({ id: 'admin', role: 'admin', organization_id: 'org-a' }) as T,
+      { user_id: 'admin', organization_id: 'org-a', role: 'admin' })
+    return registry
+  }
+  return { ...options, operation, step, workflow, kernel, scope }
+}
+
+it.each(['plugin', 'runtime', 'factory'] as const)('%s workflow permission mutations drift independently of same-name command guards', async composition => {
+  const fixture = await workflowConsumer()
+  const { operation, step, workflow, scope } = fixture
+  const denied = { entity: 'worker', operation: 'update' as const }
+  const before = await fixture.kernel([workflow], composition)
+  const a = serializeAccessLock(before, fixture)
+  expect(() => before.atomicPermission(scope, operation)).not.toThrow()
+  expect(capabilities(before, scope).workflows[workflow.name]).toEqual(['start'])
+  for (const mutation of ['primary', 'additional', 'compensation', 'remove', 'add'] as const) {
+    const changed: WorkflowStep = mutation === 'primary' ? { ...step, operation: { ...operation, permission: denied } }
+      : mutation === 'additional' ? { ...step, operation: { ...operation, additionalPermissions: [denied] } }
+      : mutation === 'compensation' ? { ...step, compensate: { ...step.compensate!, operation: { ...operation, permission: denied } } } : step
+    const after = await fixture.kernel(mutation === 'remove' ? [] : mutation === 'add' ? [workflow, { ...workflow, name: 'worker/added' }] : [{ ...workflow, steps: [changed] }], composition)
+    expect(after.config.effectiveAccess).toEqual(before.config.effectiveAccess)
+    expect(() => after.atomicPermission(scope, operation)).not.toThrow()
+    if (['primary', 'additional', 'compensation'].includes(mutation)) {
+      expect(() => after.atomicPermission(scope, mutation === 'compensation' ? changed.compensate!.operation : changed.operation)).toThrow(expect.objectContaining({ code: 'permission_denied' }))
+    }
+    expect(capabilities(after, scope).workflows[workflow.name]).toEqual(mutation === 'remove' ? undefined : ['primary', 'additional'].includes(mutation) ? [] : ['start'])
+    const b = serializeAccessLock(after, fixture)
+    expect(b.json, mutation).not.toBe(a.json)
+    expect(b.md, mutation).not.toBe(a.md)
+    await syncAccessLock({ ...fixture, kernel: before, write: true })
+    const files = ['access.lock.json', 'access.lock.md'].map(file => readFileSync(join(fixture.root, file), 'utf8'))
+    const result = await syncAccessLock({ ...fixture, kernel: after })
+    expect(result.ok, mutation).toBe(false)
+    expect(result.message).toContain(mutation === 'add' ? 'worker/added' : workflow.name)
+    expect(result.message).toContain('config.ts:')
+    if (!['remove', 'add'].includes(mutation)) expect(result.message).toContain(mutation === 'compensation' ? 'compensation' : 'forward')
+    expect(['access.lock.json', 'access.lock.md'].map(file => readFileSync(join(fixture.root, file), 'utf8'))).toEqual(files)
+    await syncAccessLock({ ...fixture, kernel: after, write: true })
+    expect((await syncAccessLock({ ...fixture, kernel: after })).ok).toBe(true)
+  }
+})
+
+it('records workflow occurrences by ordered step IDs and roles, with opaque bodies and explicit source attribution', async () => {
+  const fixture = await workflowConsumer()
+  const { step, workflow, operation } = fixture
+  const kernel = await fixture.kernel([{ ...workflow, steps: [step, { ...step, id: 'second' }] }], 'plugin')
+  const source = { file: 'config.ts', line: 7, column: 1 }
+  const options = { ...fixture, sources: { ...fixture.sources, [`workflows.${workflow.name}.steps.probe.compensation`]: source } }
+  const lock = serializeAccessLock(kernel, options)
+  const parsed = JSON.parse(lock.json)
+  const input = parsed.enforcementInputs.workflows[workflow.name]
+  expect(input.stepOrder).toEqual(['probe', 'second'])
+  expect(input.registration).toEqual({ kind: 'plugin', plugin: 'workflow_probe' })
+  expect(input.steps.probe.forward).toEqual({ name: operation.name, permission: operation.permission, additionalPermissions: [], opaque: true })
+  expect(input.steps.probe.compensation).toEqual(input.steps.probe.forward)
+  expect(input.steps.second.forward).toEqual(input.steps.probe.forward)
+  expect(parsed.sources[`workflows.${workflow.name}.steps.probe.compensation`]).toEqual({ file: 'config.ts', line: 7 })
+  expect(lock.md).toContain('config.ts:7')
+  expect(lock.md).toMatch(/worker\/review.*probe.*compensation.*worker\/shared.*opaque/)
+  expect(() => serializeAccessLock(kernel, { ...options, sources: { ...options.sources,
+    [`workflows.${workflow.name}`]: { file: '../outside.ts', line: 1, column: 1 },
+  } })).toThrow('outside the repository root')
+  const reversed = await fixture.kernel([{ ...workflow, steps: [{ ...step, id: 'second' }, step] }], 'plugin')
+  expect(serializeAccessLock(reversed, options)).not.toEqual(lock)
+  const changed = await fixture.kernel([{ ...workflow, steps: [step, { ...step, id: 'second', compensate: undefined, sideEffect: false }] }], 'plugin')
+  expect(serializeAccessLock(changed, options)).not.toEqual(lock)
+})
+
+it('workflow ordering is deterministic across registry insertion order, permission order and host locale', async () => {
+  const fixture = await workflowConsumer()
+  const definition = { ...fixture.workflow, steps: [{ ...fixture.step, operation: { ...fixture.operation,
+    additionalPermissions: [{ entity: 'worker', operation: 'read' as const }, { entity: 'users', operation: 'read' as const }] } }] }
+  const other = { ...definition, name: 'worker/another' }
+  const first = serializeAccessLock(await fixture.kernel([definition, other], 'runtime'), fixture)
+  const shuffled = await fixture.kernel([other, { ...definition, steps: [{ ...definition.steps[0], operation: {
+    ...definition.steps[0].operation, additionalPermissions: [...definition.steps[0].operation.additionalPermissions].reverse(),
+  } }] }], 'runtime')
+  const locale = vi.spyOn(String.prototype, 'localeCompare').mockImplementation(function (this: string, other: string) { return this < other ? 1 : this > other ? -1 : 0 })
+  try {
+    expect(serializeAccessLock(shuffled, fixture)).toEqual(first)
+    expect(serializeAccessLock(shuffled, fixture)).toEqual(first)
+  } finally { locale.mockRestore() }
+})
+
+it('workflow-only operations retain unsupported_command and cannot supply a command-name guard', async () => {
+  const fixture = await workflowConsumer()
+  const operation = { ...fixture.operation, name: 'worker/unregistered' }
+  const kernel = await fixture.kernel([{ ...fixture.workflow, steps: [{ ...fixture.step, operation }] }], 'runtime')
+  expect(() => kernel.atomicPermission(fixture.scope, operation)).toThrow(expect.objectContaining({ code: 'unsupported_command' }))
+  expect(capabilities(kernel, fixture.scope).workflows[fixture.workflow.name]).toEqual([])
+  const lock = JSON.parse(serializeAccessLock(kernel, fixture).json)
+  expect(lock.effectiveAccess.guards.some((guard: any) => guard.name === operation.name)).toBe(false)
+  expect(lock.enforcementInputs.workflows[fixture.workflow.name].steps.probe.forward.name).toBe(operation.name)
+})
+
+it('audits the selected runtime workflow when it replaces a builtin contribution', async () => {
+  const fixture = await workflowConsumer()
+  const original = await fixture.kernel([fixture.workflow], 'runtime')
+  const builtin = builtinPlugin({ name: 'builtin_workflow', version: '1', workflows: [{ ...fixture.workflow,
+    steps: [{ ...fixture.step, operation: { ...fixture.operation, permission: { entity: 'worker', operation: 'update' } } }],
+  }] })
+  const kernel = new KernelRegistry(original.config, { plugins: [builtin], workflows: createWorkflowRegistry([fixture.workflow]) })
+  expect(kernel.workflows.get(fixture.workflow.name)).toBe(fixture.workflow)
+  const input = JSON.parse(serializeAccessLock(kernel, fixture).json).enforcementInputs.workflows[fixture.workflow.name]
+  expect(input.registration).toEqual({ kind: 'runtime' })
+  expect(input.steps.probe.forward.permission).toEqual(fixture.operation.permission)
+})
+
+it('CLI attributes static plugin workflows to authored registrations despite plugin dependency ordering', () => {
+  const fixture = consumer()
+  symlinkSync(resolve('node_modules'), join(fixture.root, 'node_modules'), 'dir')
+  const file = join(fixture.root, 'workflow.ts')
+  writeFileSync(file, `import { z } from '${resolve('packages/core/node_modules/zod/index.js')}'
+const operation = { name: 'worker/shared', permission: { entity: 'worker', operation: 'read' }, input: z.object({}), plan() { throw new Error('opaque') } }
+export default { name: 'worker/review', version: '1', input: z.object({}), steps: [{ id: 'probe', operation, sideEffect: false,
+  policy: { maxAttempts: 1, backoffMs: 0, timeoutMs: 1, deadlineMs: 1 }, async run() { throw new Error('opaque') } }] }
+`)
+  const config = join(fixture.root, 'config.ts')
+  writeFileSync(config, `import workflow from './workflow'\n` + readFileSync(config, 'utf8').replace("id: 'lock_probe'", `plugins: [
+  { name: 'owner', version: '1', requires: { dependency: '^1' }, workflows: [workflow] },
+  { name: 'dependency', version: '1', provides: { dependency: '1.x' } }
+], id: 'lock_probe'`))
+  const sources = configSources(config)
+  const expected = { file: 'config.ts', line: sources['plugins.0.workflows.0'].line }
+  const cli = resolve('packages/core/src/access-lock/cli.ts')
+  const run = (...args: string[]) => spawnSync('bun', [cli, '--root', fixture.root, ...args], { encoding: 'utf8' })
+  expect(run('--write').status).toBe(0)
+  const lock = JSON.parse(readFileSync(join(fixture.root, 'access.lock.json'), 'utf8'))
+  expect(lock.enforcementInputs.workflows['worker/review'].registration).toEqual({ kind: 'plugin', plugin: 'owner' })
+  expect(lock.sources['workflows.worker/review']).toEqual(expected)
+  expect(lock.sources['workflows.worker/review.steps.probe.forward']).toEqual(expected)
+  writeFileSync(file, readFileSync(file, 'utf8').replace("operation: 'read'", "operation: 'update'"))
+  const stale = run()
+  expect(stale.status).toBe(1)
+  expect(stale.stdout).toContain('worker/review / steps / probe / forward / permission / operation')
+  expect(stale.stdout).toContain(`config.ts:${expected.line}`)
+  expect(run('--write').status).toBe(0)
+  expect(run().status).toBe(0)
 })

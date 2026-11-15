@@ -59,6 +59,28 @@ export function serializeAccessLock(kernel: AccessKernel, options: AccessLockOpt
   for (const action of policy.actions) lines.push(`| ${cell(action.entity)} | ${cell(action.name)} | ${cell(action.command)} | ${cell(json(action.conditions))} | ${cell(json(action.dependencies))} | ${cell(locate(action.source))} |`)
   lines.push('', '## Registered command guards', '', '| Command | Permission | Additional permissions | Executable checks | Registration source |', '| --- | --- | --- | --- | --- |')
   for (const guard of policy.guards) lines.push(`| ${cell(guard.name)} | ${cell(json(guard.permission))} | ${cell(json(guard.additionalPermissions))} | opaque | ${cell(locate(`guards.${guard.name}`, 'commands'))} |`)
+  lines.push('', '## Workflow operation occurrences', '', '| Workflow | Step (in execution order) | Role | Operation | Permission | Additional permissions | Executable checks | Registration source |', '| --- | --- | --- | --- | --- | --- | --- | --- |')
+  for (const [name, workflow] of Object.entries(canonical(inputs.workflows) as typeof inputs.workflows)) {
+    const registration = kernel.workflowRegistrations.get(name)!
+    const source = (key: string, fallback: string) => {
+      // Explicit occurrence/workflow mappings override enclosing registrations.
+      let mapped = key
+      while (mapped.startsWith('workflows.') && !options.sources[mapped]) mapped = mapped.split('.').slice(0, -1).join('.')
+      return locate(key, options.sources[mapped] ? mapped : fallback)
+    }
+    const registrationLocation = source(`workflows.${name}`, registration.source)
+    lines.push(`| ${cell(name)} (v${cell(workflow.version)}; ${cell(json(workflow.registration))}) | | | | | | | ${cell(registrationLocation)} |`)
+    workflow.stepOrder.forEach((id, index) => {
+      for (const role of ['forward', 'compensation'] as const) {
+        const operation = workflow.steps[id][role]
+        if (!operation) continue
+        const location = source(`workflows.${name}.steps.${id}.${role}`,
+          `${registration.source}.steps.${index}.${role === 'forward' ? 'operation' : 'compensate.operation'}`)
+        lines.push(`| ${cell(name)} | ${index + 1}. ${cell(id)} | ${role} | ${cell(operation.name)} | ${cell(json(operation.permission))} | ${cell(json(operation.additionalPermissions))} | opaque | ${cell(location)} |`)
+      }
+    })
+  }
+  if (!Object.keys(inputs.workflows).length) lines.push('None registered.')
   lines.push('', '## Opaque executable hooks', '')
   for (const hook of policy.opaqueHooks) lines.push(`- ${cell(hook)}: opaque (${cell(locate(`hooks.${hook}`, 'plugins'))})`)
   if (!policy.opaqueHooks.length) lines.push('None registered.')
@@ -80,7 +102,7 @@ export function serializeAccessLock(kernel: AccessKernel, options: AccessLockOpt
           lines.push(`| ${cell(path)} | ${cell(json(binding))} (${cell(locate(path))}) |`)
         }
       }
-    } else lines.push(`| ${cell(key)} | ${cell(json(value))} |`)
+    } else if (key !== 'workflows') lines.push(`| ${cell(key)} | ${cell(json(value))} |`)
   }
   // Compact JSON keeps the full normalized representation together; no derived grants.
   return { json: json({ effectiveAccess: policy, enforcementInputs: inputs, sources: locations }) + '\n', md: lines.join('\n') + '\n' }
@@ -98,6 +120,14 @@ function diff(previous: string, current: string): string[] {
     }
     function inputs(old: any, next: any, path: string) {
       if (json(old) === json(next)) return
+      if (path === 'enforcement inputs / workflows') {
+        for (const name of [...new Set([...Object.keys(old ?? {}), ...Object.keys(next ?? {})])].sort()) {
+          const child = `${path} / ${name}`
+          if (!old?.[name] || !next?.[name]) changes.push(`${next?.[name] ? '+' : '-'} workflow ${name}${inputSource(child)}`)
+          else inputs(old[name], next[name], child)
+        }
+        return
+      }
       if (old && next && typeof old === 'object' && typeof next === 'object' && !Array.isArray(old) && !Array.isArray(next)) {
         for (const key of [...new Set([...Object.keys(old), ...Object.keys(next)])].sort()) inputs(old[key], next[key], `${path} / ${key}`)
       } else changes.push(`~ ${path}: ${json(old) ?? 'missing'} -> ${json(next) ?? 'missing'}${inputSource(path)}`)
