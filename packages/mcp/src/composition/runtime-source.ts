@@ -1,5 +1,5 @@
 import ts from 'typescript'
-import { compositionChangeSchema, fail, WorkflowError, type CompositionChange } from '../schemas.ts'
+import { runtimeChangeSchema, fail, WorkflowError, type CompositionChange } from '../schemas.ts'
 import { importOrder, permissionOptions, pluginOrder, pluginRegistry, parsePluginOptions, type CompositionConfig, type PluginName, type RuntimePlugin } from './registry.ts'
 
 export interface RuntimeModel { interactive?: boolean; plugins: RuntimePlugin[] }
@@ -155,7 +155,7 @@ function normalize(model: RuntimeModel, config: CompositionConfig): RuntimeModel
 export function applyRuntimeChanges(model: RuntimeModel, changes: readonly CompositionChange[], config: CompositionConfig): RuntimeModel {
   const next = structuredClone(model)
   for (const raw of changes) {
-    const change = compositionChangeSchema.parse(raw)
+    const change = runtimeChangeSchema.parse(raw)
     if (change.kind === 'set_interactive') next.interactive = change.interactive
     else {
       const entry: RuntimePlugin = { plugin: change.plugin, ...('options' in change && change.options !== undefined ? { options: change.options } : {}) }

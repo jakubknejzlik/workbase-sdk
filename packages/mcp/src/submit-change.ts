@@ -19,6 +19,7 @@ export function promotionHash(p: Submission) {
 }
 const changeLabels: Record<Change['kind'] | CompositionChange['kind'], string> = {
   set_plugin: 'Úprava pluginu', set_interactive: 'Úprava interactive',
+  set_system_access: 'Úprava systémového přístupu', set_entity_access: 'Úprava přístupu k entitě', set_account_link: 'Úprava vazby na účet',
   set_label: 'Úprava popisku', set_locale: 'Úprava jazyka', add_role: 'Přidání role', remove_role: 'Odebrání role',
   set_permissions: 'Úprava oprávnění', set_organization_permissions: 'Úprava oprávnění organizace',
   add_entity: 'Přidání entity', set_policy: 'Úprava pravidla přístupu', set_display_field: 'Úprava zobrazeného názvu',
@@ -38,7 +39,10 @@ export async function submitChange(directory: string, p: Submission, expectedBas
   if (p.status !== 'promoted') fail('promotion_required', 'Změna musí být nejprve povýšena pomocí promote.', 409)
   if (!p.validation || !p.verification || hash(p.validation) !== hash(p.verification)) fail('verification_required', 'Chybí ověření této změny.', 409)
   if (!p.promotedFiles || !p.migrationPreview || p.promotionHash !== promotionHash(p)) fail('promotion_snapshot_required', 'Chybí platný záznam souborů povýšené změny.', 409)
-  const allowed = new Set(p.kind === 'composition_change' ? ['runtime.ts', 'access.lock.json', 'access.lock.md'] : ['config.ts', 'config.indexes.json', 'config.versions.json', `config.v${p.baseRevision}.ts`, `config.v${p.promotedRevision}.ts`, `migrations/${p.migration}`])
+  const accessChanges = p.changes.filter(change => ['set_system_access', 'set_entity_access', 'set_account_link'].includes(change.kind))
+  const allowed = new Set(p.kind === 'composition_change' ? ['runtime.ts', 'access.lock.json', 'access.lock.md',
+    ...(accessChanges.length ? ['access.ts', 'openapi.json'] : []),
+    ...accessChanges.flatMap(change => change.kind === 'set_entity_access' ? [`schema/${change.entity}.ts`] : [])] : ['config.ts', 'config.indexes.json', 'config.versions.json', `config.v${p.baseRevision}.ts`, `config.v${p.promotedRevision}.ts`, `migrations/${p.migration}`])
   const paths = new Set<string>()
   for (const file of p.promotedFiles) {
     if (!allowed.has(file.path) || paths.has(file.path)) fail('file_not_allowed', 'Změna obsahuje soubor mimo povolený seznam.', 409)

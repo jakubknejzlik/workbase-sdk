@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { accessEntities } from '@workbasehq/core/schema'
 // Shared exact SemVer contract; keep CLI init schema dependencies self-contained.
 export const exactVersion = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$/
 
@@ -52,7 +53,7 @@ const setLabel = z.strictObject({
 const setLocale = z.strictObject({
   kind: z.literal('set_locale'), locale: consoleLocaleSchema.optional(), defaultLanguage: consoleLocaleSchema.optional(),
 }).refine(change => change.locale !== undefined || change.defaultLanguage !== undefined, 'Provide locale and/or defaultLanguage')
-// Composition inputs are exported for planning; legacy propose_change stays unchanged.
+// Composition inputs remain separate from legacy config proposal records.
 export const identityOptionsSchema = z.strictObject({
   trustedIssuers: z.record(z.string().url(), z.array(z.string().min(1))).optional(),
 })
@@ -66,7 +67,20 @@ export const setPluginSchema = z.discriminatedUnion('plugin', [
     z.strictObject({ kind: z.literal('set_plugin'), plugin: z.literal(plugin) })),
 ])
 export const setInteractiveSchema = z.strictObject({ kind: z.literal('set_interactive'), interactive: z.boolean() })
-export const compositionChangeSchema = z.union([setPluginSchema, setInteractiveSchema])
+export const runtimeChangeSchema = z.union([setPluginSchema, setInteractiveSchema])
+export type RuntimeChange = z.infer<typeof runtimeChangeSchema>
+const accessDecision = z.enum(['allow', 'deny'])
+const accessGrant = z.union([accessDecision, z.strictObject({ where: z.record(z.string(), z.unknown()), fields: z.array(identifier).optional() })])
+const entityTarget = z.union([identifier, z.enum(accessEntities)])
+export const accessChangeSchema = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('set_system_access'), role: identifier, grants: z.record(z.string(), accessDecision) }),
+  z.strictObject({ kind: z.literal('set_entity_access'), entity: entityTarget, role: identifier, access: z.union([
+    z.literal('deny'), z.strictObject({ read: accessGrant, create: accessGrant, update: accessGrant, delete: accessGrant }),
+  ]) }),
+  z.strictObject({ kind: z.literal('set_account_link'), entity: identifier, invitationRole: identifier }),
+])
+export type AccessChange = z.infer<typeof accessChangeSchema>
+export const compositionChangeSchema = z.union([runtimeChangeSchema, accessChangeSchema])
 export type CompositionChange = z.infer<typeof compositionChangeSchema>
 
 export const changeSchema = z.discriminatedUnion('kind', [
@@ -97,7 +111,7 @@ export const schemas = {
   rollback: z.strictObject({ instance, to: z.string().regex(/^v[1-9][0-9]*$/), expectedRevision: revision, allowDestructive: z.boolean().optional(), preview: z.boolean().optional() }),
   inspect_schema: z.strictObject({ instance }),
   upgrade_sdk: z.strictObject({ instance, baseRevision: revision, targetVersion: z.string().regex(exactVersion).refine(value => !/\s/.test(value)) }),
-  propose_change: z.strictObject({ instance, baseRevision: revision, changes: z.array(changeSchema).min(1).max(50) }),
+  propose_change: z.strictObject({ instance, baseRevision: revision, changes: z.array(z.union([changeSchema, compositionChangeSchema])).min(1).max(50) }),
   propose_composition: z.strictObject({ instance, baseRevision: revision, changes: z.array(compositionChangeSchema).min(1).max(50) }),
   validate: z.strictObject({ proposalId: proposalId.optional(), instance: instance.optional() })
     .refine(input => !!input.proposalId !== !!input.instance, 'Provide exactly one of instance or proposalId'),

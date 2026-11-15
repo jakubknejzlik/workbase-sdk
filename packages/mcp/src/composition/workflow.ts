@@ -1,13 +1,14 @@
 import { join } from 'node:path'
 import { durableAtomic, json, type Bundle, type Store } from '../storage.ts'
-import { fail, type CompositionChange } from '../schemas.ts'
+import { fail, type AccessChange, type CompositionChange, type RuntimeChange } from '../schemas.ts'
+import { loadConfig } from '@workbasehq/core/schema/load'
 import { hash } from '../planning.ts'
 import { instanceMeta, replayEngine } from '../offline.ts'
 import { applyDisposable } from '../disposable.ts'
 import type { CompositionProposal } from '../proposals.ts'
 import { applyRuntimeChanges, parseRuntimeSource, rewriteRuntimeSource } from './runtime-source.ts'
 import { hydrateRuntimePlugins } from './registry.ts'
-import { compositionPlan } from './plan.ts'
+import { accessPlan, compositionPlan } from './plan.ts'
 import { compositionRequirements, assertCompositionRequirements } from './requirements.ts'
 import { promotionHash, submitChange } from '../submit-change.ts'
 import type { GitHubConfiguration } from '../github.ts'
@@ -18,24 +19,34 @@ async function save(store: Store, proposal: CompositionProposal) {
 function revision(bundle: Bundle, expected: number) {
   if (bundle.config.revision !== expected) fail('stale_revision', 'Revision changed; inspect and propose against the current revision', 409)
 }
-function prepare(bundle: Bundle, changes: CompositionChange[]) {
+const isAccess = (change: CompositionChange): change is AccessChange => change.kind !== 'set_plugin' && change.kind !== 'set_interactive'
+async function load(store: Store, instance: string, changes: CompositionChange[]) {
+  // Surface compiler diagnostics before the trusted config import can throw an
+  // unlocated runtime declaration error for an incomplete source matrix.
+  if (changes.some(isAccess)) await loadConfig(join(await store.directory(instance), 'config.ts'))
+  return store.load(instance, { canonicalRuntime: true })
+}
+async function prepare(bundle: Bundle, changes: CompositionChange[], root: string) {
   if (bundle.config.baseline !== 'workbase-sdk') fail('composition_requires_v3', 'Composition authoring requires a V3 instance', 409)
-  const model = applyRuntimeChanges(parseRuntimeSource(bundle.runtimeSource!), changes, bundle.config)
-  const source = rewriteRuntimeSource(bundle.runtimeSource!, model, bundle.config)
-  const runtime = { ...bundle.config, ...(model.interactive === undefined ? {} : { interactive: model.interactive }), plugins: hydrateRuntimePlugins(model, bundle.config) }
-  const target = { ...bundle, runtime }
+  const runtimeChanges = changes.filter((change): change is RuntimeChange => !isAccess(change))
+  const model = applyRuntimeChanges(parseRuntimeSource(bundle.runtimeSource!), runtimeChanges, bundle.config)
+  const source = runtimeChanges.length ? rewriteRuntimeSource(bundle.runtimeSource!, model, bundle.config) : bundle.runtimeSource!
+  const accessChanges = changes.filter(isAccess)
+  const access = accessChanges.length ? await accessPlan(root, accessChanges) : { config: bundle.config, files: [] }
+  const runtime = { ...access.config, ...(model.interactive === undefined ? {} : { interactive: model.interactive }), plugins: hydrateRuntimePlugins(model, access.config) }
+  const target = { ...bundle, config: access.config, runtime }
   try { replayEngine(target.config, runtime) }
   catch { fail('invalid_composition', 'The target plugin composition is invalid; check required providers and interactive login', 400) }
-  return { target, files: [{ path: 'runtime.ts', data: source }], model }
+  return { target, source, files: [...(runtimeChanges.length ? [{ path: 'runtime.ts', data: source }] : []), ...access.files], model }
 }
-function proof(bundle: Bundle, prepared: ReturnType<typeof prepare> & Awaited<ReturnType<typeof compositionPlan>>, changes: CompositionChange[], requirementGuards: Bundle['guards']) {
+function proof(bundle: Bundle, prepared: Awaited<ReturnType<typeof prepare>> & Awaited<ReturnType<typeof compositionPlan>>, changes: CompositionChange[], requirementGuards: Bundle['guards']) {
   return { fingerprint: bundle.fingerprint, planHash: hash({ files: prepared.files, ledger: prepared.ledger, statements: prepared.statements, model: prepared.model, changes, requirementGuards }),
     ...(bundle.dependencyDigest === undefined ? {} : { dependencyDigest: bundle.dependencyDigest }) }
 }
 export async function proposeComposition(store: Store, instance: string, baseRevision: number, changes: CompositionChange[], proposalId: string) {
-  const bundle = await store.load(instance, { canonicalRuntime: true })
+  const bundle = await load(store, instance, changes)
   revision(bundle, baseRevision)
-  prepare(bundle, changes)
+  await prepare(bundle, changes, await store.directory(instance))
   const proposal: CompositionProposal = { kind: 'composition_change', proposalId, instance, baseRevision, changes,
     createdAt: new Date().toISOString(), status: 'proposed' }
   await save(store, proposal)
@@ -63,12 +74,13 @@ export async function executeComposition(store: Store, proposal: CompositionProp
     await save(store, proposal)
     return { ok: true, status: proposal.status }
   }
-  const bundle = await store.load(proposal.instance, { canonicalRuntime: true })
+  const bundle = await load(store, proposal.instance, proposal.changes)
   if (name === 'promote') revision(bundle, input.expectedRevision!)
   revision(bundle, proposal.baseRevision)
   if (name === 'promote' && proposal.validation && proposal.validation.fingerprint !== bundle.fingerprint) fail('stale_revision', 'Instance files changed since validation', 409)
-  const target = prepare(bundle, proposal.changes)
-  const prepared = { ...target, ...await compositionPlan(bundle, target.target, target.files[0].data, await store.directory(proposal.instance)) }
+  const root = await store.directory(proposal.instance)
+  const target = await prepare(bundle, proposal.changes, root)
+  const prepared = { ...target, ...await compositionPlan(bundle, target.target, target.source, root, target.files) }
   const { requirements, guards: requirementGuards } = await compositionRequirements(await store.directory(proposal.instance), prepared.model)
   assertCompositionRequirements(requirements)
   const currentProof = proof(bundle, prepared, proposal.changes, requirementGuards)

@@ -1,20 +1,77 @@
 import { DatabaseSync } from 'node:sqlite'
-import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises'
-import { join, relative } from 'node:path'
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
+import { dirname, join, relative } from 'node:path'
 import { serializeAccessLock } from '@workbasehq/core/access/lock'
-import { configSources } from '@workbasehq/core/schema/load'
+import { configSources, loadConfig, SourceError } from '@workbasehq/core/schema/load'
+import { runOpenApiCli } from '@workbasehq/core/openapi/cli'
 import { expectedPluginMigrations, type PluginMigrationRow } from '@workbasehq/core/kernel/migrations'
 import type { Bundle } from '../storage.ts'
 import { noLink } from '../storage.ts'
-import { fail } from '../schemas.ts'
+import { fail, type AccessChange } from '../schemas.ts'
+import { replaySources } from '../replay-sources.ts'
+import { replaceLiteral } from './literal-edit.ts'
 import { replayBundle, replayEngine, snapshot } from '../offline.ts'
 import { replayInstance } from '../migration-replay.ts'
 import { compare, stateRoot } from '../disposable.ts'
 
 export const pluginLedger = (db: DatabaseSync) => db.prepare('SELECT namespace,name,position,checksum FROM _plugin_migrations ORDER BY namespace,position').all().map(row => ({ namespace: String(row.namespace), name: String(row.name), position: Number(row.position), checksum: String(row.checksum) }))
 
+/** Interpret the original graph, edit literal spans, then compile the staged graph.
+ * Consumer modules are never evaluated to obtain authored access declarations. */
+export async function accessPlan(root: string, changes: AccessChange[]) {
+  const original = await loadConfig(join(root, 'config.ts'))
+  const { shared, entities } = original.authoredAccess
+  if (!shared) fail('invalid_access', 'V3 access authoring requires access.ts')
+  const inputs = await replaySources(root, { accessLock: true })
+  const files = new Map<string, string>()
+  const edit = (file: string, path: string[], value: unknown) => {
+    files.set(file, replaceLiteral(files.get(file) ?? inputs[file].toString('utf8'), path, value, join(root, file)))
+  }
+  for (const change of changes) {
+    if (change.kind === 'set_system_access') {
+      const known = Object.hasOwn(shared.roles, change.role)
+      shared.roles[change.role] = { system: change.grants }
+      edit('access.ts', known ? ['roles', change.role, 'system'] : ['roles'], known ? change.grants : shared.roles)
+    } else if (change.kind === 'set_entity_access') {
+      // The compiled config also includes SDK-owned entities such as users.
+      const domain = Object.hasOwn(entities, change.entity)
+      const matrix = { ...(domain ? entities[change.entity] : shared.entities[change.entity]), [change.role]: change.access }
+      if (domain) { entities[change.entity] = matrix; edit(`schema/${change.entity}.ts`, ['access'], matrix) }
+      else {
+        const known = Object.hasOwn(shared.entities, change.entity)
+        shared.entities[change.entity] = matrix
+        edit('access.ts', known ? ['entities', change.entity] : ['entities'], known ? matrix : shared.entities)
+      }
+    } else {
+      const present = shared.accountLinks !== undefined
+      ;(shared.accountLinks ??= {})[change.entity] = { invitationRole: change.invitationRole }
+      edit('access.ts', present ? ['accountLinks'] : [], present ? shared.accountLinks : shared)
+    }
+  }
+  await mkdir(stateRoot, { recursive: true }); await noLink(stateRoot)
+  const scratch = await realpath(await mkdtemp(join(stateRoot, 'access-')))
+  try {
+    await writeFile(join(scratch, 'config.ts'), await readFile(join(root, 'config.ts')))
+    for (const [path, bytes] of Object.entries(inputs)) {
+      await mkdir(dirname(join(scratch, path)), { recursive: true })
+      await writeFile(join(scratch, path), files.get(path) ?? bytes)
+    }
+    const loaded = await loadConfig(join(scratch, 'config.ts'))
+    // Presence in the captured instance graph is the artifact opt-in. Never
+    // introduce OpenAPI into an instance that does not already maintain it.
+    if (inputs['openapi.json']) {
+      await runOpenApiCli(['--root', scratch, '--write'])
+      files.set('openapi.json', await readFile(join(scratch, 'openapi.json'), 'utf8'))
+    }
+    return { config: loaded.config, files: [...files].map(([path, data]) => ({ path, data })) }
+  } catch (error) {
+    if (error instanceof SourceError) throw new SourceError({ ...error.location, file: join(root, relative(scratch, error.location.file)) }, error.message.replace(/^.*?:\d+:\d+: /, ''))
+    throw error
+  } finally { await rm(scratch, { recursive: true, force: true }) }
+}
+
 /** Record the upgrade that deploy will execute, and independently replay fresh. */
-export async function compositionPlan(base: Bundle, target: Bundle, source: string, root: string) {
+export async function compositionPlan(base: Bundle, target: Bundle, source: string, root: string, files = [{ path: 'runtime.ts', data: source }]) {
   root = await realpath(root)
   const engine = replayEngine(target.config, target.runtime)
   const ledger = await expectedPluginMigrations(engine.kernel.plugins, engine.kernel.config)
@@ -51,7 +108,7 @@ export async function compositionPlan(base: Bundle, target: Bundle, source: stri
     lock = serializeAccessLock(engine.kernel, { root, sources })
   } finally { await rm(scratch, { recursive: true, force: true }) }
   return {
-    files: [{ path: 'runtime.ts', data: source }, { path: 'access.lock.json', data: lock.json }, { path: 'access.lock.md', data: lock.md }],
+    files: [...files, { path: 'access.lock.json', data: lock.json }, { path: 'access.lock.md', data: lock.md }],
     expected: expected.schema, statements, ledger,
     pluginMigrations: ledger.map(row => ({ ...row, status: applied.some(previous => previous.namespace === row.namespace && previous.name === row.name) ? 'applied' : 'new' })),
     pluginSql: statements.slice(upgradeStart).map(statement => statement.sql).join('\n'),
