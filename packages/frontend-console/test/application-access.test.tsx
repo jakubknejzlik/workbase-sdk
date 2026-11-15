@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 import { expect, it, vi } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { I18nextProvider, initReactI18next } from 'react-i18next'
 import i18next from 'i18next'
@@ -29,13 +30,14 @@ function fixture(layout: Layout = 'default') {
   const caps = { revision: 1, commands: ['entries/remove_access', 'entries/link_account'], entities: Object.fromEntries(Object.entries(model.entities).map(([name, entity]) => [name, { operations: ['read'], readable: Object.keys(entity.fields), writable: [] }])) } as Capabilities
   return { model, caps }
 }
-async function mount(options: { layout?: Layout; status?: Record<string, unknown>; error?: number; loading?: boolean; available?: boolean; transport?: boolean; manage?: boolean } = {}) {
+async function mount(options: { layout?: Layout; status?: Record<string, unknown>; error?: number; loading?: boolean; available?: boolean; transport?: boolean; manage?: boolean; commands?: string[] } = {}) {
   const { model, caps } = fixture(options.layout)
   Object.assign(model.entities.entries, { rowAccess: options.available ?? true, rowInvitations: options.manage ?? true })
   if (options.manage === false) caps.commands = []
+  if (options.commands) caps.commands = options.commands
   const i18n = i18next.createInstance()
   await i18n.use(initReactI18next).init({ lng: 'en', resources: { en: { translation: { ...en, field_user: 'Raw User', relation_user_account: 'Raw User account', relation_alias: 'Raw account alias', field_reviewer: 'Reviewer', relation_reviewer_account: 'Reviewer account', field_name: 'Name' } } } })
-  const write = vi.fn(async () => {
+  const write = vi.fn(async (_path: string, _method: string, _body?: unknown, _key?: string) => {
     if (options.loading) return new Promise<never>(() => {})
     if (options.error) throw { status: options.error }
     return options.status ?? { state: 'no_account', can_invite: false, can_cancel: false, inconsistency: null }
@@ -73,6 +75,41 @@ it('authorized linked account appears once inside the shared access card', async
   await mount({ status: { state: 'signed_in', can_invite: false, can_cancel: false, inconsistency: null, linked_accounts: [{ id: 'account', label: 'Authorized account' }] } })
   expect(await screen.findByText('Authorized account')).toBeTruthy()
   expect(screen.getAllByText('Signed in')).toHaveLength(1)
+})
+it.each(['link_account', 'remove_access'])('unavailable status preserves the authorized %s command without an invitation read', async action => {
+  const { write } = await mount({ available: false, manage: false, commands: ['entries/link_account', 'entries/remove_access'] })
+  expect(screen.getByText('Access status unavailable')).toBeTruthy()
+  expect(screen.getAllByRole('button', { name: 'Link account' })).toHaveLength(1)
+  expect(screen.getAllByRole('button', { name: 'Remove access' })).toHaveLength(1)
+  expect(write).not.toHaveBeenCalled()
+  const user = userEvent.setup()
+  const label = action === 'link_account' ? 'Link account' : 'Remove access'
+  await user.click(screen.getByRole('button', { name: label }))
+  await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: label }))
+  await waitFor(() => expect(write).toHaveBeenCalledWith(`/commands/entries/${action}`, 'POST', { rowId: 'entry', idempotencyKey: expect.any(String) }))
+  expect(write.mock.calls.every(([, method]) => method !== 'GET')).toBe(true)
+})
+it.each(['no_account', 'invited', 'expired', 'signed_in'])('available %s status offers each authorized account command exactly once', async state => {
+  await mount({ status: { state, can_invite: true, can_cancel: true, inconsistency: null,
+    ...(['invited', 'expired'].includes(state) ? { invitation: { id: 'pending', email: 'one@example.test' } } : {}) } })
+  await screen.findByText({ no_account: 'No access', invited: 'Invited', expired: 'Expired', signed_in: 'Signed in' }[state]!)
+  expect(screen.getAllByRole('button', { name: 'Link account' })).toHaveLength(1)
+  expect(screen.getAllByRole('button', { name: 'Remove access' })).toHaveLength(1)
+  const card = screen.getByText('Application access').closest('[data-application-access]') as HTMLElement
+  expect(within(card).queryAllByRole('button', { name: 'Remove access' })).toHaveLength(state === 'signed_in' ? 1 : 0)
+})
+it.each([false, true])('account commands remain individually capability gated with status available=%s', async available => {
+  await mount({ available, manage: available, commands: ['entries/link_account'], status: { state: 'signed_in', can_invite: false, can_cancel: false, inconsistency: null } })
+  await screen.findByText(available ? 'Signed in' : 'Access status unavailable')
+  expect(screen.getAllByRole('button', { name: 'Link account' })).toHaveLength(1)
+  expect(screen.queryByRole('button', { name: 'Remove access' })).toBeNull()
+})
+it.each([false, true])('no account command is exposed without a grant with status available=%s', async available => {
+  const { write } = await mount({ available, manage: available, commands: [], status: { state: 'signed_in', can_invite: false, can_cancel: false, inconsistency: null } })
+  await screen.findByText(available ? 'Signed in' : 'Access status unavailable')
+  expect(screen.queryByRole('button', { name: 'Link account' })).toBeNull()
+  expect(screen.queryByRole('button', { name: 'Remove access' })).toBeNull()
+  if (!available) expect(write).not.toHaveBeenCalled()
 })
 it.each(['explicit', 'array'])('multiple linked accounts (%s) warn and disable all account actions', async source => {
   await mount({ status: { state: 'signed_in', can_invite: true, can_cancel: true, inconsistency: source === 'explicit' ? 'multiple_linked_accounts' : null, linked_accounts: source === 'array' ? [{ id: 'a', label: 'First account' }, { id: 'b', label: 'Second account' }] : [] } })
