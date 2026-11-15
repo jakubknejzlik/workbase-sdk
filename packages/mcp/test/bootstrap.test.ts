@@ -351,7 +351,7 @@ it.each([false, true])('starts generated workbase_ops after client interpolation
   try {
     await client.connect(transport)
     expect((await client.listTools()).tools.map(tool => tool.name))
-      .toEqual(['provision_organization', ...(mailbox ? ['read_dev_mail'] : [])])
+      .toEqual(['provision_organization', 'bootstrap_instance_owner', ...(mailbox ? ['read_dev_mail'] : [])])
   } finally { await client.close(); await transport.close() }
 })
 

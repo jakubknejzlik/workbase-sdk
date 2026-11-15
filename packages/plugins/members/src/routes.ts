@@ -24,9 +24,16 @@ import { issuerGuard, organizationRule, memberMutationRule } from '../../../core
 export { organizationPermission } from '../../../core/src/execution/permissions'
 
 import { membershipExecutor, meDocument } from '../../../core/src/organizations'
+import { bootstrapInstanceOwner } from '../../../core/src/member-bootstrap'
 const nowISO = () => new Date().toISOString()
 export function memberRoutes(app: App, config: InstanceConfig, env: RuntimeEnv) {
   if (!kernelFor(config).providers.has('login')) return
+  if (!kernelFor(config).providers.has('organizations')) app.post('/internal/members/instance-owner', async c => {
+    c.header('Cache-Control', 'no-store')
+    const { ownerEmail } = z.strictObject({ ownerEmail: z.string().trim().email() }).parse(await c.req.json())
+    const result = await bootstrapInstanceOwner(config, env, ownerEmail, c.get('correlationId'))
+    return c.json(result.body, result.status)
+  })
   const roleSchema = z.enum(config.roles as [string, ...string[]])
   const scoped = scopeMiddleware(env, config, kernelFor(config))
   const execute = membershipExecutor(config, env)

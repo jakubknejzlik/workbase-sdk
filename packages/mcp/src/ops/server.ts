@@ -11,7 +11,7 @@ export function createServer(env: NodeJS.ProcessEnv = process.env, request: type
   const api = createApi(configuration, request)
   const available = (name: string) => Object.hasOwn(schemas, name) && (name !== 'read_dev_mail' || Boolean(configuration.WORKBASE_DEV_MAILBOX_URL))
   const server = new Server({ name: 'workbase-ops', version: metadata.version }, { capabilities: { tools: {} },
-    instructions: 'Operator-only Workbase onboarding. Sign in and verify the owner before provision_organization. read_dev_mail intentionally exposes development credentials through the separate dev/test mailbox sidecar when configured. Authority and destination come only from operator environment configuration.' })
+    instructions: 'Operator-only Workbase onboarding. Sign in and verify the owner before provision_organization, or bootstrap_instance_owner for Members without Organizations. read_dev_mail intentionally exposes development credentials through the separate dev/test mailbox sidecar when configured. Authority and destination come only from operator environment configuration.' })
   server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: Object.entries(schemas).filter(([name]) => available(name)).map(([name, schema]) => ({
     name, description: descriptions[name as ToolName], inputSchema: z.toJSONSchema(schema, { io: 'input' }) as Tool['inputSchema'],
     annotations: { readOnlyHint: name === 'read_dev_mail', destructiveHint: false, openWorldHint: false },

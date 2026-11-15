@@ -66,7 +66,7 @@ export interface AtomicOperation<Schema extends z.ZodType = z.ZodType, Prepared 
   name: string
   /** Public presentation only; never grants authority or changes execution. */
   ui?: { placement?: { entity: string; action: 'create' }; labelKey?: string; label?: string | { en: string; cs: string }; replacesCrud?: 'create' | 'update' | 'delete' }
-  permission: { entity: string; operation: Operation } | { system: OrganizationAction | 'organizations.create' | 'organizations.provision' | 'members.leave' | 'invitations.accept' | 'identity.write' }
+  permission: { entity: string; operation: Operation } | { system: OrganizationAction | 'organizations.create' | 'organizations.provision' | 'members.bootstrap' | 'members.leave' | 'invitations.accept' | 'identity.write' }
   additionalPermissions?: readonly { entity: string; operation: Operation }[]
   input: Schema
   idempotency?: 'required' | 'optional'

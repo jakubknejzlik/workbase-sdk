@@ -86,7 +86,8 @@ workbase ops
 
 URLs and secrets are environment-only; HTTPS is required except for loopback HTTP.
 No data token or organization ID is needed. Omit both mailbox variables to expose
-only `provision_organization({ name, ownerEmail })`. Setting both also lists
+`provision_organization({ name, ownerEmail })` and the Members-only
+`bootstrap_instance_owner({ ownerEmail })` ([instance onboarding](onboarding.md#members-without-organizations)). Setting both also lists
 `read_dev_mail({ recipient, limit? })`, which uses the exact
 [sidecar message contract](#reading-messages) above: limit defaults to 20, maximum
 50, and the result is `{ ok: true, data: { messages: [...] } }`. The server neither

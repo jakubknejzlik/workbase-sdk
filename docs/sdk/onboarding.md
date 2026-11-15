@@ -61,3 +61,32 @@ For production, omit both mailbox MCP variables and the deployment mailbox token
 configure real mail delivery with `EMAIL_FROM`, and use the same ops provisioning
 tool after the owner's delivered sign-in. Record deployed acceptance separately
 using the [phase-2 checklist](phase-2-checklist.md).
+
+## Members without Organizations
+
+For a Members-only composition, sign in with a magic link and verify the intended
+owner as above. Login alone leaves `/me.memberships` empty and instance-scoped APIs
+return `organization_forbidden` (403). With `WORKBASE_BASE_URL` and
+`WORKBASE_OPS_TOKEN` exported, run:
+
+```sh
+workbase ops bootstrap-instance-owner --owner-email owner@example.test
+```
+
+Alternatively, call `bootstrap_instance_owner({ ownerEmail: "owner@example.test" })`
+on the MCP server started by `workbase ops`. Both use
+`POST /internal/members/instance-owner` with `X-Internal-Token`, protected by the
+same middleware as organization provisioning: runtime `OPS_TOKEN` takes precedence
+over legacy `INTERNAL_TOKEN`. No tenant credential or scope argument is needed.
+The route is mounted only with Members and login, without Organizations.
+
+The identity must already exist and have verified email (`owner_sign_in_required`,
+409 otherwise). Bootstrap grants the configured `organizationOwnerRole` in the
+existing `instance` scope and returns `{ organization_id, user_id, role, replayed }`
+with status 201. Refresh `/me` to see the membership and access the scoped API.
+An identical owner email (case-insensitive) returns the durable receipt with status
+200 and `replayed: true`, even if the original membership later changes; a replay
+never restores grants. A different owner, or any existing owner without that
+receipt, returns `instance_owner_exists` (409). An existing non-owner membership
+for the target returns `membership_conflict` (409). Bootstrap never creates an
+identity or session. Use the normal member-management routes for subsequent grants.

@@ -39,8 +39,8 @@ export function membershipExecutor(config: InstanceConfig, env: RuntimeEnv) {
     authorizeOperation(scope, name)
     const context = coreExecutionContext(config, scope, new D1AtomicStore(env.DB, { env, config }), new D1AtomicReader(env.DB))
     const operation = defineAtomicOperation({ name, permission: { system }, input: z.strictObject({}), plan: () => plan })
-    if (['members.update', 'organizations.create', 'organizations.provision', 'invitations.accept'].includes(system)) {
-      if (context.scope.actor.type !== (system === 'organizations.provision' ? 'service' : 'user')) throw new ApiError(403, 'field_forbidden')
+    if (['members.update', 'organizations.create', 'organizations.provision', 'members.bootstrap', 'invitations.accept'].includes(system)) {
+      if (context.scope.actor.type !== (['organizations.provision', 'members.bootstrap'].includes(system) ? 'service' : 'user')) throw new ApiError(403, 'field_forbidden')
       if (system === 'members.update') organizationPermission(config, context.scope, system)
       const capability = Object.freeze({ operation, mode: system === 'members.update' ? 'update' as const : 'create' as const })
       memberCapabilities.add(capability)
