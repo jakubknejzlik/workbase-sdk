@@ -28,7 +28,9 @@ const options = {
   sources: Object.fromEntries(['entities', 'access', 'commands', 'plugins', 'workflows', 'ui'].map(key =>
     [key, { file: 'packages/core/test/infra/access-read-set.test.ts', line: 1, column: 1 }])),
 }
-async function fixture(composition: 'plugin' | 'runtime' | 'factory') {
+async function fixture(composition: 'plugin' | 'runtime' | 'factory', {
+  trust = false, provider = true, additionalPermissions = [{ entity: 'clients', operation: 'read' }],
+}: { trust?: boolean; provider?: boolean; additionalPermissions?: AtomicOperation['additionalPermissions'] } = {}) {
   const all = { read: 'allow', create: 'allow', update: 'allow', delete: 'allow' } as const
   const roles = ['admin', 'staff']
   const matrix = { admin: all, staff: 'deny' } as const
@@ -53,7 +55,7 @@ async function fixture(composition: 'plugin' | 'runtime' | 'factory') {
   input.entities.contacts.displayField = 'label_value'
   input.entities.contacts.label = Fn.concat('name', Q.value('!'))
   const operation: AtomicOperation = { name: 'jobs/shared', permission: { entity: 'jobs', operation: 'read' },
-    additionalPermissions: [{ entity: 'clients', operation: 'read' }], input: z.object({}), plan() { throw new Error('opaque plan') } }
+    additionalPermissions, input: z.object({}), plan() { throw new Error('opaque plan') } }
   const workflow: WorkflowDefinition = { name: 'jobs/review', version: '1', input: z.object({}), steps: [{
     id: 'review', operation: { ...operation }, sideEffect: true,
     policy: { maxAttempts: 1, backoffMs: 0, timeoutMs: 1, deadlineMs: 1 },
@@ -62,8 +64,8 @@ async function fixture(composition: 'plugin' | 'runtime' | 'factory') {
   }] }
   const env = { DB: { prepare: () => ({ bind: () => ({ first: async () => ({ user_id: 'admin', organization_id: 'org', role: 'admin' }) }) }) } } as unknown as RuntimeEnv
   const kernel = new KernelRegistry(bindSchemaLock(input, { lockVersion: 1, revision: 1, parent: null, tables: [] }), {
-    commands: createCommandRegistry([operation]),
-    plugins: [{ name: 'recorder', version: '1', provides: { permissions: '1.x' }, authorization: true,
+    commands: createCommandRegistry([operation]), ...(trust ? { authorization: 'trust' as const } : {}),
+    plugins: [{ name: 'recorder', version: '1', ...(provider ? { provides: { permissions: '1.x' }, authorization: true } : {}),
       tableFilter: () => ({ kind: 'all' }), fieldMask(entity) { return readableFields(this.config, entity, currentScope) }, commandGuard: () => ({ allow: true }),
       ...(composition === 'plugin' ? { workflows: [workflow] } : {}),
       ...(composition === 'factory' ? { workflowDefinitions: () => createWorkflowRegistry([workflow]) } : {}),
@@ -76,16 +78,24 @@ async function fixture(composition: 'plugin' | 'runtime' | 'factory') {
   // Keep the original kernel registered for the replacement config identity.
   const recorder = new ReadSet()
   const raw = { config: kernel.config, plugins: kernel.plugins, commands: kernel.commands, workflows: kernel.workflows, providers: kernel.providers }
+  // Intercept the cached scalars on the original, config-bound kernel so calls
+  // through kernelFor(config) and plugin `this` observe the same recorder.
+  const cached = { trust: kernel.authorizationTrust, permissionsActive: kernel.permissionsActive,
+    hasAuthorization: Reflect.get(kernel, 'hasAuthorization') as boolean }
+  const authorization = recorder.wrap(cached, ['kernel'])
   const config = recorder.wrap(raw.config, ['config'])
   bindKernel(raw.config, config)
   Object.defineProperties(kernel, {
+    trust: { get: () => authorization.trust }, hasAuthorization: { get: () => authorization.hasAuthorization },
+    permissionsActive: { get: () => authorization.permissionsActive },
     config: { value: config }, plugins: { value: recorder.wrap(raw.plugins, ['plugins']) },
     commands: { value: recorder.map(raw.commands, ['commands']) }, workflows: { value: recorder.map(raw.workflows, ['workflows']) },
     providers: { value: recorder.map(raw.providers, ['providers']) },
   })
   // Serialize raw inputs after enforcement; lock generation must never contribute
   // a read to the consumer recorder or make its own coverage assertion pass.
-  const lock = () => JSON.parse(serializeAccessLock({ ...kernel, ...raw, authorizationTrust: kernel.authorizationTrust }, options).json)
+  const lock = () => JSON.parse(serializeAccessLock({ ...raw, authorizationTrust: cached.trust,
+    permissionsActive: cached.permissionsActive, workflowRegistrations: kernel.workflowRegistrations }, options).json)
   return { kernel, raw, recorder, scope: currentScope, lock }
 }
 
@@ -97,17 +107,36 @@ function mapping(raw: Awaited<ReturnType<typeof fixture>>['raw'], lock: any): Ma
   const inputs = lock.enforcementInputs
   const at = (root: any, path: string[], location: string) => ({ value: path.reduce((value, key) => value?.[key], root), location: [location, ...path].join('.') })
   const guardMap = Object.fromEntries(lock.effectiveAccess.guards.map((guard: any) => [guard.name, guard]))
-  const operationAt = (value: any, path: string[], location: string) => {
+  const operationAt = (value: any, source: AtomicOperation | undefined, path: string[], location: string) => {
     if (!path.length) return at(value, [], location)
     const [part, index, property] = path
     if (!['name', 'permission', 'additionalPermissions'].includes(part)) return
     if (part === 'permission' && index && !['system', 'entity', 'operation'].includes(index)) return
     if (part === 'additionalPermissions' && index && !/^(length|\d+)$/.test(index)) return
     if (part === 'additionalPermissions' && property && !['system', 'entity', 'operation'].includes(property)) return
+    if (part === 'additionalPermissions' && index && /^\d+$/.test(index)) {
+      // Match this runtime occurrence by permission identity, independently of
+      // serialized order. The ordinal among equal permissions preserves counts.
+      const permissions = source?.additionalPermissions ?? []
+      const expected = permissions[Number(index)]
+      if (!expected) return
+      const same = (permission: any) => ['system', 'entity', 'operation'].every(key => permission?.[key] === (expected as any)[key])
+      const ordinal = permissions.slice(0, Number(index)).filter(same).length
+      const matches = (value?.additionalPermissions ?? []).flatMap((permission: any, i: number) => same(permission) ? [i] : [])
+      if (matches[ordinal] === undefined) return
+      return at(value, [part, String(matches[ordinal]), ...path.slice(2)], location)
+    }
     return at(value, path, location)
   }
   return read => {
     const [root, ...path] = read.path
+    if (root === 'kernel' && path.length === 1) {
+      if (['trust', 'permissionsActive'].includes(path[0])) return at(inputs.authorization, path, 'enforcementInputs.authorization')
+      if (path[0] === 'hasAuthorization') return {
+        value: inputs.authorization?.providers ? Object.hasOwn(inputs.authorization.providers, 'permissions') : undefined,
+        location: 'enforcementInputs.authorization.providers.permissions (membership)',
+      }
+    }
     if (root === 'config') {
       const [section, ...rest] = path
       if (section === 'effectiveAccess') return at(lock.effectiveAccess, rest, 'effectiveAccess')
@@ -132,7 +161,7 @@ function mapping(raw: Awaited<ReturnType<typeof fixture>>['raw'], lock: any): Ma
     }
     if (root === 'commands') {
       if (!path.length || path.length === 1) return at(guardMap, path, 'effectiveAccess.guards[name]')
-      return operationAt(guardMap[path[0]], path.slice(1), `effectiveAccess.guards[${path[0]}]`)
+      return operationAt(guardMap[path[0]], raw.commands.get(path[0]), path.slice(1), `effectiveAccess.guards[${path[0]}]`)
     }
     if (root === 'workflows') {
       const [name, part, index, role, ...rest] = path
@@ -143,12 +172,13 @@ function mapping(raw: Awaited<ReturnType<typeof fixture>>['raw'], lock: any): Ma
       if (part === 'version') return at(workflow, ['version'], `enforcementInputs.workflows.${name}`)
       if (part !== 'steps') return
       if (!index || index === 'length') return at(workflow?.stepOrder, index ? ['length'] : [], `enforcementInputs.workflows.${name}.stepOrder`)
-      const id = raw.workflows.get(name)?.steps?.[Number(index)]?.id
+      const source = raw.workflows.get(name)?.steps?.[Number(index)]
+      const id = source?.id
       const step = workflow?.steps[id!]
       if (!role) return at(step, [], `enforcementInputs.workflows.${name}.steps.${id}`)
       if (role === 'id') return { value: workflow?.stepOrder[Number(index)], location: 'enforcementInputs.workflows.*.stepOrder' }
-      if (role === 'operation') return operationAt(step?.forward, rest, `enforcementInputs.workflows.${name}.steps.${id}.forward`)
-      if (role === 'compensate') return operationAt(step?.compensation, rest[0] === 'operation' ? rest.slice(1) : rest, `enforcementInputs.workflows.${name}.steps.${id}.compensation`)
+      if (role === 'operation') return operationAt(step?.forward, source?.operation, rest, `enforcementInputs.workflows.${name}.steps.${id}.forward`)
+      if (role === 'compensate') return operationAt(step?.compensation, source?.compensate?.operation, rest[0] === 'operation' ? rest.slice(1) : rest, `enforcementInputs.workflows.${name}.steps.${id}.compensation`)
     }
     if (root === 'plugins') {
       if (path.length === 0 || path[0] === 'length') return at(inputs.plugins, path, 'enforcementInputs.plugins')
@@ -229,6 +259,93 @@ it.each(['plugin', 'runtime', 'factory'] as const)('%s composition: every exerci
   const size = f.recorder.reads.size
   assertReadSetCovered(reads, mapping(f.raw, f.lock()), exceptions)
   expect(f.recorder.reads.size).toBe(size)
+})
+
+it.each(['trust', 'permissionsActive', 'providers.permissions'] as const)('rejects deletion of cached authorization input %s', async input => {
+  const f = await fixture('runtime')
+  await exercise(f)
+  const complete = f.lock()
+  assertReadSetCovered(f.recorder.reads.values(), mapping(f.raw, complete), exceptions)
+  const lock = structuredClone(complete)
+  if (input === 'providers.permissions') delete lock.enforcementInputs.authorization.providers.permissions
+  else delete lock.enforcementInputs.authorization[input]
+  expect(() => assertReadSetCovered(f.recorder.reads.values(), mapping(f.raw, lock), exceptions))
+    .toThrow(/Uncovered enforcement reads/)
+})
+
+it.each([
+  { trust: true, provider: true },
+  { trust: false, provider: false },
+  { trust: true, provider: false },
+])('covers cached authorization with trust=$trust and provider=$provider', async options => {
+  const f = await fixture('runtime', options)
+  f.recorder.scenario = `trust=${options.trust}, provider=${options.provider}`
+  await loadActorProjection(f.kernel.config, f.scope, async <T>() => ({ id: 'admin', role: 'admin', organization_id: 'org' }) as T,
+    { user_id: 'admin', organization_id: 'org', role: 'admin' })
+  const authorize = () => f.kernel.atomicPermission(f.scope, f.kernel.commands.get('jobs/shared')!)
+  if (options.trust || options.provider) {
+    expect(f.kernel.tableFilter('clients', f.scope).kind).not.toBe('none')
+    expect(authorize).not.toThrow()
+  } else {
+    expect(f.kernel.tableFilter('clients', f.scope)).toEqual({ kind: 'none' })
+    expect(authorize).toThrow(expect.objectContaining({ status: 403 }))
+  }
+  expect(canManageAccountAssignments(f.kernel.config, f.scope, ['name'])).toBe(false)
+  const reads = [...f.recorder.reads.values()]
+  expect(reads).toContainEqual(expect.objectContaining({ path: ['kernel', 'trust'], value: options.trust }))
+  expect(reads).toContainEqual(expect.objectContaining({ path: ['kernel', 'permissionsActive'], value: false }))
+  if (!options.trust) expect(reads).toContainEqual(expect.objectContaining({ path: ['kernel', 'hasAuthorization'], value: options.provider }))
+  const size = f.recorder.reads.size
+  const complete = f.lock()
+  assertReadSetCovered(reads, mapping(f.raw, complete), exceptions)
+  expect(f.recorder.reads.size).toBe(size)
+  const changed = structuredClone(complete)
+  changed.enforcementInputs.authorization.trust = !options.trust
+  expect(() => assertReadSetCovered(reads, mapping(f.raw, changed), exceptions)).toThrow(/kernel.trust/)
+  changed.enforcementInputs.authorization.trust = options.trust
+  changed.enforcementInputs.authorization.permissionsActive = true
+  expect(() => assertReadSetCovered(reads, mapping(f.raw, changed), exceptions)).toThrow(/kernel.permissionsActive/)
+  if (!options.trust && !options.provider) {
+    changed.enforcementInputs.authorization.permissionsActive = false
+    changed.enforcementInputs.authorization.providers.permissions = [{ name: 'unexpected', version: '1' }]
+    expect(() => assertReadSetCovered(reads, mapping(f.raw, changed), exceptions)).toThrow(/kernel.hasAuthorization/)
+  }
+})
+
+it.each(['plugin', 'runtime', 'factory'] as const)('%s composition: matches unsorted permission occurrences in command and workflow projections', async composition => {
+  const f = await fixture(composition, { additionalPermissions: [
+    { entity: 'jobs', operation: 'read' }, { entity: 'clients', operation: 'read' },
+  ] })
+  await exercise(f)
+  const complete = f.lock()
+  const projected = (lock: any) => [
+    lock.effectiveAccess.guards.find((guard: any) => guard.name === 'jobs/shared'),
+    lock.enforcementInputs.workflows['jobs/review'].steps.review.forward,
+    lock.enforcementInputs.workflows['jobs/review'].steps.review.compensation,
+  ]
+  for (const operation of projected(complete)) expect(operation.additionalPermissions.map((permission: any) => permission.entity)).toEqual(['clients', 'jobs'])
+  assertReadSetCovered(f.recorder.reads.values(), mapping(f.raw, complete), exceptions)
+  for (let index = 0; index < 3; index++) for (const mutation of ['missing', 'changed', 'extra'] as const) {
+    const lock = structuredClone(complete)
+    const permissions = projected(lock)[index].additionalPermissions
+    if (mutation === 'missing') permissions.pop()
+    if (mutation === 'changed') permissions[0].operation = 'update'
+    if (mutation === 'extra') permissions.push({ entity: 'contacts', operation: 'read' })
+    expect(() => assertReadSetCovered(f.recorder.reads.values(), mapping(f.raw, lock), exceptions)).toThrow(/additionalPermissions/)
+  }
+})
+
+it('preserves multiplicity when matching equal permission occurrences', async () => {
+  const f = await fixture('runtime', { additionalPermissions: [
+    { entity: 'jobs', operation: 'read' }, { entity: 'clients', operation: 'read' }, { entity: 'jobs', operation: 'read' },
+  ] })
+  await exercise(f)
+  const complete = f.lock()
+  assertReadSetCovered(f.recorder.reads.values(), mapping(f.raw, complete), exceptions)
+  // Same length and members, but one repeated jobs permission was replaced.
+  const lock = structuredClone(complete)
+  lock.enforcementInputs.workflows['jobs/review'].steps.review.compensation.additionalPermissions[2] = { entity: 'clients', operation: 'read' }
+  expect(() => assertReadSetCovered(f.recorder.reads.values(), mapping(f.raw, lock), exceptions)).toThrow(/additionalPermissions/)
 })
 
 it('fails actionably when a temporary enforcement input is absent from the lock', async () => {
