@@ -868,14 +868,14 @@
       "line": "    for (const url of ['https://user:secret@example.test', 'http://example.test', 'http://192.168.1.1', 'http://0.0.0.0',",
       "value": "192.168.1.1",
       "reason": "Negative test fixture: ops provisioning must reject private/unspecified network hosts; not a deployed host.",
-      "lineNumber": 145
+      "lineNumber": 174
     },
     {
       "path": "packages/mcp/test/ops/contract.test.ts",
       "line": "    for (const url of ['https://user:secret@example.test', 'http://example.test', 'http://192.168.1.1', 'http://0.0.0.0',",
       "value": "0.0.0.0",
       "reason": "Negative test fixture: ops provisioning must reject private/unspecified network hosts; not a deployed host.",
-      "lineNumber": 145
+      "lineNumber": 174
     }
   ]
 }

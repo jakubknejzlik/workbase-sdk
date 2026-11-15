@@ -82,3 +82,40 @@ test('ops startup failures are silent with no stdout or stderr, including unsafe
     expect(status).toBe(1); expect(stdout).toBe(''); expect(stderr).toBe('')
   }
 })
+
+test('workbase ops bootstrap-instance-owner and MCP use the same protected endpoint', async () => {
+  const requests: { path: string; headers: any; body: unknown }[] = []
+  const data = { organization_id: 'instance', user_id: 'first', role: 'owner', replayed: false }
+  const baseUrl = await listen(async (req, res) => {
+    let text = ''
+    for await (const part of req) text += part
+    requests.push({ path: req.url!, headers: req.headers, body: JSON.parse(text) })
+    res.setHeader('Content-Type', 'application/json')
+    res.end(JSON.stringify(data))
+  })
+  const environment = { ...process.env, WORKBASE_BASE_URL: baseUrl, WORKBASE_OPS_TOKEN: token,
+    WORKBASE_DEV_MAILBOX_URL: '', WORKBASE_DEV_MAILBOX_TOKEN: '' }
+  const transport = new StdioClientTransport({ command: 'bun', args: ['--no-install', resolve('packages/mcp/src/bin.ts'), 'ops'],
+    env: Object.fromEntries(Object.entries(environment).filter((entry): entry is [string, string] => entry[1] !== undefined)), stderr: 'pipe' })
+  const client = new Client({ name: 'instance-bootstrap-stdio', version: '1' })
+  cleanups.push(() => transport.close(), () => client.close())
+  await client.connect(transport)
+  expect((await client.callTool({ name: 'bootstrap_instance_owner', arguments: { ownerEmail: 'first@example.test' } })).structuredContent)
+    .toEqual({ ok: true, data })
+  const child = spawn('bun', ['--no-install', resolve('packages/mcp/src/bin.ts'), 'ops', 'bootstrap-instance-owner', '--owner-email', 'first@example.test'], {
+    env: environment, stdio: ['ignore', 'pipe', 'pipe'],
+  })
+  let stdout = '', stderr = ''
+  child.stdout.on('data', part => { stdout += part }); child.stderr.on('data', part => { stderr += part })
+  const [status] = await once(child, 'close')
+  expect(status).toBe(0)
+  expect(JSON.parse(stdout)).toEqual({ ok: true, data })
+  expect(stderr).toBe('')
+  expect(requests).toHaveLength(2)
+  for (const request of requests) {
+    expect(request.path).toBe('/internal/members/instance-owner')
+    expect(request.headers['x-internal-token']).toBe(token)
+    expect(request.headers.authorization).toBeUndefined()
+    expect(request.body).toEqual({ ownerEmail: 'first@example.test' })
+  }
+})

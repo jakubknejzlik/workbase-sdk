@@ -26,17 +26,17 @@ async function connect(request = vi.fn<typeof fetch>(), extra: NodeJS.ProcessEnv
 
 test('lists read_dev_mail only with both mailbox environment variables; hidden calls fail closed', async () => {
   const { client, call, request } = await connect()
-  expect((await client.listTools()).tools.map(tool => tool.name)).toEqual(['provision_organization'])
+  expect((await client.listTools()).tools.map(tool => tool.name)).toEqual(['provision_organization', 'bootstrap_instance_owner'])
   expect((await call('read_dev_mail', { recipient: 'a@example.test' })).structuredContent)
     .toEqual({ ok: false, code: 'unknown_tool', status: 404 })
   expect(request).not.toHaveBeenCalled()
   const enabled = await connect(undefined, mailboxEnv)
   const tools = (await enabled.client.listTools()).tools
-  expect(tools.map(tool => tool.name)).toEqual(['provision_organization', 'read_dev_mail'])
+  expect(tools.map(tool => tool.name)).toEqual(['provision_organization', 'bootstrap_instance_owner', 'read_dev_mail'])
   expect(tools.every(tool => tool.inputSchema.additionalProperties === false)).toBe(true)
-  expect(tools.map(tool => tool.annotations?.readOnlyHint)).toEqual([false, true])
-  expect(tools[1].description).toContain('credential')
-  expect(Object.keys(tools[1].inputSchema.properties!)).toEqual(['recipient', 'limit'])
+  expect(tools.map(tool => tool.annotations?.readOnlyHint)).toEqual([false, false, true])
+  expect(tools[2].description).toContain('credential')
+  expect(Object.keys(tools[2].inputSchema.properties!)).toEqual(['recipient', 'limit'])
   for (const { name } of tools) {
     expect(Object.hasOwn(dataSchemas, name)).toBe(false)
     expect(Object.hasOwn(configSchemas, name)).toBe(false)
@@ -80,12 +80,41 @@ test('mail uses the merged sidecar GET /messages contract, bearer token and 1–
     .toEqual({ ok: true, data: { messages: [] } })
 })
 
+test('bootstrap forwards only ownerEmail to the Members internal route with operator auth', async () => {
+  const data = { organization_id: 'instance', user_id: 'first', role: 'owner', replayed: false }
+  const request = vi.fn<typeof fetch>().mockResolvedValueOnce(Response.json(data, { status: 201 }))
+    .mockResolvedValueOnce(Response.json({ ...data, replayed: true }))
+  const { call } = await connect(request)
+  for (const replayed of [false, true]) expect((await call('bootstrap_instance_owner', { ownerEmail: ' first@example.test ' })).structuredContent)
+    .toEqual({ ok: true, data: { ...data, replayed } })
+  expect(request.mock.calls[0][0]).toBe(`${env.WORKBASE_BASE_URL}/internal/members/instance-owner`)
+  expect(request.mock.calls[0][1]).toMatchObject({ method: 'POST', redirect: 'error',
+    headers: { 'X-Internal-Token': token, 'Content-Type': 'application/json' }, body: JSON.stringify({ ownerEmail: 'first@example.test' }) })
+})
+
+test('bootstrap maps fixed denial codes and suppresses arbitrary upstream error text', async () => {
+  const request = vi.fn<typeof fetch>()
+  const cases = [[409, 'owner_sign_in_required', 'owner_sign_in_required'], [409, 'instance_owner_exists', 'instance_owner_exists'],
+    [409, 'membership_conflict', 'membership_conflict'], [409, 'account_already_assigned', 'account_already_assigned'],
+    [409, token, 'membership_conflict'], [403, token, 'internal_token_required'], [503, token, 'internal_token_not_configured'],
+    [404, token, 'http_error']] as const
+  for (const [status, error] of cases) request.mockResolvedValueOnce(Response.json({ error, hint: token }, { status }))
+  const { call } = await connect(request)
+  for (const [status, , code] of cases) expect((await call('bootstrap_instance_owner', { ownerEmail: 'first@example.test' })).structuredContent)
+    .toEqual({ ok: false, code, status })
+})
+
 test('rejects malformed arguments and authority overrides before making any request', async () => {
   const { call, request } = await connect(undefined, mailboxEnv)
   for (const [name, args] of [
     ['provision_organization', {}], ['provision_organization', { name: 'Org', ownerEmail: 'invalid' }],
     ['provision_organization', { name: 'Org', ownerEmail: 'a@example.test', role: 'owner' }],
     ['provision_organization', { name: 'Org', ownerEmail: 'a@example.test', token }],
+    ['bootstrap_instance_owner', {}], ['bootstrap_instance_owner', { ownerEmail: 'invalid' }],
+    ['bootstrap_instance_owner', { ownerEmail: 'a@example.test', role: 'owner' }],
+    ['bootstrap_instance_owner', { ownerEmail: 'a@example.test', scope: 'instance' }],
+    ['bootstrap_instance_owner', { ownerEmail: 'a@example.test', token }],
+    ['bootstrap_instance_owner', { ownerEmail: 'a@example.test', baseUrl: 'https://attacker.test' }],
     ['read_dev_mail', {}], ['read_dev_mail', { recipient: 'a@example.test', limit: 51 }],
     ['read_dev_mail', { recipient: 'a@example.test', baseUrl: 'https://attacker.test' }],
     ['read_dev_mail', { recipient: 'a@example.test', kind: 'sign-in', after: 'yesterday' }],

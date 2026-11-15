@@ -182,8 +182,8 @@ export class KernelRegistry {
     return fields
   }
   commandGuard(command: KernelCommand, scope: Scope, input: unknown) {
-    // Service authority is limited to the two trusted internal writers, even in trust mode.
-    const servicePermission = 'system' in command.permission && ['identity.write', 'organizations.provision'].includes(command.permission.system)
+    // Service authority is limited to trusted internal writers, even in trust mode.
+    const servicePermission = 'system' in command.permission && ['identity.write', 'organizations.provision', 'members.bootstrap'].includes(command.permission.system)
     const internal = scope.actor.type === 'service' && servicePermission
     if ((scope.actor.type === 'service' || servicePermission) && !internal) throw new ApiError(403, 'permission_denied')
     if (!internal && !this.trust && !this.hasAuthorization) throw new ApiError(403, 'permission_denied')
