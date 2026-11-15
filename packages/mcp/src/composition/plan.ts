@@ -7,7 +7,7 @@ import { runOpenApiCli } from '@workbasehq/core/openapi/cli'
 import { expectedPluginMigrations, type PluginMigrationRow } from '@workbasehq/core/kernel/migrations'
 import type { Bundle } from '../storage.ts'
 import { noLink } from '../storage.ts'
-import { fail, type AccessChange } from '../schemas.ts'
+import { fail, type AccessChange, type LocaleChange } from '../schemas.ts'
 import { replaySources } from '../replay-sources.ts'
 import { replaceLiteral } from './literal-edit.ts'
 import { replayBundle, replayEngine, snapshot } from '../offline.ts'
@@ -48,19 +48,40 @@ export async function accessPlan(root: string, changes: AccessChange[]) {
       edit('access.ts', present ? ['accountLinks'] : [], present ? shared.accountLinks : shared)
     }
   }
+  return loadEditedConfig(root, inputs, files)
+}
+
+/** Languages are presentation metadata: preserve V3 source imports and lock binding. */
+export async function localePlan(root: string, changes: LocaleChange[]) {
+  if (!changes.length) return undefined
+  const { config } = await loadConfig(join(root, 'config.ts'))
+  let source = await readFile(join(root, 'config.ts'), 'utf8')
+  for (const change of changes) {
+    if (change.languages !== undefined) source = replaceLiteral(source, ['languages'], change.languages, join(root, 'config.ts'), { config: true })
+    if (change.locale !== undefined) source = replaceLiteral(source, ['locale'], change.locale, join(root, 'config.ts'), { config: true })
+    if (change.defaultLanguage !== undefined) {
+      config.ui = { ...config.ui, entities: config.ui?.entities ?? {}, defaultLanguage: change.defaultLanguage }
+      source = replaceLiteral(source, ['ui'], config.ui, join(root, 'config.ts'), { config: true })
+    }
+  }
+  return loadEditedConfig(root, await replaySources(root, { accessLock: true }), new Map([['config.ts', source]]))
+}
+
+async function loadEditedConfig(root: string, inputs: Record<string, Buffer>, files: Map<string, string>) {
   await mkdir(stateRoot, { recursive: true }); await noLink(stateRoot)
   const scratch = await realpath(await mkdtemp(join(stateRoot, 'access-')))
   try {
-    await writeFile(join(scratch, 'config.ts'), await readFile(join(root, 'config.ts')))
+    await writeFile(join(scratch, 'config.ts'), files.get('config.ts') ?? await readFile(join(root, 'config.ts')))
     for (const [path, bytes] of Object.entries(inputs)) {
       await mkdir(dirname(join(scratch, path)), { recursive: true })
       await writeFile(join(scratch, path), files.get(path) ?? bytes)
     }
-    const loaded = await loadConfig(join(scratch, 'config.ts'))
+    const loadOptions = { sdkResolutionRoot: root }
+    const loaded = await loadConfig(join(scratch, 'config.ts'), loadOptions)
     // Presence in the captured instance graph is the artifact opt-in. Never
     // introduce OpenAPI into an instance that does not already maintain it.
     if (inputs['openapi.json']) {
-      await runOpenApiCli(['--root', scratch, '--write'])
+      await runOpenApiCli(['--root', scratch, '--write'], loadOptions)
       files.set('openapi.json', await readFile(join(scratch, 'openapi.json'), 'utf8'))
     }
     return { config: loaded.config, files: [...files].map(([path, data]) => ({ path, data })) }

@@ -1,4 +1,4 @@
-# Authoring V3 composition and access through MCP
+# Authoring V3 composition, access and languages through MCP
 
 The standalone `.mcp.json` registers `workbase_config` alongside `workbase_data`
 and `workbase_ops`. After installing dependencies and generating initial schema,
@@ -46,6 +46,25 @@ The access compiler checks roles, actions and entity matrices. Composition and
 access kinds can share a proposal; `propose_change` also accepts these V3 kinds.
 Mixing them with legacy kinds is rejected with `mixed_change_kinds`.
 
+For enabled console languages, call `propose_change` (or `propose_composition`)
+with a separate proposal, for example:
+
+```json
+{
+  "instance": "my-instance",
+  "baseRevision": 1,
+  "changes": [{ "kind": "set_locale", "languages": ["en", "cs"] }]
+}
+```
+
+`languages` replaces the ordered, nonempty, unique list of enabled languages
+(`en`/`cs`); the first entry is the V3 default. `locale` and `defaultLanguage`
+remain optional independent settings; `defaultLanguage` updates
+`ui.defaultLanguage`. Language proposals edit literal values in `config.ts`,
+retaining its imports, schema-lock binding and other options. Provide the
+consumer's `locales/<language>/ui.json` and `domain.json` dictionaries separately.
+Recreate older locale proposals as new proposals to use this V3 publication path.
+
 Continue through these tools in order:
 
 1. `validate` with `{proposalId}` checks the target kernel, access declarations,
@@ -65,9 +84,10 @@ close an unpromoted proposal.
 
 Promotion writes changed `runtime.ts`, access declarations in `access.ts` or
 `schema/<entity>.ts`, regenerated `access.lock.json`/`access.lock.md`, and proposal
-metadata. Access edits regenerate `openapi.json` only if it already exists.
-The domain revision, literal `config.ts`, schema lock and domain migrations stay
-unchanged. Review and commit promoted files through the approved PR process.
+metadata. Access and language edits regenerate `openapi.json` only if it already exists.
+Language proposals also write `config.ts`. The domain revision, schema lock and
+domain migrations stay unchanged. Review and commit promoted files through the
+approved PR process.
 Promotion returns `appliesToDatabase: false`; plugin migrations run through the
 normal SDK migration engine at deploy. Promotion does not install dependencies,
 configure infrastructure, send mail or apply a live database migration.

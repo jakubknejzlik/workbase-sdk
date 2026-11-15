@@ -3,11 +3,11 @@ import { dirname, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { createHash } from 'node:crypto'
 import { KernelRegistry } from '../kernel/registry'
-import { loadConfig } from '../schema/load'
+import { loadConfig, type LoadConfigOptions } from '../schema/load'
 import { generate } from './generate'
 
 /** Instance-root artifact; checking never creates or rewrites files. */
-export async function runOpenApiCli(args: readonly string[]): Promise<number> {
+export async function runOpenApiCli(args: readonly string[], loadOptions: LoadConfigOptions = {}): Promise<number> {
   const usage = 'Usage: check:openapi [--config config.ts] [--root .] [--directory .] [--write | --live <origin>]'
   const options = { config: 'config.ts', root: '.', directory: '', write: false, live: '' }
   for (let i = 0; i < args.length; i++) {
@@ -22,7 +22,7 @@ export async function runOpenApiCli(args: readonly string[]): Promise<number> {
     if (!['http:', 'https:'].includes(origin.protocol) || origin.username || origin.password || origin.pathname !== '/' || origin.search || origin.hash) throw new Error(usage)
   }
   const file = resolve(options.root, options.config)
-  const { config, configHash } = await loadConfig(file)
+  const { config, configHash } = await loadConfig(file, loadOptions)
   // Compose the loaded schema, including SDK-registered account commands.
   const kernel = new KernelRegistry(config)
   const bytes = generate(kernel.config, kernel, configHash)

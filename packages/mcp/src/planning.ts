@@ -144,6 +144,7 @@ export function prepareChanges(config: InstanceConfig, existingIndexes: Index[],
       continue
     }
     if (c.kind === 'set_locale') {
+      if (c.languages !== undefined) next.languages = [...c.languages]
       if (c.locale !== undefined) next.locale = c.locale
       if (c.defaultLanguage !== undefined) { next.ui ??= { entities: {} }; next.ui.defaultLanguage = c.defaultLanguage }
       continue

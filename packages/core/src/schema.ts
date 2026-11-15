@@ -66,7 +66,7 @@ export function accountLink() {
   return { type: 'ref', entity: 'users', userLink: true, readOnly: true } as const
 }
 
-export type ConfigInput = Omit<InstanceInput, 'entities' | 'roles' | 'organizationOwnerRole' | 'permissions' | 'account' | 'languages' | 'enumLabels' | 'locale' | 'baseline' | 'revision'> & {
+export type ConfigInput = Omit<InstanceInput, 'entities' | 'roles' | 'organizationOwnerRole' | 'permissions' | 'account' | 'languages' | 'enumLabels' | 'baseline' | 'revision'> & {
   entities: Record<string, EntityDeclaration>
   roles: string[]
   organizationOwnerRole: string
