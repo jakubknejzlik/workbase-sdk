@@ -35,6 +35,22 @@ export default { ...config, plugins: [identity, permissions({ roles: ['admin', '
   }
   return { root, server, store, call, propose }
 }
+it.each(['./config', './config.ts'])('template access check passes after promotion beside unrelated config files (%s)', async configImport => {
+  const { root, server, call, propose } = await fixture()
+  try {
+    await writeFile(join(root, 'runtime.ts'), (await readFile(join(root, 'runtime.ts'), 'utf8')).replace("'./config'", `'${configImport}'`))
+    await writeFile(join(root, 'config.local.ts'), `throw new Error('unrelated config must not execute')`)
+    await writeFile(join(root, 'config.indexes.json'), '[]')
+    const proposalId = await propose([{ kind: 'set_interactive', interactive: false }])
+    expect(await call('validate', { proposalId })).toMatchObject({ ok: true })
+    expect(await call('preview_migration', { proposalId })).toMatchObject({ ok: true })
+    expect(await call('apply_to_disposable', { proposalId })).toMatchObject({ ok: true, verified: true, diffs: [] })
+    expect(await call('promote', { proposalId, expectedRevision: 1 })).toMatchObject({ ok: true, status: 'promoted' })
+    const check = spawnSync('bun', ['run', 'check:access'], { cwd: root, encoding: 'utf8' })
+    expect(check.status, check.stdout + check.stderr).toBe(0)
+    expect(check.stdout).toContain('check:access: lock files match')
+  } finally { await server.close() }
+})
 it.each([false, true])('preserves staged authored source locations through access promote (runtime edit: %s)', async runtimeEdit => {
   const { root, server, call, propose } = await fixture()
   try {

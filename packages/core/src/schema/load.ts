@@ -119,6 +119,29 @@ function entityPath(binding: Binding, entry: string, name: string, directory = '
     return fail(binding.node, 'Cannot resolve entity import')
   }
 }
+/** Resolve a known runtime config import without treating config.* siblings as entities. */
+function runtimeConfigPath(binding: Binding, entry: string): string {
+  const project = dirname(entry)
+  const path = resolve(project, binding.module)
+  const candidates = extname(path) ? [path] : [path, `${path}.ts`]
+  try {
+    const files = candidates.filter(candidate => {
+      try { return statSync(candidate).isFile() }
+      catch (error) {
+        if (['ENOENT', 'ENOTDIR'].includes((error as NodeJS.ErrnoException).code ?? '')) return false
+        throw error
+      }
+    })
+    if (files.length > 1) fail(binding.node, `Ambiguous config import: ${binding.module}`)
+    if (!files.length) fail(binding.node, `Cannot resolve config import: ${binding.module}`)
+    const config = realpathSync(files[0])
+    if (dirname(config) !== project) fail(binding.node, 'Resolved config import must stay inside the project directory')
+    return config
+  } catch (error) {
+    if (error instanceof SourceError) throw error
+    return fail(binding.node, `Cannot resolve config import: ${binding.module}`)
+  }
+}
 /** Only these statements and imports belong to the declaration syntax. */
 function moduleBoundary(file: ts.SourceFile, declaration: ts.Expression, helpers: string[], entityImports = new Set<string>()) {
   for (const statement of file.statements) {
@@ -221,7 +244,7 @@ export function configSources(file: string): SourceMap {
     const spread = declaration.properties.find(ts.isSpreadAssignment)
     const binding = spread && ts.isIdentifier(spread.expression) ? bindings.get(spread.expression.text) : undefined
     if (binding?.imported === 'default' && ['./config', './config.ts'].includes(binding.module)) {
-      const config = entityPath(binding, entry, 'config', '')
+      const config = runtimeConfigPath(binding, entry)
       if (config !== entry) return configSources(config)
     }
   }

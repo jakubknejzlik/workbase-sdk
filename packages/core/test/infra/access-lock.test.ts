@@ -198,6 +198,25 @@ it('CLI checks the committed SDK fixture and returns nonzero on a missing lock',
   expect(check.stderr).toBe('')
   expect(check.status).toBe(0)
 })
+it.each(['./config', './config.ts'])('CLI checks and regenerates runtime locks beside unrelated config files (%s)', configImport => {
+  const { root } = consumer()
+  symlinkSync(resolve('node_modules'), join(root, 'node_modules'), 'dir')
+  writeFileSync(join(root, 'runtime.ts'), `import config from '${configImport}'\nexport default { ...config }`)
+  writeFileSync(join(root, 'package.json'), JSON.stringify({ scripts: {
+    'check:access': 'bun node_modules/@workbasehq/core/src/access-lock/cli.ts --config runtime.ts',
+    'access:lock': 'bun node_modules/@workbasehq/core/src/access-lock/cli.ts --config runtime.ts --write',
+  } }))
+  const run = (script: string) => spawnSync('bun', ['run', script], { cwd: root, encoding: 'utf8' })
+  expect(run('access:lock').status).toBe(0)
+  const before = ['access.lock.json', 'access.lock.md'].map(file => readFileSync(join(root, file), 'utf8'))
+  writeFileSync(join(root, 'config.local.ts'), `throw new Error('unrelated config must not execute')`)
+  writeFileSync(join(root, 'config.indexes.json'), '[]')
+  const results = ['check:access', 'access:lock', 'check:access'].map(run)
+  for (const result of results) {
+    expect(result.status, result.stdout + result.stderr).toBe(0)
+  }
+  expect(['access.lock.json', 'access.lock.md'].map(file => readFileSync(join(root, file), 'utf8'))).toEqual(before)
+})
 
 it('CLI policy-only change fails with the changed operation; write then check passes; legacy skips', () => {
   const fixture = consumer()
