@@ -6,6 +6,7 @@ import { fileURLToPath, URL } from 'node:url'
 import ts from 'typescript'
 import { accountLink, DeclarationError, defineConfig, defineEntity, defineAccess, bindSchemaLock } from '../schema'
 import type { InstanceConfig } from '../config'
+import type { AccessInput, EntityAccess } from '../access'
 import { parseLock } from '../migrations/schema-lock'
 
 export interface SourceLocation { file: string; line: number; column: number }
@@ -261,7 +262,7 @@ export function configSources(file: string): SourceMap {
  * default or named defineEntity({...}) exports from schema/<entity>.ts.
  * Legacy defineInstance remains available through its existing runtime entry.
  */
-export async function loadConfig(file: string): Promise<{ config: InstanceConfig; sources: SourceMap; configHash: string }> {
+export async function loadConfig(file: string): Promise<{ config: InstanceConfig; sources: SourceMap; configHash: string; authoredAccess: { shared?: AccessInput; entities: Record<string, EntityAccess | undefined> } }> {
   const entry = realpathSync(resolve(file))
   const readSet = new Map<string, string>()
   const read = (file: string) => {
@@ -363,6 +364,9 @@ export async function loadConfig(file: string): Promise<{ config: InstanceConfig
     }
     const lockPath = resolve(dirname(entry), 'schema.lock.json')
     if (existsSync(lockPath)) bindSchemaLock(config, parseLock(readFileSync(lockPath, 'utf8')))
-    return { config, sources, configHash: hash.digest('hex') }
+    return { config, sources, configHash: hash.digest('hex'), authoredAccess: {
+      ...(data.access ? { shared: data.access as AccessInput } : {}),
+      entities: Object.fromEntries(Object.entries(entities).map(([name, entity]) => [name, entity.access])),
+    } }
   } catch (error) { return remap(error, sources) }
 }

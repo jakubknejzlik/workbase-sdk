@@ -59,6 +59,15 @@ it('normalizes deterministically across repeated compilation and shuffled declar
   // Source paths are canonical config paths, independent of machine and source order.
   expect(c.config.effectiveAccess).toEqual(a.config.effectiveAccess)
 })
+it('returns authored access separately from compiled grants without expanding predicates', async () => {
+  const access = shared(), fixture = consumer(access)
+  const { authoredAccess, config } = await fixture.load()
+  expect(authoredAccess.shared).toEqual(access)
+  expect(authoredAccess.entities.worker).toEqual(fixture.matrix)
+  expect(authoredAccess.entities.worker?.staff).toMatchObject({ read: { where: { use: 'self' } } })
+  expect(config.effectiveAccess?.entities.find(rule => rule.entity === 'worker' && rule.role === 'staff' && rule.operation === 'read')?.where)
+    .toEqual({ user: { eq: '$actor.id' } })
+})
 it('changes configHash for a policy-only edit without changing schema revision', async () => {
   const access = shared(); const first = consumer(access); const a = await first.load()
   access.entities.users.admin = 'deny'

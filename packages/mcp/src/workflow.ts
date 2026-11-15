@@ -1,4 +1,5 @@
 import { guardV3LegacyWrite } from './v3-guard.ts'
+import { SourceError } from '@workbasehq/core/schema/load'
 import { submitChange, promotionHash } from './submit-change.ts'
 import type { GitHubConfiguration } from './github.ts'
 import { bootstrapInstance } from './bootstrap.ts'
@@ -6,7 +7,7 @@ import { appendFile, readFile, readdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { z } from 'zod'
 import { atomic, configSource, json, noLink, Store, type Bundle } from './storage.ts'
-import { schemas, WorkflowError, fail, type ToolName } from './schemas.ts'
+import { schemas, compositionChangeSchema, WorkflowError, fail, type ToolName } from './schemas.ts'
 import { guard, hash, prepare, prepareChanges } from './planning.ts'
 import { effectivePolicies } from './policies.ts'
 import { expectedSnapshot, instanceMeta } from './offline.ts'
@@ -26,6 +27,7 @@ function requireConfigChange(proposal: Proposal): asserts proposal is ConfigChan
 }
 export type ToolResult = Record<string, unknown>
 export function errorResult(error: unknown): ToolResult {
+  if (error instanceof SourceError) return { ok: false, error: { code: 'invalid_access', status: 422, message: error.message, details: error.location } }
   if (isDisplayFieldError(error)) return { ok: false, errors: error.errors }
   if (error instanceof MigrationReplayError && error.diagnostic.kind === 'generation') return { ok: false, error: { code: 'internal_error', status: 500, message: 'Configuration operation failed; no database was deployed', details: { file: error.diagnostic.file, migration: error.diagnostic.migration } } }
   if (error instanceof MigrationReplayError) return { ok: false, error: { code: error.code, status: 422, message: error.message, details: error.diagnostic } }
@@ -124,6 +126,10 @@ export class Workflow {
       return await this.store.locked(targetInstance, async () => {
         if (name === 'upgrade_sdk') return proposeSdkUpgrade(this.store, targetInstance, input.baseRevision, input.targetVersion, proposalId!)
         if (name === 'propose_composition') return proposeComposition(this.store, targetInstance, input.baseRevision, input.changes, proposalId!)
+        if (name === 'propose_change' && input.changes.some((change: unknown) => compositionChangeSchema.safeParse(change).success)) {
+          if (!input.changes.every((change: unknown) => compositionChangeSchema.safeParse(change).success)) fail('mixed_change_kinds', 'Composition and legacy config changes must be proposed separately')
+          return proposeComposition(this.store, targetInstance, input.baseRevision, input.changes, proposalId!)
+        }
         if (name === 'submit_change') {
           const p = parseProposal((await this.store.find(input.proposalId)).proposal)
           if (p.instance !== targetInstance || p.proposalId !== input.proposalId) fail('invalid_proposal', 'Proposal identity mismatch', 409)

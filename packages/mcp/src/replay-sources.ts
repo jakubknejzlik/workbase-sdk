@@ -12,7 +12,7 @@ export async function replaySources(root: string, options: { accessLock?: boolea
     try { sources[path] = await readFile(join(root, path), { flag: constants.O_RDONLY | constants.O_NOFOLLOW }) }
     catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error }
   }
-  for (const path of ['runtime.ts', 'access.ts', 'schema.lock.json', ...(options.accessLock ? ['access.lock.json', 'access.lock.md'] : [])]) await read(path)
+  for (const path of ['runtime.ts', 'access.ts', 'schema.lock.json', ...(options.accessLock ? ['access.lock.json', 'access.lock.md', 'openapi.json'] : [])]) await read(path)
   const schema = async (directory: string): Promise<void> => {
     await noLink(join(root, directory), true)
     let entries
