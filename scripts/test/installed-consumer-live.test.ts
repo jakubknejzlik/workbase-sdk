@@ -36,7 +36,7 @@ test('evidence path rejects repository, archive and symlink escapes before writi
 function artifacts(name: string) {
   const consumer = join(scratch, name)
   put(join(consumer, 'package-lock.json'), { packages: Object.fromEntries(['core', 'mcp', 'plugins'].map(name => ['node_modules/@workbasehq/' + name, { version: '0.2.15' }])) })
-  put(join(consumer, '.mcp.json'), { mcpServers: { workbase_data: { args: ['data'] }, workbase_ops: { args: ['ops'] } } })
+  put(join(consumer, '.mcp.json'), { mcpServers: { workbase_data: { args: ['data'] }, workbase_ops: { args: ['ops'] }, workbase_config: { args: ['./node_modules/@workbasehq/mcp/src/bin.ts', 'config', '--root', '.'], command: 'bun' } } })
   const paths = ['/workers', '/workers/$workerId', '/workers/$workerId/edit', '/workers/new']
   put(join(consumer, '.workbase-ui/manifest.json'), { entities: { worker: { fields: { name: {}, note: {}, user: {} } } }, routes: paths.map(path => ({ path })) })
   writeFileSync(join(consumer, '.workbase-ui/routeTree.gen.ts'), paths.map(path => `fullPath: '${path}'`).join('\n'))
@@ -44,13 +44,17 @@ function artifacts(name: string) {
   put(join(consumer, 'openapi.json'), { components: { schemas: { Row_worker: { properties: { id: {}, ...Object.fromEntries(['name', 'note', 'user'].map(name => [name, { 'x-workbase-field': {} }])) } } } } })
   return consumer
 }
-for (const mutation of ['extra-package', 'workspace', 'config-server', 'archive', 'routes', 'columns', 'openapi']) {
+for (const mutation of ['extra-package', 'workspace', 'missing-config-server', 'archive', 'routes', 'columns', 'openapi']) {
   test(`negative artifact probe rejects ${mutation}`, () => {
     const consumer = artifacts(mutation)
     expect(() => assertInstalledArtifacts(consumer)).not.toThrow()
     if (mutation === 'extra-package') put(join(consumer, 'package-lock.json'), { packages: { 'node_modules/@workbasehq/ui-v3': {} } })
     if (mutation === 'workspace') put(join(consumer, 'package-lock.json'), { packages: Object.fromEntries(['core', 'mcp', 'plugins'].map(name => ['node_modules/@workbasehq/' + name, { resolved: 'workspace:*' }])) })
-    if (mutation === 'config-server') put(join(consumer, '.mcp.json'), { mcpServers: { config: {} } })
+    if (mutation === 'missing-config-server') {
+      const mcp = JSON.parse(readFileSync(join(consumer, '.mcp.json'), 'utf8'))
+      delete mcp.mcpServers.workbase_config
+      put(join(consumer, '.mcp.json'), mcp)
+    }
     if (mutation === 'archive') mkdirSync(join(consumer, '.workbase/versions'), { recursive: true })
     if (mutation === 'routes') writeFileSync(join(consumer, '.workbase-ui/routeTree.gen.ts'), "fullPath: '/wrong'")
     if (mutation === 'columns') put(join(consumer, 'schema.lock.json'), { tables: [{ name: 'worker', columns: [] }] })

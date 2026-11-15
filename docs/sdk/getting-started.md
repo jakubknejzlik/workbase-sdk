@@ -143,13 +143,44 @@ resources. Remove disposable stages with `bun run remove --stage <stage>` after
 acceptance. Live deployment and remote acceptance require the operator's account.
 No preview workflow or deployment wrapper is included in this template.
 
-The generated `.mcp.json` registers separate data and ops MCP servers with
-environment-only credentials. Data uses `WORKBASE_TOKEN` and `WORKBASE_ORG_ID`,
-with read-only mode by default; ops uses `WORKBASE_OPS_TOKEN` and optional mailbox
-inputs. Both use `WORKBASE_BASE_URL`. See [onboarding](onboarding.md). Keep
-credentials private. Legacy config-writer proposal/promotion and schema discovery
-are not the V3 authoring flow. Managers operating the Instance later use the
-approved MCP/PR process and do not edit code directly.
+The generated `.mcp.json` registers `workbase_config` for local V3 authoring,
+plus separate data and ops MCP servers with environment-only credentials. Data
+uses `WORKBASE_TOKEN` and `WORKBASE_ORG_ID`, with read-only mode by default; ops
+uses `WORKBASE_OPS_TOKEN` and optional mailbox inputs. Both remote servers use
+`WORKBASE_BASE_URL`, for example `https://app.example.test`. Mailbox variables have
+empty defaults so they can be omitted in production. See [onboarding](onboarding.md)
+and keep credentials private.
+
+## V3 changes through MCP
+
+After installation and initial artifact generation, start `workbase_config` from
+the Instance directory. It runs `workbase config --root .` without API credentials
+or optional environment variables. Existing Instances must merge this entry from
+the template manually because init never overwrites `.mcp.json`.
+
+Use `inspect_schema` with the Instance selector, then `propose_composition` with
+`instance`, the inspected `baseRevision`, and `changes`. Use `set_plugin` to add a
+built-in plugin or replace its options (including plugin `console` to enable the
+console), and `set_interactive` to set interactive login. Access authoring uses
+`set_system_access` for a role's system grants, `set_entity_access` for a role's
+entity access, and `set_account_link` for an entity's invitation role. Composition
+and access kinds can share a proposal; `propose_change` also accepts these kinds.
+Keep legacy changes separate.
+
+Continue with `validate` → `preview_migration` → `apply_to_disposable` → `promote`.
+Pass the returned `proposalId` each time; `promote` also takes `expectedRevision`
+from inspection. Review validation requirements and previewed sources, access locks
+and plugin SQL before disposable verification. Input or dependency changes require
+validation and verification again. Promotion writes local sources, regenerated
+access locks and, for access edits, an existing OpenAPI artifact. It preserves the
+domain revision and migration history and does not deploy or apply to a live DB.
+Managers use this approved MCP/PR process and do not edit code directly. Review
+and commit promoted files, then deploy through the normal SDK migration engine.
+
+V3 domain-change promotion is unsupported (`v3_promote_unsupported`). Physical
+schema changes require reviewed source edits and migration generation. Custom
+plugins/commands, plugin removal and role definitions also require reviewed source
+changes. See [composition and access inputs](mcp-composition.md).
 
 Remote acceptance covers schema compatibility, console assets under CSP, HTTPS
 login, organization creation, permitted and denied writes, redeploy/data retention,

@@ -74,6 +74,38 @@ to SDK `provision()`. For later physical schema changes use
 [template scripts](../../packages/mcp/templates/standalone/package.json),
 [artifact/asset assertions](../../scripts/smoke-template.ts).
 
+## V3 authoring through MCP
+
+After installation and initial artifact generation, `.mcp.json` provides
+`workbase_config` alongside the separate data and ops servers. Launch it from the
+Instance directory: it runs the installed `workbase config --root .` and needs no
+API credentials or optional environment variables. Remote data/ops credentials
+remain separate; their app origin can be `https://app.example.test`. Existing
+Instances must merge the config entry manually because init preserves `.mcp.json`.
+
+Call `inspect_schema` with the Instance selector, then `propose_composition` with
+`instance`, the inspected `baseRevision` and `changes`. Use `set_plugin` to add or
+configure a built-in plugin (plugin `console` enables the console),
+`set_interactive` to set interactive login, `set_system_access` to replace system
+grants, `set_entity_access` to replace a role's entity access, and
+`set_account_link` to set an entity's invitation role. `propose_change` accepts
+these V3 kinds too; do not mix them with legacy kinds.
+
+Continue with `validate` → `preview_migration` → `apply_to_disposable` → `promote`.
+Pass `proposalId` at each step and the inspected revision as `expectedRevision` to
+`promote`. Review validation requirements, exact sources, access-lock changes and
+plugin SQL before disposable verification. Source or dependency changes require
+validation and verification again. Promotion writes reviewable local sources and
+access locks, plus an existing OpenAPI artifact for access edits. It preserves the
+domain revision, schema lock and domain migration history; it does not apply to a
+live DB or deploy. Review and commit through the approved PR process, then deploy
+through SDK migration orchestration.
+
+V3 domain-change promotion is unsupported (`v3_promote_unsupported`). Physical
+schema changes require reviewed source edits and migration generation. Custom
+plugins/commands, plugin removal and role definitions also require reviewed source
+changes. See [composition and access](mcp-composition.md) for the input contract.
+
 ## Bootstrap a fresh local Worker and D1
 
 The template has no bootstrap command. This operator recipe supplies the adapter
@@ -174,7 +206,7 @@ cross-org denial, and loss of staff row access after unlink. Sixteen renders cov
 four routes × 1280/390 widths × cs/en with translated headings, no horizontal
 overflow or page errors. Protected account fields stay out of new/edit forms;
 routes/fields match the manifest, generated route tree, lock and OpenAPI. It checks
-separate data and ops MCP configuration and absence of archive/versions directories.
+separate config, data and ops MCP configuration and absence of archive/versions directories.
 Sources: [smoke](../../scripts/smoke-template.ts),
 [live assertions](../../scripts/lib/installed-consumer-live.ts).
 

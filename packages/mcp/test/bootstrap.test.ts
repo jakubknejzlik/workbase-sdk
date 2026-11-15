@@ -5,6 +5,7 @@ import { join, resolve } from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { afterEach, expect, it } from 'vitest'
 import { bootstrapInstance } from '../src/bootstrap'
+import { compositionChangeSchema, schemas } from '../src/schemas'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 
@@ -128,7 +129,9 @@ it('ships authored V3 sources and excludes Instance-generated artifacts', async 
     'src/console.tsx', 'vite.config.ts', 'index.html',
     'scripts/initial-migrations.ts', 'scripts/check-migrations.ts', 'scripts/ci-config.ts', 'scripts/deploy.ts']) expect(paths).not.toContain(path)
   const servers = JSON.parse(await readFile(join(root, '.mcp.json'), 'utf8')).mcpServers
-  expect(Object.keys(servers)).toEqual(['workbase_data', 'workbase_ops'])
+  expect(Object.keys(servers)).toEqual(['workbase_data', 'workbase_ops', 'workbase_config'])
+  expect(servers.workbase_config).toEqual({ command: 'bun',
+    args: ['./node_modules/@workbasehq/mcp/src/bin.ts', 'config', '--root', '.'] })
   expect(servers.workbase_ops.args).toEqual(['./node_modules/@workbasehq/mcp/src/bin.ts', 'ops'])
   expect(servers.workbase_ops.env).toEqual({
     WORKBASE_BASE_URL: '${WORKBASE_BASE_URL}', WORKBASE_OPS_TOKEN: '${WORKBASE_OPS_TOKEN}',
@@ -350,4 +353,51 @@ it.each([false, true])('starts generated workbase_ops after client interpolation
     expect((await client.listTools()).tools.map(tool => tool.name))
       .toEqual(['provision_organization', ...(mailbox ? ['read_dev_mail'] : [])])
   } finally { await client.close(); await transport.close() }
+})
+
+it('starts generated workbase_config with no optional environment variables', async () => {
+  const root = await empty()
+  await bootstrapInstance(root, input)
+  await mkdir(join(root, 'node_modules/@workbasehq'), { recursive: true })
+  for (const name of ['core', 'plugins', 'mcp']) await symlink(resolve('packages', name), join(root, 'node_modules/@workbasehq', name))
+  const plan = spawnSync('bun', [resolve('packages/core/src/migrations/schema-cli.ts'), 'plan', '--root', root, '--init'], { encoding: 'utf8' })
+  expect(plan.status, plan.stderr).toBe(0)
+  const config = JSON.parse(await readFile(join(root, '.mcp.json'), 'utf8')).mcpServers.workbase_config
+  const transport = new StdioClientTransport({
+    command: config.command, args: config.args, cwd: root, stderr: 'pipe',
+    env: { ...(process.env.PATH === undefined ? {} : { PATH: process.env.PATH }),
+      ...(process.env.TMPDIR === undefined ? {} : { TMPDIR: process.env.TMPDIR }) },
+  })
+  transport.stderr?.on('data', () => {})
+  const client = new Client({ name: 'generated-config', version: '1' })
+  try {
+    await client.connect(transport)
+    expect((await client.listTools()).tools.map(tool => tool.name)).toEqual(Object.keys(schemas))
+  } finally { await client.close(); await transport.close() }
+})
+
+it.each([
+  'packages/mcp/templates/standalone/CLAUDE.md',
+  'packages/mcp/templates/standalone/README.md',
+  'docs/sdk/consumption.md',
+  'docs/sdk/getting-started.md',
+  'docs/sdk/mcp-composition.md',
+])('documents the implemented V3 kinds and workflow in %s', async path => {
+  const guide = await readFile(resolve(path), 'utf8')
+  const examples = [
+    { kind: 'set_plugin', plugin: 'console' },
+    { kind: 'set_interactive', interactive: true },
+    { kind: 'set_system_access', role: 'admin', grants: { 'members.read': 'allow' } },
+    { kind: 'set_entity_access', entity: 'worker', role: 'staff', access: 'deny' },
+    { kind: 'set_account_link', entity: 'worker', invitationRole: 'staff' },
+  ]
+  const kinds = examples.map(change => compositionChangeSchema.parse(change).kind)
+  for (const kind of kinds) expect(guide, kind).toContain('`' + kind + '`')
+  for (const [kind] of guide.matchAll(/\b(?:set|add|remove)_[a-z_]+\b/g)) expect(kinds).toContain(kind)
+  const workflow = ['inspect_schema', 'propose_composition', 'validate', 'preview_migration', 'apply_to_disposable', 'promote']
+  for (const tool of workflow) {
+    expect(schemas).toHaveProperty(tool)
+    expect(guide, tool).toContain('`' + tool + '`')
+  }
+  expect(guide).toContain('v3_promote_unsupported')
 })

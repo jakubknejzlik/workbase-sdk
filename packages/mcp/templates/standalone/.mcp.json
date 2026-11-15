@@ -25,6 +25,15 @@
         "WORKBASE_DEV_MAILBOX_URL": "${WORKBASE_DEV_MAILBOX_URL:-}",
         "WORKBASE_DEV_MAILBOX_TOKEN": "${WORKBASE_DEV_MAILBOX_TOKEN:-}"
       }
+    },
+    "workbase_config": {
+      "command": "bun",
+      "args": [
+        "./node_modules/@workbasehq/mcp/src/bin.ts",
+        "config",
+        "--root",
+        "."
+      ]
     }
   }
 }
