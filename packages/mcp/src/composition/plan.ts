@@ -129,7 +129,7 @@ export async function compositionPlan(base: Bundle, target: Bundle, source: stri
       await mkdir(dirname(join(scratch, path)), { recursive: true })
       await writeFile(join(scratch, path), edits.get(path) ?? bytes)
     }
-    const sources = Object.fromEntries(Object.entries(configSources(join(scratch, 'config.ts')))
+    const sources = Object.fromEntries(Object.entries(configSources(join(scratch, 'config.ts'), { sdkResolutionRoot: root }))
       .map(([key, location]) => [key, { ...location, file: join(root, relative(scratch, location.file)) }]))
     lock = serializeAccessLock(engine.kernel, { root, sources })
   } finally { await rm(scratch, { recursive: true, force: true }) }

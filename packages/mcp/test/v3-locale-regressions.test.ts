@@ -38,7 +38,8 @@ async function promote(call: Awaited<ReturnType<typeof connect>>['call'], change
   const proposal = await call('propose_change', { instance: 'demo', baseRevision: 1, changes })
   expect(proposal, JSON.stringify(proposal)).toMatchObject({ ok: true })
   const args = { proposalId: proposal.proposalId }
-  expect(await call('validate', args)).toMatchObject({ ok: true })
+  const validation = await call('validate', args)
+  expect(validation, JSON.stringify(validation)).toMatchObject({ ok: true })
   expect(await call('apply_to_disposable', args)).toMatchObject({ ok: true, verified: true, diffs: [] })
   expect(await call('promote', { ...args, expectedRevision: 1 })).toMatchObject({ ok: true, status: 'promoted', revision: 1 })
 }

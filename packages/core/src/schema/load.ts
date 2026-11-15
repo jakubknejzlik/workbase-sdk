@@ -232,8 +232,10 @@ function literal(node: ts.Expression, bindings: Map<string, Binding>, path: stri
  * No evaluation, access compilation or policy inference occurs here. Imported code
  * guards are attributed to their enclosing config registration unless mapped directly.
  */
-export function configSources(file: string): SourceMap {
+export function configSources(file: string, options: LoadConfigOptions = {}): SourceMap {
   const entry = realpathSync(resolve(file))
+  const isSdk: typeof sdkBinding = (binding, file, name, ...args) => sdkBinding(binding,
+    options.sdkResolutionRoot ? resolve(options.sdkResolutionRoot, relative(dirname(entry), file)) : file, name, ...args)
   const source = readSource(entry)
   const sources: SourceMap = { '': location(source) }
   let declaration = exported(source, 'default')
@@ -245,12 +247,12 @@ export function configSources(file: string): SourceMap {
     const binding = spread && ts.isIdentifier(spread.expression) ? bindings.get(spread.expression.text) : undefined
     if (binding?.imported === 'default' && ['./config', './config.ts'].includes(binding.module)) {
       const config = runtimeConfigPath(binding, entry)
-      if (config !== entry) return configSources(config)
+      if (config !== entry) return configSources(config, options)
     }
   }
   while (declaration && ts.isCallExpression(declaration) && ts.isIdentifier(declaration.expression)) {
     const binding = bindings.get(declaration.expression.text)
-    if (!['bindOpenApi', 'bindSchemaLock'].some(name => sdkBinding(binding, entry, name))) break
+    if (!['bindOpenApi', 'bindSchemaLock'].some(name => isSdk(binding, entry, name))) break
     declaration = declaration.arguments[0]
   }
   if (!declaration || !ts.isCallExpression(declaration) || !declaration.arguments[0]) return sources
