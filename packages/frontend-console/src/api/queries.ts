@@ -78,5 +78,5 @@ export async function removedMembershipDestination(client: QueryClient, orgId: s
   if (!me.user || me.memberships.some(item => item.organization_id === orgId)) return
   client.removeQueries({ queryKey: ['workspace-identity', orgId] })
   client.removeQueries({ queryKey: ['bootstrap'], type: 'inactive' })
-  return authDestination(null, me.memberships)
+  return authDestination(null, me.memberships, undefined, me.organizationsEnabled)
 }

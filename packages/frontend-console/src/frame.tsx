@@ -6,7 +6,7 @@ import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { api, logoutSession } from './api/client'
 import { Skeleton } from '@workbasehq/ui/components/ui/skeleton'
-import { fetchCapabilities, useBuild, useCapabilities, type Me } from './api/queries'
+import { fetchCapabilities, useBuild, useCapabilities, meOptions, type Me } from './api/queries'
 import { useSidebar } from '@workbasehq/ui/components/ui/sidebar'
 import { DropdownMenuItem } from '@workbasehq/ui/components/ui/dropdown-menu'
 import { useInvitationDestination } from './api/invitation-destination'
@@ -26,6 +26,7 @@ import { RuntimeLocalization } from './runtime-localization'
 import { RecordBreadcrumbProvider } from '../../console-generated/src/breadcrumbs'
 import { Breadcrumbs } from './Breadcrumbs'
 import { instanceTitle, useConsoleTitle } from './console-title'
+import { ScopeHomeContext, scopeHomeDestination, useScopeHome } from '../../console-generated/src/scope-home'
 import './styles.css'
 export function Frame() {
   const location = useLocation(); const client = useQueryClient(); const { t } = useTranslation()
@@ -34,6 +35,8 @@ export function Frame() {
   useConsoleTitle(schema.data?.displayName, location.pathname)
   useEffect(() => { if (schema.data) applyInstanceLanguage(schema.data.ui?.defaultLanguage ?? schema.data.locale) }, [schema.data])
   const orgId = /^\/o\/([^/]+)/.exec(location.pathname)?.[1]
+  const me = useQuery({ ...meOptions, enabled: false })
+  const home = scopeHomeDestination(me.data, orgId ? decodeURIComponent(orgId) : undefined)
   useRuntimeModel(orgId ? decodeURIComponent(orgId) : undefined)
   useEffect(() => { client.removeQueries({ queryKey: ['resource-denied'], type: 'inactive' }) }, [client, location.pathname])
   useEffect(() => () => {
@@ -45,7 +48,7 @@ export function Frame() {
   // starting both in the first wave; bootstrap seeds safe metadata and scoped grants.
   const boot = useQuery({ ...bootstrapOptions(client, orgId ? decodeURIComponent(orgId) : undefined), enabled: gated })
   const content = gated && !boot.data ? <main id="main">{boot.error ? <QueryError error={boot.error} /> : <div role="status" aria-label={t('loading')} className="space-y-4 p-4"><Skeleton className="h-9 w-64" /><Skeleton className="h-24 w-full" /></div>}</main> : <RecordBreadcrumbProvider>{orgId ? <RuntimeLocalization key={orgId} orgId={decodeURIComponent(orgId)}><FrameContent /></RuntimeLocalization> : <FrameContent />}</RecordBreadcrumbProvider>
-  return gated ? <ProfileGate>{content}</ProfileGate> : content
+  return <ScopeHomeContext.Provider value={home}>{gated ? <ProfileGate>{content}</ProfileGate> : content}</ScopeHomeContext.Provider>
 }
 function FrameContent() {
   const { t, i18n } = useTranslation(); const location = useLocation(); const navigate = useNavigate(); const client = useQueryClient(); const matches = useMatches()
@@ -109,12 +112,13 @@ function FrameContent() {
   </ConsoleLayout>
 }
 export function Overview() {
+  const home = useScopeHome()
   const { t } = useTranslation(); const me = useQuery({ queryKey: ['me'], queryFn: () => api<Me>('/me', { redirect401: false }) })
-  const destination = useInvitationDestination(null, me.data?.memberships)
+  const destination = useInvitationDestination(null, me.data?.memberships, me.data?.organizationsEnabled)
   useEffect(() => { if (me.data?.user && destination.target) window.location.replace(destination.target) }, [me.data, destination.target])
   const schema = useQuery({ ...instanceOptions, enabled: false })
   if (destination.error) return <QueryError error={destination.error} />
-  return <ResourcePage title={t('title', { instanceTitle: instanceTitle(schema.data?.displayName) })}><div className="wb-empty"><h2>{t('welcome')}</h2><p>{t('empty')}</p><Link to="/organizations">{t('organizations')}</Link><p><Dialog trigger={t('about')} title={t('about')} description={t('description')} closeLabel={t('close')} /></p></div></ResourcePage>
+  return <ResourcePage title={t('title', { instanceTitle: instanceTitle(schema.data?.displayName) })}><div className="wb-empty"><h2>{t('welcome')}</h2><p>{t('empty')}</p><Link to={home}>{t(home === '/organizations' ? 'organizations' : 'overview')}</Link><p><Dialog trigger={t('about')} title={t('about')} description={t('description')} closeLabel={t('close')} /></p></div></ResourcePage>
 }
 
 function AccountSettingsItem({ orgId, onNavigate, member }: { member?: boolean; orgId?: string; onNavigate: () => void }) {
