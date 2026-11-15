@@ -40,8 +40,9 @@ export async function submitChange(directory: string, p: Submission, expectedBas
   if (!p.validation || !p.verification || hash(p.validation) !== hash(p.verification)) fail('verification_required', 'Chybí ověření této změny.', 409)
   if (!p.promotedFiles || !p.migrationPreview || p.promotionHash !== promotionHash(p)) fail('promotion_snapshot_required', 'Chybí platný záznam souborů povýšené změny.', 409)
   const accessChanges = p.changes.filter(change => ['set_system_access', 'set_entity_access', 'set_account_link'].includes(change.kind))
-  const allowed = new Set(p.kind === 'composition_change' ? ['runtime.ts', 'access.lock.json', 'access.lock.md',
-    ...(accessChanges.length ? ['access.ts', 'openapi.json'] : []),
+  const allowed = new Set(p.kind === 'composition_change' ? [...(p.changes.some(change => change.kind === 'set_locale') ? ['config.ts'] : []), 'runtime.ts', 'access.lock.json', 'access.lock.md',
+    ...(accessChanges.length ? ['access.ts'] : []),
+    ...(accessChanges.length || p.changes.some(change => change.kind === 'set_locale') ? ['openapi.json'] : []),
     ...accessChanges.flatMap(change => change.kind === 'set_entity_access' ? [`schema/${change.entity}.ts`] : [])] : ['config.ts', 'config.indexes.json', 'config.versions.json', `config.v${p.baseRevision}.ts`, `config.v${p.promotedRevision}.ts`, `migrations/${p.migration}`])
   const paths = new Set<string>()
   for (const file of p.promotedFiles) {

@@ -83,6 +83,8 @@ it('set_locale changes locale and default language independently and preserves U
     expect(result.target.entities).toEqual(config.entities)
     return result.target
   }
+  config = next({ kind: 'set_locale', languages: ['en', 'cs'] })
+  expect(config.languages).toEqual(['en', 'cs'])
   config = next({ kind: 'set_locale', locale: 'cs' })
   expect(config.locale).toBe('cs'); expect(config.ui?.defaultLanguage).toBeUndefined()
   config = next({ kind: 'set_locale', defaultLanguage: 'en' })

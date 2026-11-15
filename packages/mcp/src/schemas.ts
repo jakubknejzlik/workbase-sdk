@@ -51,7 +51,9 @@ const setLabel = z.strictObject({
 'Provide entity singular/plural/object captions, or field and label; do not mix the targets')
 const setLocale = z.strictObject({
   kind: z.literal('set_locale'), locale: consoleLocaleSchema.optional(), defaultLanguage: consoleLocaleSchema.optional(),
-}).refine(change => change.locale !== undefined || change.defaultLanguage !== undefined, 'Provide locale and/or defaultLanguage')
+  languages: z.array(consoleLocaleSchema).min(1).max(2).refine(values => new Set(values).size === values.length, 'Duplicate languages').optional(),
+}).refine(change => change.locale !== undefined || change.defaultLanguage !== undefined || change.languages !== undefined, 'Provide locale, defaultLanguage and/or languages')
+export type LocaleChange = z.infer<typeof setLocale>
 // Composition inputs remain separate from legacy config proposal records.
 export const identityOptionsSchema = z.strictObject({
   trustedIssuers: z.record(z.string().url(), z.array(z.string().min(1))).optional(),
@@ -82,7 +84,7 @@ export const accessChangeSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('set_account_link'), entity: identifier, invitationRole: identifier }),
 ])
 export type AccessChange = z.infer<typeof accessChangeSchema>
-export const compositionChangeSchema = z.union([runtimeChangeSchema, accessChangeSchema])
+export const compositionChangeSchema = z.union([runtimeChangeSchema, accessChangeSchema, setLocale])
 export type CompositionChange = z.infer<typeof compositionChangeSchema>
 
 export const changeSchema = z.discriminatedUnion('kind', [

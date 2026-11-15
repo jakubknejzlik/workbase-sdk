@@ -6,7 +6,7 @@ function unwrap(node: ts.Expression): ts.Expression {
 }
 /** The loader validates the module first. Edit only an initializer's token span;
  * trivia, declarations, imports and all other authored bytes remain untouched. */
-export function replaceLiteral(text: string, path: readonly string[], value: unknown, file: string): string {
+export function replaceLiteral(text: string, path: readonly string[], value: unknown, file: string, options: { config?: boolean } = {}): string {
   const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS)
   const error = (node: ts.Node, message: string): never => {
     const pos = source.getLineAndCharacterOfPosition(node.getStart(source))
@@ -25,12 +25,21 @@ export function replaceLiteral(text: string, path: readonly string[], value: unk
       }
     }
   }
-  if (calls.length !== 1 || calls[0].arguments.length !== 1) error(source, 'Expected one literal declaration')
-  let node = unwrap(calls[0].arguments[0])
-  for (const name of path) {
+  if (calls.length !== 1 || !options.config && calls[0].arguments.length !== 1) error(source, 'Expected one literal declaration')
+  let declaration = calls[0]
+  // loadConfig has already validated SDK bindOpenApi/bindSchemaLock wrappers.
+  if (options.config) while (ts.isCallExpression(unwrap(declaration.arguments[0]))) declaration = unwrap(declaration.arguments[0]) as ts.CallExpression
+  let node = unwrap(declaration.arguments[0])
+  for (const [position, name] of path.entries()) {
     if (!ts.isObjectLiteralExpression(node)) error(node, 'Expected a literal object')
     const property = (node as ts.ObjectLiteralExpression).properties.find(property => property.name
       && (ts.isIdentifier(property.name) || ts.isStringLiteral(property.name) || ts.isNumericLiteral(property.name)) && property.name.text === name)
+    if (!property && options.config && position === path.length - 1) {
+      const object = node as ts.ObjectLiteralExpression
+      const end = object.getEnd() - 1
+      const separator = object.properties.length && !object.properties.hasTrailingComma ? ',' : ''
+      return text.slice(0, end) + `${separator}\n  ${JSON.stringify(name)}: ${JSON.stringify(value, null, 2)}\n` + text.slice(end)
+    }
     if (!property || !ts.isPropertyAssignment(property)) error(node, `Missing literal property: ${name}`)
     node = unwrap((property as ts.PropertyAssignment).initializer)
   }

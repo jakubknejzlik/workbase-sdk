@@ -126,8 +126,8 @@ export class Workflow {
       return await this.store.locked(targetInstance, async () => {
         if (name === 'upgrade_sdk') return proposeSdkUpgrade(this.store, targetInstance, input.baseRevision, input.targetVersion, proposalId!)
         if (name === 'propose_composition') return proposeComposition(this.store, targetInstance, input.baseRevision, input.changes, proposalId!)
-        if (name === 'propose_change' && input.changes.some((change: unknown) => compositionChangeSchema.safeParse(change).success)) {
-          if (!input.changes.every((change: unknown) => compositionChangeSchema.safeParse(change).success)) fail('mixed_change_kinds', 'Composition and legacy config changes must be proposed separately')
+        if (name === 'propose_change' && input.changes.some((change: unknown) => (change as { kind: string }).kind !== 'set_locale' && compositionChangeSchema.safeParse(change).success)) {
+          if (!input.changes.every((change: unknown) => (change as { kind: string }).kind !== 'set_locale' && compositionChangeSchema.safeParse(change).success)) fail('mixed_change_kinds', 'Composition and legacy config changes must be proposed separately')
           return proposeComposition(this.store, targetInstance, input.baseRevision, input.changes, proposalId!)
         }
         if (name === 'submit_change') {
@@ -160,11 +160,14 @@ export class Workflow {
           const diagnostics = await diagnose()
           return { ok: true, instance: targetInstance, revision: bundle.config.revision, instance_meta: diagnostics.meta, validation: diagnostics.validation,
             entities: bundle.config.entities, roles: bundle.config.roles, permissions: bundle.config.permissions,
-            locale: bundle.config.locale, ui: bundle.config.ui, enumLabels: bundle.config.enumLabels,
+            languages: bundle.config.languages, locale: bundle.config.locale, ui: bundle.config.ui, enumLabels: bundle.config.enumLabels,
             policies: effectivePolicies(bundle.config), organizationPermissions: bundle.config.organizationPermissions,
             indexes: bundle.indexes, pendingProposals: pending }
         }
         if (name === 'propose_change') {
+          if (bundle.config.baseline === 'workbase-sdk' && input.changes.every((change: { kind: string }) => change.kind === 'set_locale')) {
+            return proposeComposition(this.store, targetInstance, input.baseRevision, input.changes, proposalId!)
+          }
           guardV3LegacyWrite(bundle.config, 'propose', input.changes)
           this.revision(bundle, input.baseRevision)
           if (input.changes.some((change: { kind: string }) => ['set_display_field', 'set_label', 'add_role', 'remove_role', 'set_permissions', 'set_organization_permissions'].includes(change.kind))) prepareChanges(bundle.config, bundle.indexes, input.changes)
