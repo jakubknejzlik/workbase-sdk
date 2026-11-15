@@ -197,12 +197,15 @@ Selected resolved kernel/config inputs used alongside the compiled grants (curat
 | account | {"entity":"users"} |
 | authorization | {"permissionsActive":true,"providers":{"identity":[{"name":"identity","version":"0.1.0"}],"login":[{"name":"local-auth","version":"0.1.0"}],"permissions":[{"name":"rbac","version":"0.1.0"}]},"trust":false} |
 | record / commandsOnly | false |
+| record / displayField | "state" (packages/core/test/fixtures/record-actions.ts:1) |
 | record / fields | {"secret":{"readOnly":false,"sensitive":false,"type":"text","userLink":false},"state":{"readOnly":false,"sensitive":false,"type":"text","userLink":false},"user":{"entity":"users","readOnly":true,"sensitive":false,"type":"ref","userLink":true}} |
 | record / relations | {"user_account":{"entity":"users","field":"user"}} |
 | users / commandsOnly | false |
+| users / displayField | "name" (packages/core/test/fixtures/record-actions.ts:1) |
 | users / fields | {"name":{"readOnly":false,"sensitive":false,"type":"string","userLink":false},"role":{"readOnly":false,"sensitive":false,"type":"enum","userLink":false,"values":["admin","staff","viewer"]}} |
 | users / relations | {} |
 | worker / commandsOnly | false |
+| worker / displayField | "name" (packages/core/test/fixtures/record-actions.ts:1) |
 | worker / fields | {"name":{"readOnly":false,"sensitive":false,"type":"text","userLink":false}} |
 | worker / relations | {} |
 | organizationOwnerRole | "admin" |

@@ -141,9 +141,11 @@ Selected resolved kernel/config inputs used alongside the compiled grants (curat
 | account | {"entity":"users"} |
 | authorization | {"permissionsActive":false,"providers":{},"trust":false} |
 | users / commandsOnly | false |
+| users / displayField | "name" (packages/core/test/fixtures/config-era/config.ts:7) |
 | users / fields | {"name":{"readOnly":false,"sensitive":false,"type":"string","userLink":false},"role":{"readOnly":false,"sensitive":false,"type":"enum","userLink":false,"values":["admin","staff"]}} |
 | users / relations | {} |
 | worker / commandsOnly | false |
+| worker / displayField | "name" (packages/core/test/fixtures/config-era/schema/worker.ts:2) |
 | worker / fields | {"name":{"readOnly":false,"sensitive":false,"type":"text","userLink":false},"user":{"entity":"users","readOnly":true,"sensitive":false,"type":"ref","userLink":true}} |
 | worker / relations | {"user_account":{"entity":"users","field":"user"}} |
 | organizationOwnerRole | "admin" |

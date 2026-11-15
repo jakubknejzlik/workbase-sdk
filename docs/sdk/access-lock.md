@@ -15,9 +15,6 @@ effective access is unchanged.
 
 **Not covered** (changes here can alter access outcomes without lock drift):
 
-- Computed-field dependency resolution: `displayField`, label/display expressions and
-  expression dependency hops that decide whether a computed field is readable or
-  projected as `NULL`.
 - Workflow registry: step operation `permission`/`additionalPermissions` and the
   resulting `start` capability.
 - Executable bodies: hooks, command plans, named predicates and whatever config they read.
@@ -65,8 +62,18 @@ runtime state outside the grant compiler. Moving those consumers into that
 compiler would change their execution contracts; this audit does not change them
 or derive grants again. Relation bindings retain the exact `entity`, `field` and
 `many` values used to resolve predicate `field`/`parentField`. Drift diagnostics name
-the changed input path and values. Opaque hook bodies remain opaque, including
+the changed input path and values, with source attribution for display selectors,
+labels and related-column bindings. Opaque hook bodies remain opaque, including
 their arbitrary application-specific config reads.
+
+Normalized entity `displayField` selectors and supported structured labels (via
+`label.serialize()`) are included, along with `ui.entities.*.list.relatedColumns`,
+which the runtime uses to resolve label paths. Existing computed expression wires,
+ref targets and relation bindings retain the inputs for transitive dependencies.
+Runtime expression/label resolvers continue to decide readability and SQL masking;
+the audit does not derive dependencies or grants independently. This covers the
+supported normalized/runtime label form; `defineEntity` still rejects inline labels.
+Only related-column bindings are projected from UI config, not presentation settings.
 
 Covered inputs (not exhaustive; see Scope above). Read sites as of this change, under `packages/core/src`:
 
@@ -80,6 +87,8 @@ Covered inputs (not exhaustive; see Scope above). Read sites as of this change, 
 | `policies.ts:18,21,81,123,235,239`: account entity, assignments, managedBy | `enforcementInputs.account` |
 | `policies.ts:39,154`; `query/schema.ts:51`: relation entity/field/many (including nested dependencies) | `enforcementInputs.entities.*.relations` |
 | `policies.ts:18,42,84,254`; `query/schema.ts:19,21,56`: entity/field existence, type, computed, readOnly, userLink; compiler masks also read sensitive | `enforcementInputs.entities.*.fields` (also records ref targets and enum values) |
+| `query/expressions.ts:96,311,342`; `query/labels.ts:51,75,90`: display selectors, structured label operands and transitive computed/ref dependencies | `enforcementInputs.entities.*.displayField/label/fields/relations`; label ASTs serialize to their wire values |
+| `query/labels.ts:9`: configured related-column paths | `enforcementInputs.ui.entities.*.list.relatedColumns` |
 | `policies.ts:48,124`; `execution/policy-receipts.ts:13`: effective rules and compatibility policies/account; plugin tableFilter/policyInConfig/builtin | `effectiveAccess.entities`; `enforcementInputs.policies/account/plugins` |
 | `organization-permissions.ts:8,16,35,54`; `organization-rules.ts:9,27`: roles, organizationOwnerRole, organizationPermissions | `enforcementInputs.roles/organizationOwnerRole/organizationPermissions`; grants remain in `effectiveAccess` |
 | `execution/policies.ts:75,114,115`; `execution/policy-receipts.ts:22,45`: schema membership, userLink protection, account entity, compiled-policy presence | `enforcementInputs.entities/account`; `effectiveAccess` |

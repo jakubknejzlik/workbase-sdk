@@ -21,8 +21,16 @@ export function enforcementInputs(kernel: AccessKernel) {
     account: config.account ?? null, organizationOwnerRole: config.organizationOwnerRole,
     // Compatibility projections are also read by live issuer guards/receipts.
     roles: [...config.roles].sort(), permissions: config.permissions, policies: config.policies, organizationPermissions: config.organizationPermissions,
+    // labelPath reads this mapping even though the surrounding UI is presentation.
+    ui: { entities: Object.fromEntries(Object.entries(config.ui?.entities ?? {}).flatMap(([name, ui]) =>
+      ui.list?.relatedColumns ? [[name, { list: { relatedColumns: ui.list.relatedColumns } }]] : [])) },
     entities: Object.fromEntries(Object.entries(config.entities).map(([name, entity]) => [name, {
       commandsOnly: !!entity.commandsOnly, relations: entity.relations,
+      // Keep the same normalized selector and structured wire that the runtime
+      // expression/label resolvers consume. Ref targets and computed wires below
+      // cover subsequent hops; no second dependency or grant compiler is needed.
+      ...(entity.displayField ? { displayField: entity.displayField } : {}),
+      ...(entity.label ? { label: entity.label.serialize() } : {}),
       fields: Object.fromEntries(Object.entries(entity.fields).map(([field, definition]) => [field, {
         type: definition.type, entity: definition.entity, computed: definition.computed,
         readOnly: !!definition.readOnly, sensitive: !!definition.sensitive, userLink: !!definition.userLink,

@@ -69,7 +69,17 @@ export function serializeAccessLock(kernel: AccessKernel, options: AccessLockOpt
   lines.push('', '## Enforcement inputs', '', 'Selected resolved kernel/config inputs used alongside the compiled grants (curated, not exhaustive; see docs/sdk/access-lock.md § Scope). Executable bodies remain opaque.', '', '| Input | Resolved value |', '| --- | --- |')
   for (const [key, value] of Object.entries(canonical(inputs) as Record<string, unknown>)) {
     if (key === 'entities') for (const [entity, definition] of Object.entries(value as Record<string, Record<string, unknown>>)) {
-      for (const [part, data] of Object.entries(definition)) lines.push(`| ${cell(`${entity} / ${part}`)} | ${cell(json(data))} |`)
+      for (const [part, data] of Object.entries(definition)) {
+        const source = part === 'displayField' || part === 'label' ? ` (${cell(locate(`entities.${entity}.${part}`))})` : ''
+        lines.push(`| ${cell(`${entity} / ${part}`)} | ${cell(json(data))}${source} |`)
+      }
+    } else if (key === 'ui') {
+      for (const [entity, ui] of Object.entries(canonical(inputs.ui.entities) as typeof inputs.ui.entities)) {
+        for (const [column, binding] of Object.entries(canonical(ui.list.relatedColumns) as typeof ui.list.relatedColumns)) {
+          const path = `ui.entities.${entity}.list.relatedColumns.${column}`
+          lines.push(`| ${cell(path)} | ${cell(json(binding))} (${cell(locate(path))}) |`)
+        }
+      }
     } else lines.push(`| ${cell(key)} | ${cell(json(value))} |`)
   }
   // Compact JSON keeps the full normalized representation together; no derived grants.
@@ -80,11 +90,17 @@ function diff(previous: string, current: string): string[] {
   try {
     const before = JSON.parse(previous); const after = JSON.parse(current)
     const changes: string[] = []
+    const inputSource = (path: string) => {
+      let key = path.replace(/^enforcement inputs \/ /, '').split(' / ').join('.')
+      while (!after.sources[key] && !before.sources[key] && key) key = key.split('.').slice(0, -1).join('.')
+      const source = after.sources[key] ?? before.sources[key]
+      return source ? ` (${source.file}:${source.line})` : ''
+    }
     function inputs(old: any, next: any, path: string) {
       if (json(old) === json(next)) return
       if (old && next && typeof old === 'object' && typeof next === 'object' && !Array.isArray(old) && !Array.isArray(next)) {
         for (const key of [...new Set([...Object.keys(old), ...Object.keys(next)])].sort()) inputs(old[key], next[key], `${path} / ${key}`)
-      } else changes.push(`~ ${path}: ${json(old) ?? 'missing'} -> ${json(next) ?? 'missing'}`)
+      } else changes.push(`~ ${path}: ${json(old) ?? 'missing'} -> ${json(next) ?? 'missing'}${inputSource(path)}`)
     }
     for (const [section, key] of [
       ['entities', (r: any) => `${r.role} / ${r.entity} / ${r.operation}`],
