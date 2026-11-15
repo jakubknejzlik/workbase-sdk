@@ -1,9 +1,9 @@
 import { afterEach, expect, it } from 'vitest'
-import { mkdtempSync, mkdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { compileAccess, type EntityAccess } from '../../src/schema'
-import { loadConfig } from '../../src/schema/load'
+import { configSources, loadConfig } from '../../src/schema/load'
 import { accessEntities, accessSystemActions, type AccessInput } from '../../src/access'
 
 const roots: string[] = []
@@ -25,6 +25,35 @@ export default defineConfig({ id: 'sample', roles: ['admin', 'staff'], organizat
   writeFileSync(join(root, 'schema/worker.ts'), `import { defineEntity, accountLink } from '@workbasehq/core/schema'\nexport default defineEntity({ fields: { name: { type: 'text', required: true }, user: accountLink() }, access: ${JSON.stringify(worker, null, 2)} })`)
   return { root, matrix: worker, load: () => loadConfig(join(root, 'config.ts')) }
 }
+it.each(['./config', './config.ts'])('reads authored access sources through a runtime config spread (%s) beside unrelated config files without executing modules', configImport => {
+  const { root } = consumer()
+  writeFileSync(join(root, 'config.local.ts'), `throw new Error('unrelated config must not execute')`)
+  writeFileSync(join(root, 'config.indexes.json'), '[]')
+  writeFileSync(join(root, 'runtime.ts'), `import authored from '${configImport}'
+throw new Error('source metadata must not execute runtime')
+export default { ...authored, plugins: [neverExecute()] }
+`)
+  const sources = configSources(join(root, 'runtime.ts'))
+  expect(sources).toEqual(configSources(join(root, 'config.ts')))
+  expect(sources['access.roles.admin.system.members.read'].file).toBe(join(root, 'access.ts'))
+  expect(sources['entities.worker.access.staff.read'].file).toBe(join(root, 'schema/worker.ts'))
+})
+it.each(['./config', './config.ts'])('rejects a missing or out-of-project runtime config import (%s)', configImport => {
+  const { root } = consumer()
+  writeFileSync(join(root, 'runtime.ts'), `import config from '${configImport}'\nexport default { ...config }`)
+  rmSync(join(root, 'config.ts'))
+  expect(() => configSources(join(root, 'runtime.ts'))).toThrow(/runtime.ts:1:\d+:.*Cannot resolve.*config import/)
+  symlinkSync(join(consumer().root, 'config.ts'), join(root, 'config.ts'))
+  expect(() => configSources(join(root, 'runtime.ts'))).toThrow(/runtime.ts:1:\d+:.*config import.*inside the project/)
+})
+it('resolves an explicit config.ts import even beside a bare config file, but rejects an ambiguous extensionless import', () => {
+  const { root } = consumer()
+  writeFileSync(join(root, 'config'), `throw new Error('bare config must not execute')`)
+  writeFileSync(join(root, 'runtime.ts'), `import config from './config.ts'\nexport default { ...config }`)
+  expect(configSources(join(root, 'runtime.ts'))).toEqual(configSources(join(root, 'config.ts')))
+  writeFileSync(join(root, 'runtime.ts'), `import config from './config'\nexport default { ...config }`)
+  expect(() => configSources(join(root, 'runtime.ts'))).toThrow(/runtime.ts:1:\d+:.*Ambiguous config import/)
+})
 it('rejects missing role × entity entries with role, entity and file:line', async () => {
   const { load } = consumer(shared(), { admin: operations })
   await expect(load()).rejects.toThrow(/schema\/worker.ts:\d+:\d+:.*staff.*worker/)
