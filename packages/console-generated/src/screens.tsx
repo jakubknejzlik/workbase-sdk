@@ -21,6 +21,7 @@ import { DetailGroups } from './detail-groups'
 import { detailPlan, detailReadableField } from './detail-plan'
 import { selectedReferenceRow } from './use-selected-references'
 import { shortRecordId } from './labels'
+import { useScopeHome } from './scope-home'
 import { GeneratedRowInvitation, GeneratedInlineEdit, type WriteRequest } from './write-screens'
 const queryCodes = ['query_invalid', 'field_forbidden', 'relation_forbidden', 'query_too_expensive', 'entity_not_found', 'policy_violation'] as const
 export { formatValue } from './labels'
@@ -34,6 +35,7 @@ export function signedValue(row: Record<string, any>, field: Field, value: React
 interface ReadPageProps { calendarCreate?: (values: Record<string, string>) => void; write?: WriteRequest; onDenied?: () => void; contextList?: ReadQuery['contextList']; title?: string; embeddedCreate?: (entity: string, values: Record<string, string>) => ReactNode; model: Model; caps: Capabilities; orgId: string; entity: string; id?: string; request: (input: ReadQuery) => Promise<Result>; primaryAction?: { label: string; onAction: () => void }; actions?: (row?: Record<string, any>) => ReactNode; rowActions?: (row: Record<string, any>, disabled: boolean) => ReactNode }
 export function GeneratedReadPage(props: ReadPageProps) { return props.id ? <GeneratedDetailPage {...props} /> : <GeneratedListPage {...props} /> }
 function GeneratedDetailPage({ model, caps, orgId, entity, id, request, actions, embeddedCreate, write, onDenied }: ReadPageProps) {
+  const home = useScopeHome()
   const { t, i18n } = useEntityTranslation(entity); const definition = model.entities[entity]
   const plan = detailPlan(model, entity, caps)
   const allowed = visibleEntities(model, caps).includes(entity)
@@ -65,7 +67,7 @@ function GeneratedDetailPage({ model, caps, orgId, entity, id, request, actions,
     if (definition.fields[field].type === 'enum' && row[field] != null) return t(`value_${row[field]}`)
     return formatValue(row[field], definition.fields[field], i18n.language, t('yes'), t('no'), t('nullValue'))
   }
-  const notFound = () => <ResourcePage title={t('notFound')}><p>{t('notFoundDescription')}</p><Link to="/organizations">{t('organizations')}</Link></ResourcePage>
+  const notFound = () => <ResourcePage title={t('notFound')}><p>{t('notFoundDescription')}</p><Link to={home}>{t(home === '/organizations' ? 'organizations' : 'overview')}</Link></ResourcePage>
   if ((result.error as { status?: number } | null)?.status === 403) return <ResourcePage title={t('forbidden')}><p>{t('resourceForbidden', { resource: t(`entity_${entity}`).toLocaleLowerCase(i18n.language) })}</p></ResourcePage>
   if (id && result.data && !result.data.data.length) return notFound()
   const code = (result.error as { code?: string } | null)?.code

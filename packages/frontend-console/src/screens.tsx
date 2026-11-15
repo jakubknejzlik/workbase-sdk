@@ -13,20 +13,22 @@ import { api, ApiError, safeReturnTo } from './api/client'
 import { useMe, useOrganization, useOrganizations } from './api/queries'
 import { OrganizationSetup } from './organization-setup'
 import { CreateOrganizationDialog } from './create-organization-dialog'
+import { useScopeHome } from '../../console-generated/src/scope-home'
 export function Page({ title, actions, children }: { title: string; actions?: ReactNode; children?: ReactNode }) {
   useEffect(() => { document.querySelector<HTMLElement>('h1')?.focus() }, [title])
   return <ResourcePage title={title} actions={actions}>{children}</ResourcePage>
 }
 export function Failure({ kind }: { kind: 'forbidden' | 'notFound' | 'invalidLink' | 'requestFailed' }) {
+  const home = useScopeHome()
   const { t } = useTranslation()
-  return <Page title={t(kind)}><p>{t(`${kind}Description`)}</p><Link to={kind === 'invalidLink' ? '/sign-in' : '/organizations'}>{t(kind === 'invalidLink' ? 'newLink' : 'organizations')}</Link></Page>
+  return <Page title={t(kind)}><p>{t(`${kind}Description`)}</p><Link to={kind === 'invalidLink' ? '/sign-in' : home}>{t(kind === 'invalidLink' ? 'newLink' : home === '/organizations' ? 'organizations' : 'overview')}</Link></Page>
 }
 export function Loading() { const { t } = useTranslation(); return <p role="status">{t('loading')}</p> }
 export function QueryError({ error }: { error: Error }) { return <Failure kind={error instanceof ApiError && error.status === 403 ? 'forbidden' : 'requestFailed'} /> }
 export function SignIn() {
   const submit = useMutationSubmit()
   const { t } = useTranslation(); const [email, setEmail] = useState('')
-  const returnTo = safeReturnTo(new URLSearchParams(window.location.search).get('returnTo'))
+  const returnTo = safeReturnTo(new URLSearchParams(window.location.search).get('returnTo'), useScopeHome())
   const providers = useQuery({ queryKey: ['providers'], queryFn: () => api<{ providers: { id: string }[] }>('/auth/providers', { redirect401: false }) })
   const magic = useMutation({ mutationFn: () => api('/auth/sign-in/magic-link', { method: 'POST', body: { email, callbackURL: returnTo, errorCallbackURL: '/verify?failed=1' }, redirect401: false }), onSuccess: () => sessionStorage.setItem('console-returnTo', returnTo) })
   const oidc = useMutation({ mutationFn: () => api<{ url: string }>('/auth/sign-in/social', { method: 'POST', body: { provider: 'oidc', callbackURL: '/auth/complete' }, redirect401: false }), onSuccess: data => { sessionStorage.setItem('console-returnTo', returnTo); window.location.assign(data.url) } })
@@ -52,7 +54,7 @@ export function Verify() {
 }
 export function Complete() {
   const me = useMe()
-  const destination = useInvitationDestination(sessionStorage.getItem('console-returnTo'), me.data?.memberships)
+  const destination = useInvitationDestination(sessionStorage.getItem('console-returnTo'), me.data?.memberships, me.data?.organizationsEnabled)
   useEffect(() => {
     if (!destination.target) return
     sessionStorage.removeItem('console-returnTo')

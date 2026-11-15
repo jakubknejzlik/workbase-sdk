@@ -12,10 +12,52 @@ import { KernelRegistry } from '@workbasehq/core/kernel/registry'
 import { createApp } from '@workbasehq/core/app'
 import { sha256 } from '@workbasehq/core/crypto'
 import { request, runtime, setup } from '@workbasehq/test-support/helpers'
+import { permissions } from '@workbasehq/plugins/permissions'
+import { adaptConsoleModel } from '../../../frontend-console/src/api/adapt-console-model'
+import type { ConsoleModelContract } from '@workbasehq/core/console-contract'
+import { scopeHomeDestination } from '../../../console-generated/src/scope-home'
 
 beforeEach(async () => { await setup({ ...sample, plugins: [identity, localAuth, rbac] }) })
 const single = () => ({ ...sample, plugins: [identity, localAuth, rbac, members, mailOutbox()] })
 beforeEach(completeInvitationProfiles)
+it('Members-only instance scope keeps the packaged console overview for an admin owner without a console provider', async () => {
+  const config = { ...sample, plugins: [identity, localAuth, permissions({ roles: ['admin'], ownerRole: 'admin' }), members],
+    roles: ['admin'], permissions: { admin: sample.permissions.owner }, organizationPermissions: { admin: sample.organizationPermissions.owner },
+    policies: Object.fromEntries(Object.keys(sample.entities).map(entity => [entity, { admin: 'all' as const }])) }
+  await new KernelRegistry(config).applyMigrations(env.DB)
+  await env.DB.prepare("INSERT INTO memberships (user_id,organization_id,role) VALUES ('owner-a','instance','admin')").run()
+  const app = createApp(config, runtime())
+  const response = await request(app, '/o/instance/console-model', 'GET', undefined, 'owner-a', 'instance')
+  expect(response.status).toBe(200)
+  const document = await response.json() as ConsoleModelContract
+  expect(await (await request(app, '/me', 'GET', undefined, 'owner-a', 'instance')).json()).toMatchObject({ organizationsEnabled: false, memberships: [{ organization_id: 'instance', role: 'admin' }] })
+  const home = await request(app, '/me?scope=organization', 'GET', undefined, 'owner-a', 'instance')
+  expect(home.status).toBe(200)
+  expect(await home.json()).toMatchObject({ role: 'admin', memberships: [{ organization_id: 'instance', role: 'admin' }] })
+  expect(document.capabilities.organization.role).toBe('admin')
+  expect(document.capabilities.resources['members.read']).toBe(true)
+  // No console provider is required to serve the packaged console. Its fallback
+  // registry must include the built-in home as well as readable entities.
+  expect(document.console).toBeNull()
+  const registry = adaptConsoleModel(document).console
+  expect(registry.pages).toContainEqual(expect.objectContaining({ id: 'core.overview', path: '/', renderer: 'core.overview' }))
+  expect(registry.pages).toContainEqual(expect.objectContaining({ id: 'members.list', path: '/settings/workspace-members', renderer: 'members.list', grant: 'members.read' }))
+  expect((await request(app, '/orgs/instance/members?include=pending', 'GET', undefined, 'owner-a', 'instance')).status).toBe(200)
+  expect(registry.navigation).toContainEqual(expect.objectContaining({ id: 'core.overview', page: 'core.overview', placement: 'sidebar' }))
+  expect(registry.navigation).toContainEqual(expect.objectContaining({ entity: 'workers', placement: 'sidebar' }))
+})
+it('an Organizations composition retains its provider overview and multi-scope recovery chooser', async () => {
+  await new KernelRegistry(sample).applyMigrations(env.DB)
+  await env.DB.prepare("INSERT OR IGNORE INTO memberships (user_id,organization_id,role) VALUES ('owner-a','org-b','owner')").run()
+  const app = createApp(sample, runtime())
+  const me = await (await request(app, '/me')).json() as { organizationsEnabled: boolean; memberships: { organization_id: string }[] }
+  expect(me.organizationsEnabled).toBe(true)
+  expect(me.memberships).toHaveLength(2)
+  expect(scopeHomeDestination(me, 'org-a')).toBe('/organizations')
+  const document = await (await request(app, '/o/org-a/console-model')).json() as ConsoleModelContract
+  expect(document.console?.pages).toContainEqual(expect.objectContaining({ id: 'core.overview', path: '/' }))
+  expect(adaptConsoleModel(document).console).toBe(document.console)
+})
 it('Members requires Identity and Permissions, optionally orders Organizations first', () => {
   expect(() => new KernelRegistry({ ...single(), plugins: [identity, localAuth, members] })).toThrow(/permissions/i)
   const kernel = new KernelRegistry({ ...sample, plugins: [members, organizations, rbac, identity, localAuth] })

@@ -4,15 +4,15 @@ export class ApiError extends Error {
   constructor(public status: number, public code: string, public details?: unknown) { super(code) }
 }
 /** Only console-local paths can become a post-authentication destination. */
-export function safeReturnTo(value: unknown): string {
-  if (typeof value !== 'string' || !value.startsWith('/') || /[\\\u0000-\u0020]/.test(value)) return '/organizations'
+export function safeReturnTo(value: unknown, fallback = '/'): string {
+  if (typeof value !== 'string' || !value.startsWith('/') || /[\\\u0000-\u0020]/.test(value)) return fallback
   // Explicit invitation returns use only the recipient-authorized opaque ID.
   if (/^\/invitation\?id=[A-Za-z0-9_-]+$/.test(value)) return value
   try {
     const url = new URL(value, 'https://console.invalid')
-    if (url.origin !== 'https://console.invalid' || /%2f|%5c/i.test(value) || !/^\/(organizations|settings(?:\/profile)?|o\/[^/]+(?:\/.*)?)(?:\/)?$/.test(url.pathname)) return '/organizations'
+    if (url.origin !== 'https://console.invalid' || /%2f|%5c/i.test(value) || !/^\/(organizations|settings(?:\/profile)?|o\/[^/]+(?:\/.*)?)?(?:\/)?$/.test(url.pathname)) return fallback
     return url.pathname + url.search + url.hash
-  } catch { return '/organizations' }
+  } catch { return fallback }
 }
 export function signInLocation(returnTo = window.location.pathname + window.location.search) {
   return '/sign-in?returnTo=' + encodeURIComponent(safeReturnTo(returnTo))
