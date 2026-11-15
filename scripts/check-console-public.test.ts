@@ -5,6 +5,7 @@ import { resolve } from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
 import { consolePrivateTerms, reviewDigest } from './lib/public-vocabulary'
 import { checkConsolePublic, privateLocaleKeys } from './check-console-public'
+import { inspectSource } from './check-terminology'
 import { execFileSync } from 'node:child_process'
 import policy from './sdk-scan-policy.json'
 import { assertBytes, withPolicyDataReviews } from './lib/sdk-export-scan'
@@ -13,6 +14,16 @@ afterEach(() => vi.unstubAllEnvs())
 const syntheticTerms = ['quartzbeacon', 'cobalt-gateway', 'Žlutý signál']
 const vocabulary = new RegExp([consolePrivateTerms.source, ...syntheticTerms, 'secret_'].join('|'), 'iu')
 const scan = (directory: string) => checkConsolePublic(directory, vocabulary)
+it.each(['page.tsx', 'packages/frontend-console/dist/assets/index.js'])('terminology accepts the preserved members path in %s', file => {
+  expect(inspectSource(file, "const page = { path: '/settings/workspace-members' }")).toEqual([])
+})
+it.each([
+  ['JSX text', 'page.tsx', 'const page = <span>/settings/workspace-members</span>'],
+  ['label', 'page.tsx', "const page = { label: '/settings/workspace-members' }"],
+  ['locale value', 'en.json', '{"members":"/settings/workspace-members"}'],
+])('terminology rejects the preserved members path as %s', (_kind, file, source) => {
+  expect(inspectSource(file, source)).toContainEqual({ code: 'terminology_forbidden', location: expect.any(String), match: 'workspace' })
+})
 it.each([
   ['substring in JSON', 'index.js', JSON.stringify({ label: 'xquartzbeaconx' })],
   ['embedded prefix in minified identifier', 'index.js', '(()=>{const xsecret_value=1;return 0})()'],
