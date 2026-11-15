@@ -1,10 +1,11 @@
 # Access audit locks
 
 `access.lock.json` serializes `kernel.config.effectiveAccess` after SDK, plugin and
-application command composition. `access.lock.md` presents the same grants,
-expanded predicates, field masks, system/account privileges and command guards.
-Executable hooks and command plans are marked opaque; generation never executes
-them. Unresolved command names retain their null permission and opaque marker.
+application command/workflow composition. `access.lock.md` presents the same grants,
+expanded predicates, field masks, system/account privileges, command guards and
+workflow operation occurrences. Executable hooks, command plans and workflow
+bodies are marked opaque; serialization never executes them. Unresolved command
+names retain their null permission and opaque marker.
 
 ## Scope
 
@@ -15,9 +16,10 @@ effective access is unchanged.
 
 **Not covered** (changes here can alter access outcomes without lock drift):
 
-- Workflow registry: step operation `permission`/`additionalPermissions` and the
-  resulting `start` capability.
-- Executable bodies: hooks, command plans, named predicates and whatever config they read.
+- Workflows absent from the audited composition: the environment-free CLI cannot
+  include separately supplied runtime workflows or environment-dependent factories.
+- Executable bodies: hooks, command plans, workflow run/recover/compensation bodies,
+  input validators, named predicates and whatever config they read.
 - Runtime data: credentials, memberships, actor attributes, rows.
 - Any SDK enforcement read not listed below; the list is curated, not derived.
 
@@ -41,16 +43,25 @@ compact line, while Markdown groups the four operations by role and entity.
 Consumers can wire `runAccessCli` from `@workbasehq/core/access/lock/cli` with
 `--config config.ts --root . --directory .`. Add `--write` for the writing script.
 Config modules are trusted executable application code. The CLI composes their
-registered plugin and SDK commands through `KernelRegistry` before serialization.
+registered plugin and SDK commands and static plugin workflows through
+`KernelRegistry` before serialization.
 Legacy `defineInstance` configs skip with a message and exit 0, even with `--write`.
 
-For a runtime with separately supplied command registries, call `syncAccessLock`
+For a runtime with separately supplied command/workflow registries or environment
+workflow factories, call `syncAccessLock`
 from `@workbasehq/core/access/lock` with that composed kernel, `root` and `sources`.
+The kernel must use the same runtime options and environment as the audited runtime;
+the CLI does not infer these inputs or invoke absent environment factories.
 Use `loadConfig(...).sources` for literal configs or `configSources(configPath)`
 from `@workbasehq/core/schema/load` for executable configs. The latter only indexes
-source metadata. A source map may additionally identify `guards.<command>` and
-`hooks.<plugin>.<hook>`; otherwise these point to the enclosing command/plugin
-registration in config.ts. Imported executable bodies remain opaque.
+source metadata. A source map may additionally identify `guards.<command>`,
+`hooks.<plugin>.<hook>`, `workflows.<name>` or
+`workflows.<name>.steps.<id>.forward` / `.compensation`. Workflow locations fall
+back to their enclosing static plugin workflow or factory registration; supplied
+runtime registries and plugin overrides fall back to the config registration.
+Provide explicit workflow mappings to attribute external runtime registrations
+more precisely. All locations must be within `root`. Imported executable bodies
+remain opaque.
 
 The audit is a review artifact. Drift detection provides no signature or tamper
 protection. Authorization continues to consume the existing normalized policy.
@@ -66,6 +77,20 @@ the changed input path and values, with source attribution for display selectors
 labels and related-column bindings. Opaque hook bodies remain opaque, including
 their arbitrary application-specific config reads.
 
+`enforcementInputs.workflows` comes from the actual composed workflow registry,
+including static plugins, environment factories and supplied runtime workflows
+present in that kernel. It records workflow name/version/registration, ordered
+step IDs and each forward/compensation occurrence's operation name, primary and
+additional permissions and opaque-body marker. The marker covers the operation's
+prepare/plan/validation and the step's run/recover bodies; their code is not hashed.
+Additional permissions are sorted; step execution order is preserved. Diagnostics
+name the workflow, step, role and changed permission with registration source;
+removal retains the previous source. Workflow occurrences are separate from
+`effectiveAccess.guards`: sharing an operation name never registers or overrides a
+command guard. Scheduling/control metadata beyond these listed fields is outside
+this projection. The independent enforcement read-set recorder remains tracked in
+#20; this slice does not establish a mechanically checked coverage invariant.
+
 Normalized entity `displayField` selectors and supported structured labels (via
 `label.serialize()`) are included, along with `ui.entities.*.list.relatedColumns`,
 which the runtime uses to resolve label paths. Existing computed expression wires,
@@ -80,10 +105,11 @@ Covered inputs (not exhaustive; see Scope above). Read sites as of this change, 
 | Reads (file:line) | Representation in the lock |
 | --- | --- |
 | `access-evaluator.ts:11,20,46`: roles, entity decisions/operations/masks, system decisions/targets | `effectiveAccess.roles/entities/system` |
-| `kernel/registry.ts:185`: command permissions/additional permissions, guard lookup | `effectiveAccess.guards` (registered command bodies stay opaque) |
-| `kernel/registry.ts:82,157,182,212`: trust, permissions provider presence/activation | `enforcementInputs.authorization.trust/permissionsActive/providers` with resolved provider names/versions |
-| `kernel/registry.ts:160,173,199`: plugin hooks, builtin provenance, authorization, policyInConfig | `enforcementInputs.plugins` plus `effectiveAccess.opaqueHooks` |
-| `kernel/registry.ts:89,102`: identity/organization/member port selection | `enforcementInputs.authorization.providers` |
+| `kernel/registry.ts:213,215,221`: command permissions/additional permissions, guard lookup | `effectiveAccess.guards` (registered command bodies stay opaque) |
+| `capabilities.ts:20`; `workflow-runtime.ts`: composed workflow membership, ordered steps, forward/compensation operation permissions checked by `atomicPermission` | `enforcementInputs.workflows.*.stepOrder/steps` and per-occurrence registration sources (workflow bodies stay opaque) |
+| `kernel/registry.ts:105,180,207,236`: trust, permissions provider presence/activation | `enforcementInputs.authorization.trust/permissionsActive/providers` with resolved provider names/versions |
+| `kernel/registry.ts:183,196,224`: plugin hooks, builtin provenance, authorization, policyInConfig | `enforcementInputs.plugins` plus `effectiveAccess.opaqueHooks` |
+| `kernel/registry.ts:112,125`: identity/organization/member port selection | `enforcementInputs.authorization.providers` |
 | `policies.ts:18,21,81,123,235,239`: account entity, assignments, managedBy | `enforcementInputs.account` |
 | `policies.ts:39,154`; `query/schema.ts:51`: relation entity/field/many (including nested dependencies) | `enforcementInputs.entities.*.relations` |
 | `policies.ts:18,42,84,254`; `query/schema.ts:19,21,56`: entity/field existence, type, computed, readOnly, userLink; compiler masks also read sensitive | `enforcementInputs.entities.*.fields` (also records ref targets and enum values) |

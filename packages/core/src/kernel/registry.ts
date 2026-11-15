@@ -25,12 +25,16 @@ import { userLinkCommands, userLinkActionPermission } from '../user-links'
 
 const registries = new WeakMap<InstanceConfig, KernelRegistry>()
 export const lifecyclePhases = ['contribute', 'validate', 'migrations', 'ports', 'mount'] as const
+interface WorkflowRegistration { kind: 'runtime' | 'plugin'; plugin?: string; source: string }
 export class KernelRegistry {
   readonly plugins: readonly WorkbasePlugin[]
   readonly providers: ReadonlyMap<string, readonly WorkbasePlugin[]>
   readonly config: InstanceConfig
   readonly commands: CommandRegistry
   readonly workflows: WorkflowRegistry
+  /** Audit provenance captured during composition, including environment factories.
+   * Kept separate from the command-name guard registry. */
+  readonly workflowRegistrations: ReadonlyMap<string, WorkflowRegistration>
   readonly migrations: readonly PluginMigration[]
   /** True only for a complete permissions provider outside development trust. */
   readonly permissionsActive: boolean
@@ -41,7 +45,8 @@ export class KernelRegistry {
   constructor(config: InstanceInput & Pick<InstanceConfig, 'effectiveAccess'>, options: RuntimeOptions = {}, env?: RuntimeEnv) {
     assertSchemaLockBound(config)
     if (config.baseline === 'workbase-sdk' && !config.effectiveAccess) throw new DeclarationError(['access'], 'Executable schema configurations require explicit entity access and shared access.ts')
-    const resolved = resolvePlugins(options.plugins ?? config.plugins ?? [], config.interactive)
+    const configuredPlugins = options.plugins ?? config.plugins ?? []
+    const resolved = resolvePlugins(configuredPlugins, config.interactive)
     this.plugins = resolved.plugins
     this.providers = resolved.providers
     const names = new Set(this.plugins.map(plugin => plugin.name))
@@ -49,6 +54,8 @@ export class KernelRegistry {
     const entities = { ...config.entities }
     const commands = [...(options.commands?.values() ?? [])]
     const workflows = [...(options.workflows?.values() ?? [])]
+    const workflowRegistrations = new Map<string, WorkflowRegistration>(
+      workflows.map(workflow => [workflow.name, { kind: 'runtime', source: 'workflows' }]))
     const commandNames = [...(config.commands ?? [])]
     for (const plugin of this.plugins) {
       for (const [name, entity] of Object.entries(plugin.entities ?? {})) {
@@ -59,8 +66,18 @@ export class KernelRegistry {
         if (!isBuiltinPlugin(plugin) || !options.commands?.has(command.name)) commands.push(command)
         if (!commandNames.includes(command.name)) commandNames.push(command.name)
       }
-      for (const workflow of [...(plugin.workflows ?? []), ...(env ? plugin.workflowDefinitions?.(env)?.values() ?? [] : [])]) {
-        if (!isBuiltinPlugin(plugin) || !options.workflows?.has(workflow.name)) workflows.push(workflow)
+      // Source-map array positions belong to authored config.plugins, not the
+      // dependency-sorted plugin list. Runtime overrides use the enclosing fallback.
+      const source = options.plugins ? 'plugins' : `plugins.${configuredPlugins.indexOf(plugin)}`
+      const definitions = [
+        ...(plugin.workflows ?? []).map((workflow, index) => ({ workflow, source: `${source}.workflows.${index}` })),
+        ...[...(env ? plugin.workflowDefinitions?.(env)?.values() ?? [] : [])].map(workflow => ({ workflow, source: `${source}.workflowDefinitions` })),
+      ]
+      for (const { workflow, source } of definitions) {
+        if (!isBuiltinPlugin(plugin) || !options.workflows?.has(workflow.name)) {
+          workflows.push(workflow)
+          workflowRegistrations.set(workflow.name, { kind: 'plugin', plugin: plugin.name, source })
+        }
       }
     }
     // validate: whole model, registries, and each plugin-owned section.
@@ -78,6 +95,7 @@ export class KernelRegistry {
     }
     this.commands = createCommandRegistry(commands)
     this.workflows = createWorkflowRegistry(workflows)
+    this.workflowRegistrations = workflowRegistrations
     if (this.config.effectiveAccess) this.config.effectiveAccess = accessGuards(this.config.effectiveAccess, this.config.commands, [...this.commands.values()], this.plugins)
     if (this.config.effectiveAccess) bindActionPolicy(this.config.effectiveAccess, this.config)
     // migrations: append hooks to the supplied chain. Applying D1 migrations remains an operator action.

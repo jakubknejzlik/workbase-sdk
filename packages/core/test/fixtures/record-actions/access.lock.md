@@ -180,6 +180,12 @@ Source locations identify the rule or its enclosing registration declaration. Ex
 | record/link_account | {"entity":"record","operation":"update"} | [] | opaque | packages/core/test/fixtures/record-actions.ts:1 |
 | record/remove_access | {"entity":"record","operation":"update"} | [] | opaque | packages/core/test/fixtures/record-actions.ts:1 |
 
+## Workflow operation occurrences
+
+| Workflow | Step (in execution order) | Role | Operation | Permission | Additional permissions | Executable checks | Registration source |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+None registered.
+
 ## Opaque executable hooks
 
 None registered.
