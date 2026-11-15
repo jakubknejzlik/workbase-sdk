@@ -76,6 +76,14 @@ it('authorized linked account appears once inside the shared access card', async
   expect(await screen.findByText('Authorized account')).toBeTruthy()
   expect(screen.getAllByText('Signed in')).toHaveLength(1)
 })
+it('policy-hidden linked identity preserves signed-in status and authorized account actions', async () => {
+  await mount({ status: { state: 'signed_in', can_invite: true, can_cancel: true, inconsistency: null, linked_accounts: [] } })
+  expect(await screen.findByText('Signed in')).toBeTruthy()
+  expect(screen.getAllByRole('button', { name: 'Link account' })).toHaveLength(1)
+  expect(screen.getAllByRole('button', { name: 'Remove access' })).toHaveLength(1)
+  expect(screen.queryByText('Raw account')).toBeNull()
+  expect(screen.queryByText('Access status denied')).toBeNull()
+})
 it.each(['link_account', 'remove_access'])('unavailable status preserves the authorized %s command without an invitation read', async action => {
   const { write } = await mount({ available: false, manage: false, commands: ['entries/link_account', 'entries/remove_access'] })
   expect(screen.getByText('Access status unavailable')).toBeTruthy()

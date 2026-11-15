@@ -1,5 +1,6 @@
 import type { RowAccessStatus } from '../../../core/src/row-access'
 import { executeQuery } from '../../../core/src/query/executor'
+import { QueryError } from '../../../core/src/query/errors'
 import { cursorSecret } from '../../../core/src/query/routes'
 import { readableDisplay } from '../../../core/src/query/labels'
 import { invitationRole, latestRowInvitation } from '../../../core/src/worker-access'
@@ -147,10 +148,16 @@ export function memberRoutes(app: App, config: InstanceConfig, env: RuntimeEnv) 
       linkedAccounts = []
       if (row.user) {
         const display = readableDisplay(kernel, scope, accountEntity)
-        const result = await executeQuery(kernel, scope, env.DB, await cursorSecret(env), {
-          entity: accountEntity, select: ['id', ...(display ? [display] : [])], where: { id: { eq: row.user } }, limit: 1,
-        })
-        linkedAccounts = result.data.map(account => ({ id: account.id, ...(display && account[display] != null ? { label: String(account[display]) } : {}) }))
+        const secret = await cursorSecret(env)
+        try {
+          const result = await executeQuery(kernel, scope, env.DB, secret, {
+            entity: accountEntity, select: ['id', ...(display ? [display] : [])], where: { id: { eq: row.user } }, limit: 1,
+          })
+          linkedAccounts = result.data.map(account => ({ id: account.id, ...(display && account[display] != null ? { label: String(account[display]) } : {}) }))
+        } catch (error) {
+          // A policy-hidden identity does not hide the independently authorized status.
+          if (!(error instanceof QueryError && error.code === 'policy_violation' && error.path.length === 0)) throw error
+        }
       }
     }
     return c.json({ inconsistency: null, ...(linkedAccounts ? { linked_accounts: linkedAccounts } : {}), can_cancel: canCancel, state: row.user ? 'signed_in' : invitation ? invitation.expired_at || invitation.expires_at <= nowISO() ? 'expired' : 'invited' : 'no_account',

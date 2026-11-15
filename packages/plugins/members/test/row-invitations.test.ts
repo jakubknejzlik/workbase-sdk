@@ -379,6 +379,30 @@ it.each(['source-field', 'target-row', 'target-field'])('14 summary respects %s 
   if (restriction === 'target-row') expect(body.linked_accounts).toEqual([])
   if (restriction === 'target-field') expect(body.linked_accounts).toEqual([{ id: 'member-a' }])
 })
+it('14 forbidden identity row preserves status and actions without disclosing the account', async () => {
+  await invitation()
+  await env.DB.prepare("UPDATE people SET user='member-a' WHERE id='p1'").run()
+  const before = await json(await status())
+  const config = configuration()
+  config.policies.users.owner = { where: { id: { eq: 'owner-a' } }, deny: 'forbidden' }
+  app = createApp(config, runtime())
+  // The account query itself must still enforce its policy.
+  const account = await request(app, '/query', 'POST', { entity: 'users', select: ['id', 'name'], where: { id: { eq: 'member-a' } }, limit: 1 })
+  expect(account.status).toBe(403)
+  expect(await json(account)).toMatchObject({ error: 'policy_violation' })
+  const response = await status()
+  expect(response.status).toBe(200)
+  expect(await json(response)).toEqual({ ...before, state: 'signed_in', linked_accounts: [], can_invite: true, can_cancel: true })
+})
+it('14 unrelated identity query failure still propagates from status', async () => {
+  await env.DB.prepare("UPDATE people SET user='member-a' WHERE id='p1'").run()
+  // Break only the selected account display column, leaving authentication and
+  // the source-row/status queries intact. The executor reports query_invalid.
+  await env.DB.exec('ALTER TABLE users RENAME COLUMN name TO unavailable_name')
+  const response = await status()
+  expect(response.status).toBe(400)
+  expect(await json(response)).toMatchObject({ error: 'query_invalid' })
+})
 it.each(['invitations', 'entity'])('14 status still denies missing %s read and hides foreign rows', async missing => {
   await env.DB.prepare("UPDATE people SET user='member-a' WHERE id='p1'").run()
   const call = await agentToken('owner', missing === 'invitations' ? ['people.read', 'users.read'] : ['invitations.read', 'users.read'])
