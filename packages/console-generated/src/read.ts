@@ -62,7 +62,7 @@ export function relationQuery(model: Model, entity: string, name: string, row: R
     where: { [many ? relation.field : 'id']: { eq: many ? row.id : row[relation.field] } }, orderBy: [order], ...(cursor ? { cursor } : {}) }
 }
 export function readQuery(model: Model, entity: string, caps: Capabilities, options: ReadOptions = {}): ReadQuery {
-  const definition = model.entities[entity]; const plan = options.id && options.purpose !== 'edit' ? detailPlan(model, entity, caps) : undefined; const select = (plan?.select ?? projection(model, entity, caps)).filter(field => !options.id || options.purpose === 'edit' || !accountLinkField(model, entity, field)); const include: Record<string, Selection> = {}
+  const definition = model.entities[entity]; const plan = options.id && options.purpose !== 'edit' ? detailPlan(model, entity, caps) : undefined; const select = plan?.select ?? projection(model, entity, caps).filter(field => !options.id || options.purpose === 'edit' || !accountLinkField(model, entity, field)); const include: Record<string, Selection> = {}
   for (const [name, relation] of (separateRelations(model) || options.id && (definition.detail || Object.values(definition.relations).some(relation => relation.through)) ? [] : Object.entries(definition.relations).slice(0, model.limits.relations))) {
     const target = caps.entities[relation.entity]; const fkEntity = relation.cardinality === '1:n' ? relation.entity : entity
     if (options.id && options.purpose !== 'edit' && accountLinkRelation(model, entity, relation) || relation.cardinality === '1:n' || relation.through || !target?.operations.includes('read') || !target.readable.includes('id') || !caps.entities[fkEntity]?.readable.includes(relation.field)) continue

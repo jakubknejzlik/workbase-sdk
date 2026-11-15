@@ -30,13 +30,14 @@ export function detailPlan(model: Model, entity: string, caps: Capabilities) {
   })
   const fields = [...summary, ...groups.flatMap(group => group.fields)]
   const display = caps.entities[entity]?.displayField ?? definition.displayField
+  // Hidden account links can still be authorized operands of visible detail items.
   const select = [...new Set([
     'id', ...(caps.entities[entity]?.operations.includes('update') ? ['version'] : []),
     ...(display && readable(entity, display) ? [display] : []),
     ...fields.flatMap(item => [item.field, ...item.when ? [item.when.field] : [], ...definition.fields[item.field]?.ui?.signedBy ? [definition.fields[item.field].ui!.signedBy!.field] : []]),
     ...metrics.flatMap(metric => [metric.field, ...metric.unitField ? [metric.unitField] : []]),
     ...relations.filter(([, relation]) => relation.cardinality !== '1:n').map(([, relation]) => relation.field),
-  ])].filter(field => !accountLinkField(model, entity, field) && caps.entities[entity]?.readable.includes(field))
+  ])].filter(field => caps.entities[entity]?.readable.includes(field))
   const labels = fields.filter(item => definition.fields[item.field]?.type === 'ref').map(item => item.field)
   return { summary, groups, metrics, relations, select, labels: [...new Set(labels)] }
 }
