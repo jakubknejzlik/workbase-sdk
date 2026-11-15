@@ -5,7 +5,7 @@ import { spawn } from 'node:child_process'
 import { DatabaseSync } from 'node:sqlite'
 import { CORE_VERSION } from '@workbasehq/core/config'
 import type { Bundle } from './storage.ts'
-import { snapshot, replayEngine } from './offline.ts'
+import { snapshot, replayEngine, replayBundle } from './offline.ts'
 import { replayInstance, readInstanceMeta, usesBaseline, MigrationReplayError, privateReplayMessage } from './migration-replay.ts'
 import { WorkflowError, type Index } from './schemas.ts'
 import { rebuildBlock, rebuildBlockMessage } from './planning.ts'
@@ -95,11 +95,10 @@ export async function applyDisposable(bundle: Bundle, prepared: Prepared, expect
     } else if (usesBaseline(bundle.config)) {
       // Capture actual engine SQL, including baseline/domain receipts, then let
       // Wrangler execute those exact bytes in the disposable D1.
-      const db = new DatabaseSync(':memory:'), statements: { sql: string; name: string }[] = []
-      try { await replayInstance(db, [...bundle.migrations, proposal], replayEngine(prepared.target, bundle.runtime), {
+      const statements: { sql: string; name: string }[] = []
+      await replayBundle({ ...bundle, config: prepared.target, currentConfig: bundle.config, migrations: [...bundle.migrations, proposal] }, () => {}, {
         mode: 'synthetic', record: (sql, context) => statements.push({ sql, name: (context?.migration ?? 'ledger').replace(/[^a-z0-9_]/gi, '_') }),
-      }) }
-      finally { db.close() }
+      })
       for (const [i, statement] of statements.entries()) {
         await writeFile(join(migrations, `${String(i + 1).padStart(4, '0')}_${statement.name}.sql`), statement.sql + '\n;\n')
       }
@@ -113,8 +112,14 @@ export async function applyDisposable(bundle: Bundle, prepared: Prepared, expect
     await migrate(config, join(scratch, 'persist'), scratch, entities, signal)
     const files = await sqliteFiles(join(scratch, 'persist', 'v3', 'd1'))
     if (files.length !== 1) throw new WorkflowError('disposable_not_found', 'Expected exactly one disposable D1 database', 500)
-    const db = new DatabaseSync(files[0], { readOnly: true })
+    const db = new DatabaseSync(files[0], { readOnly: !usesBaseline(bundle.config) })
     try {
+      if (usesBaseline(bundle.config)) {
+        // Verify actual persisted receipts and plugin schema through the same
+        // runner as deploy. A physical schema match cannot prove ledger rows.
+        await replayInstance(db, prepared.composition ? bundle.migrations : [...bundle.migrations, proposal], replayEngine(prepared.composition ? bundle.config : prepared.target, bundle.runtime),
+          { ...(prepared.composition ? {} : { mode: 'synthetic' as const }), verifyExisting: true })
+      }
       const diffs = compare(expected, snapshot(db, usesBaseline(bundle.config)))
       if (prepared.composition) {
         const ledger = db.prepare('SELECT namespace,name,position,checksum FROM _plugin_migrations ORDER BY namespace,position').all()
@@ -127,8 +132,7 @@ export async function applyDisposable(bundle: Bundle, prepared: Prepared, expect
   } catch (error) {
     const block = error instanceof MigrationReplayError && rebuildBlock(privateReplayMessage(error), entities)
     if (block) return { verified: false, diffs: [{ code: 'migration_blocked', message: rebuildBlockMessage(block) }], ...(keep ? { directory: scratch } : {}) }
-    if (error instanceof MigrationReplayError && error.diagnostic.kind === 'generation') return { verified: false, diffs: [{ code: 'disposable_verification_failed', message: 'Could not verify the disposable schema', file: error.diagnostic.file, migration: error.diagnostic.migration }], ...(keep ? { directory: scratch } : {}) }
-    if (error instanceof MigrationReplayError) return { verified: false, diffs: [{ code: error.code, message: error.message }], ...(keep ? { directory: scratch } : {}) }
+    if (error instanceof MigrationReplayError) return { verified: false, diffs: [{ code: error.code, message: error.message, details: error.diagnostic }], ...(keep ? { directory: scratch } : {}) }
     if (error instanceof WorkflowError) return { verified: false, diffs: [{ code: error.code, message: error.message }], ...(keep ? { directory: scratch } : {}) }
     console.error('Private disposable verification failure', String(error instanceof Error ? error.stack : error).slice(0, 65536))
     return { verified: false, diffs: [{ code: 'disposable_verification_failed', message: 'Could not verify the disposable schema' }], ...(keep ? { directory: scratch } : {}) }

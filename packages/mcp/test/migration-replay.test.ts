@@ -49,6 +49,7 @@ it('reports a broken SDK baseline with its namespace, name, source file and SQLi
   vi.spyOn(baseline, 'sdkMigrations').mockReturnValue([{ name: '001_system', sql: 'BROKEN BASELINE;' }])
   await expect(replayBundle({ config: config(), migrations: [] }, readInstanceMeta)).rejects.toMatchObject({
     code: 'migration_replay_failed', message: expect.stringMatching(/workbase-sdk\/001_system.*sdk-baseline\.ts.*SQLite SQL logic error/),
+    diagnostic: { phase: 'sdk', namespace: 'workbase-sdk', hint: expect.any(String) },
   })
 })
 it.each(['BEGIN;', 'CREATE TRIGGER broken AFTER INSERT ON users BEGIN'])('names a plugin baseline rejected before SQL execution: %s', async sql => {
@@ -66,6 +67,7 @@ it.each(['plugin', 'instance'] as const)('reports a broken %s migration and reta
   try {
     await expect(replayInstance(db, migrations, replayEngine(current))).rejects.toMatchObject({
       code: 'migration_replay_failed', diagnostic: {
+        phase: kind === 'plugin' ? 'plugin' : 'domain',
         migration: kind === 'plugin' ? 'example/001_example' : '0001_r1.sql',
         file: kind === 'plugin' ? '@workbasehq/plugins/example' : 'migrations/0001_r1.sql',
         sqlError: 'SQLite SQL logic error',

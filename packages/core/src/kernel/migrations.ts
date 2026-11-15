@@ -13,6 +13,14 @@ export class PluginMigrationError extends Error {
   }
 }
 
+/** History failures keep their engine-owned identity across offline boundaries. */
+export class PluginMigrationHistoryError extends Error {
+  readonly code = 'migration_plugin_history_mismatch'
+  constructor(readonly namespace: string, readonly migration: string, reason: 'order' | 'checksum') {
+    super(`${reason === 'order' ? 'Plugin migrations must be append-only' : 'Plugin migration changed'}: ${namespace}/${migration}`)
+  }
+}
+
 /** Per-plugin append-only ledgers. Absent namespaces are retained on uninstall. */
 export async function applyPluginMigrations(db: D1Database, plugins: readonly WorkbasePlugin[], config?: InstanceConfig) {
   const chain = ledgerPlugins(plugins, config)
@@ -23,8 +31,8 @@ export async function applyPluginMigrations(db: D1Database, plugins: readonly Wo
     const { results: applied } = await db.prepare('SELECT name,position,checksum FROM _plugin_migrations WHERE namespace=? ORDER BY position').bind(plugin.name).all<{ name: string; position: number; checksum: string }>()
     const checksums = await Promise.all(migrations.map(m => sha256(m.sql)))
     for (const [position, row] of applied.entries()) {
-      if (row.position !== position || migrations[position]?.name !== row.name) throw new Error(`Plugin migrations must be append-only: ${plugin.name}/${row.name}`)
-      if (checksums[position] !== row.checksum) throw new Error(`Plugin migration changed: ${plugin.name}/${row.name}`)
+      if (row.position !== position || migrations[position]?.name !== row.name) throw new PluginMigrationHistoryError(plugin.name, row.name, 'order')
+      if (checksums[position] !== row.checksum) throw new PluginMigrationHistoryError(plugin.name, row.name, 'checksum')
     }
     for (let position = applied.length; position < migrations.length; position++) {
       const migration = migrations[position]

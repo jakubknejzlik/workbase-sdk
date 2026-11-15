@@ -516,7 +516,7 @@ it('still rejects an unauthorised future SDK stamp outside SDK target verificati
   await expect(instanceMeta(bundle)).rejects.toThrow(expect.objectContaining({ code: 'revision_mismatch' }))
 })
 
-it('promotes deploy-valid V3 SDK markers when the target is newer than the producer', async () => {
+it('refuses V3 SDK proposals and saved SDK promotion before publishing any artifacts', async () => {
   const current = defineConfig({ id: 'sample', interactive: false, languages: ['en'], roles: ['admin'], organizationOwnerRole: 'admin', entities: {},
     access: defineAccess({ predicates: {}, entities: Object.fromEntries(accessEntities.map(entity => [entity, { admin: 'deny' }])), roles: { admin: { system: Object.fromEntries(accessSystemActions.map(action => [action, 'deny'])) } } }),
   })
@@ -524,12 +524,12 @@ it('promotes deploy-valid V3 SDK markers when the target is newer than the produ
   for (const name of await fs.readdir(join(root, 'migrations'))) await fs.rm(join(root, 'migrations', name))
   await fs.writeFile(join(root, 'migrations/0001_r1.sql'), 'SELECT 1;\n')
   await restart()
-  const proposed = await workflow.call('upgrade_sdk', { instance: 'sample', baseRevision: 1, targetVersion })
-  expect(proposed).toMatchObject({ ok: true }); proposalId = String(proposed.proposalId)
-  const verification = await workflow.call('apply_to_disposable', { proposalId })
-  expect(verification, JSON.stringify(verification)).toMatchObject({ ok: true, verified: true })
-  expect(await promote(1)).toMatchObject({ ok: true, status: 'promoted', migration: '0002_r1.sql' })
-  await restart()
-  expect(await promote(1)).toMatchObject({ ok: true, status: 'promoted', migration: '0002_r1.sql' })
-  expect(await workflow.call('upgrade_sdk', { instance: 'sample', baseRevision: 1, targetVersion })).toMatchObject({ ok: false, error: { code: 'sdk_upgrade_forward_required' } })
+  const before = await captureSdkInputs(root), saved = await fs.readFile(path())
+  vi.mocked(runSdkTarget).mockClear()
+  expect(await workflow.call('upgrade_sdk', { instance: 'sample', baseRevision: 1, targetVersion })).toMatchObject({ ok: false,
+    error: { code: 'v3_sdk_upgrade_unsupported', message: 'SDK upgrade is not supported yet for V3' } })
+  expect(await promote(1)).toMatchObject({ ok: false, error: { code: 'v3_sdk_upgrade_unsupported' } })
+  expect(runSdkTarget).not.toHaveBeenCalled()
+  expect(await captureSdkInputs(root)).toEqual(before)
+  expect(await fs.readFile(path())).toEqual(saved)
 })

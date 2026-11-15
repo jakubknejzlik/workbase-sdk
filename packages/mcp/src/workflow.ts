@@ -29,7 +29,6 @@ export type ToolResult = Record<string, unknown>
 export function errorResult(error: unknown): ToolResult {
   if (error instanceof SourceError) return { ok: false, error: { code: 'invalid_access', status: 422, message: error.message, details: error.location } }
   if (isDisplayFieldError(error)) return { ok: false, errors: error.errors }
-  if (error instanceof MigrationReplayError && error.diagnostic.kind === 'generation') return { ok: false, error: { code: 'internal_error', status: 500, message: 'Configuration operation failed; no database was deployed', details: { file: error.diagnostic.file, migration: error.diagnostic.migration } } }
   if (error instanceof MigrationReplayError) return { ok: false, error: { code: error.code, status: 422, message: error.message, details: error.diagnostic } }
   if (error instanceof WorkflowError) return { ok: false, error: { code: error.code, status: error.status, message: error.message, ...(error.details ? { details: error.details } : {}) } }
   if (error instanceof z.ZodError) return { ok: false, error: { code: 'invalid_input', status: 400, message: 'Input does not match the tool schema', issues: error.issues.map(({ path, message }) => ({ path, message })) } }
@@ -138,12 +137,12 @@ export class Workflow {
         }
         const bundle = await this.store.load(targetInstance)
         const diagnose = async () => {
-          const errors: { code: string; message: string }[] = [...inspectInstance(bundle.config).errors]
+          const errors: { code: string; message: string; details?: unknown }[] = [...inspectInstance(bundle.config).errors]
           let meta: Awaited<ReturnType<typeof instanceMeta>> | null = null
           try { meta = await instanceMeta(bundle) }
           catch (error) {
             console.error('Private committed migration validation failure', String(error instanceof Error ? error.stack : error).slice(0, 65536))
-            errors.push({ code: error instanceof WorkflowError || error instanceof MigrationReplayError ? error.code : 'invalid_migrations', message: error instanceof WorkflowError || error instanceof MigrationReplayError ? error.message : 'Cannot replay committed migrations' })
+            errors.push({ code: error instanceof WorkflowError || error instanceof MigrationReplayError ? error.code : 'invalid_migrations', message: error instanceof WorkflowError || error instanceof MigrationReplayError ? error.message : 'Cannot replay committed migrations', ...(error instanceof MigrationReplayError ? { details: error.diagnostic } : error instanceof WorkflowError && error.details ? { details: error.details } : {}) })
           }
           return { validation: { ok: errors.length === 0, errors }, meta }
         }
@@ -197,7 +196,9 @@ export class Workflow {
         if (name === 'validate') {
           delete p.validation; delete p.verification; p.status = 'proposed'
           try {
-            await instanceMeta(bundle)
+            // expectedSnapshot verifies physical state with the proposal, so
+            // preserve the runner's more specific rebuild refusal diagnostics.
+            await instanceMeta(bundle, undefined, { verifySchema: false })
             const prepared = prepare(bundle.config, bundle.indexes, p.changes)
             await expectedSnapshot(bundle, prepared)
             p.validation = this.proof(bundle, prepared); p.status = 'validated'
@@ -210,10 +211,10 @@ export class Workflow {
               issue.code === 'custom' && issue.path.at(-1) === 'actorLinkedIn'
                 ? 'actorLinkedIn requires an entity with a protected user link' : 'Invalid configuration' })) : undefined
             const detail = error instanceof WorkflowError || error instanceof MigrationReplayError ? error.message : 'Invalid configuration'
-            return { ok: false, errors: isDisplayFieldError(error) ? error.errors : policyIssues ?? (error instanceof WorkflowError && Array.isArray(error.details) ? error.details : [{ code: error instanceof WorkflowError || error instanceof MigrationReplayError ? error.code : 'invalid_config', message: detail }]) }
+            return { ok: false, errors: isDisplayFieldError(error) ? error.errors : policyIssues ?? (error instanceof WorkflowError && Array.isArray(error.details) ? error.details : [{ code: error instanceof WorkflowError || error instanceof MigrationReplayError ? error.code : 'invalid_config', message: detail, ...(error instanceof MigrationReplayError ? { details: error.diagnostic } : error instanceof WorkflowError && error.details ? { details: error.details } : {}) }]) }
           }
         }
-        await instanceMeta(bundle)
+        await instanceMeta(bundle, undefined, { verifySchema: false })
         const prepared = prepare(bundle.config, bundle.indexes, p.changes)
         const expected = await expectedSnapshot(bundle, prepared)
         const proof = this.proof(bundle, prepared)

@@ -25,7 +25,8 @@ export const requestSchema = z.strictObject({
 }).refine(value => (value.action === 'verify') === !!value.stage, 'Only verification has a bound stage')
 export const replayFailureSchema = z.strictObject({
   identity: identitySchema, inputHashes: inputHashesSchema,
-  diagnostic: z.strictObject({ file: z.string().min(1).max(512), migration: z.string().min(1).max(256), kind: z.enum(Object.keys(replayMessages) as [ReplayErrorKind, ...ReplayErrorKind[]]), sqlError: z.string().min(1).max(2048) }),
+  diagnostic: z.strictObject({ file: z.string().min(1).max(512), migration: z.string().min(1).max(256), kind: z.enum(Object.keys(replayMessages) as [ReplayErrorKind, ...ReplayErrorKind[]]), sqlError: z.string().min(1).max(2048),
+    phase: z.enum(['sdk', 'plugin', 'domain', 'verification']).optional(), namespace: z.string().max(128).optional(), hint: z.string().max(512).optional() }),
 })
 const packageSchema = z.strictObject({
   name: z.enum(['@workbasehq/core', '@workbasehq/plugins', '@workbasehq/mcp']), version,

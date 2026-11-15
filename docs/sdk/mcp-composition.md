@@ -94,6 +94,23 @@ configure infrastructure, send mail or apply a live database migration.
 
 V3 domain-change promotion is unsupported and returns `v3_promote_unsupported`.
 Physical schema changes require reviewed source edits and migration generation.
+V3 SDK upgrades return `v3_sdk_upgrade_unsupported`, including promotion of a
+previously saved SDK proposal. These mutation paths require a later capability.
 Custom plugins/commands, plugin removal and role definitions also require reviewed
 source changes. Runtime authoring accepts only the canonical built-in composition
 shape; noncanonical sources fail closed with `runtime_not_canonical`.
+
+V3 inspection, both forms of validation, migration previews and disposable
+verification share the core migration runner: SDK baseline, installed plugins,
+then domain SQL and revision receipts. Fresh desired schemas use the same SDK and
+plugin prerequisites. Physical schema comparison is separate from receipt
+verification; disposable verification also checks the database produced by
+Wrangler and rejects retries that fill missing receipts. Legacy inline instances
+retain their existing replay path.
+
+Migration diagnostics retain revision, history and plugin error codes and include
+`phase` (`sdk`, `plugin`, `domain` or `verification`), a bounded source `file` and
+`migration`, an installed plugin `namespace` when available, and a `hint`.
+SQLite and plugin callback messages stay private. Fresh desired construction
+skips plugin `checkSchema` hooks; the replayed deployment and actual
+disposable database run those checks against committed data.

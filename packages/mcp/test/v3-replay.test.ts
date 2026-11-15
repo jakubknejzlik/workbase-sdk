@@ -1,5 +1,5 @@
 import { registerTempDir, cleanupTempDir } from '../../../scripts/lib/test-temp-dir.mjs'
-import { appendFile, mkdtemp, readFile, symlink } from 'node:fs/promises'
+import { appendFile, mkdtemp, readFile, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { execFileSync } from 'node:child_process'
@@ -45,6 +45,8 @@ it.each(['node', 'bun'])('validates a proposal on a V3 instance created through 
     expect(bundle.runtime?.plugins?.map(plugin => plugin.name)).toEqual(['identity', 'permissions', 'members', 'organizations', 'local-auth', 'machine-credentials', 'mail-outbox', 'audit', 'console'])
     const namespaces = await replayBundle(bundle, db => db.prepare('SELECT DISTINCT namespace FROM _plugin_migrations ORDER BY namespace').all().map(row => row.namespace))
     expect(namespaces).toEqual(['audit', 'identity', 'machine-credentials', 'mail-outbox', 'members', 'organizations', 'workbase-sdk'])
+    expect(await call('inspect_schema', { instance: 'replay-fixture' })).toMatchObject({ ok: true,
+      instance_meta: { revision: 1 }, validation: { ok: true, errors: [] } })
     expect(await call('validate', { instance: 'replay-fixture' })).toMatchObject({ ok: true, errors: [] })
     const preview = await call('preview_migration', { proposalId: proposal.proposalId })
     expect(preview).toMatchObject({ ok: true, revision: 2, sql: expect.stringContaining('ADD COLUMN') })
@@ -58,11 +60,23 @@ it.each(['node', 'bun'])('validates a proposal on a V3 instance created through 
     expect(await readFile(join(root, 'config.ts'), 'utf8')).toBe(configBefore)
     const current = await store.load('replay-fixture')
     expect(current.migrations.map(m => m.name)).toEqual(bundle.migrations.map(m => m.name))
+    expect(await call('upgrade_sdk', { instance: 'replay-fixture', baseRevision: 1, targetVersion: '0.2.16' })).toMatchObject({ ok: false,
+      error: { code: 'v3_sdk_upgrade_unsupported', message: 'SDK upgrade is not supported yet for V3' } })
+    expect(await readFile(join(root, 'config.ts'), 'utf8')).toBe(configBefore)
     const deploy = new DatabaseSync(':memory:')
     try {
       await migrateInstance(replayQuery(deploy, current.migrations), current.migrations.map(m => ({ filename: m.name, sql: m.sql, checksum: createHash('sha256').update(m.sql).digest('hex') })), replayEngine(current.config, current.runtime).kernel)
       expect(deploy.prepare('SELECT MAX(revision) AS revision FROM instance_meta').get()).toEqual({ revision: 1 })
     } finally { deploy.close() }
+    const domainFile = join(root, 'migrations/0001_r1.sql'), domainSQL = await readFile(domainFile, 'utf8')
+    await appendFile(domainFile, '\nCREATE TABLE unconfigured_table (id TEXT);\n')
+    expect(await call('inspect_schema', { instance: 'replay-fixture' })).toMatchObject({ validation: { ok: false, errors: [{ code: 'config_schema_mismatch' }] } })
+    expect(await call('validate', { instance: 'replay-fixture' })).toMatchObject({ ok: false, errors: [{ code: 'config_schema_mismatch' }] })
+    expect(await call('validate', { proposalId: proposal.proposalId })).toMatchObject({ ok: false, errors: [{ code: 'config_schema_mismatch' }] })
+    for (const tool of ['preview_migration', 'apply_to_disposable']) {
+      expect(await call(tool, { proposalId: proposal.proposalId })).toMatchObject({ ok: false, error: { code: 'config_schema_mismatch' } })
+    }
+    await writeFile(domainFile, domainSQL)
     await appendFile(join(root, 'migrations/0001_r1.sql'), '\nSELECT * FROM missing_domain_source;\n')
     const failure = await call('validate', { instance: 'replay-fixture' })
     expect(failure).toMatchObject({ ok: false, errors: [{ code: 'migration_replay_failed',

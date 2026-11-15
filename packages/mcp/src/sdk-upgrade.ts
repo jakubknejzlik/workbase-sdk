@@ -53,6 +53,7 @@ const publicMessages: Record<string, string> = {
   sdk_upgrade_major_unsupported: 'SDK upgrades must stay within the current major version',
   sdk_upgrade_forward_required: 'SDK upgrades require a strictly newer version',
   sdk_upgrade_not_supported: 'SDK submission is not supported',
+  v3_sdk_upgrade_unsupported: 'SDK upgrade is not supported yet for V3',
   sdk_upgrade_cancelled: 'SDK upgrade operation was cancelled',
   sdk_upgrade_failed: 'SDK target verification failed; the proposal has no accepted evidence',
   invalid_input: 'Input does not match the tool schema',
@@ -84,7 +85,6 @@ const publicMessages: Record<string, string> = {
 }
 export function sdkWorkflowError(error: unknown): WorkflowError {
   if (error instanceof MigrationReplayError) {
-    if (error.diagnostic.kind === 'generation') return new WorkflowError('internal_error', publicMessages.internal_error, 500, { file: error.diagnostic.file, migration: error.diagnostic.migration })
     return new WorkflowError(error.code, error.message, 422, error.diagnostic)
   }
   const code = error instanceof WorkflowError || error instanceof RegistrySdkError ? error.code : error instanceof z.ZodError ? 'invalid_input' : 'internal_error'
@@ -96,7 +96,11 @@ function executionVersion(version: string) {
   if (!/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(version)) fail('sdk_upgrade_target_unsupported', 'SDK execution requires a numeric release version without prerelease or build qualifiers', 409)
   return version.split('.').map(BigInt)
 }
+function guardV3SdkUpgrade(bundle: Bundle) {
+  if (bundle.config.baseline === 'workbase-sdk') fail('v3_sdk_upgrade_unsupported', publicMessages.v3_sdk_upgrade_unsupported, 409)
+}
 async function executionBase(bundle: Bundle, proposal: Pick<SdkUpgradeProposal, 'targetVersion' | 'baseRevision' | 'baseFingerprint' | 'baseDependencyDigest'>) {
+  guardV3SdkUpgrade(bundle)
   const target = executionVersion(proposal.targetVersion)
   if (bundle.dependencyDigest === undefined) fail('sdk_upgrade_standalone_required', 'SDK upgrades require a standalone Instance', 409)
   if (bundle.config.revision !== proposal.baseRevision) fail('sdk_upgrade_base_changed', 'SDK proposal application inputs changed; create a new proposal', 409)
@@ -117,6 +121,7 @@ async function executionBase(bundle: Bundle, proposal: Pick<SdkUpgradeProposal, 
  * publication, target authorization and rollback hold the canonical lock. */
 async function promoteSdkUpgrade(store: Store, proposal: SdkUpgradeProposal, recover: () => Promise<void>, expectedRevision: number | undefined, source: Buffer | undefined, signal?: AbortSignal) {
   await recover()
+  guardV3SdkUpgrade(await store.load(proposal.instance))
   if (proposal.status === 'discarded') fail('proposal_closed', 'Proposal is discarded', 409)
   await requireEvidence(store, proposal, source)
   if (proposal.evidence?.state !== 'verified') fail('verification_required', 'Verify this SDK proposal on a disposable database before promotion', 409)

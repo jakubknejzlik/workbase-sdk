@@ -53,7 +53,7 @@ it.each([
   { tool: 'apply_to_disposable', format: 'V3' },
   { tool: 'promote', format: 'legacy' },
   { tool: 'promote', format: 'V3' },
-])('verify1: $tool rejects a target locale rejected by deploy checkSchema ($format instance)', async ({ tool, format }) => {
+])('verify1: $tool rejects a target entity rejected by deploy checkSchema ($format instance)', async ({ tool, format }) => {
   const root = registerTempDir(await mkdtemp(join(tmpdir(), 'verify1-'))); roots.push(root)
   const dir = join(root, 'examples/probe'), current = format === 'V3' ? config()
     : defineInstance({ id: 'replay_fixture', revision: 1, interactive: false, roles: ['owner'], entities: {}, permissions: {} })
@@ -61,16 +61,17 @@ it.each([
   await symlink(resolve('node_modules'), join(root, 'node_modules'))
   await writeFile(join(root, 'package.json'), '{"type":"module"}')
   await writeFile(join(dir, 'config.ts'), configSource(current))
-  await writeFile(join(dir, 'runtime.ts'), `import config from './config.ts'; export default {...config, plugins: [{name: 'target_check', version: '1.0.0', async checkSchema(db, target) {if (target.locale === 'cs') await db.prepare('SELECT * FROM required_after_change').all()}}]};`)
+  await writeFile(join(dir, 'runtime.ts'), `import config from './config.ts'; export default {...config, plugins: [{name: 'target_check', version: '1.0.0', async checkSchema(db, target) {if (target.entities.after_change) await db.prepare('SELECT * FROM required_after_change').all()}}]};`)
   await writeFile(join(dir, 'migrations/0001_r1.sql'), initialSchema(current))
   const store = new Store(root, new Set(['probe'])); await store.init()
   const workflow = new Workflow(store), bundle = await store.load('probe')
   expect(bundle.config.baseline).toBe(format === 'V3' ? 'workbase-sdk' : undefined)
-  const planned = prepare(bundle.config, [], [{ kind: 'set_locale', locale: 'cs' }])
+  const change = { kind: 'add_entity' as const, entity: 'after_change', fields: { name: { type: 'text' as const } } }
+  const planned = prepare(bundle.config, [], [change])
   const migrations = [...bundle.migrations, { name: '0002_r2.sql', sql: planned.sql }]
   // Legacy Store.load ignores runtime.ts; supply its deploy hook explicitly.
   const runtime: typeof bundle.config = bundle.runtime ?? { ...bundle.config, plugins: [{ name: 'target_check', version: '1.0.0', checkSchema: async (db, target) => {
-    if ((target as { locale?: string }).locale === 'cs') await db.prepare('SELECT * FROM required_after_change').all()
+    if ((target as typeof bundle.config).entities.after_change) await db.prepare('SELECT * FROM required_after_change').all()
   } }] }
   const engine = replayEngine(planned.target, runtime), db = new DatabaseSync(':memory:')
   let deployError: unknown
@@ -78,9 +79,9 @@ it.each([
   finally { db.close() }
   const deployFailure = replayError(deployError, engine) as MigrationReplayError
   const deployCode = deployFailure.code
-  expect(deployCode).toBe('migration_replay_failed')
+  expect(deployCode).toBe('migration_plugin_verification_failed')
   expect(deployFailure.diagnostic.migration).toBe('target_check/checkSchema')
-  const proposal = await workflow.call('propose_change', { instance: 'probe', baseRevision: 1, changes: [{ kind: 'set_locale', locale: 'cs' }] })
+  const proposal = await workflow.call('propose_change', { instance: 'probe', baseRevision: 1, changes: [change] })
   expect(proposal).toMatchObject({ ok: true })
   if (format === 'V3') {
     if (tool === 'apply_to_disposable' || tool === 'promote') await workflow.call('validate', { proposalId: proposal.proposalId })
@@ -96,7 +97,7 @@ it.each([
   if (snapshot) {
     expect(snapshot).toHaveBeenCalledOnce()
     expect(snapshot).toHaveBeenCalledWith(expect.objectContaining({ config: bundle.config }),
-      expect.objectContaining({ target: expect.objectContaining({ locale: 'cs' }) }))
+      expect.objectContaining({ target: expect.objectContaining({ entities: expect.objectContaining({ after_change: expect.anything() }) }) }))
   }
   expect(await readFile(join(dir, 'config.ts'))).toEqual(configBefore)
   expect((await store.load('probe')).config.revision).toBe(1)
@@ -109,8 +110,8 @@ it('verify1: direct disposable replay runs target checkSchema before spawning Wr
   const bundle = { config: current, runtime: current, migrations: [{ name: '0001_r1.sql', sql: initialSchema(current) }], indexes: [], fingerprint: '', guards: {} }
   const planned = prepare(current, [], [{ kind: 'set_locale', locale: 'cs' }])
   const result = await applyDisposable(bundle, planned, [], false)
-  expect(result).toMatchObject({ verified: false, diffs: [{ code: 'migration_replay_failed' }] })
-  await expect(expectedSnapshot(bundle, planned)).rejects.toMatchObject({ code: 'migration_replay_failed' })
+  expect(result).toMatchObject({ verified: false, diffs: [{ code: 'migration_plugin_verification_failed' }] })
+  await expect(expectedSnapshot(bundle, planned)).rejects.toMatchObject({ code: 'migration_plugin_verification_failed' })
 })
 
 it("verify1: callback RAISE(FAIL,'UNIQUE constraint failed: SYNTHETIC_PRIVATE_TEXT') stays private", async () => {

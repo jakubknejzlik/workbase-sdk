@@ -2,11 +2,11 @@ import { DatabaseSync } from 'node:sqlite'
 import type { Bundle, Migration } from './storage.ts'
 import { CORE_VERSION } from '@workbasehq/core/config'
 import { KernelRegistry } from '@workbasehq/core/kernel/registry'
-import { PluginMigrationError } from '@workbasehq/core/kernel/migrations'
+import { PluginMigrationError, PluginMigrationHistoryError } from '@workbasehq/core/kernel/migrations'
 import { migrateD1, migrateInstance, instanceMigrationReceipt, migrationErrorMessage, queryDatabase } from '@workbasehq/core/infra'
-import { replayInstance, readInstanceMeta, usesBaseline, MigrationReplayError, privateReplayMessage, sqliteKind, type ReplayMigration } from './migration-replay.ts'
+import { replayInstance, replayError, readInstanceMeta, usesBaseline, MigrationReplayError, privateReplayMessage, sqliteKind, type ReplayMigration } from './migration-replay.ts'
 import { initialSchema, revisionSQL } from '@workbasehq/core/migrations/schema'
-import { fail } from './schemas.ts'
+import { fail, WorkflowError } from './schemas.ts'
 import { indexSQL, rebuildBlock, rebuildBlockMessage } from './planning.ts'
 
 // Only server-generated SQL and checked-in instance migrations enter this offline database.
@@ -25,16 +25,14 @@ export function replay<T>(migrations: Migration[], fn: (db: DatabaseSync) => T, 
     return fn(db)
   } finally { db.close() }
 }
-export const replayEngine = (config: Bundle['config'], runtime?: Bundle['runtime']) => ({ kernel: new KernelRegistry(runtime
-  ? { ...runtime, ...config, plugins: runtime.plugins, interactive: runtime.interactive } : config), migrateD1, migrateInstance, instanceMigrationReceipt, queryDatabase, revisionSQL, PluginMigrationError })
-// A plugin can throw a branded engine diagnostic too. Select only a known
-// code from its parsed token; formatted diagnostic data is private.
-const engineFailureCodes = [
-  'migration_unsupported_history', 'migration_history_mismatch', 'migration_out_of_order',
-  'migration_sequence_gap_or_duplicate', 'migration_instance_verification_failed',
-  'migration_instance_revision_mismatch', 'migration_plugin_verification_failed', 'migration_blocked',
-] as const
-export async function replayBundle<T>(bundle: Pick<Bundle, 'config' | 'runtime'> & { migrations: ReplayMigration[]; currentConfig?: Bundle['config'] }, fn: (db: DatabaseSync) => T, options: { mode?: 'synthetic' | 'schema' } = {}): Promise<T> {
+const engineDiagnostics = { PluginMigrationError, PluginMigrationHistoryError, migrationErrorMessage }
+export function replayEngine(config: Bundle['config'], runtime?: Bundle['runtime']) {
+  try {
+    return { kernel: new KernelRegistry(runtime ? { ...runtime, ...config, plugins: runtime.plugins, interactive: runtime.interactive } : config),
+      migrateD1, migrateInstance, instanceMigrationReceipt, queryDatabase, revisionSQL, ...engineDiagnostics }
+  } catch (error) { throw replayError(error, engineDiagnostics) }
+}
+export async function replayBundle<T>(bundle: Pick<Bundle, 'config' | 'runtime'> & { migrations: ReplayMigration[]; currentConfig?: Bundle['config'] }, fn: (db: DatabaseSync) => T, options: Parameters<typeof replayInstance>[3] = {}): Promise<T> {
   const entities = [...Object.keys(bundle.config.entities), ...Object.keys(bundle.currentConfig?.entities ?? {})]
   if (!usesBaseline(bundle.config)) return replay(bundle.migrations, fn, entities)
   const db = new DatabaseSync(':memory:')
@@ -44,12 +42,6 @@ export async function replayBundle<T>(bundle: Pick<Bundle, 'config' | 'runtime'>
   } catch (error) {
     const block = rebuildBlock(privateReplayMessage(error), entities)
     if (block) fail('migration_blocked', rebuildBlockMessage(block))
-    const token = migrationErrorMessage(error).split(':', 1)[0]
-    const code = engineFailureCodes.find(code => code === token)
-    if (code) {
-      console.error('Private engine replay failure', String(error instanceof Error ? error.stack : error).slice(0, 65536))
-      fail(code, code, 422)
-    }
     throw error
   } finally { db.close() }
 }
@@ -66,8 +58,8 @@ export function snapshot(db: DatabaseSync, domainLedger = false) {
     } : { columns: db.prepare(`PRAGMA index_info(${q(String(row.name))})`).all().map(({ cid: _cid, ...c }) => c) }),
   }))
 }
-export async function instanceMeta(bundle: Bundle, supportedVersion: string | null = CORE_VERSION) {
-  return replayBundle(bundle, db => {
+export async function instanceMeta(bundle: Bundle, supportedVersion: string | null = CORE_VERSION, options: { verifySchema?: boolean } = {}) {
+  const { meta, physical } = await replayBundle(bundle, db => {
     const meta = readInstanceMeta(db)
     const version = String(meta?.core_version ?? '').match(/^(\d+)\.(\d+)\.(\d+)$/)?.slice(1).map(Number)
     const current = (supportedVersion ?? CORE_VERSION).split('.').map(Number)
@@ -77,12 +69,21 @@ export async function instanceMeta(bundle: Bundle, supportedVersion: string | nu
     const supported = version && version[0] === current[0] &&
       (supportedVersion === null || version[1] < current[1] || (version[1] === current[1] && version[2] <= current[2]))
     if (!meta || meta.revision !== bundle.config.revision || !supported) fail('revision_mismatch', 'Config and committed migrations disagree', 409)
-    return { revision: Number(meta.revision), core_version: String(meta.core_version), source: 'offline replay of committed migrations; no live database read' }
+    return { meta: { revision: Number(meta.revision), core_version: String(meta.core_version), source: 'offline replay of committed migrations; no live database read' },
+      physical: usesBaseline(bundle.config) && options.verifySchema !== false ? snapshot(db, true) : null }
   })
+  if (physical) assertSnapshot(physical, await desiredSnapshot(bundle, { target: bundle.config, indexes: bundle.indexes }), 'Committed schema differs from configured schema')
+  return meta
 }
 export async function expectedSnapshot(bundle: Bundle, prepared: { target: Bundle['config']; indexes: Bundle['indexes']; sql: string }) {
   const planned = await replayBundle({ ...bundle, config: prepared.target, currentConfig: bundle.config, migrations: [...bundle.migrations, { name: 'proposal.sql', sql: prepared.sql, syntheticRevision: prepared.target.revision }] }, db => snapshot(db, usesBaseline(bundle.config)), { mode: 'synthetic' })
-  const desired = await replayBundle({ config: prepared.target, currentConfig: bundle.config, runtime: bundle.runtime, migrations: [{ name: 'desired.sql', syntheticRevision: prepared.target.revision, sql: initialSchema(prepared.target) + prepared.indexes.map(indexSQL).join('\n') }] }, db => snapshot(db, usesBaseline(prepared.target)), { mode: 'schema' })
+  assertSnapshot(planned, await desiredSnapshot(bundle, prepared))
+  return planned
+}
+function desiredSnapshot(bundle: Pick<Bundle, 'config' | 'runtime'>, prepared: { target: Bundle['config']; indexes: Bundle['indexes'] }) {
+  return replayBundle({ config: prepared.target, currentConfig: bundle.config, runtime: bundle.runtime, migrations: [{ name: 'desired.sql', syntheticRevision: prepared.target.revision, sql: initialSchema(prepared.target) + prepared.indexes.map(indexSQL).join('\n') }] }, db => snapshot(db, usesBaseline(prepared.target)), { mode: 'schema' })
+}
+function assertSnapshot(planned: ReturnType<typeof snapshot>, desired: ReturnType<typeof snapshot>, message = 'Planned schema differs from resulting config') {
   // Compare logical config semantics without column ordinals or SQLite-assigned FK IDs.
   const logical = (rows: ReturnType<typeof snapshot>) => rows.map(({ sql, ...r }) => ({ ...r,
     ...(r.type === 'index' ? { sql: sql.replaceAll('"', '').replace(/\s+/g, '') } : {}),
@@ -91,6 +92,6 @@ export async function expectedSnapshot(bundle: Bundle, prepared: { target: Bundl
       .sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))) } : {}),
   }))
   const canonical = (rows: ReturnType<typeof snapshot>) => JSON.stringify(logical(rows))
-  if (canonical(planned) !== canonical(desired)) fail('config_schema_mismatch', 'Planned schema differs from resulting config')
-  return planned
+  if (canonical(planned) !== canonical(desired)) throw new WorkflowError('config_schema_mismatch', message, 400,
+    { phase: 'verification', hint: 'Review domain migrations against the bound schema lock and authored configuration.' })
 }
