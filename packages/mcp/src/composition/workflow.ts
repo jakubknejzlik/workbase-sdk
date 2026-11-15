@@ -1,6 +1,8 @@
 import { join } from 'node:path'
 import { durableAtomic, json, type Bundle, type Store } from '../storage.ts'
-import { fail, type AccessChange, type CompositionChange, type RuntimeChange } from '../schemas.ts'
+import { fail, identifier, type AccessChange, type CompositionChange, type RuntimeChange } from '../schemas.ts'
+import { z } from 'zod'
+import { accessEntities } from '@workbasehq/core/schema'
 import { loadConfig } from '@workbasehq/core/schema/load'
 import { hash } from '../planning.ts'
 import { instanceMeta, replayEngine } from '../offline.ts'
@@ -20,7 +22,11 @@ function revision(bundle: Bundle, expected: number) {
   if (bundle.config.revision !== expected) fail('stale_revision', 'Revision changed; inspect and propose against the current revision', 409)
 }
 const isAccess = (change: CompositionChange): change is AccessChange => change.kind !== 'set_plugin' && change.kind !== 'set_interactive'
+const accessEntityTarget = z.union([identifier, z.enum(accessEntities)])
 async function load(store: Store, instance: string, changes: CompositionChange[]) {
+  // Check the closed SDK entity list before loading or editing the instance.
+  // Zod preserves the public invalid_input refusal for unsupported targets.
+  for (const change of changes) if (change.kind === 'set_entity_access') accessEntityTarget.parse(change.entity)
   // Surface compiler diagnostics before the trusted config import can throw an
   // unlocated runtime declaration error for an incomplete source matrix.
   if (changes.some(isAccess)) await loadConfig(join(await store.directory(instance), 'config.ts'))

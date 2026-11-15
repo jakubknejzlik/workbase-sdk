@@ -68,15 +68,23 @@ it.each(['_migrations', '_ops_relay_run', '_plugin_migrations', 'rateLimit'])('a
     expect(await readFile(join(root, 'access.ts'), 'utf8')).not.toBe(preview.files[0].data)
     expect(await call('propose_composition', { instance: 'access-fixture', baseRevision: 1,
       changes: [{ kind: 'set_entity_access', entity: '_unknown_system_entity', role: 'staff', access: 'deny' }],
-    })).toMatchObject({ ok: false, error: { code: 'invalid_input', status: 400 } })
+    })).toMatchObject({ ok: false, error: { code: 'invalid_input', status: 400, message: 'Input does not match the tool schema' } })
   } finally { await server.close() }
 })
-it('accepts the closed SDK entity list only for entity access and retains domain target restrictions', () => {
+it('accepts the closed SDK entity list only for entity access and retains domain target restrictions', async () => {
   const parse = (change: unknown) => schemas.propose_change.safeParse({ instance: 'access-fixture', baseRevision: 1, changes: [change] }).success
   for (const entity of accessEntities) expect(parse({ kind: 'set_entity_access', entity, role: 'staff', access: 'deny' }), entity).toBe(true)
-  for (const entity of ['_unknown_system_entity', '../users', 'schema/users', 'Worker', '__proto__', 'constructor', 'prototype', 'a'.repeat(64)]) {
-    expect(parse({ kind: 'set_entity_access', entity, role: 'staff', access: 'deny' }), entity).toBe(false)
-  }
+  // Membership is checked by composition; the init-safe schema only checks shape.
+  const { server, call } = await fixture()
+  try {
+    for (const entity of ['_unknown_system_entity', '../users', 'schema/users', 'Worker', '__proto__', 'constructor', 'prototype', 'a'.repeat(64)]) {
+      for (const tool of ['propose_change', 'propose_composition']) {
+        expect(await call(tool, { instance: 'access-fixture', baseRevision: 1,
+          changes: [{ kind: 'set_entity_access', entity, role: 'staff', access: 'deny' }],
+        }), `${tool}: ${entity}`).toMatchObject({ ok: false, error: { code: 'invalid_input', status: 400, message: 'Input does not match the tool schema' } })
+      }
+    }
+  } finally { await server.close() }
   for (const entity of ['_migrations', '_ops_relay_run', '_plugin_migrations', 'rateLimit']) {
     expect(parse({ kind: 'set_account_link', entity, invitationRole: 'staff' }), entity).toBe(false)
     expect(parse({ kind: 'add_entity', entity, fields: {} }), entity).toBe(false)
