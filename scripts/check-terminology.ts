@@ -70,6 +70,7 @@ function inspectHtml(location: string, html: string): Finding[] {
 // none applies to locale values, JSX copy, accessibility attributes or mail.
 const routeValues = new Set([
   'workspace-settings', 'workspace-members', '/workspace-settings', '/workspace-members',
+  '/settings/workspace-members',
   '/o/$orgId/settings/workspace-settings', '/o/$orgId/settings/workspace-members',
 ])
 function propertyName(node: ts.Node): string | undefined {
