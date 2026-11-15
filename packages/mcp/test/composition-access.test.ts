@@ -3,9 +3,10 @@ import { mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterEach, expect, it } from 'vitest'
-import { accessSystemActions } from '@workbasehq/core/schema'
+import { accessEntities, accessSystemActions } from '@workbasehq/core/schema'
 import { loadConfig } from '@workbasehq/core/schema/load'
 import { createServer } from '../src/server.ts'
+import { schemas } from '../src/schemas.ts'
 
 const roots: string[] = []
 afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))) })
@@ -34,6 +35,54 @@ export default { ...config, plugins: [identity, permissions({ roles: ['admin', '
   }
   return { root, server, store, call, propose }
 }
+it('promotes SDK users access in access.ts while preserving every other users role', async () => {
+  const { root, server, call, propose } = await fixture()
+  try {
+    const before = await loadConfig(join(root, 'config.ts'))
+    expect(Object.hasOwn(before.config.entities, 'users')).toBe(true)
+    expect(Object.hasOwn(before.authoredAccess.entities, 'users')).toBe(false)
+    const access = { read: 'allow', create: 'deny', update: 'deny', delete: 'deny' }
+    const proposalId = await propose([{ kind: 'set_entity_access', entity: 'users', role: 'staff', access }])
+    expect(await call('validate', { proposalId })).toMatchObject({ ok: true })
+    const preview = await call('preview_migration', { proposalId })
+    expect(preview.files.map((file: any) => file.path)).toEqual(['access.ts', 'access.lock.json', 'access.lock.md'])
+    expect(await call('apply_to_disposable', { proposalId })).toMatchObject({ ok: true, verified: true, diffs: [] })
+    expect(await call('promote', { proposalId, expectedRevision: 1 })).toMatchObject({ ok: true, status: 'promoted' })
+    const after = await loadConfig(join(root, 'config.ts'))
+    expect(after.authoredAccess.shared!.entities.users).toEqual({ ...before.authoredAccess.shared!.entities.users, staff: access })
+    const otherRoles = (loaded: typeof before) => loaded.config.effectiveAccess!.entities.filter(rule => rule.entity === 'users' && rule.role !== 'staff')
+    expect(otherRoles(after)).toEqual(otherRoles(before))
+    expect(after.config.effectiveAccess!.entities).toContainEqual(expect.objectContaining({ entity: 'users', role: 'staff', operation: 'read', decision: 'allow' }))
+    expect(execFileSync('bun', ['run', 'check:access'], { cwd: root, encoding: 'utf8' })).toContain('check:access:')
+  } finally { await server.close() }
+})
+it.each(['_migrations', '_ops_relay_run', '_plugin_migrations', 'rateLimit'])('accepts and compiles SDK system entity access: %s', async entity => {
+  const { root, server, call, propose } = await fixture()
+  try {
+    const proposalId = await propose([{ kind: 'set_entity_access', entity, role: 'staff', access: { read: 'allow', create: 'deny', update: 'deny', delete: 'deny' } }])
+    expect(await call('validate', { proposalId })).toMatchObject({ ok: true })
+    const preview = await call('preview_migration', { proposalId })
+    expect(preview.files.map((file: any) => file.path)).toEqual(['access.ts', 'access.lock.json', 'access.lock.md'])
+    const lock = JSON.parse(preview.files.find((file: any) => file.path === 'access.lock.json').data)
+    expect(lock.effectiveAccess.entities).toContainEqual(expect.objectContaining({ entity, role: 'staff', operation: 'read', decision: 'allow' }))
+    expect(await readFile(join(root, 'access.ts'), 'utf8')).not.toBe(preview.files[0].data)
+    expect(await call('propose_composition', { instance: 'access-fixture', baseRevision: 1,
+      changes: [{ kind: 'set_entity_access', entity: '_unknown_system_entity', role: 'staff', access: 'deny' }],
+    })).toMatchObject({ ok: false, error: { code: 'invalid_input', status: 400 } })
+  } finally { await server.close() }
+})
+it('accepts the closed SDK entity list only for entity access and retains domain target restrictions', () => {
+  const parse = (change: unknown) => schemas.propose_change.safeParse({ instance: 'access-fixture', baseRevision: 1, changes: [change] }).success
+  for (const entity of accessEntities) expect(parse({ kind: 'set_entity_access', entity, role: 'staff', access: 'deny' }), entity).toBe(true)
+  for (const entity of ['_unknown_system_entity', '../users', 'schema/users', 'Worker', '__proto__', 'constructor', 'prototype', 'a'.repeat(64)]) {
+    expect(parse({ kind: 'set_entity_access', entity, role: 'staff', access: 'deny' }), entity).toBe(false)
+  }
+  for (const entity of ['_migrations', '_ops_relay_run', '_plugin_migrations', 'rateLimit']) {
+    expect(parse({ kind: 'set_account_link', entity, invitationRole: 'staff' }), entity).toBe(false)
+    expect(parse({ kind: 'add_entity', entity, fields: {} }), entity).toBe(false)
+    expect(parse({ kind: 'set_entity_access', entity: 'worker', role: entity, access: 'deny' }), entity).toBe(false)
+  }
+})
 it('shows a system-grant change in the access-lock diff without creating absent OpenAPI', async () => {
   const { root, server, call, propose } = await fixture()
   try {

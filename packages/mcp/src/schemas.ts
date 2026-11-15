@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { accessEntities } from '@workbasehq/core/schema'
 // Shared exact SemVer contract; keep CLI init schema dependencies self-contained.
 export const exactVersion = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$/
 
@@ -70,9 +71,10 @@ export const runtimeChangeSchema = z.union([setPluginSchema, setInteractiveSchem
 export type RuntimeChange = z.infer<typeof runtimeChangeSchema>
 const accessDecision = z.enum(['allow', 'deny'])
 const accessGrant = z.union([accessDecision, z.strictObject({ where: z.record(z.string(), z.unknown()), fields: z.array(identifier).optional() })])
+const entityTarget = z.union([identifier, z.enum(accessEntities)])
 export const accessChangeSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('set_system_access'), role: identifier, grants: z.record(z.string(), accessDecision) }),
-  z.strictObject({ kind: z.literal('set_entity_access'), entity: identifier, role: identifier, access: z.union([
+  z.strictObject({ kind: z.literal('set_entity_access'), entity: entityTarget, role: identifier, access: z.union([
     z.literal('deny'), z.strictObject({ read: accessGrant, create: accessGrant, update: accessGrant, delete: accessGrant }),
   ]) }),
   z.strictObject({ kind: z.literal('set_account_link'), entity: identifier, invitationRole: identifier }),

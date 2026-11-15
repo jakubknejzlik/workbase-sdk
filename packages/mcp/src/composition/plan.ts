@@ -33,7 +33,8 @@ export async function accessPlan(root: string, changes: AccessChange[]) {
       shared.roles[change.role] = { system: change.grants }
       edit('access.ts', known ? ['roles', change.role, 'system'] : ['roles'], known ? change.grants : shared.roles)
     } else if (change.kind === 'set_entity_access') {
-      const domain = Object.hasOwn(original.config.entities, change.entity)
+      // The compiled config also includes SDK-owned entities such as users.
+      const domain = Object.hasOwn(entities, change.entity)
       const matrix = { ...(domain ? entities[change.entity] : shared.entities[change.entity]), [change.role]: change.access }
       if (domain) { entities[change.entity] = matrix; edit(`schema/${change.entity}.ts`, ['access'], matrix) }
       else {
