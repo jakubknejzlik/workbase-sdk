@@ -5,7 +5,7 @@ import { spawn } from 'node:child_process'
 import { DatabaseSync } from 'node:sqlite'
 import { CORE_VERSION } from '@workbasehq/core/config'
 import type { Bundle } from './storage.ts'
-import { snapshot, replayEngine } from './offline.ts'
+import { snapshot, replayEngine, replayLegacyMigrations } from './offline.ts'
 import { replayInstance, readInstanceMeta, usesBaseline, MigrationReplayError, privateReplayMessage } from './migration-replay.ts'
 import { WorkflowError, type Index } from './schemas.ts'
 import { rebuildBlock, rebuildBlockMessage } from './planning.ts'
@@ -92,19 +92,19 @@ export async function applyDisposable(bundle: Bundle, prepared: Prepared, expect
       for (const [i, statement] of prepared.composition.statements.entries()) {
         await writeFile(join(migrations, `${String(i + 1).padStart(4, '0')}_${statement.name}.sql`), statement.sql + '\n;\n')
       }
-    } else if (usesBaseline(bundle.config)) {
-      // Capture actual engine SQL, including baseline/domain receipts, then let
-      // Wrangler execute those exact bytes in the disposable D1.
+    } else {
+      // Capture domain SQL and the deployment-owned migration batches, including
+      // the legacy Model B repair, then execute those exact bytes in D1.
       const db = new DatabaseSync(':memory:'), statements: { sql: string; name: string }[] = []
-      try { await replayInstance(db, [...bundle.migrations, proposal], replayEngine(prepared.target, bundle.runtime), {
-        mode: 'synthetic', record: (sql, context) => statements.push({ sql, name: (context?.migration ?? 'ledger').replace(/[^a-z0-9_]/gi, '_') }),
-      }) }
-      finally { db.close() }
+      try {
+        const engine = replayEngine(prepared.target, bundle.runtime)
+        const record: NonNullable<Parameters<typeof replayInstance>[3]>['record'] = (sql, context) => statements.push({ sql, name: (context?.migration ?? 'ledger').replace(/[^a-z0-9_]/gi, '_') })
+        await replayInstance(db, [...bundle.migrations, proposal], engine, { mode: 'synthetic', record })
+        if (!usesBaseline(bundle.config)) await replayLegacyMigrations(db, engine, record)
+      } finally { db.close() }
       for (const [i, statement] of statements.entries()) {
         await writeFile(join(migrations, `${String(i + 1).padStart(4, '0')}_${statement.name}.sql`), statement.sql + '\n;\n')
       }
-    } else {
-      for (const m of [...bundle.migrations, proposal]) await writeFile(join(migrations, m.name), m.sql)
     }
     const config = join(scratch, 'wrangler.json')
     await writeFile(config, JSON.stringify({ name: 'workbase-mcp-disposable', compatibility_date: '2026-08-01',

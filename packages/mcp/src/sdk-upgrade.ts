@@ -253,7 +253,7 @@ export async function executeSdkUpgrade(store: Store, proposal: SdkUpgradePropos
     // Publication can itself trigger abort/drift. Use the same durable
     // revocation primitive so a failed cleanup rewrite cannot retain proof.
     await store.revokeSdkProposal(proposal.proposalId)
-    if (error instanceof WorkflowError || error instanceof MigrationReplayError) throw error
+    if (error instanceof WorkflowError || error instanceof MigrationReplayError || error instanceof SqlTokenizationError) throw error
     if (signal?.aborted) fail('sdk_upgrade_cancelled', 'SDK upgrade verification was cancelled', 409)
     if (error instanceof RegistrySdkError) throw error
     fail('sdk_upgrade_failed', 'SDK target verification failed; the proposal has no accepted evidence', 409)

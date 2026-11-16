@@ -4,7 +4,7 @@ import { CORE_VERSION } from '@workbasehq/core/config'
 import { KernelRegistry } from '@workbasehq/core/kernel/registry'
 import { PluginMigrationError } from '@workbasehq/core/kernel/migrations'
 import { migrateD1, migrateInstance, instanceMigrationReceipt, migrationErrorMessage, queryDatabase } from '@workbasehq/core/infra'
-import { replayInstance, readInstanceMeta, usesBaseline, MigrationReplayError, privateReplayMessage, sqliteKind, type ReplayMigration } from './migration-replay.ts'
+import { replayInstance, replayQuery, replayError, readInstanceMeta, usesBaseline, MigrationReplayError, privateReplayMessage, sqliteKind, type ReplayMigration } from './migration-replay.ts'
 import { initialSchema, revisionSQL } from '@workbasehq/core/migrations/schema'
 import { fail, WorkflowError } from './schemas.ts'
 import { indexSQL, rebuildBlock, rebuildBlockMessage } from './planning.ts'
@@ -36,12 +36,20 @@ const engineFailureCodes = [
   'migration_sequence_gap_or_duplicate', 'migration_instance_verification_failed',
   'migration_instance_revision_mismatch', 'migration_plugin_verification_failed', 'migration_blocked',
 ] as const
-export async function replayBundle<T>(bundle: Pick<Bundle, 'config' | 'runtime'> & { migrations: ReplayMigration[]; currentConfig?: Bundle['config'] }, fn: (db: DatabaseSync) => T, options: { mode?: 'synthetic' | 'schema' } = {}): Promise<T> {
+// Legacy deployment applies the existing core/plugin chain after domain SQL.
+// Use those same guarded, transactional batches in comparison and disposable D1.
+export async function replayLegacyMigrations(db: DatabaseSync, engine: ReturnType<typeof replayEngine>, record?: Parameters<typeof replayQuery>[2]) {
+  try { await engine.kernel.applyMigrations(engine.queryDatabase(replayQuery(db, [], record))) }
+  catch (error) { throw replayError(error, engine) }
+}
+export async function replayBundle<T>(bundle: Pick<Bundle, 'config' | 'runtime'> & { migrations: ReplayMigration[]; currentConfig?: Bundle['config'] }, fn: (db: DatabaseSync) => T, options: { mode?: 'synthetic' | 'schema'; legacyMigrations?: boolean } = {}): Promise<T> {
   const entities = [...Object.keys(bundle.config.entities), ...Object.keys(bundle.currentConfig?.entities ?? {})]
-  if (!usesBaseline(bundle.config)) return replay(bundle.migrations, fn, entities)
+  if (!usesBaseline(bundle.config) && !options.legacyMigrations) return replay(bundle.migrations, fn, entities)
   const db = new DatabaseSync(':memory:')
   try {
-    await replayInstance(db, bundle.migrations, replayEngine(bundle.config, bundle.runtime), options)
+    const engine = replayEngine(bundle.config, bundle.runtime)
+    await replayInstance(db, bundle.migrations, engine, options)
+    if (!usesBaseline(bundle.config) && options.legacyMigrations) await replayLegacyMigrations(db, engine)
     return fn(db)
   } catch (error) {
     const block = rebuildBlock(privateReplayMessage(error), entities)
@@ -84,7 +92,8 @@ function schemaSnapshot(db: DatabaseSync, domainLedger: boolean) {
     const base = { type: row.type, name: row.name, table: row.tbl_name }
     if (row.type === 'trigger' || row.type === 'index') {
       if (typeof row.sql !== 'string') unsupportedSchema()
-      const scope = { table: String(row.tbl_name), columns: db.prepare(`PRAGMA table_xinfo(${q(String(row.tbl_name))})`).all().map(column => String(column.name)) }
+      const scope = { table: String(row.tbl_name), columns: db.prepare(`PRAGMA table_xinfo(${q(String(row.tbl_name))})`).all().map(column => String(column.name)),
+        indexColumns: row.type === 'index' ? db.prepare(`PRAGMA index_xinfo(${q(String(row.name))})`).all().filter(column => column.key === 1).map(column => Number(column.cid) >= 0 ? String(column.name) : null) : undefined }
       return { ...base, sql: ddlFingerprint(row.sql, String(row.type), String(row.name), scope) }
     }
     if (row.type !== 'table' || typeof row.sql !== 'string') unsupportedSchema()
@@ -131,8 +140,8 @@ export async function instanceMeta(bundle: Bundle, supportedVersion: string | nu
   })
 }
 export async function expectedSnapshot(bundle: Bundle, prepared: { target: Bundle['config']; indexes: Bundle['indexes']; sql: string }) {
-  const planned = await replayBundle({ ...bundle, config: prepared.target, currentConfig: bundle.config, migrations: [...bundle.migrations, { name: 'proposal.sql', sql: prepared.sql, syntheticRevision: prepared.target.revision }] }, db => snapshot(db, usesBaseline(bundle.config)), { mode: 'synthetic' })
-  const desired = await replayBundle({ config: prepared.target, currentConfig: bundle.config, runtime: bundle.runtime, migrations: [{ name: 'desired.sql', syntheticRevision: prepared.target.revision, sql: initialSchema(prepared.target) + prepared.indexes.map(indexSQL).join('\n') }] }, db => snapshot(db, usesBaseline(prepared.target)), { mode: 'schema' })
+  const planned = await replayBundle({ ...bundle, config: prepared.target, currentConfig: bundle.config, migrations: [...bundle.migrations, { name: 'proposal.sql', sql: prepared.sql, syntheticRevision: prepared.target.revision }] }, db => snapshot(db, usesBaseline(bundle.config)), { mode: 'synthetic', legacyMigrations: true })
+  const desired = await replayBundle({ config: prepared.target, currentConfig: bundle.config, runtime: bundle.runtime, migrations: [{ name: 'desired.sql', syntheticRevision: prepared.target.revision, sql: initialSchema(prepared.target) + prepared.indexes.map(indexSQL).join('\n') }] }, db => snapshot(db, usesBaseline(prepared.target)), { mode: 'schema', legacyMigrations: true })
   if (JSON.stringify(planned) !== JSON.stringify(desired)) fail('config_schema_mismatch', 'Planned schema differs from resulting config')
   return planned
 }

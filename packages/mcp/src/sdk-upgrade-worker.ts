@@ -14,7 +14,8 @@ const q = (name: string) => `"${name.replaceAll('"', '""')}"`
 // Compare full DDL (constraints/triggers included), columns, FKs and indexes.
 function physical(db: DatabaseSync) {
   return db.prepare("SELECT type,name,tbl_name,sql FROM sqlite_master WHERE type IN ('table','index','trigger') AND sql IS NOT NULL AND name NOT GLOB 'sqlite_*' AND name NOT GLOB '_cf_*' AND name NOT IN ('_migrations','_plugin_migrations','d1_migrations') AND tbl_name NOT IN ('_migrations','_plugin_migrations','d1_migrations') ORDER BY type,name").all().map(row => {
-    const scope = { table: String(row.tbl_name), columns: db.prepare(`PRAGMA table_xinfo(${q(String(row.tbl_name))})`).all().map(column => String(column.name)) }
+    const scope = { table: String(row.tbl_name), columns: db.prepare(`PRAGMA table_xinfo(${q(String(row.tbl_name))})`).all().map(column => String(column.name)),
+      indexColumns: row.type === 'index' ? db.prepare(`PRAGMA index_xinfo(${q(String(row.name))})`).all().filter(column => column.key === 1).map(column => Number(column.cid) >= 0 ? String(column.name) : null) : undefined }
     return {
       type: row.type, name: row.name, table: row.tbl_name, sql: ddlFingerprint(String(row.sql), String(row.type), String(row.name), scope),
       ...(row.type === 'table' ? {

@@ -126,7 +126,7 @@ export function tableSemantics(tokens: SqlToken[], columns: { name: unknown; typ
 
 // The object declaration is a name position. Do not apply its name binding to
 // later expression tokens: the same quoted spelling could be a DQS literal.
-export function ddlFingerprint(sql: string, type: string, name: string, scope?: { table: string; columns: readonly string[] }) {
+export function ddlFingerprint(sql: string, type: string, name: string, scope?: { table: string; columns: readonly string[]; indexColumns?: readonly (string | null)[] }) {
   const tokens = tokenizeSQL(sql)
   if (isPunct(tokens.at(-1), ';')) tokens.pop()
   let nameAt = 1
@@ -150,13 +150,25 @@ export function ddlFingerprint(sql: string, type: string, name: string, scope?: 
       || foldIdentifier(table.value) !== foldIdentifier(scope.table) || !isPunct(tokens[tableAt + 1], '(')) unsupportedSchema()
     fingerprint[tableAt] = identifierToken(table)
     const columns = new Set(scope.columns.map(foldIdentifier))
+    let depth = 1, term = 0, inColumnList = true
     for (let i = tableAt + 2; i < tokens.length; i++) {
       const current = tokens[i]
+      if (inColumnList) {
+        if (isPunct(current, '(')) depth++
+        if (isPunct(current, ')') && --depth === 0) inColumnList = false
+        if (depth === 1 && isPunct(current, ',')) term++
+      }
+      // index_xinfo binds a simple indexed column (including contextual
+      // keywords). Expressions/literals have cid=-2 and supply no binding.
+      // Restrict this role to the column operand, never COLLATE or DESC.
+      const columnRole = inColumnList && scope.indexColumns?.[term] != null
+        && foldIdentifier(current.value) === foldIdentifier(scope.indexColumns[term]!)
+        && (isPunct(tokens[i - 1], '(') || (depth === 1 && isPunct(tokens[i - 1], ',')))
       // COLLATE names and function names occupy identifier roles regardless
       // of whether a column happens to share their spelling.
       const nameRole = isKeyword(tokens[i - 1], 'collate')
         || (['identifier', 'quotedIdentifier'].includes(current.kind) && isPunct(tokens[i + 1], '('))
-      fingerprint[i] = nameRole ? identifierToken(current) : normalizedToken(current, columns)
+      fingerprint[i] = nameRole || columnRole ? identifierToken(current) : normalizedToken(current, columns)
     }
   }
   return JSON.stringify(fingerprint)
