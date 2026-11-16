@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 import { expect, it, vi } from 'vitest'
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { I18nextProvider, initReactI18next } from 'react-i18next'
@@ -126,6 +126,61 @@ it.each(['explicit', 'array'])('multiple linked accounts (%s) warn and disable a
   expect(screen.queryByText('First account')).toBeNull()
   expect(screen.queryByRole('button', { name: 'Link account' })).toBeNull()
 })
+it('background status refresh preserves the open invitation draft and disables submission until settled', async () => {
+  const status = { state: 'no_account', can_invite: true, can_cancel: false, inconsistency: null }
+  const { write, client } = await mount({ status })
+  const user = userEvent.setup()
+  await user.click(await screen.findByRole('button', { name: 'Invite to application' }))
+  const dialog = screen.getByRole('dialog')
+  const email = within(dialog).getByLabelText('Email') as HTMLInputElement
+  const submit = within(dialog).getByRole('button', { name: 'Invite to application' }) as HTMLButtonElement
+  await user.type(email, 'draft@example.test')
+  expect(submit.disabled).toBe(false)
+  let settle!: (value: typeof status) => void
+  write.mockImplementationOnce(() => new Promise(resolve => { settle = resolve }))
+  let refresh!: Promise<void>
+  await act(async () => { refresh = client.invalidateQueries({ queryKey: ['row-access'] }) })
+  await waitFor(() => expect(client.isFetching({ queryKey: ['row-access'] })).toBe(1))
+  expect(screen.getByRole('dialog')).toBe(dialog)
+  expect(email.value).toBe('draft@example.test')
+  await waitFor(() => expect(submit.disabled).toBe(true))
+  await user.click(submit)
+  expect(write.mock.calls.every(([, method]) => method === 'GET')).toBe(true)
+  await act(async () => { settle(status); await refresh })
+  await waitFor(() => expect(submit.disabled).toBe(false))
+  expect(screen.getByRole('dialog')).toBe(dialog)
+  expect(within(dialog).getByLabelText('Email')).toBe(email)
+  expect(email.value).toBe('draft@example.test')
+  await user.click(submit)
+  await waitFor(() => expect(write).toHaveBeenCalledWith('/orgs/org/invitations', 'POST', { email: 'draft@example.test', target: { entity: 'entries', row: 'entry' } }))
+})
+it.each(['explicit', 'array'])('background status refresh retains the %s multiple-account guard until reconciliation', async source => {
+  const status = { state: 'signed_in', can_invite: true, can_cancel: true,
+    inconsistency: source === 'explicit' ? 'multiple_linked_accounts' : null,
+    linked_accounts: source === 'array' ? [{ id: 'a' }, { id: 'b' }] : [] }
+  const { write, client } = await mount({ status })
+  await screen.findByRole('alert')
+  const expectGuard = () => {
+    expect(screen.getByRole('alert').textContent).toContain('Multiple linked accounts')
+    expect(screen.queryByRole('button', { name: 'Link account' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Remove access' })).toBeNull()
+  }
+  expectGuard()
+  let settle!: (value: Record<string, unknown>) => void
+  write.mockImplementationOnce(() => new Promise(resolve => { settle = resolve }))
+  let refresh!: Promise<void>
+  await act(async () => { refresh = client.invalidateQueries({ queryKey: ['row-access'] }) })
+  await waitFor(() => expect(client.isFetching({ queryKey: ['row-access'] })).toBe(1))
+  expectGuard()
+  await act(async () => { settle(status); await refresh })
+  await waitFor(() => expect(client.isFetching({ queryKey: ['row-access'] })).toBe(0))
+  expectGuard()
+  write.mockResolvedValueOnce({ state: 'no_account', can_invite: true, can_cancel: false, inconsistency: null })
+  await act(async () => { await client.invalidateQueries({ queryKey: ['row-access'] }) })
+  await screen.findByText('No access')
+  expect(screen.getAllByRole('button', { name: 'Link account' })).toHaveLength(1)
+  expect(screen.getAllByRole('button', { name: 'Remove access' })).toHaveLength(1)
+})
 it.each([403, 404, 500])('status error %s never becomes no access', async error => {
   await mount({ error })
   await screen.findByRole('alert')
@@ -151,13 +206,20 @@ it.each(['invited', 'expired', 'signed_in'])('status-only %s reveals no identity
   expect(screen.queryByRole('button', { name: 'Remove access' })).toBeNull()
 })
 
-it('failed refresh replaces a previously loaded no-access status', async () => {
-  const { write, client } = await mount()
+it.each([403, 404, 500])('failed refresh (%s) replaces cached status and closes the invitation dialog', async error => {
+  const { write, client } = await mount({ status: { state: 'no_account', can_invite: true, can_cancel: false, inconsistency: null } })
   await screen.findByText('No access')
-  write.mockRejectedValueOnce({ status: 500 })
-  await client.invalidateQueries({ queryKey: ['row-access'] })
-  await screen.findByRole('alert')
+  const user = userEvent.setup()
+  await user.click(screen.getByRole('button', { name: 'Invite to application' }))
+  await user.type(screen.getByLabelText('Email'), 'draft@example.test')
+  write.mockRejectedValueOnce({ status: error })
+  await act(async () => { await client.invalidateQueries({ queryKey: ['row-access'] }) })
+  expect((await screen.findByRole('alert')).textContent).toContain(error === 403 ? en.rowAccessDenied : error === 404 ? en.rowAccessUnavailable : en.requestFailed)
   expect(screen.queryByText('No access')).toBeNull()
+  expect(screen.queryByRole('dialog')).toBeNull()
+  expect(screen.queryByRole('button', { name: 'Invite to application' })).toBeNull()
+  expect(screen.getAllByRole('button', { name: 'Link account' })).toHaveLength(1)
+  expect(screen.getAllByRole('button', { name: 'Remove access' })).toHaveLength(1)
 })
 it('unknown status is a failure, never an access grant or no-access fallback', async () => {
   await mount({ status: { state: 'unknown', can_invite: true, inconsistency: null } })

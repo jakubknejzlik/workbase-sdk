@@ -288,7 +288,8 @@ function useApplicationAccess(props: Omit<AccessContext, 'row'> & { row?: Record
   const enabled = !props.disabled && !!props.write && !!props.row && !!(definition?.rowAccess ?? definition?.rowInvitations)
   const status = useQuery<RowAccessStatus>({ queryKey: ['row-access', props.orgId, props.entity, props.row?.id, props.caps],
     queryFn: () => props.write!(`/orgs/${encodeURIComponent(props.orgId)}/row-access/${encodeURIComponent(props.entity)}/${encodeURIComponent(props.row!.id)}`, 'GET'), enabled: enabled && !observeOnly, retry: false })
-  const data = enabled && !status.error && !status.isFetching ? status.data : undefined
+  // Keep cached actions and inconsistency guards while a background read reconciles.
+  const data = enabled && !status.error ? status.data : undefined
   const multiple = !!data && (data.inconsistency === 'multiple_linked_accounts' || (data.linked_accounts?.length ?? 0) > 1)
   const valid = !!data && !multiple && ['no_account', 'invited', 'expired', 'signed_in'].includes(data.state) && data.inconsistency == null
   const actions = !valid ? [] : data.state === 'no_account' && data.can_invite ? ['invite'] : ['invited', 'expired'].includes(data.state) && data.invitation
@@ -313,7 +314,7 @@ function ApplicationAccess(props: AccessContext) {
     const code = (status.error as { status?: number }).status
     return <span role="alert">{t(code === 403 ? 'rowAccessDenied' : code === 404 ? 'rowAccessUnavailable' : 'requestFailed')}</span>
   }
-  if (status.isFetching || !status.data) return <span role="status">{t('loading')}</span>
+  if (!status.data) return <span role="status">{t('loading')}</span>
   const data = status.data
   if (multiple) return <span role="alert">{t('rowAccessMultiple')}</span>
   if (!valid) return <span role="alert">{t('requestFailed')}</span>
@@ -326,7 +327,7 @@ function ApplicationAccess(props: AccessContext) {
     {actions.map(action => <ResourceFormDialog key={action} entity={props.entity} compact
       schema={action === 'invite' ? rowInviteSchema : emptyRowSchema} trigger={t(`rowInvite_${action}`)} triggerLabel={t(`rowInvite_${action}`)}
       title={t(`rowInvite_${action}`)} description={t(action === 'remove' ? 'rowInviteRemoveDescription' : 'rowInviteDescription')} cancelLabel={t('cancel')}>
-      {controls => <RowInvitationMutation {...props} write={props.write!} action={action} invitationId={pending?.id} controls={controls} />}
+      {controls => <RowInvitationMutation {...props} disabled={props.disabled || status.isFetching} write={props.write!} action={action} invitationId={pending?.id} controls={controls} />}
     </ResourceFormDialog>)}
   </div>
 }
