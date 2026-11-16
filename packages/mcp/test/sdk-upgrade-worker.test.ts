@@ -168,7 +168,11 @@ export default bindSchemaLock(config, schemaLock(config))
   const db = new DatabaseSync(database)
   try {
     expect(db.prepare('SELECT * FROM example').all()).toEqual([{ revision: 7 }])
-    expect(db.prepare('SELECT namespace FROM _plugin_migrations ORDER BY rowid').all()).toEqual([{ namespace: 'workbase-sdk' }, { namespace: 'example' }])
+    expect(db.prepare('SELECT namespace,name FROM _plugin_migrations ORDER BY rowid').all()).toEqual([
+      { namespace: 'workbase-sdk', name: '001_system' },
+      { namespace: 'workbase-sdk', name: '002_operational_evidence' },
+      { namespace: 'example', name: '001_example' },
+    ])
   } finally { db.close() }
 })
 it('rejects invalid target configuration', async () => {
