@@ -92,7 +92,7 @@ export function userLinkActionPermission(config: InstanceConfig, scope: Scope, o
   organizationPermission(config, scope, permission)
 }
 interface PreparedIssuer { role: string; filter: SqlStatement }
-export function userLinkCommands(config: InstanceConfig): AtomicOperation<any>[] {
+export function userLinkCommands(config: InstanceConfig, entryPoint: 'legacy' | 'record-action' = 'legacy'): AtomicOperation<any>[] {
   return userLinks(config).flatMap(({ entity }) => (['link_account', 'remove_access'] as const).map(action => {
     const rowId = z.string().min(1).meta({ referenceEntity: entity })
     const inputSchema: z.ZodType<{ rowId: string; userId?: string }> = action === 'link_account'
@@ -127,7 +127,7 @@ export function userLinkCommands(config: InstanceConfig): AtomicOperation<any>[]
         // Its WHERE checks the live pre-image. Keep the executor's row capture
         // and 403 denial, without checking the cleared source against the policy.
         livePolicies.set(issuer, Object.freeze({ sql: '1=1' }))
-        return { rules: [{ name: 'account_link_issuer', statements: [issuer] }, mutation, ...(action === 'link_account' ? [{ name: 'supersede_row_invitation', statements: [writer({
+        return { rules: [{ name: 'account_link_issuer', statements: [issuer] }, mutation, ...(action === 'link_account' && entryPoint === 'record-action' ? [{ name: 'supersede_row_invitation', statements: [writer({
           // Commit together with the confirmed link, never during discovery.
           // A failed eligibility/policy check rolls this revocation back too.
           sql: `UPDATE invitations SET revoked_at=? WHERE organization_id=? AND target_entity=? AND target_row=? AND accepted_at IS NULL AND revoked_at IS NULL AND declined_at IS NULL AND expired_at IS NULL AND expires_at>?`,
