@@ -80,7 +80,34 @@ recent login. Current scalar storage returns at most one summary; invitation
 history is not a source of multiple linked accounts. The card defensively warns
 and withholds account actions for an explicit inconsistency or multiple summaries.
 Loading, denied, missing and failed status remain distinct from no access.
-Create/edit invitation controls and email prefill are outside this detail slice.
+The same Application access controller serves detail, list rows, create and edit.
+Legacy `link_account` / `remove_access` and V3 `access_*` commands are excluded
+from generic detail and menu actions. V3 controls read the record's access state
+and action availability and submit to `/api/:entity/:id/actions/:name` with
+`{ email }`, `{ user_id }` or `{}`; legacy controls retain their supported Members
+and account-command transports. Explicit link/unlink controls remain individually
+granted inside the card even without Members invitation-status support. A status
+read that is loading, failed, unknown or refetching disables every account
+mutation. Cached refetches preserve the displayed state and invitation draft;
+only the first read without cache shows loading.
+
+Create offers an authorized, opt-in “Invite now”. The entity is saved first,
+without invitation fields in its CRUD payload, then its live access state is
+checked before inviting the returned ID. Invitation failure keeps the record and
+shows a retry against that same ID. An uncertain response is reconciled before
+retrying, so an existing invitation is not created again. Prefill uses the live,
+authorized string field `email`, then `contact_email`; otherwise it stays blank.
+It follows contact edits only until the invitation address is manually edited.
+This convention requires no instance-specific mapping.
+
+Edit embeds invite, change, resend, cancel and remove controls with the existing
+confirmations. Changing an email cancels a pending invitation (or removes the
+linked account), reconciles status, then invites the replacement. An expired
+invitation can be replaced directly after checking live invite availability. Access actions
+take effect immediately and remain effective if the entity edit is cancelled.
+They preserve unsaved entity fields and refresh the row version before the next
+entity save. If version reconciliation fails, saving waits for a successful
+retry. Removing a link retains its existing application-wide account effect.
 
 Read/write metadata retains its existing authorization requirements. Read fields,
 enum choices and labels, columns, checks, indexes, relation/FK targets, display

@@ -569,5 +569,14 @@
   "rowAccess_expired": "Vypršela",
   "rowInvite_copy": "Kopírovat odkaz",
   "rowAccessFilter": "Stav přístupu",
-  "rowAccessAll": "Vše"
+  "rowAccessAll": "Vše",
+  "rowInviteNow": "Pozvat nyní",
+  "rowInviteEmail": "E-mail pozvánky",
+  "rowInviteSavedFailed": "Záznam uložen; pozvánka selhala. Opakování pozve ke stejnému záznamu.",
+  "rowInviteRetry": "Zkusit pozvánku znovu",
+  "rowAccessRefreshing": "Ověřuje se stav přístupu. Akce účtu nejsou dostupné.",
+  "rowInvite_link": "Propojit účet",
+  "rowInviteAccount": "ID účtu",
+  "rowInvite_change": "Změnit e-mail pozvánky",
+  "rowInviteDeliveryFailed": "Pozvánka existuje; doručení e-mailu selhalo. Zkuste ji znovu odeslat."
 }

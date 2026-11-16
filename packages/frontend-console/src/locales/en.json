@@ -549,5 +549,14 @@
   "rowAccess_expired": "Expired",
   "rowInvite_copy": "Copy link",
   "rowAccessFilter": "Access state",
-  "rowAccessAll": "All"
+  "rowAccessAll": "All",
+  "rowInviteNow": "Invite now",
+  "rowInviteEmail": "Invitation email",
+  "rowInviteSavedFailed": "Record saved; invitation failed. Retry invites the same record.",
+  "rowInviteRetry": "Retry invitation",
+  "rowAccessRefreshing": "Access status is being reconciled. Account actions are unavailable.",
+  "rowInvite_link": "Link account",
+  "rowInviteAccount": "Account ID",
+  "rowInvite_change": "Change invitation email",
+  "rowInviteDeliveryFailed": "Invitation exists; email delivery failed. Use Resend to try delivery again."
 }

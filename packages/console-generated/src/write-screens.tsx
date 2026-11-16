@@ -1,3 +1,4 @@
+import { hasRecordAccess } from './account-link'
 import type { RowAccessStatus } from '../../core/src/row-access'
 import { Card, CardHeader, CardTitle, CardContent } from '@workbasehq/ui/components/ui/card'
 import { Badge } from '@workbasehq/ui/components/ui/badge'
@@ -6,7 +7,7 @@ import { ManyRelationField } from './many-relation-field'
 import type { ComponentProps, ReactNode } from 'react'
 import { createDataTableQueryKey } from '@workbasehq/ui'
 import { useEffect, useRef, useState } from 'react'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useIsMutating, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
 import { useTranslation } from 'react-i18next'
 import { useEntityTranslation } from './entity-translation'
@@ -23,6 +24,7 @@ interface WriteFailure { code?: string; status?: number; details?: { field?: unk
 function writeErrorKey(error: unknown) {
   const failure = error as WriteFailure | null
   if (!failure) return null
+  if (failure.code === 'invitation_delivery_failed') return 'rowInviteDeliveryFailed'
   // Closed write codes describe a refused mutation, even with HTTP 403.
   return failure.status === 404 ? 'notFoundDescription' : codes.includes(failure.code ?? '') ? `write_${failure.code}` : failure.status === 403 ? 'forbiddenDescription' : 'requestFailed'
 }
@@ -63,11 +65,6 @@ function CreateCommandDialog({ command, ...props }: Context & { command: NonNull
 }
 export function GeneratedActions(props: Context & { row?: Record<string, any> }) {
   const { t, i18n } = useEntityTranslation(props.entity); const { model, caps, entity, row } = props
-  // Observe the card's status without starting a read or widening its read gates.
-  const access = useApplicationAccess(props, true)
-  const suppressed = !model.entities[entity]?.accountLink ? []
-    : access.multiple ? [`${entity}/link_account`, `${entity}/remove_access`]
-    : access.actions.includes('remove') ? [`${entity}/remove_access`] : []
   if (!visibleEntities(model, caps).includes(entity)) return null
   const operations = caps.entities[entity].operations
   const createLabel = resourceCreateLabel(model, entity, i18n.language, t, caps)
@@ -76,7 +73,7 @@ export function GeneratedActions(props: Context & { row?: Record<string, any> })
     {createCommand && <CreateCommandDialog {...props} command={createCommand} />}
     {(!row ? ['create'] : ['update']).filter(operation => operations.includes(operation) && (operation !== 'update' || caps.entities[entity].readable.includes('version'))).map(operation => <ResourceFormDialog entity={entity} outcome={row ? 'updated' : 'created'} schema={writeSchema(model, entity, caps, row ? 'edit' : 'create')} compact={!!row} key={operation} trigger={operation === 'create' ? createLabel : t('edit', { context: '' })} triggerIcon={row ? 'edit' : undefined} triggerVariant={row ? 'secondary' : undefined} title={t(operation === 'create' ? 'createEntity' : 'editEntity', { entity: t(`entitySingular_${entity}`) })} description={t(operation === 'create' ? 'createEntityDescription' : 'editEntityDescription', { entity: t(`entitySingular_${entity}`) })} cancelLabel={t('cancel')}>{controls => <EntityMutation {...props} row={row} controls={controls} />}</ResourceFormDialog>)}
     {row && operations.includes('delete') && <ResourceDeleteDialog entity={entity} entityType={t(`entity_${entity}`, { defaultValue: entity })} entityName={recordLabel(model, entity, row, caps, i18n.language, t)} targetDescription={t('deleteTarget')} warningMessage={t('deleteDescription')} confirmText={t('delete')} compact trigger={t('delete', { context: '' })} triggerIcon="delete" triggerVariant="destructive" title={t('deleteRecord')} description={t('deleteDescription')} cancelLabel={t('cancel')} destructive>{controls => <DeleteMutation {...props} row={row} close={controls.close} />}</ResourceDeleteDialog>}
-    {row ? commandDefinitions(model, entity, caps).filter(command => !!commandRowField(command, entity) && !suppressed.includes(command.name)).map(command => {
+    {row ? commandDefinitions(model, entity, caps).filter(command => !!commandRowField(command, entity)).map(command => {
       const replacement = command.ui?.replacesCrud
       const label = commandLabel(command, i18n.language, t)
       return <ResourceFormDialog entity={command.permission.entity} outcome={command.name.endsWith('/create') ? 'created' : command.name.endsWith('/delete') ? 'deleted' : undefined} schema={commandFormSchema(command.inputSchema)} compact key={command.name}
@@ -90,7 +87,7 @@ export function GeneratedRowActions(props: Context & { row: Record<string, any>;
   const { t, i18n } = useEntityTranslation(props.entity); const { model, caps, entity, row } = props
   if (!visibleEntities(model, caps).includes(entity)) return null
   const operations = caps.entities[entity].operations
-  const commands = commandDefinitions(model, entity, caps).filter(command => !!commandRowField(command, entity) && !(model.entities[entity].rowInvitations && command.name === `${entity}/remove_access`))
+  const commands = commandDefinitions(model, entity, caps).filter(command => !!commandRowField(command, entity))
   const items = [
     ...(operations.includes('update') && caps.entities[entity].readable.includes('version') ? [{ id: 'edit', label: t('edit') }] : []),
     ...commands.map(command => ({ id: command.name, label: commandLabel(command, i18n.language, t) })),
@@ -123,7 +120,7 @@ export function HeaderCommands(props: Context) {
 }
 function useRefresh() {
   const client = useQueryClient()
-  return () => Promise.all([client.invalidateQueries({ queryKey: createDataTableQueryKey() }), client.invalidateQueries({ queryKey: ['read'] }), client.invalidateQueries({ queryKey: ['picker'] }), client.invalidateQueries({ queryKey: ['lookup'] }), client.invalidateQueries({ queryKey: ['row-access'] })])
+  return () => Promise.all([client.invalidateQueries({ queryKey: createDataTableQueryKey() }), client.invalidateQueries({ queryKey: ['read'] }), client.invalidateQueries({ queryKey: ['picker'] }), client.invalidateQueries({ queryKey: ['lookup'] }), client.invalidateQueries({ queryKey: ['row-access'] }), client.invalidateQueries({ queryKey: ['row-access-delivery'] })])
 }
 function formLabel(model: Model, entity: string, name: string, translate: (key: string, options?: any) => string) {
   const section = model.entities[entity].sections?.find(section => `section:${section.id}` === name)
@@ -138,16 +135,49 @@ function EntityMutation(props: Context & { row?: Record<string, any>; controls: 
   const editRecord = useQuery({ queryKey: ['read', model.instance, props.orgId, caps, entity, row?.id, 'edit-record'], enabled: needsEditRead, queryFn: () => request(readQuery(model, entity, caps, { id: row!.id, purpose: 'edit' })) })
   const editingRow = current !== row ? current : needsEditRead ? editRecord.data?.data[0] : current
   const orgId = props.orgId
+  const client = useQueryClient()
+  const accountForm = !inline && !!model.entities[entity].accountLink
+  const contactField = ['email', 'contact_email'].find(name => ['string', 'text'].includes(model.entities[entity].fields[name]?.type) && caps.entities[entity].readable.includes(name))
+  const [contactEmail, setContactEmail] = useState<string | undefined>(undefined)
+  // RegistryForm keeps its initial values across background reads. Seed from
+  // that same snapshot; only an actual contact-field edit changes the prefill.
+  const contactSeed = useRef<string | undefined>(undefined)
+  if (contactSeed.current === undefined && (!needsEditRead || editingRow)) {
+    const value = contactField ? props.lockedValues?.[contactField] ?? editingRow?.[contactField] ?? props.initialValues?.[contactField] ?? model.entities[entity].writeSchema?.properties?.[contactField]?.default : ''
+    contactSeed.current = typeof value === 'string' ? value : ''
+  }
+  const liveEmail = contactEmail ?? contactSeed.current ?? ''
+  const [inviteNow, setInviteNow] = useState(false)
+  const [invitationEmail, setInvitationEmail] = useState<string | undefined>(undefined)
+  const [savedRow, setSavedRow] = useState<Record<string, any>>()
+  const [inviteFailed, setInviteFailed] = useState(false)
+  const [versionError, setVersionError] = useState<unknown>()
+  const createAccess = useApplicationAccess({ ...props, row: savedRow })
+  const email = invitationEmail ?? liveEmail
+  const canInviteAtCreate = accountForm && !row && model.entities[entity].rowAccess !== false && (hasRecordAccess(model, entity) ? caps.commands?.includes(`${entity}/access_invite`) : model.entities[entity].rowInvitations && (model.entities[entity].rowAccess ?? true))
   const fullSchema = writeSchema(model, entity, caps, row ? 'edit' : 'create')
   const schema = inline ? { ...fullSchema, properties: { [inline.field]: { ...fullSchema.properties[inline.field], 'x-ui': { ...fullSchema.properties[inline.field]['x-ui'], span: 'full', section: undefined } } }, required: fullSchema.required.filter((name: string) => name === inline.field) } : fullSchema
   const relations = editableManyRelations(model, entity, caps).filter(([name]) => Object.hasOwn(schema.properties, name))
   const initial = useQuery({ queryKey: ['read', model.instance, orgId, caps, entity, row?.id, 'form-memberships', generation], enabled: !!row && !!relations.length, queryFn: async () => Object.fromEntries(await Promise.all(relations.map(async ([name, relation]) => [name, row ? [...new Set((await memberships(model, relation, row.id, request)).map(item => item[relation.through!.field]))] : []]))) })
   const saved = useRef<{ row?: Record<string, any>; fields?: string }>({ row })
-  const mutation = useMutation({ mutationFn: async (data: Record<string, any>) => {
+  const accessVersion = useRef(false)
+  const reconcileVersion = async () => {
+    try {
+      const result = await request(readQuery(model, entity, caps, { id: saved.current.row!.id, purpose: 'edit' }))
+      if (!result.data[0] || result.data[0].version == null) throw { code: 'version_conflict' }
+      saved.current.row = { ...(saved.current.row ?? row), version: result.data[0].version }
+      accessVersion.current = true
+      setVersionError(undefined)
+    } catch (error) { setVersionError(error); throw error }
+  }
+  const mutation = useMutation({ mutationKey: accountForm ? ['account-access', orgId, entity] : undefined, mutationFn: async (data: Record<string, any>) => {
+    if (versionError) throw versionError
+    if (savedRow && createAccess.blocked) throw { code: 'action_unavailable' }
+    if (canInviteAtCreate && inviteNow && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw { code: 'validation_failed' }
     const fields = Object.fromEntries(Object.entries({ ...data, ...props.lockedValues }).filter(([name]) => !relations.some(([key]) => key === name)))
     const fingerprint = JSON.stringify(fields)
     if (!saved.current.row || Object.keys(fields).length && saved.current.fields !== fingerprint) {
-      const parent = saved.current.fields ? saved.current.row : editingRow ?? saved.current.row
+      const parent = saved.current.fields || accessVersion.current ? saved.current.row : editingRow ?? saved.current.row
       saved.current.row = await write(`/api/${entity}${parent ? `/${encodeURIComponent(parent.id)}` : ''}`, parent ? 'PATCH' : 'POST', { ...fields, ...(parent ? { version: parent.version } : {}) }, parent ? undefined : controls.submissionKey)
       saved.current.fields = fingerprint
     }
@@ -158,29 +188,59 @@ function EntityMutation(props: Context & { row?: Record<string, any>; controls: 
       void refresh()
       throw Object.assign(new Error('relation_save_failed', { cause }), { code: 'relation_save_failed' })
     }
+    if (canInviteAtCreate && inviteNow) {
+      const accessProps = { ...props, row: saved.current.row! }
+      setSavedRow(saved.current.row)
+      try {
+        // Always establish live status after saving, including before a retry.
+        const status = await client.fetchQuery({ ...accessQuery(accessProps), staleTime: 0 })
+        if (!accessGuard(status).valid) throw { code: 'action_unavailable' }
+        // An uncertain prior response may already have created the invitation.
+        if (status.state !== 'invited') {
+          if (!status.can_invite) throw { code: 'action_unavailable' }
+          await inviteRecord(accessProps, email)
+        }
+        setInviteFailed(false)
+      } catch (error) {
+        setInviteFailed(true)
+        void refresh()
+        throw error
+      }
+    }
   }, onSuccess: async () => { await refresh(); controls.close() }, onError: async (error: WriteFailure) => {
     if (error.status === 403 && !codes.includes(error.code ?? '')) props.onDenied?.()
     // Keep the refused draft frozen, but immediately show the current detail value.
     if (inline && error.code === 'version_conflict') await inline.refresh().catch(() => {})
   } })
-  const reload = useMutation({ mutationFn: () => inline ? inline.refresh() : request(readQuery(model, entity, caps, { id: current!.id, purpose: 'edit' })), onSuccess: result => { if (!result.data[0]) return; setCurrent(result.data[0]); saved.current = { row: result.data[0] }; setGeneration(value => value + 1); mutation.reset() } })
+  const reload = useMutation({ mutationFn: () => inline ? inline.refresh() : request(readQuery(model, entity, caps, { id: (current ?? saved.current.row)!.id, purpose: 'edit' })), onSuccess: result => { if (!result.data[0]) return; setCurrent(result.data[0]); setContactEmail(undefined); contactSeed.current = undefined; saved.current = { row: result.data[0] }; setGeneration(value => value + 1); mutation.reset() } })
   const breadcrumbDenied = !visibleEntities(model, caps).includes(entity) || [403, 404].includes((mutation.error as WriteFailure | null)?.status ?? 0) || !!reload.error
   usePublishRecordBreadcrumb(!inline && row && current ? { orgId, entity, id: String(current.id), status: breadcrumbDenied ? 'unavailable' : 'ready', label: breadcrumbDenied ? undefined : breadcrumbRecordLabel(model, entity, current, caps, i18n.language, t) } : undefined, 'edit')
   const conflict = (mutation.error as { code?: string } | null)?.code === 'version_conflict'
   const values = Object.fromEntries(writableFields(model, entity, caps).filter(field => editingRow?.[field] !== undefined).map(field => [field, editingRow![field]]))
   if (needsEditRead && editRecord.isPending || row && relations.length && initial.isPending) return <p role="status">{t('loading')}</p>
-  if (needsEditRead && (editRecord.error || !editingRow)) return <><WriteError error={editRecord.error ?? { code: 'entity_not_found' }} /><Button onClick={() => { void editRecord.refetch() }}>{t('reloadRetry')}</Button></>
-  if (initial.error) return <><WriteError error={initial.error} /><Button onClick={() => { void initial.refetch() }}>{t('reloadRetry')}</Button></>
-  return <><WriteError error={mutation.error ?? reload.error} schema={schema} />
+  if (needsEditRead && (editRecord.error && !editRecord.data || !editingRow)) return <><WriteError error={editRecord.error ?? { code: 'entity_not_found' }} /><Button onClick={() => { void editRecord.refetch() }}>{t('reloadRetry')}</Button></>
+  if (initial.error && !initial.data) return <><WriteError error={initial.error} /><Button onClick={() => { void initial.refetch() }}>{t('reloadRetry')}</Button></>
+  return <><WriteError error={mutation.error ?? reload.error ?? versionError ?? editRecord.error ?? initial.error} schema={schema} />
+    {versionError != null && <Button type="button" onClick={() => { void reconcileVersion().catch(() => {}) }}>{t('reloadRetry')}</Button>}
+    {canInviteAtCreate && <fieldset disabled={mutation.isPending || !!savedRow && createAccess.blocked} className="space-y-2">
+      <label><input type="checkbox" checked={inviteNow} onChange={event => setInviteNow(event.target.checked)} /> {t('rowInviteNow')}</label>
+      {inviteNow && <label>{t('rowInviteEmail')}<input aria-label={t('rowInviteEmail')} type="email" value={email} onChange={event => setInvitationEmail(event.target.value)} /></label>}
+    </fieldset>}
+    {inviteFailed && (mutation.error as WriteFailure)?.code !== 'invitation_delivery_failed' && <p role="alert">{t('rowInviteSavedFailed')}</p>}
+    {accountForm && (row || savedRow) && <ApplicationAccessCard {...props} row={row ?? savedRow!} email={liveEmail} onChanged={reconcileVersion} />}
+
     {conflict && inline && <p role="status">{t('inlineFreshValue')}: {inline.value}</p>}
     {conflict && <Button type="button" disabled={reload.isPending} onClick={() => reload.mutate()}>{t('reloadRetry')}</Button>}
-    <RegistryForm secondaryAction={inline && <Button data-inline-cancel type="button" variant="outline" disabled={mutation.isPending || reload.isPending} onClick={controls.close}>{t('cancel')}</Button>} optionLabel={value => t(`value_${value}`, { defaultValue: value })} key={generation} requireDirty={!!current} partial={!!current} schema={schema} lockedValues={props.lockedValues} values={{ ...props.initialValues, ...values, ...initial.data }} label={name => inline?.label ?? formLabel(model, entity, name, t)} submitLabel={inline ? t('save', { context: '' }) : t(current ? 'save' : 'create')} invalidLabel={t('invalidField')} pending={mutation.isPending || reload.isPending} disabled={conflict} serverErrors={translatedFieldErrors(mutation.error, schema, t)} onSubmit={data => mutation.mutateAsync(data)} relation={(name, value, change, error) => {
+    <div onChange={event => {
+      const input = event.target as HTMLInputElement
+      if (contactField && input.closest('[data-write-field]')?.getAttribute('data-write-field') === contactField) setContactEmail(input.value)
+    }}><RegistryForm secondaryAction={inline && <Button data-inline-cancel type="button" variant="outline" disabled={mutation.isPending || reload.isPending} onClick={controls.close}>{t('cancel')}</Button>} optionLabel={value => t(`value_${value}`, { defaultValue: value })} key={generation} requireDirty={!!current} partial={!!current} schema={schema} lockedValues={props.lockedValues} values={{ ...props.initialValues, ...values, ...initial.data }} label={name => inline?.label ?? formLabel(model, entity, name, t)} submitLabel={inviteFailed ? t('rowInviteRetry') : inline ? t('save', { context: '' }) : t(current ? 'save' : 'create')} invalidLabel={t('invalidField')} pending={mutation.isPending || reload.isPending} disabled={conflict || versionError != null || !!savedRow && createAccess.blocked} serverErrors={translatedFieldErrors(mutation.error, schema, t)} onSubmit={data => mutation.mutateAsync(data)} relation={(name, value, change, error) => {
       const relation = relations.find(([key]) => key === name)?.[1]
       if (relation?.through) return <ManyRelationField {...props} name={name} target={relation.through.entity} value={value} onChange={change} error={error} />
       const field = model.entities[entity].fields[name]
       if (field?.type !== 'ref' || !field.entity) return undefined
       return <RelationPicker {...props} allowCreate={inline ? false : undefined} label={inline?.label} target={field.entity} field={name} value={value} selectedRow={selectedReferenceRow(model, entity, name, current)} onChange={change} error={error} />
-    }} />
+    }} /></div>
   </>
 }
 
@@ -225,7 +285,7 @@ function CommandMutation({ schema, name, values, controls, row, ...props }: Cont
     return <RelationPicker {...props} allowCreate={false} target={target} field={field} label={label(field)} value={value} onChange={change} error={error} />
   }} /></>
 }
-/** Instance forms and generated account actions share command writes and refreshes. */
+/** Instance command forms share writes and refreshes. */
 export function useCommandMutation(props: Pick<Context, 'write' | 'onDenied'>, name: string, controls: { close: () => void; submissionKey: string }) {
   const refresh = useRefresh()
   return useMutation({ mutationFn: (data: Record<string, any>) => props.write(`/commands/${name}`, 'POST', { ...data, idempotencyKey: controls.submissionKey }), onSuccess: async () => { await refresh(); controls.close() }, onError: (error: WriteFailure) => { if (commandError(error).denied) props.onDenied?.() } })
@@ -281,73 +341,138 @@ export function ContextCreateAction(props: Context & { lockedValues: Record<stri
   return <><Button onClick={() => setOpen(true)}>{resourceCreateLabel(props.model, props.entity, i18n.language, t, props.caps)}</Button><GeneratedCreateDialog {...props} open={open} onOpenChange={setOpen} /></>
 }
 
-type AccessContext = Omit<Context, 'write'> & { write?: WriteRequest; row: Record<string, any>; disabled?: boolean }
-
-function useApplicationAccess(props: Omit<AccessContext, 'row'> & { row?: Record<string, any> }, observeOnly = false) {
-  const definition = props.model.entities[props.entity]
-  const enabled = !props.disabled && !!props.write && !!props.row && !!(definition?.rowAccess ?? definition?.rowInvitations)
-  const status = useQuery<RowAccessStatus>({ queryKey: ['row-access', props.orgId, props.entity, props.row?.id, props.caps],
-    queryFn: () => props.write!(`/orgs/${encodeURIComponent(props.orgId)}/row-access/${encodeURIComponent(props.entity)}/${encodeURIComponent(props.row!.id)}`, 'GET'), enabled: enabled && !observeOnly, retry: false })
-  // Keep cached actions and inconsistency guards while a background read reconciles.
-  const data = enabled && !status.error ? status.data : undefined
+type AccessContext = Omit<Context, 'write'> & { write?: WriteRequest; row: Record<string, any>; disabled?: boolean; email?: string; onChanged?: () => Promise<void> }
+type AccessStatus = RowAccessStatus & { recordActions?: Record<string, { enabled: boolean }>; invitationUnavailable?: boolean }
+function accessQuery(props: Omit<AccessContext, 'row'> & { row?: Record<string, any> }) {
+  return { queryKey: ['row-access', props.orgId, props.entity, props.row?.id, props.caps], retry: false as const,
+    queryFn: async (): Promise<AccessStatus> => {
+      if (!hasRecordAccess(props.model, props.entity)) return props.write!(`/orgs/${encodeURIComponent(props.orgId)}/row-access/${encodeURIComponent(props.entity)}/${encodeURIComponent(props.row!.id)}`, 'GET')
+      const row = await props.write!(`/api/${encodeURIComponent(props.entity)}/${encodeURIComponent(props.row!.id)}`, 'GET')
+      const access = row.access
+      return { ...access, state: access?.state === 'linked' ? 'signed_in' : access?.state,
+        linked_accounts: access?.linked_accounts ?? (access?.account ? [{ id: access.account.id, label: access.account.display_name ?? access.account.email }] : []),
+        inconsistency: access?.inconsistency ?? null, can_invite: row.actions?.invite?.enabled === true,
+        can_cancel: row.actions?.cancel_invite?.enabled === true, invitationUnavailable: row.access === undefined, recordActions: row.actions ?? {} }
+    } }
+}
+function accessGuard(data?: AccessStatus) {
   const multiple = !!data && (data.inconsistency === 'multiple_linked_accounts' || (data.linked_accounts?.length ?? 0) > 1)
-  const valid = !!data && !multiple && ['no_account', 'invited', 'expired', 'signed_in'].includes(data.state) && data.inconsistency == null
-  const actions = !valid ? [] : data.state === 'no_account' && data.can_invite ? ['invite'] : ['invited', 'expired'].includes(data.state) && data.invitation
-    ? [...(data.can_invite ? ['resend', ...(data.state === 'invited' ? ['copy'] : [])] : []), ...(data.can_cancel ? ['cancel'] : [])]
-    : data.state === 'signed_in' && props.caps.commands?.includes(`${props.entity}/remove_access`) ? ['remove'] : []
-  return { enabled, status, multiple, valid, actions }
+  return { multiple, valid: !!data && !multiple && ['no_account', 'invited', 'expired', 'signed_in'].includes(data.state) && data.inconsistency == null }
+}
+function useApplicationAccess(props: Omit<AccessContext, 'row'> & { row?: Record<string, any> }) {
+  const pending = useIsMutating({ mutationKey: ['account-access', props.orgId, props.entity] }) > 0
+  const definition = props.model.entities[props.entity]
+  const supported = hasRecordAccess(props.model, props.entity) || !!(definition?.rowAccess ?? definition?.rowInvitations)
+  const enabled = !!props.write && !!props.row && supported
+  const status = useQuery({ ...accessQuery(props), enabled })
+  const data = enabled && !status.error ? status.data : undefined
+  const { multiple, valid } = accessGuard(data)
+  const granted = (name: string) => props.caps.commands?.includes(`${props.entity}/${name}`)
+  const v3 = hasRecordAccess(props.model, props.entity)
+  // A structurally unavailable Members status does not remove separately granted
+  // legacy link/unlink controls. An attempted but uncertain status always blocks.
+  // Without invitation-read authority, V3 still returns independently
+  // authorized live link/unlink availability. Omitted access is distinct from
+  // an unknown state, failed read or an inconsistent response.
+  const explicitOnly = !!data && v3 && definition.rowAccess === false && data.invitationUnavailable === true && data.inconsistency == null && !multiple
+  const explicit = !!props.write && !!props.row && (!supported || valid || explicitOnly)
+  const inviteGranted = v3 ? granted('access_invite') : data?.can_invite
+  const cancelGranted = v3 ? granted('access_cancel_invite') : data?.can_cancel
+  const actions = !valid ? [] : data!.state === 'no_account' && data!.can_invite && inviteGranted ? ['invite'] : ['invited', 'expired'].includes(data!.state) && data!.invitation
+    ? [...(inviteGranted ? ['resend', ...(data!.state === 'invited' ? ['copy'] : [])] : []), ...(data!.can_cancel && cancelGranted ? ['cancel', ...(inviteGranted ? ['change'] : [])] : [])]
+    : []
+  if (valid && data!.state === 'expired' && inviteGranted && data!.can_invite && !actions.includes('change')) actions.push('change')
+  if (explicit && (v3 ? granted('access_link_account') && data?.recordActions?.link_account?.enabled : granted('link_account'))) actions.push('link')
+  if (explicit && (v3 ? granted('access_unlink_account') && data?.recordActions?.unlink_account?.enabled : granted('remove_access'))) actions.push('remove')
+  if (valid && data!.state === 'signed_in' && inviteGranted && actions.includes('remove')) actions.push('change')
+  return { enabled, supported, status, multiple, valid, explicitOnly, actions, blocked: pending || !!props.disabled || !props.write || !props.row || supported && ((!valid && !explicitOnly) || status.isFetching || !!status.error) }
 }
 
-/** The same status controller/view serves the compact list and the detail card. */
+/** All account action entry points use this controller, including nested edit dialogs. */
 export function GeneratedRowInvitation(props: Context & { row: Record<string, any>; disabled?: boolean }) {
-  return props.disabled || !props.model.entities[props.entity]?.rowInvitations ? null : <ApplicationAccess {...props} />
+  return props.disabled || !(props.model.entities[props.entity]?.accountLink || props.model.entities[props.entity]?.rowInvitations) ? null : <ApplicationAccess {...props} />
 }
 export function ApplicationAccessCard(props: AccessContext) {
   const { t } = useTranslation()
   return <Card data-application-access=""><CardHeader><CardTitle>{t('rowAccess')}</CardTitle></CardHeader><CardContent><ApplicationAccess {...props} /></CardContent></Card>
 }
 function ApplicationAccess(props: AccessContext) {
-  const { enabled, status, multiple, valid, actions } = useApplicationAccess(props)
+  const { enabled, status, multiple, valid, explicitOnly, actions, blocked } = useApplicationAccess(props)
   const { t } = useTranslation()
-  if (!enabled) return <span role="status">{t('rowAccessUnavailable')}</span>
-  if (status.error) {
-    const code = (status.error as { status?: number }).status
-    return <span role="alert">{t(code === 403 ? 'rowAccessDenied' : code === 404 ? 'rowAccessUnavailable' : 'requestFailed')}</span>
-  }
-  if (!status.data) return <span role="status">{t('loading')}</span>
   const data = status.data
-  if (multiple) return <span role="alert">{t('rowAccessMultiple')}</span>
-  if (!valid) return <span role="alert">{t('requestFailed')}</span>
-  const pending = data.invitation
-  const account = data.linked_accounts?.[0]
+  const delivery = useQuery({ queryKey: ['row-access-delivery', props.orgId, props.entity, props.row.id, data?.invitation?.id, props.caps], retry: false,
+    enabled: !blocked && data?.state === 'invited' && !!data.invitation && actions.includes('resend'),
+    queryFn: async () => {
+      const result = await props.write!(`/orgs/${encodeURIComponent(props.orgId)}/invitations/${encodeURIComponent(data!.invitation!.id)}/delivery`, 'GET')
+      return result.delivery?.status === 'failed'
+    } })
+  const message = !enabled ? 'rowAccessUnavailable' : status.error ? ((status.error as WriteFailure).status === 403 ? 'rowAccessDenied' : (status.error as WriteFailure).status === 404 ? 'rowAccessUnavailable' : 'requestFailed') : !data ? 'loading' : explicitOnly ? 'rowAccessUnavailable' : multiple ? 'rowAccessMultiple' : !valid ? 'requestFailed' : undefined
+  // Keep mounted dialogs/drafts during a cached refetch; every trigger and submit
+  // is disabled by the same guard until the response settles.
   return <div className="flex flex-wrap items-center gap-2" aria-label={t('rowAccess')}>
-    <Badge role="status" variant="secondary" className={data.state === 'expired' ? 'bg-red-100 text-red-800' : data.state === 'invited' ? 'bg-amber-100 text-amber-800' : data.state === 'signed_in' ? 'bg-green-100 text-green-800' : undefined}>{t(`rowAccess_${data.state}`)}</Badge>
-    {account && <span className="text-sm break-all">{account.label ?? account.id}</span>}
-    {pending && <span className="text-sm break-all">{pending.email}</span>}
+    {message ? <span role={status.error || data ? 'alert' : 'status'}>{t(message)}</span> : <>
+      <Badge role="status" variant="secondary" className={data!.state === 'expired' ? 'bg-red-100 text-red-800' : data!.state === 'invited' ? 'bg-amber-100 text-amber-800' : data!.state === 'signed_in' ? 'bg-green-100 text-green-800' : undefined}>{t(`rowAccess_${data!.state}`)}</Badge>
+      {data!.linked_accounts?.[0] && <span className="text-sm break-all">{data!.linked_accounts[0].label ?? data!.linked_accounts[0].id}</span>}
+      {data!.invitation && <span className="text-sm break-all">{data!.invitation.email}</span>}
+    </>}
+    {enabled && !status.isFetching && (status.error || data && !valid && !multiple && !explicitOnly) && <Button type="button" variant="outline" onClick={() => { void status.refetch() }}>{t('reloadRetry')}</Button>}
+    {delivery.data === true && <span role="alert">{t('rowInviteDeliveryFailed')}</span>}
+    {status.isFetching && data && !multiple && <span role="status">{t('rowAccessRefreshing')}</span>}
     {actions.map(action => <ResourceFormDialog key={action} entity={props.entity} compact
-      schema={action === 'invite' ? rowInviteSchema : emptyRowSchema} trigger={t(`rowInvite_${action}`)} triggerLabel={t(`rowInvite_${action}`)}
-      title={t(`rowInvite_${action}`)} description={t(action === 'remove' ? 'rowInviteRemoveDescription' : 'rowInviteDescription')} cancelLabel={t('cancel')}>
-      {controls => <RowInvitationMutation {...props} disabled={props.disabled || status.isFetching} write={props.write!} action={action} invitationId={pending?.id} controls={controls} />}
+      disabledReason={blocked ? t('rowAccessRefreshing') : undefined}
+      schema={actionSchema(action)} trigger={t(`rowInvite_${action}`)} triggerLabel={t(`rowInvite_${action}`)}
+      title={t(`rowInvite_${action}`)} description={t(action === 'remove' || action === 'change' && data?.state === 'signed_in' ? 'rowInviteRemoveDescription' : 'rowInviteDescription')} cancelLabel={t('cancel')}>
+      {controls => <RowInvitationMutation {...props} write={props.write!} action={action} controls={controls} />}
     </ResourceFormDialog>)}
   </div>
 }
 const emptyRowSchema = { type: 'object' as const, properties: {}, additionalProperties: false }
 const rowInviteSchema = { type: 'object' as const, properties: { email: { type: 'string' as const, format: 'email' } }, required: ['email'], additionalProperties: false }
-function RowInvitationMutation(props: Context & { row: Record<string, any>; disabled?: boolean; action: string; invitationId?: string; controls: { close: () => void } }) {
-  const { t } = useTranslation(); const refresh = useRefresh()
-  const mutation = useMutation({ gcTime: 0, retry: false, mutationFn: async (values: Record<string, any>) => {
+const rowLinkSchema = { type: 'object' as const, properties: { user_id: { type: 'string' as const } }, required: ['user_id'], additionalProperties: false }
+const actionSchema = (action: string) => action === 'invite' || action === 'change' ? rowInviteSchema : action === 'link' ? rowLinkSchema : emptyRowSchema
+async function inviteRecord(props: AccessContext & { write: WriteRequest }, email: string) {
+  const result = hasRecordAccess(props.model, props.entity)
+    ? await props.write(`/api/${encodeURIComponent(props.entity)}/${encodeURIComponent(props.row.id)}/actions/invite`, 'POST', { email })
+    : await props.write(`/orgs/${encodeURIComponent(props.orgId)}/invitations`, 'POST', { email, target: { entity: props.entity, row: props.row.id } })
+  if (result?.delivery?.status === 'failed') throw { code: 'invitation_delivery_failed' }
+  // Discard accept_url and any other credential-bearing result immediately.
+}
+function RowInvitationMutation(props: Context & AccessContext & { action: string; controls: { close: () => void; submissionKey: string } }) {
+  const { t } = useTranslation(); const refresh = useRefresh(); const client = useQueryClient()
+  const access = useApplicationAccess(props)
+  const mutation = useMutation({ mutationKey: ['account-access', props.orgId, props.entity], gcTime: 0, retry: false, mutationFn: async (values: Record<string, any>) => {
+    if (access.blocked || !access.actions.includes(props.action)) throw { code: 'action_unavailable' }
     const base = `/orgs/${encodeURIComponent(props.orgId)}/invitations`
-    if (props.action === 'invite') await props.write(base, 'POST', { email: values.email, target: { entity: props.entity, row: props.row.id } })
-    else if (props.action === 'copy') {
-      const result = await props.write(`${base}/${encodeURIComponent(props.invitationId!)}/copy-link`, 'POST', {})
-      await navigator.clipboard.writeText(result.accept_url)
+    const record = `/api/${encodeURIComponent(props.entity)}/${encodeURIComponent(props.row.id)}/actions`
+    const v3 = hasRecordAccess(props.model, props.entity)
+    const cancel = async () => { if (v3) await props.write(`${record}/cancel_invite`, 'POST', {}); else await props.write(`${base}/${encodeURIComponent(access.status.data!.invitation!.id)}`, 'DELETE') }
+    const remove = async () => { if (v3) await props.write(`${record}/unlink_account`, 'POST', {}); else await props.write(`/commands/${props.entity}/remove_access`, 'POST', { rowId: props.row.id, idempotencyKey: props.controls.submissionKey }) }
+    let failure: unknown
+    try {
+      if (props.action === 'invite') await inviteRecord(props, values.email)
+      else if (props.action === 'link') {
+        if (v3) await props.write(`${record}/link_account`, 'POST', { user_id: values.user_id })
+        else await props.write(`/commands/${props.entity}/link_account`, 'POST', { rowId: props.row.id, userId: values.user_id, idempotencyKey: props.controls.submissionKey })
+      } else if (props.action === 'change') {
+        if (access.status.data?.state === 'signed_in') await remove(); else if (access.status.data?.state !== 'expired') await cancel()
+        const data = await client.fetchQuery({ ...accessQuery(props), staleTime: 0 })
+        if (!accessGuard(data).valid || !data.can_invite) throw { code: 'action_unavailable' }
+        await inviteRecord(props, values.email)
+      } else if (props.action === 'copy') {
+        const result = await props.write(`${base}/${encodeURIComponent(access.status.data!.invitation!.id)}/copy-link`, 'POST', {})
+        await navigator.clipboard.writeText(result.accept_url)
+      } else if (props.action === 'resend') await props.write(`${base}/${encodeURIComponent(access.status.data!.invitation!.id)}/resend`, 'POST', {})
+      else if (props.action === 'cancel') await cancel()
+      else await remove()
+    } catch (error) { failure = error } finally {
+      // Reconcile even an uncertain/partially successful response before retry,
+      // retaining the original denial if a reconciliation read also fails.
+      try { await refresh(); await props.onChanged?.() } catch (error) { failure ??= error }
     }
-    else if (props.action === 'resend') await props.write(`${base}/${encodeURIComponent(props.invitationId!)}/resend`, 'POST', {})
-    else if (props.action === 'cancel') await props.write(`${base}/${encodeURIComponent(props.invitationId!)}`, 'DELETE')
-    else await props.write(`/commands/${props.entity}/remove_access`, 'POST', { rowId: props.row.id })
-    // No accept_url/credential enters the mutation cache.
-  }, onSuccess: async () => { await refresh(); props.controls.close() }, onError: (error: WriteFailure) => { if (error.status === 403) props.onDenied?.() } })
-  return <><WriteError error={mutation.error} /><RegistryForm schema={props.action === 'invite' ? rowInviteSchema : emptyRowSchema}
-    label={() => t('email')} submitLabel={t(`rowInvite_${props.action}`)} invalidLabel={t('invalidField')} pending={mutation.isPending} disabled={props.disabled}
+    if (failure) throw failure
+    // Credentials are never returned to the mutation cache.
+  }, onSuccess: () => props.controls.close(), onError: (error: WriteFailure) => { if (error.status === 403) props.onDenied?.() } })
+  return <><WriteError error={mutation.error} /><RegistryForm schema={actionSchema(props.action)} values={{ email: props.email ?? '' }}
+    label={name => t(name === 'user_id' ? 'rowInviteAccount' : 'email')} submitLabel={t(`rowInvite_${props.action}`)} invalidLabel={t('invalidField')} pending={mutation.isPending} disabled={access.blocked}
     onSubmit={values => mutation.mutateAsync(values)} /></>
 }

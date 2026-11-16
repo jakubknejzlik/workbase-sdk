@@ -257,3 +257,33 @@ it('accept winning before unlink retains its staff membership and clears only th
   expect((await request('/api/worker/local', 'recipient')).status).toBe(404)
   expect(await (await request('/api/worker', 'recipient')).json()).toMatchObject({ data: [] })
 })
+
+it('review5 V3 accountLink publishes the whole family and dedicated handlers succeed with console input shapes', async () => {
+  const contract = await (await request('/o/org-a/console-model')).json() as any
+  expect(contract.model.entities.worker.accountLink).toEqual({ field: 'user', entity: 'users' })
+  const family = ['link_account', 'remove_access', ...names.map(name => `access_${name}`)]
+  expect(contract.model.commands.filter((command: any) => family.includes(command.name.split('/')[1])).map((command: any) => command.name).sort()).toEqual(family.map(name => `worker/${name}`).sort())
+  for (const name of names) {
+    const response = await request(`/commands/worker/access_${name}`, 'admin', 'POST', { id: 'local', ...bodyFor(name) })
+    expect(response.status).toBe(405)
+    expect(await response.json()).toEqual({ error: 'unsupported_command' })
+  }
+  for (const [name, body] of [['invite', { email: 'recipient@example.test' }], ['cancel_invite', {}], ['link_account', { user_id: 'recipient' }], ['unlink_account', {}]] as const) {
+    const response = await act('local', name, body)
+    expect(response.ok, `${name}: ${await response.clone().text()}`).toBe(true)
+  }
+  expect(await env.DB.prepare("SELECT user FROM worker WHERE id='local'").first('user')).toBeNull()
+  expect(await env.DB.prepare("SELECT count(*) n FROM worker WHERE id='local'").first('n')).toBe(1)
+})
+it('V3 explicit link/unlink remain authorized when invitation status cannot be disclosed', async () => {
+  const config = workerAccessFixture()
+  config.effectiveAccess = { ...config.effectiveAccess!, system: config.effectiveAccess!.system.map(rule => rule.role === 'admin' && rule.action === 'invitations.read' ? { ...rule, decision: 'deny' } : rule) }
+  app = createApp(config, runtime())
+  const contract = await (await request('/o/org-a/console-model')).json() as any
+  expect(contract.model.entities.worker.rowAccess).toBe(false)
+  const row = await (await request('/api/worker/local')).json() as any
+  expect(row).not.toHaveProperty('access')
+  expect(row.actions.link_account.enabled).toBe(true)
+  expect((await act('local', 'link_account', { user_id: 'recipient' })).status).toBe(200)
+  expect((await act('local', 'unlink_account')).status).toBe(200)
+})

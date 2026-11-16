@@ -93,8 +93,9 @@ it.each(['link_account', 'remove_access'])('unavailable status preserves the aut
   const user = userEvent.setup()
   const label = action === 'link_account' ? 'Link account' : 'Remove access'
   await user.click(screen.getByRole('button', { name: label }))
+  if (action === 'link_account') await user.type(within(screen.getByRole('dialog')).getByLabelText('Account ID'), 'account')
   await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: label }))
-  await waitFor(() => expect(write).toHaveBeenCalledWith(`/commands/entries/${action}`, 'POST', { rowId: 'entry', idempotencyKey: expect.any(String) }))
+  await waitFor(() => expect(write).toHaveBeenCalledWith(`/commands/entries/${action}`, 'POST', { rowId: 'entry', ...(action === 'link_account' ? { userId: 'account' } : {}), idempotencyKey: expect.any(String) }))
   expect(write.mock.calls.every(([, method]) => method !== 'GET')).toBe(true)
 })
 it.each(['no_account', 'invited', 'expired', 'signed_in'])('available %s status offers each authorized account command exactly once', async state => {
@@ -104,7 +105,7 @@ it.each(['no_account', 'invited', 'expired', 'signed_in'])('available %s status 
   expect(screen.getAllByRole('button', { name: 'Link account' })).toHaveLength(1)
   expect(screen.getAllByRole('button', { name: 'Remove access' })).toHaveLength(1)
   const card = screen.getByText('Application access').closest('[data-application-access]') as HTMLElement
-  expect(within(card).queryAllByRole('button', { name: 'Remove access' })).toHaveLength(state === 'signed_in' ? 1 : 0)
+  expect(within(card).queryAllByRole('button', { name: 'Remove access' })).toHaveLength(1)
 })
 it.each([false, true])('account commands remain individually capability gated with status available=%s', async available => {
   await mount({ available, manage: available, commands: ['entries/link_account'], status: { state: 'signed_in', can_invite: false, can_cancel: false, inconsistency: null } })
@@ -218,8 +219,8 @@ it.each([403, 404, 500])('failed refresh (%s) replaces cached status and closes 
   expect(screen.queryByText('No access')).toBeNull()
   expect(screen.queryByRole('dialog')).toBeNull()
   expect(screen.queryByRole('button', { name: 'Invite to application' })).toBeNull()
-  expect(screen.getAllByRole('button', { name: 'Link account' })).toHaveLength(1)
-  expect(screen.getAllByRole('button', { name: 'Remove access' })).toHaveLength(1)
+  expect(screen.queryByRole('button', { name: 'Link account' })).toBeNull()
+  expect(screen.queryByRole('button', { name: 'Remove access' })).toBeNull()
 })
 it('unknown status is a failure, never an access grant or no-access fallback', async () => {
   await mount({ status: { state: 'unknown', can_invite: true, inconsistency: null } })
