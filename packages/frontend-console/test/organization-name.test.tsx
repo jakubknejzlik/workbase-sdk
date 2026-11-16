@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { I18nextProvider } from 'react-i18next'
 import { createInstance } from 'i18next'
-import { organizationNameCases } from '../../test-support/src/organization-name-cases'
+import { organizationNameCases, organizationNameTypeCases } from '../../test-support/src/organization-name-cases'
 import { MutationSession } from '@workbasehq/ui'
 import { CreateOrganizationForm } from '../src/create-organization-dialog'
 import { OrganizationSettings } from '../src/settings'
@@ -65,7 +65,7 @@ for (const surface of ['create', 'settings'] as const) {
         expect(form.stored()).toBe(c.value)
       }
     })
-    const reasons = [...new Set(organizationNameCases.flatMap(c => c.reason ? [c.reason] : []))]
+    const reasons = [...new Set([...organizationNameCases, ...organizationNameTypeCases].flatMap(c => c.reason ? [c.reason] : []))]
     it.each(reasons)(`${surface} ${language}: maps server 400 %s to name`, async reason => {
       const form = await mount(surface, language, reason)
       form.change('Valid label'); form.submit()

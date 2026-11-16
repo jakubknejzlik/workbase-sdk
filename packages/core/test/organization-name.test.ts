@@ -1,6 +1,6 @@
 import { beforeEach, expect, it, describe } from 'vitest'
 import { env } from 'cloudflare:workers'
-import { organizationNameCases } from '../../test-support/src/organization-name-cases'
+import { organizationNameCases, organizationNameTypeCases } from '../../test-support/src/organization-name-cases'
 import { setup, runtime, request, json } from '@workbasehq/test-support/helpers'
 import { KernelRegistry } from '../src/kernel/registry'
 import sample from './fixtures/sample/config'
@@ -11,7 +11,7 @@ beforeEach(async () => { app = await setup() })
 const stored = () => env.DB.prepare('SELECT id,name FROM organizations ORDER BY id').all()
 for (const [method, path] of [['POST', '/orgs'], ['POST', '/internal/organizations'], ['PATCH', '/organizations/org-a'], ['PATCH', '/orgs/org-a']] as const) {
   describe(`${method} ${path}`, () => {
-    it.each(organizationNameCases)('$label', async c => {
+    it.each([...organizationNameCases, ...organizationNameTypeCases])('$label', async c => {
       const before = (await stored()).results
       const response = path === '/internal/organizations'
         ? await app.request(`http://localhost${path}`, { method, headers: { 'Content-Type': 'application/json', 'X-Internal-Token': 'synthetic-test-internal' }, body: JSON.stringify({ name: c.input, ownerEmail: 'owner.a@example.test' }) })

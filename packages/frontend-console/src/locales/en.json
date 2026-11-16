@@ -33,6 +33,8 @@
   "createDescription": "Create a organization for your team.",
   "organizationName": "Organization name",
   "create": "Create",
+  "organizationName_required": "Enter an organization name.",
+  "organizationName_not_string": "Enter the organization name as text.",
   "organizationName_empty": "Enter an organization name.",
   "organizationName_too_long": "Use at most 200 characters for the organization name.",
   "organizationName_control_character": "Remove control characters from the organization name.",

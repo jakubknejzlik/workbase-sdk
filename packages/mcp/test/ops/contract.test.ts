@@ -1,4 +1,4 @@
-import { organizationNameCases } from '../../../test-support/src/organization-name-cases'
+import { organizationNameCases, organizationNameTypeCases } from '../../../test-support/src/organization-name-cases'
 import { afterEach, expect, test, vi } from 'vitest'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
@@ -108,7 +108,7 @@ test('bootstrap maps fixed denial codes and suppresses arbitrary upstream error 
 test('rejects malformed arguments and authority overrides before making any request', async () => {
   const { call, request } = await connect(undefined, mailboxEnv)
   for (const [name, args] of [
-    ['provision_organization', {}], ['provision_organization', { name: 'Org', ownerEmail: 'invalid' }],
+    ['provision_organization', { name: 'Org', ownerEmail: 'invalid' }],
     ['provision_organization', { name: 'Org', ownerEmail: 'a@example.test', role: 'owner' }],
     ['provision_organization', { name: 'Org', ownerEmail: 'a@example.test', token }],
     ['bootstrap_instance_owner', {}], ['bootstrap_instance_owner', { ownerEmail: 'invalid' }],
@@ -201,7 +201,7 @@ test('data server still strips accept_url from invitation results', async () => 
 })
 
 
-test.each(organizationNameCases)('organization name contract: $label', async c => {
+test.each([...organizationNameCases, ...organizationNameTypeCases])('organization name contract: $label', async c => {
   let stored: string | undefined
   const request = vi.fn<typeof fetch>().mockImplementation(async (_url, init) => {
     stored = JSON.parse(init!.body as string).name
@@ -221,7 +221,7 @@ test.each(organizationNameCases)('organization name contract: $label', async c =
   }
 })
 
-const organizationNameReasonCases = [...new Set(organizationNameCases.flatMap(c => c.reason ? [c.reason] : []))]
+const organizationNameReasonCases = [...new Set([...organizationNameCases, ...organizationNameTypeCases].flatMap(c => c.reason ? [c.reason] : []))]
 test.each(organizationNameReasonCases)('preserves upstream organization-name reason %s', async reason => {
   const request = vi.fn<typeof fetch>().mockResolvedValue(Response.json({ error: 'invalid_organization_name', detail: { field: 'name', reason }, hint: token }, { status: 400 }))
   const { call } = await connect(request)
@@ -238,4 +238,12 @@ test('does not reflect unknown upstream organization-name details', async () => 
   const { call } = await connect(request)
   for (let i = 0; i < 3; i++) expect((await call('provision_organization', { name: 'Valid label', ownerEmail: 'owner@example.test' })).structuredContent)
     .toEqual({ ok: false, code: 'http_error', status: 400 })
+})
+
+test('missing provision arguments report the required name field', async () => {
+  const { call, request } = await connect()
+  expect((await call('provision_organization')).structuredContent).toEqual({
+    ok: false, code: 'invalid_organization_name', status: 400, detail: { field: 'name', reason: 'required' },
+  })
+  expect(request).not.toHaveBeenCalled()
 })

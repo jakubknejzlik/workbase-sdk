@@ -35,6 +35,8 @@
   "createDescription": "Vytvořte organizaci pro svůj tým.",
   "organizationName": "Název organizace",
   "create": "Vytvořit",
+  "organizationName_required": "Zadejte název organizace.",
+  "organizationName_not_string": "Zadejte název organizace jako text.",
   "organizationName_empty": "Zadejte název organizace.",
   "organizationName_too_long": "Název organizace může mít nejvýše 200 znaků.",
   "organizationName_control_character": "Odstraňte řídicí znaky z názvu organizace.",
