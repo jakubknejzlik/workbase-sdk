@@ -32,10 +32,12 @@ it('OI invitation acceptance rolls back consumption when the membership has zero
   const invitation = await json(await request(app, '/orgs/org-a/invitations', 'POST', { email: 'owner.b@example.test', role: 'viewer' }))
   const token = mailbox.acceptUrl().searchParams.get('token')!
   await env.DB.exec("CREATE TRIGGER skip_membership BEFORE INSERT ON memberships BEGIN SELECT RAISE(IGNORE); END;")
+  // Invitation creation and post-commit delivery already have their own audits.
+  const auditBefore = (await count('audit_outbox'))!
   expect((await request(app, '/invitations/accept', 'POST', { token }, 'owner-b')).status).toBeGreaterThanOrEqual(400)
   expect(await env.DB.prepare('SELECT accepted_at FROM invitations WHERE id=?').bind(invitation.id).first('accepted_at')).toBeNull()
   expect(await env.DB.prepare("SELECT count(*) AS n FROM memberships WHERE user_id='owner-b' AND organization_id='org-a'").first('n')).toBe(0)
-  expect(await count('audit_outbox')).toBe(1)
+  expect((await count('audit_outbox'))! - auditBefore).toBe(0)
   expect(await count('atomic_assert')).toBe(0)
   await env.DB.exec('DROP TRIGGER skip_membership;')
   expect((await request(app, '/invitations/accept', 'POST', { token }, 'owner-b')).status).toBe(201)
@@ -64,7 +66,8 @@ it('OI every organization mutation uses one assertion-bearing atomic submission'
     return typeof value === 'function' ? value.bind(target) : value
   } })
   const sql = new WeakMap<D1PreparedStatement, string>()
-  app = createApp(sample, { ...runtime(), ...mailbox.delivery, DB: db })
+  // Measure organization mutations without the separately audited mail delivery lifecycle.
+  app = createApp(sample, { ...runtime(), DB: db })
   async function mutation(path: string, method: string, body: unknown, status: number, user = 'owner-a') {
     const before = submissions.length
     const response = await request(app, path, method, body, user)
@@ -82,7 +85,10 @@ it('OI every organization mutation uses one assertion-bearing atomic submission'
   await mutation('/orgs/org-a/leave', 'POST', undefined, 204, 'dispatcher-a')
   const revoked = await mutation('/orgs/org-a/invitations', 'POST', { email: 'viewer.a@example.test', role: 'viewer' }, 201)
   await mutation(`/orgs/org-a/invitations/${revoked.id}`, 'DELETE', undefined, 204)
-  await mutation('/orgs/org-a/invitations', 'POST', { email: 'owner.b@example.test', role: 'viewer' }, 201)
+  const invitation = await mutation('/orgs/org-a/invitations', 'POST', { email: 'owner.b@example.test', role: 'viewer' }, 201)
+  // Obtain the mailbox proof outside mutation() and through the unobserved database.
+  const deliveringApp = createApp(sample, { ...runtime(), ...mailbox.delivery })
+  expect((await request(deliveringApp, `/orgs/org-a/invitations/${invitation.id}/resend`, 'POST', {})).status).toBe(200)
   await mutation('/invitations/accept', 'POST', { token: mailbox.acceptUrl().searchParams.get('token')! }, 201, 'owner-b')
   const token = await mutation('/orgs/org-a/tokens', 'POST', { name: 'Atomic token', role: 'viewer' }, 201)
   await mutation(`/orgs/org-a/tokens/${token.id}`, 'DELETE', undefined, 204)
