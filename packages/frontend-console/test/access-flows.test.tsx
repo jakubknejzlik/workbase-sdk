@@ -11,17 +11,17 @@ import { ApplicationAccessCard, GeneratedActions, GeneratedCreateDialog, Generat
 import type { Model, Capabilities } from '../../console-generated/src/read'
 vi.mock('@tanstack/react-router', () => ({ useNavigate: () => vi.fn(), Link: ({ children }: { children: ReactNode }) => <a>{children}</a> }))
 const family = ['link_account', 'remove_access', 'access_invite', 'access_cancel_invite', 'access_link_account', 'access_unlink_account']
-async function mount(surface: 'detail' | 'menu' | 'create' | 'edit', options: { labels?: Record<string, string>; language?: 'en' | 'cs'; linkConflict?: boolean; noMembers?: boolean; deferMutation?: boolean; membersRead?: boolean; membersFailure?: boolean; state?: string; grouped?: boolean; unavailable?: boolean; denial?: boolean; inconsistency?: string | null; accounts?: object[]; failure?: boolean; uncertainInvite?: boolean; deliveryFailure?: boolean; contact?: 'contact_email' | 'hidden'; grants?: string[]; v3?: boolean; loading?: boolean; error?: boolean; mutationDenied?: boolean } = {}) {
+async function mount(surface: 'detail' | 'menu' | 'create' | 'edit', options: { admin?: boolean; labels?: Record<string, string>; language?: 'en' | 'cs'; linkConflict?: boolean; noMembers?: boolean; deferMutation?: boolean; membersRead?: boolean; membersFailure?: boolean; state?: string; grouped?: boolean; unavailable?: boolean; denial?: boolean; inconsistency?: string | null; accounts?: object[]; failure?: boolean; uncertainInvite?: boolean; deliveryFailure?: boolean; contact?: 'contact_email' | 'hidden'; grants?: string[]; v3?: boolean; loading?: boolean; error?: boolean; mutationDenied?: boolean } = {}) {
   const v3 = options.v3 !== false
   const model = { instance: 'neutral', limits: { root: 100, relations: 10 }, entities: { entries: { accountLink: { field: 'user', entity: 'accounts' }, rowAccess: !options.unavailable, rowInvitations: !options.unavailable, fields: { id: { type: 'string' }, version: { type: 'integer' }, name: { type: 'string' }, email: { type: 'string' } }, writeSchema: { type: 'object', properties: { name: { type: 'string' }, email: { type: 'string' } } }, columns: ['name', 'email'], relations: {}, routes: {} } }, commands: family.filter(n => v3 || !n.startsWith('access_')).map(name => ({ name: `entries/${name}`, permission: { entity: 'entries', operation: 'update' }, inputSchema: { type: 'object', properties: { rowId: { type: 'string', referenceEntity: 'entries' } }, required: ['rowId'] } })) } as unknown as Model
-  const caps = { resources: { 'members.read': options.membersRead !== false }, revision: 1, commands: (options.grants ?? family).map(n => `entries/${n}`), entities: { entries: { operations: ['read', 'create', 'update'], readable: ['id', 'version', 'name', 'email'], writable: ['name', 'email'] } } } as Capabilities
+  const caps = { resources: { 'members.read': options.membersRead !== false, 'members.search_link_account': options.admin !== false && options.membersRead !== false }, revision: 1, commands: (options.grants ?? family).map(n => `entries/${n}`), entities: { entries: { operations: ['read', 'create', 'update'], readable: ['id', 'version', 'name', 'email'], writable: ['name', 'email'] } } } as Capabilities
   const row = { id: 'one', version: 1, name: 'Original', email: 'contact@example.test' }
   let current = options.state ?? 'no_account', version = 1, failed = false
   const statusBlock = options.loading, statusError = options.error
   const status = () => ({ state: current, can_invite: true, can_cancel: true, inconsistency: options.inconsistency ?? null, linked_accounts: options.accounts, ...(['invited', 'expired'].includes(current) ? { invitation: { id: 'pending', email: 'invited@example.test' } } : {}) })
   const write = vi.fn(async (path: string, method: string, body?: any, _key?: string): Promise<any> => {
     if (method === 'GET') {
-      if (path.includes('/members?eligible=link_account')) { if (options.membersFailure) throw { status: 403 }; return { data: options.noMembers ? [] : [...(!failed ? [{ user_id: 'account', display_name: 'Workspace member', email: 'member@example.test' }] : []), ...(options.linkConflict ? [{ user_id: 'free', display_name: 'Free member', email: 'free@example.test' }] : [])] } }
+      if (path.includes('/members?eligible=link_account')) { if (options.membersFailure) throw { status: 403 }; return { data: options.noMembers ? [] : [...(!failed ? [{ user_id: 'account', display_name: 'Workspace member', email: 'member@example.test' }] : []), ...(options.linkConflict ? [{ user_id: 'free', display_name: 'Free member', email: 'free@example.test' }] : [])].filter(member => (new URL(path, 'http://localhost').searchParams.get('q') ?? '').toLowerCase().split(/\s+/).every(token => `${member.display_name} ${member.email}`.toLowerCase().includes(token))) } }
       if (statusBlock) return new Promise(() => {})
       if (statusError) throw { status: 500 }
       if (path.endsWith('/delivery')) return { delivery: { status: options.deliveryFailure ? 'failed' : 'queued' } }
@@ -116,26 +116,62 @@ for (const language of ['en', 'cs'] as const) {
   for (const v3 of [true, false]) it(`${language} ${v3 ? 'V3' : 'legacy'} link explains immediate access and keeps invitation copy in invite`, async () => {
     const locale = language === 'cs' ? cs : en
     const { user } = await mount('detail', { language, v3 })
-    await user.click(await screen.findByRole('button', { name: locale.rowInvite_link }))
+    await user.click(await screen.findByRole('button', { name: locale.rowFindMember }))
     let dialog = screen.getByRole('dialog')
-    expect(within(dialog).getByText(locale.rowLinkDescription)).toBeTruthy()
+    expect(within(dialog).getByText(locale.rowFindDescription)).toBeTruthy()
     expect(within(dialog).getByText(locale.rowLinkPickerHint)).toBeTruthy()
     expect(within(dialog).queryByText(locale.rowInviteDescription)).toBeNull()
-    await user.click(within(dialog).getByRole('button', { name: locale.cancel }))
-    await user.click(screen.getByRole('button', { name: locale.rowInvite_invite }))
-    dialog = screen.getByRole('dialog')
+    await user.type(within(dialog).getByRole('combobox', { name: locale.rowFindQuery }), 'new@example.test')
+    expect(await within(dialog).findByRole('button', { name: locale.rowFindSend })).toBeTruthy()
     expect(within(dialog).getByText(locale.rowInviteDescription)).toBeTruthy()
-    expect(within(dialog).queryByText(locale.rowLinkDescription)).toBeNull()
-    expect(within(dialog).queryByText(locale.rowLinkPickerHint)).toBeNull()
   })
 }
-it('review5 edit embeds invitation controls', async () => { await mount('edit'); expect(await screen.findByRole('button', { name: 'Invite to application' })).toBeTruthy() })
+it('review5 edit embeds invitation controls', async () => { await mount('edit'); expect(await screen.findByRole('button', { name: 'Find member or invite' })).toBeTruthy() })
+
+it.each([true, false])('91 edit search preserves the live contact email until explicit invitation confirmation (v3=%s)', async v3 => {
+  const { user, write } = await mount('edit', { v3, noMembers: true })
+  const contact = screen.getByLabelText('Contact email')
+  await user.clear(contact)
+  await user.type(contact, 'live@example.test')
+  await user.click(await screen.findByRole('button', { name: en.rowFindMember }))
+  const dialog = screen.getByRole('dialog', { name: en.rowFindMember })
+  const input = within(dialog).getByRole('combobox', { name: en.rowFindQuery })
+  expect(input).toHaveProperty('value', 'live@example.test')
+  const confirm = await within(dialog).findByRole('button', { name: en.rowFindSend })
+  await user.tab()
+  await user.click(input)
+  expect(input).toHaveProperty('value', 'live@example.test')
+  expect(write).toHaveBeenCalledWith('/orgs/org/members?eligible=link_account&target_entity=entries&target_row=one&q=live%40example.test', 'GET')
+  expect(write.mock.calls.every(([, method]) => method === 'GET')).toBe(true)
+  await user.click(confirm)
+  await waitFor(() => expect(write).toHaveBeenCalledWith(
+    v3 ? '/api/entries/one/actions/invite' : '/orgs/org/invitations', 'POST',
+    v3 ? { email: 'live@example.test' } : { email: 'live@example.test', target: { entity: 'entries', row: 'one' } },
+  ))
+  expect(write.mock.calls.filter(([, method]) => method !== 'GET')).toHaveLength(1)
+  expect(contact).toHaveProperty('value', 'live@example.test')
+})
 
 async function confirmAction(user: ReturnType<typeof userEvent.setup>, label: string, input?: [string, string]) {
-  await user.click(await screen.findByRole('button', { name: label }))
+  await waitFor(() => expect(screen.queryByText(en.loading)).toBeNull())
+  const find = ['Invite to application', 'Link account'].includes(label) ? screen.queryByRole('button', { name: 'Find member or invite' }) : null
+  let button = find ?? screen.queryByRole('button', { name: label })
+  if (!button) {
+    await user.click(await screen.findByRole('button', { name: 'Invitation actions' }))
+    button = await screen.findByRole('menuitem', { name: label })
+  }
+  await user.click(button)
   const dialog = screen.getAllByRole('dialog').at(-1)!
-  if (input) { const field = await within(dialog).findByLabelText(input[0]); if (input[0] === 'Member') { await waitFor(() => expect(field).not.toHaveProperty('disabled', true)); await user.click(field); await user.click(await screen.findByRole('option', { name: 'Workspace member · member@example.test' })) } else { await user.clear(field); await user.type(field, input[1]) } }
-  await user.click(within(dialog).getByRole('button', { name: label }))
+  if (find) {
+    const field = within(dialog).getByRole('combobox', { name: 'Name or email' })
+    await user.clear(field)
+    await user.type(field, label === 'Link account' ? 'Workspace' : input![1])
+    if (label === 'Link account') await user.click(await screen.findByRole('option', { name: 'Workspace member · member@example.test' }))
+    await user.click(await within(dialog).findByRole('button', { name: label === 'Link account' ? label : 'Send invitation' }))
+  } else {
+    if (input) { const field = await within(dialog).findByLabelText(input[0]); await user.clear(field); await user.type(field, input[1]) }
+    await user.click(within(dialog).getByRole('button', { name: label }))
+  }
 }
 it.each(['detail', 'menu', 'edit'] as const)('V3 dedicated invite/link/unlink/cancel succeed on %s without generic commands', async surface => {
   const { user, write } = await mount(surface)
@@ -149,7 +185,7 @@ it.each(['detail', 'menu', 'edit'] as const)('V3 dedicated invite/link/unlink/ca
   await waitFor(() => expect(write).toHaveBeenCalledWith('/api/entries/one/actions/unlink_account', 'POST', {}))
   expect(write.mock.calls.some(([path]) => path.startsWith('/commands/'))).toBe(false)
 })
-const mutationNames = /^(Invite to application|Link account|Remove access|Cancel invitation|Resend|Change invitation email|Retry invitation)$/
+const mutationNames = /^(Find member or invite|Send invitation|Invite to application|Link account|Remove access|Cancel invitation|Resend|Change invitation email|Retry invitation)$/
 function expectNoEnabledAccess() { expect(screen.queryAllByRole('button', { name: mutationNames }).filter(button => !(button as HTMLButtonElement).disabled)).toHaveLength(0) }
 for (const v3 of [true, false]) for (const surface of ['detail', 'menu', 'edit', 'create'] as const) {
   it.each(['explicit', 'array', 'inconsistent', 'unknown', 'error', 'loading'] as const)(`${v3 ? 'V3' : 'legacy'} ${surface} guards %s status on every control`, async state => {
@@ -212,7 +248,7 @@ it.each(['Invite to application', 'Cancel invitation', 'Change invitation email'
 })
 it.each(['access_link_account', 'access_unlink_account'] as const)('V3 explicit %s is individually gated and lives inside the shared card', async grant => {
   await mount('detail', { grants: [grant], state: grant === 'access_unlink_account' ? 'signed_in' : 'no_account' }); await screen.findByText(grant === 'access_unlink_account' ? 'Signed in' : 'No access')
-  const label = grant === 'access_link_account' ? 'Link account' : 'Remove access'
+  const label = grant === 'access_link_account' ? 'Find member or invite' : 'Remove access'
   expect(screen.getAllByRole('button', { name: label })).toHaveLength(1)
   const card = screen.getByText('Application access').closest('[data-application-access]') as HTMLElement
   expect(within(card).getByRole('button', { name: label })).toBeTruthy()
@@ -232,7 +268,7 @@ it('authorized contact_email is the fallback prefill convention', async () => {
   const { user } = await mount('create', { contact: 'contact_email' }); await user.click(screen.getByRole('checkbox', { name: 'Invite now' })); await user.type(screen.getByLabelText('field_contact_email'), 'fallback@example.test'); expect((screen.getByLabelText('Invitation email') as HTMLInputElement).value).toBe('fallback@example.test')
 })
 it('prefill never copies an unreadable contact field', async () => {
-  const { user } = await mount('edit', { contact: 'hidden' }); await user.click(await screen.findByRole('button', { name: 'Invite to application' })); expect((screen.getByLabelText('Email') as HTMLInputElement).value).toBe('')
+  const { user } = await mount('edit', { contact: 'hidden', membersRead: false }); await user.click(await screen.findByRole('button', { name: 'Invite to application' })); expect((screen.getByLabelText('Email') as HTMLInputElement).value).toBe('')
 })
 it('create and detail omit invitation controls without the matching V3 grant', async () => {
   await mount('create', { grants: ['access_link_account'] }); expect(screen.queryByRole('checkbox', { name: 'Invite now' })).toBeNull()
@@ -273,7 +309,7 @@ it.each(['detail', 'edit', 'create'] as const)('%s preserves invitation denial h
 it.each(['access_link_account', 'access_unlink_account'] as const)('V3 %s remains in the card without Members invitation status', async grant => {
   const { write } = await mount('detail', { grants: [grant], unavailable: true, state: grant === 'access_unlink_account' ? 'signed_in' : 'no_account' })
   await screen.findByText(en.rowAccessUnavailable)
-  expect(screen.getByRole('button', { name: grant === 'access_link_account' ? 'Link account' : 'Remove access' })).toBeTruthy()
+  expect(screen.getByRole('button', { name: grant === 'access_link_account' ? 'Find member or invite' : 'Remove access' })).toBeTruthy()
   expect(write.mock.calls.every(([path]) => path === '/api/entries/one')).toBe(true)
 })
 it.each(['detail', 'edit'] as const)('%s shows an existing invitation with delivery trouble', async surface => {
@@ -295,7 +331,7 @@ it('changing a linked account in edit reconciles removal before inviting its rep
   expect(unlink).toBeGreaterThan(-1); expect(paths.slice(unlink + 1, invite)).toContain('/api/entries/one')
 })
 it('an in-flight access mutation blocks every other access control until reconciliation', async () => {
-  const { user, write } = await mount('detail')
+  const { user, write } = await mount('detail', { membersRead: false })
   await user.click(await screen.findByRole('button', { name: 'Invite to application' }))
   await user.type(screen.getByLabelText('Email'), 'recipient@example.test')
   let finish!: (data: any) => void
@@ -319,7 +355,7 @@ for (const surface of ['detail', 'menu', 'edit', 'create'] as const) {
     const { user } = await mount(surface, { state, failure: surface === 'create', accounts: state === 'signed_in' ? [{ id: 'account', label: 'Authorized linked account' }] : [] })
     if (surface === 'create') { await user.click(screen.getByRole('checkbox', { name: 'Invite now' })); await user.type(screen.getByLabelText('Invitation email'), 'recipient@example.test'); await user.click(screen.getByRole('button', { name: 'Create' })) }
     await screen.findByText({ no_account: 'No access', invited: 'Invited', expired: 'Expired', signed_in: 'Signed in' }[state])
-    const label = state === 'no_account' ? 'Invite to application' : state === 'signed_in' ? 'Remove access' : 'Resend'
+    const label = state === 'no_account' ? 'Find member or invite' : state === 'signed_in' ? 'Remove access' : 'Resend'
     await waitFor(() => expect((screen.getByRole('button', { name: label }) as HTMLButtonElement).disabled).toBe(false))
     if (state === 'signed_in') expect(screen.getByText('Authorized linked account')).toBeTruthy()
     if (state === 'expired') expect(screen.queryByRole('button', { name: 'Copy link' })).toBeNull()
@@ -361,9 +397,9 @@ it('create with unavailable invitation status omits Invite now despite an invita
 
 it('review6 Link picker requests eligible Members and submits without users capabilities', async () => {
   const { user, write, request } = await mount('detail', { deferMutation: true })
-  await user.click(await screen.findByRole('button', { name: 'Link account' }))
-  await waitFor(() => expect(write).toHaveBeenCalledWith('/orgs/org/members?eligible=link_account&target_entity=entries&target_row=one', 'GET'))
-  await user.click(await screen.findByRole('combobox', { name: 'Member' }))
+  await user.click(await screen.findByRole('button', { name: 'Find member or invite' }))
+  await user.type(screen.getByRole('combobox', { name: 'Name or email' }), 'Workspace')
+  await waitFor(() => expect(write).toHaveBeenCalledWith('/orgs/org/members?eligible=link_account&target_entity=entries&target_row=one&q=Workspace', 'GET'))
   await user.click(await screen.findByRole('option', { name: 'Workspace member · member@example.test' }))
   await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Link account' }))
   await waitFor(() => expect(write).toHaveBeenCalledWith('/api/entries/one/actions/link_account', 'POST', { user_id: 'account' }))
@@ -378,10 +414,11 @@ it('14 staff without members.read has no Link picker even with an explicit link 
 })
 it('14 failed Members read never falls back to a raw account id input', async () => {
   const { user, write } = await mount('detail', { membersFailure: true })
-  await user.click(await screen.findByRole('button', { name: 'Link account' }))
+  await user.click(await screen.findByRole('button', { name: 'Find member or invite' }))
+  await user.type(screen.getByRole('combobox', { name: 'Name or email' }), 'Workspace')
   await screen.findByRole('alert')
   expect(screen.queryByRole('textbox', { name: 'Member' })).toBeNull()
-  expect(within(screen.getByRole('dialog')).getByRole('button', { name: 'Link account' })).toHaveProperty('disabled', true)
+  expect(within(screen.getByRole('dialog')).queryByRole('button', { name: 'Link account' })).toBeNull()
   expect(write.mock.calls.every(([, method]) => method === 'GET')).toBe(true)
 })
 
@@ -392,21 +429,21 @@ it.each(['en', 'cs'].flatMap(language => [true, false].map(v3 => ({ language: la
   const { user, write, client } = await mount('detail', { language, v3, linkConflict: true })
   // Another row/entity's cache cannot provide this target's choices.
   client.setQueryData(['account-link-members', 'org', 'other', 'two'], { data: [{ user_id: 'wrong', display_name: 'Wrong target' }] })
-  await user.click(await screen.findByRole('button', { name: labels.rowInvite_link }))
-  await user.click(await screen.findByRole('combobox', { name: labels.rowInviteAccount }))
+  await user.click(await screen.findByRole('button', { name: labels.rowFindMember }))
+  await user.type(screen.getByRole('combobox', { name: labels.rowFindQuery }), 'member')
   expect(screen.queryByRole('option', { name: 'Wrong target' })).toBeNull()
   await user.click(await screen.findByRole('option', { name: 'Workspace member · member@example.test' }))
   await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: labels.rowInvite_link }))
   const error = await screen.findByText(message)
-  const field = screen.getByRole('combobox', { name: labels.rowInviteAccount })
+  const field = screen.getByRole('combobox', { name: labels.rowFindQuery })
   expect(field.getAttribute('aria-invalid')).toBe('true')
   expect(field.getAttribute('aria-describedby')?.split(' ')).toContain(error.id)
   expect(screen.queryByText(labels.requestFailed)).toBeNull()
   expect(screen.getByRole('dialog')).toBeTruthy()
-  expect(field.textContent).not.toContain('Workspace member')
+  expect(field).not.toHaveProperty('value', 'Workspace member · member@example.test')
   const memberReads = () => write.mock.calls.filter(([path]) => path.includes('/members?'))
   await waitFor(() => expect(memberReads().length).toBeGreaterThanOrEqual(2))
-  expect(client.getQueryCache().getAll().find(q => q.queryKey[0] === 'account-link-members' && q.queryKey[2] === 'entries')?.queryKey).toEqual(['account-link-members', 'org', 'entries', 'one', expect.any(Object)])
+  expect(client.getQueryCache().getAll().find(q => q.queryKey[0] === 'account-link-members' && q.queryKey[2] === 'entries' && q.queryKey[5] === 'member')?.queryKey).toEqual(['account-link-members', 'org', 'entries', 'one', expect.any(Object), 'member'])
   await user.click(field)
   expect(screen.queryByRole('option', { name: 'Workspace member · member@example.test' })).toBeNull()
   await user.click(await screen.findByRole('option', { name: 'Free member · free@example.test' }))
@@ -420,9 +457,10 @@ it.each(['en', 'cs'].flatMap(language => [true, false].map(v3 => ({ language: la
 it.each(['en', 'cs'] as const)('89 %s Link displays a localized empty state', async language => {
   const labels = language === 'cs' ? cs : en
   const { user } = await mount('detail', { language, noMembers: true })
-  await user.click(await screen.findByRole('button', { name: labels.rowInvite_link }))
+  await user.click(await screen.findByRole('button', { name: labels.rowFindMember }))
+  await user.type(screen.getByRole('combobox', { name: labels.rowFindQuery }), 'Nobody')
   await screen.findByText(language === 'cs' ? 'Žádní členové k propojení.' : 'No members available to link.')
-  expect(within(screen.getByRole('dialog')).getByRole('button', { name: labels.rowInvite_link })).toHaveProperty('disabled', true)
+  expect(within(screen.getByRole('dialog')).queryByRole('button', { name: labels.rowInvite_link })).toBeNull()
 })
 
 it.each([true, false])('89 unlink invalidates cached Link choices for other targets (v3=%s)', async v3 => {
@@ -433,4 +471,97 @@ it.each([true, false])('89 unlink invalidates cached Link choices for other targ
   await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: en.rowInvite_remove }))
   await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
   expect(client.getQueryState(key)?.isInvalidated).toBe(true)
+})
+
+
+it.each(['detail', 'edit'] as const)('91 %s pending card keeps two primary actions and two overflow items with keyboard focus return', async surface => {
+  const { user } = await mount(surface, { state: 'invited' })
+  await screen.findByText('invited@example.test')
+  expect(screen.getByRole('button', { name: 'Resend' })).toBeTruthy()
+  expect(screen.getByRole('button', { name: 'Copy link' })).toBeTruthy()
+  expect(screen.queryByRole('button', { name: 'Cancel invitation' })).toBeNull()
+  expect(screen.queryByRole('button', { name: 'Change invitation email' })).toBeNull()
+  expect(screen.queryByRole('button', { name: 'Link account' })).toBeNull()
+  const menu = screen.getByRole('button', { name: 'Invitation actions' })
+  menu.focus(); await user.keyboard('{ArrowDown}')
+  const items = await screen.findAllByRole('menuitem')
+  expect(items.map(item => item.textContent)).toEqual(['Cancel invitation', 'Change invitation email'])
+  await user.keyboard('{Escape}')
+  await waitFor(() => expect(document.activeElement).toBe(menu))
+  await user.keyboard('{ArrowDown}')
+  await screen.findAllByRole('menuitem')
+  await user.keyboard('{ArrowDown}{Enter}')
+  await screen.findByRole('dialog', { name: 'Change invitation email' })
+  await user.keyboard('{Escape}')
+  await waitFor(() => expect(document.activeElement).toBe(menu))
+})
+it.each(['Workspace', 'member@example.test', 'Workspace member member@example.test'])('91 searches %s and requires a concrete choice and explicit confirmation', async query => {
+  const { user, write } = await mount('detail', { state: 'invited' })
+  await user.click(await screen.findByRole('button', { name: 'Find member or invite' }))
+  const input = screen.getByRole('combobox', { name: 'Name or email' })
+  await user.type(input, query)
+  await screen.findByRole('option', { name: 'Workspace member · member@example.test' })
+  expect(write).toHaveBeenCalledWith(`/orgs/org/members?eligible=link_account&target_entity=entries&target_row=one&q=${encodeURIComponent(query)}`, 'GET')
+  expect(write.mock.calls.every(([, method]) => method === 'GET')).toBe(true)
+  expect(screen.getByText('invited@example.test')).toBeTruthy()
+  await user.keyboard('{ArrowDown}{Enter}')
+  expect(screen.getByText('Linking this member will cancel the pending invitation to invited@example.test. Its old link will stop working.')).toBeTruthy()
+  expect(write.mock.calls.every(([, method]) => method === 'GET')).toBe(true)
+  await user.click(screen.getByRole('button', { name: 'Link account' }))
+  await waitFor(() => expect(write).toHaveBeenCalledWith('/api/entries/one/actions/link_account', 'POST', { user_id: 'account' }))
+})
+it.each(['Nobody', 'bad@invalid', 'a..b@example.test', 'new@example.test'])('91 no match for %s invites only a valid email', async query => {
+  const { user, write } = await mount('detail', { noMembers: true })
+  await user.click(await screen.findByRole('button', { name: 'Find member or invite' }))
+  await user.type(screen.getByRole('combobox', { name: 'Name or email' }), query)
+  await screen.findByText('No members available to link.')
+  const invite = screen.queryByRole('button', { name: 'Send invitation' })
+  if (query === 'new@example.test') { expect(invite).toBeTruthy(); await user.click(invite!); await waitFor(() => expect(write).toHaveBeenCalledWith('/api/entries/one/actions/invite', 'POST', { email: query })) }
+  else { expect(invite).toBeNull(); expect(write.mock.calls.every(([, method]) => method === 'GET')).toBe(true) }
+})
+it.each([{ admin: false }, { membersRead: false }, { grants: ['access_invite'] }])('91 invite-only roles make no member request: %j', async options => {
+  const { user, write } = await mount('detail', options)
+  await screen.findByText('No access')
+  expect(screen.queryByRole('button', { name: 'Find member or invite' })).toBeNull()
+  await user.click(screen.getByRole('button', { name: 'Invite to application' }))
+  await user.type(screen.getByLabelText('Email'), 'new@example.test')
+  expect(screen.queryByRole('option')).toBeNull()
+  expect(screen.queryByText(/Workspace member/)).toBeNull()
+  expect(write.mock.calls.some(([path]) => path.includes('/members'))).toBe(false)
+})
+
+
+it.each(['en', 'cs'].flatMap(language => [[], ['access_invite'], ['access_cancel_invite'], ['access_invite', 'access_cancel_invite']].map(grants => ({ language: language as 'en' | 'cs', grants }))))
+('91 $language pending actions retain individual grants: $grants', async ({ language, grants }) => {
+  const labels = language === 'cs' ? cs : en
+  const { user, write } = await mount('detail', { language, state: 'invited', grants })
+  await screen.findByText('invited@example.test')
+  const invite = grants.includes('access_invite'), cancel = grants.includes('access_cancel_invite')
+  expect(!!screen.queryByRole('button', { name: labels.rowInvite_resend })).toBe(invite)
+  expect(!!screen.queryByRole('button', { name: labels.rowInvite_copy })).toBe(invite)
+  expect(!!screen.queryByRole('button', { name: labels.rowInvitationActions })).toBe(cancel)
+  if (cancel) {
+    await user.click(screen.getByRole('button', { name: labels.rowInvitationActions }))
+    expect(screen.getByRole('menuitem', { name: labels.rowInvite_cancel })).toBeTruthy()
+    expect(!!screen.queryByRole('menuitem', { name: labels.rowInvite_change })).toBe(invite)
+    expect(screen.getAllByRole('menuitem')).toHaveLength(invite ? 2 : 1)
+  }
+  expect(write.mock.calls.every(([, method]) => method === 'GET')).toBe(true)
+  expect(write.mock.calls.some(([path]) => path.includes('/members'))).toBe(false)
+})
+
+it('91 edit search popup handles Escape before either enclosing dialog', async () => {
+  const { user } = await mount('edit', { state: 'invited' })
+  await user.click(await screen.findByRole('button', { name: 'Find member or invite' }))
+  const input = screen.getByRole('combobox', { name: 'Name or email' })
+  await user.clear(input)
+  await user.type(input, 'Workspace')
+  await screen.findByRole('option', { name: 'Workspace member · member@example.test' })
+  await user.keyboard('{Escape}')
+  expect(screen.queryByRole('option')).toBeNull()
+  expect(screen.getAllByRole('dialog')).toHaveLength(2)
+  expect(document.activeElement).toBe(input)
+  await user.keyboard('{Escape}')
+  await waitFor(() => expect(screen.getAllByRole('dialog')).toHaveLength(1))
+  expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Find member or invite' }))
 })

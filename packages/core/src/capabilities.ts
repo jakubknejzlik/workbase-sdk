@@ -5,6 +5,7 @@ import { ApiError } from './errors'
 import { writableFields } from './policies'
 import { hasOwnerRole } from './policies'
 import { organizationPermission } from './execution/permissions'
+import { isOrganizationAdministrator } from './organization-permissions'
 
 /** Projection of the live authorization ports; never serialize their predicates. */
 export function capabilities(kernel: KernelRegistry, scope: Scope) {
@@ -24,6 +25,7 @@ export function capabilities(kernel: KernelRegistry, scope: Scope) {
   // Match the read routes' complete gates, including their identity/owner checks.
   // Navigation needs grants, not whole member/token/workflow/audit collections.
   const resources = {
+    'members.search_link_account': isOrganizationAdministrator(kernel.config, scope.role) && permits(() => { kernel.resourcePermission(scope, 'members.read'); organizationPermission(kernel.config, scope, 'members.read') }),
     'organizations.update': kernel.providers.has('organizations') && kernel.permissionsActive && permits(() => kernel.resourcePermission(scope, 'organizations.update')),
     ...Object.fromEntries((['members.read', 'members.update', 'members.remove', 'invitations.read', 'invitations.create', 'invitations.revoke', 'tokens.read'] as const).map(action => [action,
       permits(() => { kernel.resourcePermission(scope, action); organizationPermission(kernel.config, scope, action) }),

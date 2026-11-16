@@ -14,6 +14,10 @@ afterEach(() => vi.unstubAllEnvs())
 const syntheticTerms = ['quartzbeacon', 'cobalt-gateway', 'Žlutý signál']
 const vocabulary = new RegExp([consolePrivateTerms.source, ...syntheticTerms, 'secret_'].join('|'), 'iu')
 const scan = (directory: string) => checkConsolePublic(directory, vocabulary)
+it.each(['en', 'cs'])('91 %s Console catalog passes the terminology gate', language => {
+  const file = `packages/frontend-console/src/locales/${language}.json`
+  expect(inspectSource(file, readFileSync(resolve(import.meta.dirname, '..', file), 'utf8'))).toEqual([])
+})
 it.each(['page.tsx', 'packages/frontend-console/dist/assets/index.js'])('terminology accepts the preserved members path in %s', file => {
   expect(inspectSource(file, "const page = { path: '/settings/workspace-members' }")).toEqual([])
 })

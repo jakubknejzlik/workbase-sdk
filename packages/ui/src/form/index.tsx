@@ -98,3 +98,5 @@ export { FormFieldWrapper } from '../components/form/FormFieldWrapper'
 export { FormFieldInput } from '../components/form/FormFieldInput'
 export { FormSubmitButton } from '../components/form/FormSubmitButton'
 export { RegistryLabelsProvider, cs, enUS, type RegistrySchema } from './schema'
+
+export { formValidator } from './validation'

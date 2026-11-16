@@ -19,7 +19,7 @@ export function canReadMembers(config: InstanceConfig, scope: Scope): boolean {
  * The optional id narrows a lookup; it never substitutes for the membership join.
  * Only the Link picker opts into the writer's account eligibility filter.
  */
-export async function memberIdentities(config: InstanceConfig, scope: Scope, db: D1Database, userId?: string, target?: { entity: string; row: string }) {
+export async function memberIdentities(config: InstanceConfig, scope: Scope, db: D1Database, userId?: string, target?: { entity: string; row: string }, search?: string) {
   requireMembersRead(config, scope)
   const eligible = target ? linkableMembers(scope.organizationId) : undefined
   const unique = target ? accountLinkUnique(config, scope.organizationId, target, { member: true }) : undefined
@@ -33,7 +33,10 @@ export async function memberIdentities(config: InstanceConfig, scope: Scope, db:
     WHERE m.organization_id=?${userId === undefined ? '' : ' AND m.user_id=?'}${eligible ? ` AND m.user_id IN (${eligible.sql})` : ''}${unique ? ` AND ${unique.sql}` : ''} ORDER BY m.user_id`)
     .bind(scope.organizationId, ...(userId === undefined ? [] : [userId]), ...(eligible?.bindings ?? []), ...(unique?.bindings ?? []))
     .all<{ user_id: string; email: string; role: string; name: string | null; firstName: string | null; lastName: string | null }>()
+  // Filter on the server after SQL eligibility and the trusted identity projection.
+  // JS case folding also handles Czech names; SQLite lower() only folds ASCII.
+  const tokens = target ? (search ?? '').toLocaleLowerCase().trim().split(/\s+/).map(token => token.replace(/^[<]+|[>]+$/g, '')).filter(Boolean) : []
   return rows.results.map(({ name, firstName, lastName, ...row }) => ({ ...row,
     display_name: displayIdentity({ name, firstName, lastName, email: row.email }).displayName,
-  }))
+  })).filter(row => tokens.every(token => [row.display_name, row.email].some(value => value?.toLocaleLowerCase().includes(token))))
 }

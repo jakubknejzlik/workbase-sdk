@@ -9,7 +9,7 @@ import { Check, ChevronsUpDown, X } from 'lucide-react'
 export interface PickerOption { id: string; label: string }
 interface Props {
   label: string; options: PickerOption[]; value: string; onChange: (id: string) => void; placeholder: string
-  remote?: boolean; selectedLabel?: string; onFocus?: () => void; onSearch?: (search: string) => void; onClose?: () => void
+  remote?: boolean; selectedLabel?: string; search?: string; onFocus?: () => void; onSearch?: (search: string) => void; onClose?: () => void
   loadMore?: () => void; hasMore?: boolean; loading?: boolean; loadingLabel?: string; moreLabel?: string; clearLabel?: string; emptyLabel?: string; error?: string; wizard?: ReactNode
   multiple?: { selected: PickerOption[]; onRemove: (id: string) => void; removeLabel: (option: PickerOption) => string }
 }
@@ -20,15 +20,28 @@ export function EntityPicker(props: Props) {
   if (!props.remote) return <div className="grid gap-2"><Label htmlFor={id}>{props.label}</Label><Select disabled={pending} value={props.value || empty} onValueChange={value => props.onChange(value === empty ? '' : value)}><SelectTrigger id={id} className="w-full" aria-invalid={!!props.error} aria-describedby={props.error ? `${id}-error` : undefined}><SelectValue /></SelectTrigger><SelectContent><SelectItem value={empty}>{props.placeholder}</SelectItem>{props.options.map(option => <SelectItem key={option.id} value={option.id}>{option.label}</SelectItem>)}</SelectContent></Select>{props.error && <p id={`${id}-error`} role="alert">{props.error}</p>}</div>
   return <RemotePicker {...props} />
 }
-function RemotePicker({ label, options, value, selectedLabel, onChange, placeholder, onFocus, onSearch, onClose, loadMore, hasMore, loading, loadingLabel, moreLabel, clearLabel, emptyLabel, error, wizard, multiple }: Props) {
+function RemotePicker({ label, options, value, selectedLabel, search: controlledSearch, onChange, placeholder, onFocus, onSearch, onClose, loadMore, hasMore, loading, loadingLabel, moreLabel, clearLabel, emptyLabel, error, wizard, multiple }: Props) {
   const pending = useMutationSession()?.pending
-  const id = useId(); const input = useRef<HTMLInputElement>(null); const previousValue = useRef(value); const restoringFocus = useRef(false); const [open, setOpen] = useState(false); const [search, setSearch] = useState(''); const [active, setActive] = useState(-1)
+  const id = useId(); const input = useRef<HTMLInputElement>(null); const previousValue = useRef(value); const restoringFocus = useRef(false); const [open, setOpen] = useState(false); const [localSearch, setSearch] = useState(''); const [active, setActive] = useState(-1)
+  const search = controlledSearch ?? localSearch
   const close = () => { if (pending) return; setOpen(false); setSearch(''); setActive(-1); onClose?.() }
   useEffect(() => {
     if (previousValue.current === value) return
     previousValue.current = value; close()
     restoringFocus.current = true; input.current?.focus(); restoringFocus.current = false
   }, [value])
+  useEffect(() => {
+    if (!open) return
+    // An inline popup owns the first Escape, before a parent dialog handles it
+    // in its native document listener. A second Escape can close the dialog.
+    const escape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.target !== input.current) return
+      event.preventDefault(); event.stopPropagation()
+      if (!pending) { setOpen(false); setSearch(''); setActive(-1); onClose?.() }
+    }
+    window.addEventListener('keydown', escape, true)
+    return () => window.removeEventListener('keydown', escape, true)
+  }, [open, pending, onClose])
   const select = (option: PickerOption) => { if (pending) return; onChange(option.id); close(); input.current?.focus() }
   return <div className="wb-picker grid gap-2"><Label htmlFor={id}>{label}</Label>
     <div data-picker-control className={multiple ? 'min-w-0 rounded-md border border-input p-2 shadow-xs focus-within:border-ring focus-within:ring-ring/50 focus-within:ring-[3px]' : undefined}>
@@ -47,6 +60,6 @@ function RemotePicker({ label, options, value, selectedLabel, onChange, placehol
     {error && <p id={`${id}-error`} role="alert">{error}</p>}
     {open && <div className="wb-picker-popup"><div id={`${id}-options`} role="listbox" aria-label={label} className="wb-picker-options" onScroll={event => { const node = event.currentTarget; if (node.scrollHeight - node.scrollTop - node.clientHeight < 50 && hasMore && !loading) loadMore?.() }}>
       {options.map((option, index) => <div role="option" id={`${id}-${index}`} key={option.id} aria-selected={active === index} onMouseDown={event => event.preventDefault()} onClick={() => select(option)}><Check aria-hidden="true" className={value === option.id ? "mr-2 h-4 w-4 shrink-0" : "mr-2 h-4 w-4 shrink-0 opacity-0"} />{option.label}</div>)}
-    </div>{loading && <p role="status">{loadingLabel}</p>}{!loading && !options.length && <p>{emptyLabel}</p>}{hasMore && <Button type="button" variant="outline" disabled={loading || pending} onClick={loadMore}>{moreLabel}</Button>}{wizard}</div>}
+    </div>{loading && <p role="status">{loadingLabel}</p>}{!loading && !options.length && <p role="status">{emptyLabel}</p>}{hasMore && <Button type="button" variant="outline" disabled={loading || pending} onClick={loadMore}>{moreLabel}</Button>}{wizard}</div>}
   </div>
 }

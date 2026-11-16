@@ -127,7 +127,12 @@ export function userLinkCommands(config: InstanceConfig): AtomicOperation<any>[]
         // Its WHERE checks the live pre-image. Keep the executor's row capture
         // and 403 denial, without checking the cleared source against the policy.
         livePolicies.set(issuer, Object.freeze({ sql: '1=1' }))
-        return { rules: [{ name: 'account_link_issuer', statements: [issuer] }, mutation],
+        return { rules: [{ name: 'account_link_issuer', statements: [issuer] }, mutation, ...(action === 'link_account' ? [{ name: 'supersede_row_invitation', statements: [writer({
+          // Commit together with the confirmed link, never during discovery.
+          // A failed eligibility/policy check rolls this revocation back too.
+          sql: `UPDATE invitations SET revoked_at=? WHERE organization_id=? AND target_entity=? AND target_row=? AND accepted_at IS NULL AND revoked_at IS NULL AND declined_at IS NULL AND expired_at IS NULL AND expires_at>?`,
+          bindings: [ctx.now, ctx.scope.organizationId, entity, input.rowId, ctx.now],
+        }, 'cleanup')] }] : [])],
         event: { operation: action === 'link_account' ? 'account.linked' : 'account.access_removed', entity, entityId: input.rowId },
         result: { status: 200, body: { id: input.rowId } } }
       },
