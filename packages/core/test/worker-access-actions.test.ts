@@ -550,3 +550,24 @@ it.each(['text', 'html', 'both', 'html-one', 'body', 'text-extra', 'html-extra']
   expect(await invitationOutbox(result.invitation_id)).toMatchObject({ delivery_status: 'failed', attempts: 2, last_error: 'email_send_failed' })
   expect(await env.DB.prepare('SELECT sent_at FROM email_outbox WHERE id=?').bind(row.id).first('sent_at')).toBeNull()
 })
+
+// Review3 V3_METADATA_REPRO: use the real worker action and native transport.
+it('worker invite mail: acceptance path in organization display text delivers once', async () => {
+  const send = vi.fn().mockResolvedValue(undefined)
+  app = createApp(workerAccessFixture(), mailRuntime(send))
+  expect((await request('/orgs/org-a', 'admin', 'PATCH', { name: 'Team /invitations/accept' })).status).toBe(200)
+  const response = await act('local', 'invite', { email: 'recipient@example.test' })
+  expect(response.status).toBe(201)
+  const result = await response.json() as any
+  expect(result.delivery).toMatchObject({ status: 'delivered', attempts: 1, error: null })
+  expect(send).toHaveBeenCalledTimes(1)
+  const message = send.mock.calls[0][0]
+  expect(message.text).toContain('Team /invitations/accept')
+  expect(message.html).toContain('Team /invitations/accept')
+  const delivered = message.text.match(/https?:\/\/[^\s]+\/invitations\/accept\?token=[a-f0-9]+\.[a-f0-9]+/)![0]
+  const proof = new URL(delivered).searchParams.get('token')!
+  expect((await app.request('http://localhost/invitations/resolve', { method: 'POST', headers: {
+    Origin: 'http://localhost', 'Sec-Fetch-Site': 'same-origin', 'Content-Type': 'application/json',
+  }, body: JSON.stringify({ token: proof }) })).status).toBe(200)
+  expect(await invitationOutbox(result.invitation_id)).toMatchObject({ delivery_status: 'sent', attempts: 1, last_error: null })
+})

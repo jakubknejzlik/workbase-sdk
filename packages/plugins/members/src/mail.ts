@@ -44,24 +44,34 @@ export const invitationMailRenderer = (env: RuntimeEnv): MailDeliveryRenderer =>
   if (!await hasInvitationMailboxProof(env, proof)) fail()
   url.searchParams.set('token', proof)
   const escape = (value: string) => value.replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]!)
-  const finalize = (part: string, source: string, signed: string, expected: number) => {
+  const finalize = (part: string, source: string, signed: string, expected: number, htmlPart = false) => {
     const slots = part.split(source)
     // The Members template has one text link and three HTML occurrences (two
     // hrefs and the visible fallback). Never accept a partially matched template.
     if (slots.length - 1 !== expected) fail()
     const remainder = slots.join('')
-    // Catch extra unsigned occurrences, including percent/entity-encoded copies.
-    const decoded = remainder.replace(/&#(?:x([0-9a-f]+)|([0-9]+));?/gi,
+    // Inspect residual links, not display labels that happen to contain the path.
+    // Decode link values before checking for percent/entity-encoded credentials.
+    const decode = (value: string) => value.replace(/&#(?:x([0-9a-f]+)|([0-9]+));?/gi,
       (_, hex, decimal) => String.fromCodePoint(Number.parseInt(hex ?? decimal, hex ? 16 : 10)))
       .replace(/%([0-9a-f]{2})/gi, (_, byte) => String.fromCharCode(Number.parseInt(byte, 16)))
-    if (decoded.includes(selector) || decoded.includes('/invitations/accept')) fail()
+    const decoded = decode(remainder)
+    const links: string[] = decoded.match(/(?:[a-z][a-z0-9+.-]*:)?\/\/[^\s<>"']+|[^\s<>"']*[?&]token=[^\s<>"']+/gi) ?? []
+    // Extract attributes from actual tags before decoding, so escaped display
+    // text cannot turn into an HTML link during this validation.
+    for (const tag of (htmlPart ? remainder : '').matchAll(/<[^>]+>/g)) {
+      for (const href of tag[0].matchAll(/\bhref\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/gi)) {
+        links.push(decode(href[1] ?? href[2] ?? href[3]))
+      }
+    }
+    if (links.some(value => value.includes('/invitations/accept') || value.includes(selector) || /[?&]token=/.test(value))) fail()
     const result = slots.join(signed)
-    if (result.split(signed).length - 1 !== expected || result.replaceAll(signed, '').includes(selector)) fail()
+    if (result.split(signed).length - 1 !== expected) fail()
     return result
   }
   // Body is the durable source of the selector, never a transport-ready proof.
   finalize(body, link, url.href, 1)
-  return { text: finalize(text, link, url.href, 1), html: finalize(html, escape(link), escape(url.href), 3) }
+  return { text: finalize(text, link, url.href, 1), html: finalize(html, escape(link), escape(url.href), 3, true) }
 }
 
 /** Members owns the P10 template and credential eligibility; the shared port owns transport. */
