@@ -228,7 +228,7 @@ export function memberRoutes(app: App, config: InstanceConfig, env: RuntimeEnv) 
   })
   async function managedInvitation(c: AppContext) {
     const scope = scopeFor(c, 'invitations.create')
-    const invitation = await env.DB.prepare(`SELECT id,email,role,token_hash,coalesce(delivery_token_hash,token_hash) AS delivery_token_hash,expires_at,delivery_outbox_id,target_entity,target_row FROM invitations
+    const invitation = await env.DB.prepare(`SELECT id,email,role,token_hash,delivery_token_hash,expires_at,delivery_outbox_id,target_entity,target_row FROM invitations
       WHERE id=? AND organization_id=? AND accepted_at IS NULL AND revoked_at IS NULL AND declined_at IS NULL AND expired_at IS NULL AND expires_at>?`)
       .bind(c.req.param('invitationId'), scope.organizationId, nowISO()).first<{ id: string; email: string; role: string; token_hash: string; delivery_token_hash: string; expires_at: string; delivery_outbox_id: string | null; target_entity: string | null; target_row: string | null }>()
     if (!invitation) throw new ApiError(409, 'invitation_unavailable')

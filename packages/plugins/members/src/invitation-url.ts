@@ -4,7 +4,7 @@ import { hasInvitationMailboxProof, invitationMailToken, invitationTokenSchema }
 declare const verified: unique symbol
 export type VerifiedInvitationAcceptUrl<P extends 'email' | 'copy' = 'email'> = string & { readonly [verified]: P }
 export class InvitationLinkError extends Error {
-  constructor(readonly code: 'invitation_origin_required' | 'invitation_link_invalid' | 'invitation_mail_inputs_required') { super(code) }
+  constructor(readonly code: 'invitation_origin_required' | 'invitation_link_invalid') { super(code) }
 }
 
 /** Configuration chooses the credential destination, never a request host. */

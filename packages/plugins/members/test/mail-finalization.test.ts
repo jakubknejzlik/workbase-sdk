@@ -13,9 +13,8 @@ import { hasInvitationMailboxProof } from '../src/invitation-token'
 beforeEach(async () => { await setup() })
 afterEach(() => vi.restoreAllMocks())
 const escape = (v: string) => v.replaceAll('&', '&amp;')
-const cases = (['en', 'cs'] as const).flatMap(locale => (['invite', 'reminder'] as const).flatMap(kind =>
-  [false, true].map(rotated => ({ locale, kind, rotated }))))
-it.each(cases)('stored inputs $locale $kind rotated=$rotated re-render with current proof and send once', async ({ locale, kind, rotated }) => {
+const cases = (['en', 'cs'] as const).flatMap(locale => (['invite', 'reminder'] as const).map(kind => ({ locale, kind })))
+it.each(cases)('current inputs $locale $kind re-render with verified proof and send once', async ({ locale, kind }) => {
   const config = { ...sample, locale }
   const created = await json(await request(createApp(config, runtime()), '/orgs/org-a/invitations', 'POST', { email: 'inputs@example.test', role: 'viewer' }))
   const row = (await env.DB.prepare('SELECT id,body FROM email_outbox').first<{ id: string; body: string }>())!
@@ -24,7 +23,6 @@ it.each(cases)('stored inputs $locale $kind rotated=$rotated re-render with curr
   await env.DB.prepare('UPDATE email_outbox SET body=? WHERE id=?').bind(JSON.stringify(inputs), row.id).run()
   const send = vi.fn().mockResolvedValue(undefined)
   const settings = { ...runtime(), EMAIL: { send }, EMAIL_FROM: 'noreply@example.test' }
-  if (rotated) settings.IDENTITY.secret = 'synthetic-rotated-key-at-least-32-characters'
   const acceptUrl = await buildInvitationAcceptUrl(settings, { selector: inputs.selector, purpose: 'email' })
   const app = createApp(config, settings)
   const retry = () => request(app, `/orgs/org-a/invitations/${created.id}/retry-delivery`, 'POST', {})
@@ -40,26 +38,6 @@ it.each(cases)('stored inputs $locale $kind rotated=$rotated re-render with curr
   expect(message.subject.startsWith(locale === 'cs' ? 'Připomenutí: ' : 'Reminder: ')).toBe(kind === 'reminder')
   expect(await json(await retry())).toMatchObject({ delivery: { status: 'delivered', attempts: 1 } })
   expect(send).toHaveBeenCalledTimes(1)
-})
-const legacyCases = (['en', 'cs'] as const).flatMap(locale => (['invite', 'reminder'] as const).flatMap(kind =>
-  (['unsigned', 'signed', 'rotated'] as const).flatMap(tokenKind => [false, true].map(amp => ({ locale, kind, tokenKind, amp })))))
-it.each(legacyCases)('legacy $locale $kind $tokenKind amp=$amp fails closed without template inputs', async ({ locale, tokenKind, amp }) => {
-  const config = { ...sample, locale }
-  const created = await json(await request(createApp(config, runtime()), '/orgs/org-a/invitations', 'POST', { email: 'legacy@example.test', role: 'viewer' }))
-  const row = (await env.DB.prepare('SELECT id,body FROM email_outbox').first<{ id: string; body: string }>())!
-  const inputs = JSON.parse(row.body)
-  const link = new URL(await buildInvitationAcceptUrl(runtime(), { selector: inputs.selector, purpose: tokenKind === 'unsigned' ? 'copy' : 'email' }))
-  if (amp) { link.searchParams.set('source', 'email'); link.searchParams.set('label', 'A & B') }
-  await env.DB.prepare('UPDATE email_outbox SET body=?,delivery_text=?,delivery_html=? WHERE id=?').bind(`Accept: ${link.href}`, link.href, `<a href="${escape(link.href)}">Accept</a>`, row.id).run()
-  const send = vi.fn().mockResolvedValue(undefined)
-  const settings = { ...runtime(), EMAIL: { send }, EMAIL_FROM: 'noreply@example.test' }
-  if (tokenKind === 'rotated') settings.IDENTITY.secret = 'synthetic-rotated-key-at-least-32-characters'
-  const log = vi.spyOn(console, 'error').mockImplementation(() => {})
-  const app = createApp(config, settings)
-  expect(await json(await request(app, `/orgs/org-a/invitations/${created.id}/retry-delivery`, 'POST', {})))
-    .toMatchObject({ delivery: { status: 'failed', attempts: 1, sent_at: null, error: 'email_send_failed' } })
-  expect(send).not.toHaveBeenCalled()
-  expect(log).toHaveBeenCalledWith(JSON.stringify({ event: 'email_send_failed', outboxId: row.id, reason: 'invitation_mail_inputs_required' }))
 })
 it('invalid inputs can be repaired and retried with exactly one native send', async () => {
   const created = await json(await request(createApp(sample, runtime()), '/orgs/org-a/invitations', 'POST', { email: 'repair@example.test', role: 'viewer' }))

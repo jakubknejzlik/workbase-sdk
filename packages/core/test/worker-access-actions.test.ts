@@ -318,7 +318,6 @@ it('worker invite mail: delivers exactly once after commit, with Members renderi
   const outbox = (await invitationOutbox(result.invitation_id))!
   expect(outbox).toMatchObject({ delivery_status: 'sent', attempts: 1, last_error: null })
   const deliveredLink = message.text.match(/https?:\/\/[^\s]+\/invitations\/accept\?token=[a-f0-9]+\.[a-f0-9]+/)![0]
-  expect(JSON.parse(outbox.body).version).toBe(1)
   expect(message.text).toContain(deliveredLink); expect(message.html).toContain(deliveredLink.replaceAll('&', '&amp;'))
   const selector = new URL(result.accept_url).searchParams.get('token')!
   const proof = new URL(deliveredLink).searchParams.get('token')!

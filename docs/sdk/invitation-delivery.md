@@ -19,7 +19,7 @@ record access dialog does the same; the SDK access card can also copy the
 unsigned value returned by its invite action. None receives the delivered
 selector or proof. The copied value is absent from the delivered message.
 
-New outbox rows store version 1 template inputs in `body`: display metadata,
+Outbox rows store template inputs in `body`: display metadata,
 locale, timezone, expiry, configured origin and the unsigned delivered selector.
 `delivery_html` and `delivery_text` are empty placeholders. On each send/retry,
 Members checks the stored selector against the live invitation's delivered hash,
@@ -33,16 +33,12 @@ There is no rendered-content scanner, URL substitution or replacement count.
 Stored HTML/text, including null or tampered values, cannot supply a delivered
 link. Invalid inputs or a failed URL/proof verification fail the claimed attempt
 with `failed` / `email_send_failed` before native send. No proof is persisted in
-the outbox or serialized operation plan. Key rotation is handled by signing and
-verifying again at delivery time.
+the outbox or serialized operation plan.
 
-Legacy rows with rendered bodies, whether unsigned or already signed, lack the
-original template inputs. They fail closed rather than guessing metadata or
-recovering links from rendered content. The fixed log diagnostic is
-`invitation_mail_inputs_required`; management status stays `email_send_failed`.
-Use authorized manual Resend to create a new versioned reminder intent. Migration
-005 preserves existing delivery hashes independently of later copy rotations;
-it does not make old rendered content trusted.
+The input object has no format-version marker: `selector`, `origin` and
+`template` describe the current payload. Historical formats are unsupported;
+missing or malformed inputs follow the normal `email_send_failed` path. Migration
+005 remains part of the current copy/delivery credential separation.
 
 The shared outbox still claims an attempt before rendering, sends through the
 native binding, and fences sent rows and ambiguous timeouts. A rendering failure

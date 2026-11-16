@@ -33,7 +33,6 @@ const deliver: MailOutboxPort['deliver'] = async (env, config, id, eligible, ren
   const now = new Date().toISOString()
   const row = await env.DB.prepare('SELECT body,sender_name,recipient,subject,delivery_text,delivery_html,expires_at,delivery_status,attempts,lease_until,last_error FROM email_outbox WHERE id=?').bind(id)
     .first<{ body: string; sender_name: string | null; recipient: string; subject: string; delivery_text: string | null; delivery_html: string | null; expires_at: string | null; delivery_status: string; attempts: number; lease_until: string | null; last_error: string | null }>()
-  // Legacy rows lack a caller-rendered payload/expiry. Retain them, never guess a template.
   if (!row || row.delivery_status === 'sent' || row.last_error === 'email_send_timeout' || (!render && (row.delivery_text === null || row.delivery_html === null))
     || !row.expires_at || !Number.isFinite(Date.parse(row.expires_at)) || Date.parse(row.expires_at) <= Date.now()
     || (row.delivery_status === 'sending' && row.lease_until !== null && row.lease_until > now)) return
@@ -71,7 +70,7 @@ const deliver: MailOutboxPort['deliver'] = async (env, config, id, eligible, ren
     // retain a durable fence so retry cannot duplicate a late provider delivery.
     timedOut = error instanceof EmailSendTimeout
     // Provider errors can echo credentials. Log only a fixed code and opaque ID.
-    console.error(JSON.stringify({ event: 'email_send_failed', outboxId: id, ...(error instanceof Error && error.message === 'invitation_mail_inputs_required' ? { reason: error.message } : {}) }))
+    console.error(JSON.stringify({ event: 'email_send_failed', outboxId: id }))
   }
   await identityWrite(env, config, 'email_delivery', [{
     // A stale-lease observer may already have fenced this attempt. In that case

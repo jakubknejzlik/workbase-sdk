@@ -19,24 +19,21 @@ export async function inviterDisplay(db: D1Database, userId: string): Promise<st
 
 /** Eligibility is rechecked by the outbox for every delivery/retry. */
 export async function invitationDeliveryEligible(db: D1Database, id: string, organizationId: string, outboxId: string, hash: string) {
-  return !!await db.prepare(`SELECT id FROM invitations WHERE id=? AND organization_id=? AND delivery_outbox_id=? AND coalesce(delivery_token_hash,token_hash)=?
+  return !!await db.prepare(`SELECT id FROM invitations WHERE id=? AND organization_id=? AND delivery_outbox_id=? AND delivery_token_hash=?
     AND accepted_at IS NULL AND revoked_at IS NULL AND declined_at IS NULL AND expired_at IS NULL AND expires_at>?`)
     .bind(id, organizationId, outboxId, hash, new Date().toISOString()).first()
 }
 
 const mailInputs = z.strictObject({
-  version: z.literal(1), selector: z.string().regex(/^[a-f0-9]{64}$/), origin: z.string(),
+  selector: z.string().regex(/^[a-f0-9]{64}$/), origin: z.string(),
   template: z.strictObject({
     kind: z.enum(['invite', 'reminder']), inviterDisplayName: z.string(), organizationName: z.string().optional(),
     roleLabel: z.string(), expiresAt: z.iso.datetime(), timeZone: z.string(), language: z.enum(['en', 'cs']).optional(),
   }),
 })
 
-/** Old rendered bodies cannot recover the authorized template inputs. Require manual Resend. */
 export const invitationMailRenderer = (env: RuntimeEnv, expectedHash: string): MailDeliveryRenderer => async ({ body }) => {
-  let inputs: z.infer<typeof mailInputs>
-  try { inputs = mailInputs.parse(JSON.parse(body)) }
-  catch { throw new InvitationLinkError('invitation_mail_inputs_required') }
+  const inputs = mailInputs.parse(JSON.parse(body))
   if (inputs.origin !== invitationOrigin(env, inputs.origin) || await sha256(inputs.selector) !== expectedHash) {
     throw new InvitationLinkError('invitation_link_invalid')
   }
@@ -54,7 +51,7 @@ export async function invitationMail(env: RuntimeEnv, config: InstanceConfig, id
     ? await env.DB.prepare('SELECT name FROM organizations WHERE id=?').bind(organizationId).first<{ name: string }>() : null
   const senderName = options ? await inviterDisplay(env.DB, options.inviterId) : undefined
   const language = config.locale
-  const inputs = options ? mailInputs.parse({ version: 1, selector, origin: invitationOrigin(env, options.localFallback), template: {
+  const inputs = options ? mailInputs.parse({ selector, origin: invitationOrigin(env, options.localFallback), template: {
     kind: options.kind, inviterDisplayName: senderName!, organizationName: organization?.name,
     roleLabel: enumLabel(config, 'roles', options.role, language), expiresAt: options.expiresAt, timeZone: config.timeZone, language,
   } }) : undefined
@@ -67,7 +64,7 @@ export async function invitationMail(env: RuntimeEnv, config: InstanceConfig, id
     },
     deliver: () => outbox.deliver(env, config, id, async () => (options?.invitationId
       ? await invitationDeliveryEligible(env.DB, options.invitationId, organizationId, id, hash)
-      : !!await env.DB.prepare(`SELECT id FROM invitations WHERE organization_id=? AND coalesce(delivery_token_hash,token_hash)=? AND delivery_outbox_id=?
+      : !!await env.DB.prepare(`SELECT id FROM invitations WHERE organization_id=? AND delivery_token_hash=? AND delivery_outbox_id=?
       AND accepted_at IS NULL AND revoked_at IS NULL AND declined_at IS NULL AND expired_at IS NULL AND expires_at>?`)
       .bind(organizationId, hash, id, new Date().toISOString()).first()) && (!options?.eligible || await options.eligible()), invitationMailRenderer(env, hash)),
   }

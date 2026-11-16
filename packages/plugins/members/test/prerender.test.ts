@@ -14,7 +14,7 @@ const modes = ['bare', 'plain', 'percent', 'decimal', 'hex'] as const
 it.each(modes)('re-renders inputs and ignores tampered stored HTML/text: %s', async mode => {
   const created = await json(await request(createApp(sample, runtime()), '/orgs/org-a/invitations', 'POST', { email: 'tampered@example.test', role: 'viewer' }))
   const row = (await env.DB.prepare('SELECT id,body,delivery_html FROM email_outbox').first<{ id: string; body: string; delivery_html: string }>())!
-  const selector = row.body.startsWith('{') ? JSON.parse(row.body).selector : new URL(created.accept_url).searchParams.get('token')!
+  const selector = JSON.parse(row.body).selector
   const encoded = [...selector].map(ch => mode === 'percent' ? `%${ch.charCodeAt(0).toString(16)}` : mode === 'decimal' ? `&#${ch.charCodeAt(0)};` : mode === 'hex' ? `&#x${ch.charCodeAt(0).toString(16)};` : ch).join('')
   const extra = `<a title=">" href="/invitations/accept${mode === 'bare' ? '' : `&quest;token&equals;${encoded}`}">extra</a>`
   await env.DB.prepare('UPDATE email_outbox SET delivery_html=? WHERE id=?').bind(row.delivery_html + extra, row.id).run()
