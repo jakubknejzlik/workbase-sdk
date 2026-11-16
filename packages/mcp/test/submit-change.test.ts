@@ -5,6 +5,8 @@ import { createHash } from 'node:crypto'
 import { cp, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+import { KernelRegistry } from '@workbasehq/core/kernel/registry'
+import { generate } from '../../core/src/openapi/generate.ts'
 import { json, Store } from '../src/storage.ts'
 import { Workflow } from '../src/workflow.ts'
 import { RestGitHub, notConfigured, type TreeEntry, type CheckRun } from '../src/github.ts'
@@ -414,6 +416,14 @@ it.each(['promote', 'submit_change'])('rejects SDK %s before config execution; s
 async function compositionSubmission() {
   const p = await proposal()
   p.kind = 'composition_change'
+  // This versioned fixture uses executable configs; use the CLI's generator directly.
+  const bundle = await store.load('sample'), kernel = new KernelRegistry(bundle.config)
+  const configHash = createHash('sha256').update(await readFile(join(dir(), 'config.ts'))).digest('hex')
+  const openapi = generate(kernel.config, kernel, configHash)
+  await writeFile(join(dir(), 'openapi.json'), openapi)
+  const openapiHash = createHash('sha256').update(openapi).digest('hex')
+  p.validation.openapiHash = openapiHash
+  p.verification.openapiHash = openapiHash
   p.changes = [{ kind: 'set_plugin', plugin: 'organizations', options: { allowCreate: true } }, { kind: 'set_interactive', interactive: true }]
   p.promotedRevision = p.baseRevision
   delete p.migration
