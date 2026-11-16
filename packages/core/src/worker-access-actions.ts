@@ -44,7 +44,7 @@ export function workerAccessCommands(config: InstanceConfig, env?: RuntimeEnv): 
     }, 'invitations.revoke')
     const invite = registerPostCommit(registerUserLinkAction({ name: accountCommand(entity, 'invite'), permission: { entity, operation: 'create' }, input: z.strictObject({ id, email: z.string().trim().pipe(z.email()).transform(email => email.toLowerCase()) }),
       async prepare(ctx, input) {
-        // Resolve credentials and outbox payload privately, never into config/locks.
+        // Prepare the unsigned selector and mail metadata outside config/locks.
         const configured = env?.IDENTITY?.baseURL ?? env?.AUTH_BASE_URL
         if (!configured) throw new Error('invitation_origin_required')
         const role = invitationRole(ctx.config, entity)
@@ -68,11 +68,17 @@ export function workerAccessCommands(config: InstanceConfig, env?: RuntimeEnv): 
           sql: `INSERT INTO invitations (id,organization_id,email,role,token_hash,expires_at,inviter_id,created_at,delivery_outbox_id,target_entity,target_row) SELECT ?,?,?,?,?,?,?,?,?,?,? WHERE ${guard.sql}`,
           bindings: [p.invitationId, ctx.scope.organizationId, input.email, p.role, p.hash, p.expires, actorAccountId(ctx.scope), ctx.now, p.outboxId, entity, input.id, ...guard.values], expectRows: 1,
         }, p.mail.intent(p.expires)] }], event: { operation: 'invitation.created', entity: 'invitations', entityId: p.invitationId },
-          result: { status: 201, body: { invitation_id: p.invitationId, expires_at: p.expires, accept_url: p.url } } }
+          result: { status: 201, body: { invitation_id: p.invitationId, expires_at: p.expires, accept_url: p.url,
+            delivery: { status: 'unknown', attempts: 0, sent_at: null, error: 'email_delivery_unknown' } } } }
       },
     }), async (prepared, result) => {
-      await prepared.mail.deliver()
-      return { ...result, body: { ...result.body, delivery: await prepared.deliveryStatus() } }
+      try {
+        await prepared.mail.deliver()
+        return { ...result, body: { ...result.body, delivery: await prepared.deliveryStatus() } }
+      } catch {
+        console.error(JSON.stringify({ event: 'invitation_post_commit_failed', outboxId: prepared.outboxId }))
+        return result
+      }
     })
     return [invite, cancel, adapt(link, 'link_account'), adapt(unlink, 'unlink_account')]
   })

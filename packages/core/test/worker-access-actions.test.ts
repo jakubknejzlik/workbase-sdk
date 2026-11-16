@@ -1,3 +1,6 @@
+import { z } from 'zod'
+import { registerPostCommit, postCommitFor } from '../src/execution/post-commit'
+import type { AtomicOperation } from '../src/execution/types'
 import { env } from 'cloudflare:workers'
 import { reset } from 'cloudflare:test'
 import { beforeEach, afterEach, expect, it, vi } from 'vitest'
@@ -314,7 +317,8 @@ it('worker invite mail: delivers exactly once after commit, with Members renderi
   expect(message.text).toContain('admin'); expect(message.html).toContain('admin')
   const outbox = (await invitationOutbox(result.invitation_id))!
   expect(outbox).toMatchObject({ delivery_status: 'sent', attempts: 1, last_error: null })
-  const deliveredLink = outbox.body.replace('Accept: ', '')
+  const deliveredLink = message.text.match(/https?:\/\/[^\s]+\/invitations\/accept\?token=[a-f0-9]+\.[a-f0-9]+/)![0]
+  expect(outbox.body).toBe(`Accept: ${result.accept_url}`);
   expect(message.text).toContain(deliveredLink); expect(message.html).toContain(deliveredLink.replaceAll('&', '&amp;'))
   const selector = new URL(result.accept_url).searchParams.get('token')!
   const proof = new URL(deliveredLink).searchParams.get('token')!
@@ -423,19 +427,100 @@ it('worker invite mail: a pre-existing pending intent stays untouched', async ()
     .toEqual({ delivery_status: 'pending', attempts: 0, sent_at: null, last_error: null })
 })
 
-it('worker invite mail: post-commit failure remains a failure and idempotent replay never sends twice', async () => {
+it('worker invite mail: post-commit failure preserves the committed result and idempotent replay never sends twice', async () => {
   const send = vi.fn().mockResolvedValue(undefined)
   const settings = mailRuntime(send)
   const kernel = new KernelRegistry(workerAccessFixture(), {}, settings)
   const scope = await requireScope(await kernel.requireActor(new Request('http://localhost', { headers: { Authorization: 'Bearer synthetic-admin' } }), settings), 'org-a', kernel.config)
   const operation = kernel.commands.get('worker/access_invite')!
   const context = coreExecutionContext(kernel.config, scope, new D1AtomicStore(env.DB, { env: settings, config: kernel.config }), new D1AtomicReader(env.DB), 'invite-once')
+  vi.spyOn(console, 'error').mockImplementation(() => {})
   const status = vi.spyOn(kernel.invitationMail, 'status').mockRejectedValueOnce(new Error('synthetic post-commit status failure'))
-  await expect(executeAtomic(operation, { id: 'local', email: 'recipient@example.test' }, context)).rejects.toThrow('synthetic post-commit status failure')
+  const committed = await executeAtomic(operation, { id: 'local', email: 'recipient@example.test' }, context)
+  expect(committed).toMatchObject({ status: 201, body: { delivery: { status: 'unknown' } } })
   expect(send).toHaveBeenCalledTimes(1)
   expect(await env.DB.prepare("SELECT delivery_status FROM email_outbox").first('delivery_status')).toBe('sent')
   const replay = await executeAtomic(operation, { id: 'local', email: 'recipient@example.test' }, context)
-  expect(replay.status).toBe(201)
+  expect(replay).toEqual(committed)
   expect(send).toHaveBeenCalledTimes(1); expect(status).toHaveBeenCalledTimes(1)
   expect(await env.DB.prepare('SELECT count(*) n FROM invitations').first('n')).toBe(1)
+})
+
+it('worker invite mail: status failure returns 201 and delivery recovery uses the committed invitation', async () => {
+  const send = vi.fn().mockResolvedValue(undefined)
+  const settings = mailRuntime(send)
+  const port = new KernelRegistry(workerAccessFixture(), {}, settings).invitationMail
+  vi.spyOn(port, 'status').mockRejectedValueOnce(new Error('synthetic status read failure with private details'))
+  const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+  app = createApp(workerAccessFixture(), settings)
+  const response = await act('local', 'invite', { email: 'recipient@example.test' })
+  expect(response.status).toBe(201)
+  const result = await response.json() as any
+  expect(result).toMatchObject({ invitation_id: expect.any(String), accept_url: expect.any(String), delivery: { status: 'unknown' } })
+  expect(await env.DB.prepare('SELECT count(*) n FROM invitations').first('n')).toBe(1)
+  expect(await invitationOutbox(result.invitation_id)).toMatchObject({ delivery_status: 'sent', attempts: 1 })
+  expect(send).toHaveBeenCalledTimes(1)
+  const retry = await request(`/orgs/org-a/invitations/${result.invitation_id}/retry-delivery`, 'admin', 'POST', {})
+  expect(retry.status).toBe(200)
+  expect(await retry.json()).toMatchObject({ id: result.invitation_id, delivery: { status: 'delivered', attempts: 1 } })
+  expect(send).toHaveBeenCalledTimes(1)
+  expect(await env.DB.prepare('SELECT count(*) n FROM invitations').first('n')).toBe(1)
+  expect(log.mock.calls).toEqual([[JSON.stringify({ event: 'invitation_post_commit_failed', outboxId: (await invitationOutbox(result.invitation_id))!.id })]])
+})
+
+it('worker invite mail: serialized StorePlans exclude the delivered mailbox proof on creation and retry', async () => {
+  const send = vi.fn().mockRejectedValueOnce(new Error('synthetic provider failure')).mockResolvedValue(undefined)
+  vi.spyOn(console, 'error').mockImplementation(() => {})
+  const config = workerAccessFixture()
+  app = createApp(config, mailRuntime(send))
+  const serializedPlans: string[] = []
+  const original = D1AtomicStore.prototype.run
+  vi.spyOn(D1AtomicStore.prototype, 'run').mockImplementation(async function(this: D1AtomicStore, plan) {
+    serializedPlans.push(JSON.stringify(plan))
+    return original.call(this, plan)
+  })
+  const response = await act('local', 'invite', { email: 'recipient@example.test' })
+  expect(response.status).toBe(201)
+  const result = await response.json() as any
+  expect(result.delivery.status).toBe('failed')
+  const retried = await request(`/orgs/org-a/invitations/${result.invitation_id}/retry-delivery`, 'admin', 'POST', {})
+  expect(retried.status).toBe(200)
+  expect(await retried.json()).toMatchObject({ delivery: { status: 'delivered', attempts: 2 } })
+  expect(send).toHaveBeenCalledTimes(2)
+  const message = send.mock.calls[1][0]
+  const deliveredLink = message.text.match(/https?:\/\/[^\s]+\/invitations\/accept\?token=[a-f0-9]+\.[a-f0-9]+/)![0]
+  const proof = new URL(deliveredLink).searchParams.get('token')!
+  expect(proof).toMatch(/^[a-f0-9]{64}\.[a-f0-9]{64}$/)
+  expect(serializedPlans.length).toBeGreaterThan(0)
+  expect(serializedPlans.some(plan => plan.includes(proof) || /[a-f0-9]{64}\.[a-f0-9]{64}/.test(plan))).toBe(false)
+  expect(JSON.stringify(config).includes(proof)).toBe(false)
+  expect(JSON.stringify(await env.DB.prepare('SELECT payload FROM audit_outbox').all()).includes(proof)).toBe(false)
+  expect(JSON.stringify(result).includes(proof)).toBe(false)
+  expect(JSON.stringify(await invitationOutbox(result.invitation_id)).includes(proof)).toBe(false)
+  expect((await app.request('http://localhost/invitations/resolve', { method: 'POST', headers: { Origin: 'http://localhost', 'Sec-Fetch-Site': 'same-origin', 'Content-Type': 'application/json' }, body: JSON.stringify({ token: proof }) })).status).toBe(200)
+})
+
+it('post-commit callbacks are isolated by operation identity even with a shared plan function', async () => {
+  const kernel = new KernelRegistry(workerAccessFixture(), {}, runtime())
+  const scope = await requireScope(await kernel.requireActor(new Request('http://localhost', { headers: { Authorization: 'Bearer synthetic-admin' } }), runtime()), 'org-a', kernel.config)
+  const context = coreExecutionContext(kernel.config, scope, new D1AtomicStore(env.DB, { env: runtime(), config: kernel.config }), new D1AtomicReader(env.DB))
+  const plan: AtomicOperation['plan'] = () => ({ rules: [{ name: 'touch', statements: [{ sql: "UPDATE worker SET name=name WHERE id='local'" }] }], event: { operation: 'worker.updated', entity: 'worker', entityId: 'local' }, result: { status: 200, body: {} } })
+  const base = { permission: { system: 'invitations.create' as const }, input: z.object({}), plan }
+  const callbackA = vi.fn(async (_prepared, result) => ({ ...result, body: { owner: 'a' } }))
+  const callbackB = vi.fn(async (_prepared, result) => ({ ...result, body: { owner: 'b' } }))
+  const a = registerPostCommit({ ...base, name: 'worker/probe_a' }, callbackA)
+  const b = registerPostCommit({ ...base, name: 'worker/probe_b' }, callbackB)
+  const unregistered = { ...base, name: 'worker/probe_unregistered' }
+  expect(postCommitFor(a)).toBe(callbackA)
+  expect(postCommitFor(b)).toBe(callbackB)
+  expect(postCommitFor(unregistered)).toBeUndefined()
+  expect(await executeAtomic(a, {}, context)).toMatchObject({ body: { owner: 'a' } })
+  expect(await executeAtomic(b, {}, context)).toMatchObject({ body: { owner: 'b' } })
+  expect(await executeAtomic(unregistered, {}, context)).toEqual({ status: 200, body: {} })
+  expect(callbackA).toHaveBeenCalledTimes(1); expect(callbackB).toHaveBeenCalledTimes(1)
+  const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+  const failing = registerPostCommit({ ...base, name: 'worker/probe_failure' }, async () => { throw new Error('private callback details') })
+  expect(await executeAtomic(failing, {}, context)).toEqual({ status: 200, body: {} })
+  expect(log).toHaveBeenCalledTimes(1)
+  expect(JSON.parse(log.mock.calls[0][0])).toEqual({ event: 'post_commit_failed', operationId: expect.stringMatching(/^[0-9a-f-]{36}$/) })
 })

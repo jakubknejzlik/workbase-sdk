@@ -1,5 +1,5 @@
 import { env } from 'cloudflare:workers'
-import { beforeEach, expect, it } from 'vitest'
+import { beforeEach, expect, it, vi } from 'vitest'
 import sample from '../../../core/test/fixtures/sample/config'
 import accounts from '../../../core/test/fixtures/accounts/config'
 import { createApp } from '@workbasehq/core/app'
@@ -12,13 +12,15 @@ import { invitationMailToken } from '../src/invitation-token'
 import { FakeIdpAdapter, idpAuth } from '../../idp-auth/src/fake'
 
 let app: ReturnType<typeof createApp>
-beforeEach(async () => { app = await setup() })
+const send = vi.fn().mockResolvedValue(undefined)
+const mailRuntime = () => ({ ...runtime(), EMAIL: { send }, EMAIL_FROM: 'noreply@example.test' })
+beforeEach(async () => { send.mockClear(); await setup(); app = createApp(sample, mailRuntime()) })
 async function invite(email = 'owner.b@example.test', extra: Record<string, unknown> = {}) {
   const r = await request(app, '/orgs/org-a/invitations', 'POST', { email, role: 'viewer', ...extra })
   expect(r.status, await r.clone().text()).toBe(201)
   const row = await json(r)
-  const mail = await env.DB.prepare('SELECT o.body FROM email_outbox o JOIN invitations i ON i.delivery_outbox_id=o.id WHERE i.id=?').bind(row.id).first<string>('body')
-  return { ...row, token: new URL(mail!.replace('Accept: ', '')).searchParams.get('token')! }
+  const link = send.mock.calls.at(-1)![0].text.match(/https?:\/\/[^\s]+\/invitations\/accept\?token=[a-f0-9]+\.[a-f0-9]+/)![0]
+  return { ...row, token: new URL(link).searchParams.get('token')! }
 }
 async function complete(user = 'owner-b') {
   const kernel = new KernelRegistry(sample)

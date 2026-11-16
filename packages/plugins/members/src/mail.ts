@@ -1,3 +1,4 @@
+import type { MailDeliveryRenderer } from '../../../core/src/kernel/mail-outbox-port'
 import type { InvitationMailOptions } from '../../../core/src/kernel/invitation-mail-port'
 import { enumLabel } from '../../../core/src/query/search'
 import type { InstanceConfig } from '@workbasehq/core/config'
@@ -31,6 +32,16 @@ export async function invitationDeliveryEligible(db: D1Database, id: string, org
     .bind(id, organizationId, outboxId, hash, new Date().toISOString()).first()
 }
 
+/** Finalize a durable invitation payload on every send/retry, without writing proof to a plan or row. */
+export const invitationMailRenderer = (env: RuntimeEnv): MailDeliveryRenderer => async ({ body, text, html }) => {
+  const link = body.replace(/^Accept: /, '')
+  const url = new URL(link)
+  const selector = invitationSelector(url.searchParams.get('token')!)
+  url.searchParams.set('token', await invitationMailToken(env, selector))
+  const escape = (value: string) => value.replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]!)
+  return { text: text.replaceAll(link, url.href), html: html.replaceAll(escape(link), escape(url.href)) }
+}
+
 /** Members owns the P10 template and credential eligibility; the shared port owns transport. */
 export async function invitationMail(env: RuntimeEnv, config: InstanceConfig, id: string, organizationId: string, recipient: string, link: string,
   options?: InvitationMailOptions) {
@@ -38,7 +49,8 @@ export async function invitationMail(env: RuntimeEnv, config: InstanceConfig, id
   const recipientLink = new URL(link)
   const selector = invitationSelector(recipientLink.searchParams.get('token')!)
   const hash = await sha256(selector)
-  recipientLink.searchParams.set('token', await invitationMailToken(env, selector))
+  // Persist only the unsigned selector; mailbox proof exists only at send time.
+  recipientLink.searchParams.set('token', selector)
   link = recipientLink.href
   const organization = options && kernelFor(config).providers.has('organizations')
     ? await env.DB.prepare('SELECT name FROM organizations WHERE id=?').bind(organizationId).first<{ name: string }>() : null
@@ -61,7 +73,7 @@ export async function invitationMail(env: RuntimeEnv, config: InstanceConfig, id
       ? await invitationDeliveryEligible(env.DB, options.invitationId, organizationId, id, hash)
       : !!await env.DB.prepare(`SELECT id FROM invitations WHERE organization_id=? AND token_hash=? AND delivery_outbox_id=?
       AND accepted_at IS NULL AND revoked_at IS NULL AND declined_at IS NULL AND expired_at IS NULL AND expires_at>?`)
-      .bind(organizationId, hash, id, new Date().toISOString()).first()) && (!options?.eligible || await options.eligible())),
+      .bind(organizationId, hash, id, new Date().toISOString()).first()) && (!options?.eligible || await options.eligible()), invitationMailRenderer(env)),
   }
 }
 

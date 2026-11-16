@@ -47,7 +47,8 @@ export async function executeAtomic<S extends z.ZodType>(operation: AtomicOperat
   let conflict: string | undefined
   let prepared: unknown
   let committed: AtomicResult
-  const postCommit = postCommitFor(operation)
+  const postCommit = postCommitFor(identity)
+  const runId = crypto.randomUUID()
   try {
     prepared = await operation.prepare?.(Object.freeze({ __proto__: null, ...context, reader: Object.freeze({ __proto__: null, first: <T>(query: Parameters<typeof reader.first>[0]) => reader.first<T>(query) }) }), body)
     const rawPlan = operation.plan(Object.freeze({ __proto__: null, ...context, prepared, now: new Date().toISOString(), newId: crypto.randomUUID() }), body)
@@ -55,7 +56,6 @@ export async function executeAtomic<S extends z.ZodType>(operation: AtomicOperat
     const plan = enforcePlan(kernelFor(config), scope, rawPlan, memberMode)
     conflict = plan.conflict
     const event = makeEvent(config, scope, plan.event.operation, plan.event.entity, plan.event.entityId, plan.event.before, plan.event.after, plan.event.details)
-    const runId = crypto.randomUUID()
     const response = policyIdentity ? receiptExpression(config, plan.rules, runId, plan.result, policyIdentity) : { sql: '?', bindings: [JSON.stringify(plan.result)] }
     const submission: StorePlan = { runId, rules: [...plan.rules,
       { name: 'audit_outbox', statements: [outboxInsert(event, { sql: 'NOT EXISTS (SELECT 1 FROM atomic_assert WHERE run_id=? AND ok<>1)', bindings: [runId] })] },
@@ -73,5 +73,12 @@ export async function executeAtomic<S extends z.ZodType>(operation: AtomicOperat
   }
   // The commit is final: post-commit failures must never enter rollback/replay
   // handling, and idempotent replays must never repeat external effects.
-  return postCommit ? postCommit(prepared, committed) : committed
+  if (postCommit) {
+    try { return await postCommit(prepared, committed) }
+    catch {
+      // Exceptions may contain credentials or provider payloads.
+      console.error(JSON.stringify({ event: 'post_commit_failed', operationId: runId }))
+    }
+  }
+  return committed
 }

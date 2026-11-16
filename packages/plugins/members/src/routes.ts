@@ -9,7 +9,7 @@ import { isOrganizationAdministrator } from '../../permissions/src/roles'
 import { recipientRoutes } from './recipient-routes'
 import { invitationTokenSchema } from './invitation-token'
 import { profileNamesSchema } from '../../identity/src/profile'
-import { invitationMail, invitationDeliveryStatus, invitationDeliveryEligible, inviterDisplay, invitationOrigin } from './mail'
+import { invitationMail, invitationDeliveryStatus, invitationDeliveryEligible, invitationMailRenderer, inviterDisplay, invitationOrigin } from './mail'
 import { canGrantRole } from '../../../core/src/execution/permissions'
 import { kernelFor } from '@workbasehq/core/kernel/registry'
 import { z } from 'zod'
@@ -269,7 +269,7 @@ export function memberRoutes(app: App, config: InstanceConfig, env: RuntimeEnv) 
     const guard = invitation.target_entity ? rowInvitationGuard(config, scope, { entity: invitation.target_entity, row: invitation.target_row! }) : issuerGuard(config, scope, 'invitations.create', invitation.role)
     await kernelFor(config).mailOutbox.retry(env, config, invitation.delivery_outbox_id, async () =>
       await invitationDeliveryEligible(env.DB, invitation.id, scope.organizationId, invitation.delivery_outbox_id!, invitation.token_hash)
-      && !!await env.DB.prepare(`SELECT 1 WHERE ${guard.sql}`).bind(...guard.values).first())
+      && !!await env.DB.prepare(`SELECT 1 WHERE ${guard.sql}`).bind(...guard.values).first(), invitationMailRenderer(env))
     return c.json({ id: invitation.id, delivery: await invitationDeliveryStatus(env, config, invitation.delivery_outbox_id) })
   })
   app.get('/orgs/:orgId/invitations', scoped, async c => {
