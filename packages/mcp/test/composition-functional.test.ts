@@ -65,15 +65,30 @@ export default { ...config, plugins: [identity, permissions({ roles: ['admin', '
   expect(proposal).toMatchObject({ ok: true, kind: 'composition_change' })
   return { root, store, call, proposalId: proposal.proposalId as string }
 }
-async function boot(root: string) {
+async function boot(root: string, captureInvitation = false) {
   const reservation = netServer()
   await new Promise<void>(resolve => reservation.listen(0, '127.0.0.1', resolve))
   const port = (reservation.address() as { port: number }).port
   await new Promise<void>((resolve, reject) => reservation.close(error => error ? reject(error) : resolve()))
   const origin = `http://127.0.0.1:${port}`
   await writeFile(join(root, '.dev.vars'), `INTERNAL_TOKEN=${opsToken}\nOPS_TOKEN=${opsToken}\nBETTER_AUTH_SECRET=${authSecret}\nAUTH_BASE_URL=${origin}\n`, { mode: 0o600 })
+  if (captureInvitation) {
+    // Only invitation creation gets a delivery capture; all other requests run without EMAIL.
+    await writeFile(join(root, 'src/invitation-mailbox.ts'), `import worker from './index'
+import { invitationMailbox } from ${JSON.stringify(resolve('packages/core/test/helpers/invitation-mailbox.ts'))}
+const mailbox = invitationMailbox()
+export default {
+  ...worker,
+  fetch(request, env, ctx) {
+    const path = new URL(request.url).pathname
+    if (path === '/__test/invitation-mailbox') return Response.json(mailbox.acceptUrl().href)
+    return worker.fetch(request, request.method === 'POST' && path.endsWith('/actions/invite') ? { ...env, ...mailbox.delivery } : env, ctx)
+  },
+}
+`)
+  }
   let logs = '', error: unknown
-  const worker: ChildProcess = spawn(process.execPath, [resolve('node_modules/wrangler/bin/wrangler.js'), 'dev', '--local', '--ip', '127.0.0.1', '--port', String(port), '--inspector-port', '0', '--persist-to', '.wrangler/state', '--log-level', 'error'], {
+  const worker: ChildProcess = spawn(process.execPath, [resolve('node_modules/wrangler/bin/wrangler.js'), 'dev', ...(captureInvitation ? ['src/invitation-mailbox.ts'] : []), '--local', '--ip', '127.0.0.1', '--port', String(port), '--inspector-port', '0', '--persist-to', '.wrangler/state', '--log-level', 'error'], {
     cwd: root, detached: true, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env,
       NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ''} --require=${resolve('scripts/local-network-only.cjs')}`,
       CLOUDFLARE_CF_FETCH_ENABLED: 'false', CLOUDFLARE_SEND_METRICS: 'false', WRANGLER_SEND_METRICS: 'false', WRANGLER_SEND_ERROR_REPORTS: 'false',
@@ -122,7 +137,7 @@ it('boots the MCP-promoted template composition and passes its functional contra
   cleanups.push(() => proxy.dispose())
   const db = proxy.env.DB as unknown as D1Database
   await migrateInstance(sql => db.batch(splitStatements(sql).map(statement => db.prepare(statement))), await readMigrationFiles(join(root, 'migrations')), kernel)
-  const { origin, stop } = await boot(root)
+  const { origin, stop } = await boot(root, true)
   expect((await fetch(origin + '/me')).status).toBe(401)
   const request = async (path: string, method = 'GET', body?: unknown, token?: string, org?: string, extra: Record<string, string> = {}) => fetch(origin + path, {
     method, signal: AbortSignal.timeout(15000), headers: { Origin: origin, 'Content-Type': 'application/json',
@@ -145,9 +160,9 @@ it('boots the MCP-promoted template composition and passes its functional contra
   const invite = await json(await request(rowPath + '/actions/invite', 'POST', { email: 'staff@example.test' }, admin, orgA.id), 201)
   const staff = await magicSession(origin, db, 'staff@example.test')
   await json(await request('/me/profile', 'PATCH', { firstName: 'Staff', lastName: 'Person' }, staff))
-  const invitation = await db.prepare("SELECT body FROM email_outbox WHERE recipient='staff@example.test' AND body LIKE 'Accept: %'").first<string>('body')
+  const invitation = await (await fetch(origin + '/__test/invitation-mailbox')).json() as string
   expect(invitation).toBeTruthy()
-  const token = new URL(invitation!.slice('Accept: '.length)).searchParams.get('token')
+  const token = new URL(invitation).searchParams.get('token')
   await json(await request('/invitations/resolve', 'POST', { token }, staff))
   await json(await request('/invitations/' + invite.invitation_id + '/accept', 'POST', {}, staff), 201)
   expect((await json(await request('/me', 'GET', undefined, staff))).memberships).toEqual(expect.arrayContaining([expect.objectContaining({ organization_id: orgA.id, role: 'staff' })]))
