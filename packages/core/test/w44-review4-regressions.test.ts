@@ -13,7 +13,7 @@ import { executeQuery } from '../src/query/executor'
 import { validateQuery } from '../src/query/schema'
 import { scopeOperations } from '../src/scope-operations'
 import { compileRoot, compileAggregate } from '../src/query/compiler'
-import { ExpressionError, expressionInfo } from '../src/query/expressions'
+import { ExpressionError, expressionInfo, readableComputed, rebindExpression } from '../src/query/expressions'
 
 const count = () => Q.select().from('people', 'p').field(Fn.count(Q.value(1))).where(Cond.isNotNull('self.id')).serialize()
 const input = () => ({ id: 'w44_review', revision: 1, interactive: true, plugins: [identity, localAuth, tenancy, legacyPermissions], roles: ['owner'],
@@ -68,6 +68,107 @@ it.each(['unqualified','qualified'])('R4 ORDER BY aggregate output alias %s',asy
  if(mode==='qualified'){expect(()=>defineInstance(v)).toThrow();return}
  const {run}=await fixture(defineInstance(v));expect((await run({entity:'notes',select:['value'],limit:10})).data).toEqual([{value:2},{value:2}]);
 });
+
+const outputAliasOperands = ['total', '#total#', 'TOTAL', '#ToTaL#']
+it.each(['scalar', 'count'].flatMap(projection => ['total', 'Total'].flatMap(alias => outputAliasOperands.map(operand => ({ projection, alias, operand })))))
+('R4 whole ORDER BY alias $operand resolves $projection projection declared as $alias', async ({ projection, alias, operand }) => {
+  const value = input()
+  const select = () => {
+    const query = Q.select().from('notes', 'n').field(projection === 'scalar' ? Fn.abs('n.amount') : Fn.count('n.amount'), alias)
+    return projection === 'scalar' ? query.limit(1) : query
+  }
+  const wire = select().orderBy(operand, 'DESC').serialize()
+  value.entities.notes.fields.value.computed = wire
+  const config = defineInstance(value)
+  const info = expressionInfo(config, 'notes', 'value', wire)
+  const baseline = expressionInfo(config, 'notes', 'value', select().orderBy(alias, 'DESC').serialize())
+  expect(info.dependencies).toEqual(baseline.dependencies)
+  expect(info.tables).toEqual(baseline.tables)
+  expect(info.dependencies.map(dep => [dep.entity, dep.field])).toEqual([['notes', 'amount'], ['notes', 'amount']])
+  const rendered = toSQLWithBindings(info.ast, Q.flavors.sqlite)
+  expect(rendered).toEqual(toSQLWithBindings(baseline.ast, Q.flavors.sqlite))
+  expect(rendered.sql).toContain(`ORDER BY \`${alias}\` DESC`)
+  // Exercise rebinding independently, before expressionInfo canonicalizes the AST.
+  const original = select().orderBy(operand, 'DESC')
+  expect(toSQLWithBindings(rebindExpression(original, new Map([['total', 'row.amount']])), Q.flavors.sqlite)).toEqual(rendered)
+
+  const { kernel, scope, run } = await fixture(config)
+  await env.DB.prepare("UPDATE notes SET amount=-5 WHERE id='n2'").run()
+  const query = { entity: 'notes', select: ['value'], limit: 10 }
+  expect((await run(query)).data).toEqual(Array(2).fill({ value: projection === 'scalar' ? 5 : 2 }))
+  const masked = new KernelRegistry(config, { plugins: [...config.plugins!, {
+    name: 'mask_alias_projection', version: '1',
+    fieldMask: entity => kernel.fieldMask(entity, scope).filter(field => entity !== 'notes' || field !== 'amount'),
+  }] })
+  expect(readableComputed(masked, scope, 'notes', 'value')).toBe(false)
+  expect((await run(query, masked)).data).toEqual([{ value: null }, { value: null }])
+  for (const [current, expected] of [[kernel, 2], [masked, 0]] as const) {
+    const { query: filtered, cost } = validateQuery(current, scope, { ...query, where: { value: { gt: 0 } } })
+    const count = compileAggregate(current, scope, filtered, { fn: 'count' }, cost)
+    expect(await env.DB.prepare(count.sql).bind(...count.bindings).first()).toMatchObject({ value: expected, __count: expected })
+  }
+})
+
+it.each(outputAliasOperands)('R4 ORDER BY alias %s does not waive scalar LIMIT rules', operand => {
+  const value = input()
+  value.entities.notes.fields.value.computed = Q.select().from('notes', 'n')
+    .field(Fn.abs('n.amount'), 'Total').orderBy(operand, 'DESC').serialize()
+  invalid(value, /LIMIT 1 or an aggregate/)
+})
+
+it.each(['n.total', '#n.total#', 'missing', '#missing#', Fn.abs('total').serialize(), Fn.add('total', Q.value(1)).serialize(), Q.raw('total').serialize()])
+('R4 ORDER BY operand %s cannot masquerade as a whole output alias', operand => {
+  const value = input()
+  value.entities.notes.fields.value.computed = Q.select().from('notes', 'n')
+    .field(Fn.abs('n.amount'), 'total').orderBy(Q.expr(operand), 'DESC').limit(1).serialize()
+  invalid(value, /Unknown schema field|needs a schema table alias|raw|Unknown field/i)
+})
+
+it('R4 qualified source and value operands retain their meaning beside a matching output alias', async () => {
+  const value = input()
+  const literal = '#AMOUNT#'
+  value.entities.notes.fields.value.computed = Q.select().from('notes', 'n')
+    .field(Fn.abs('n.amount'), 'amount').orderBy('n.amount', 'DESC')
+    .orderBy(Q.value('amount'), 'ASC').orderBy(Q.value(literal), 'ASC').limit(1).serialize()
+  const config = defineInstance(value)
+  const statement = toSQLWithBindings(expressionInfo(config, 'notes', 'value', value.entities.notes.fields.value.computed).ast, Q.flavors.sqlite)
+  expect(statement.sql).toContain('ORDER BY `n`.`amount` DESC, ? ASC, ? ASC')
+  expect(statement.bindings).toEqual(['amount', literal, 1])
+  const { run } = await fixture(config)
+  await env.DB.prepare("UPDATE notes SET amount=-5 WHERE id='n2'").run()
+  expect((await run({ entity: 'notes', select: ['value'], limit: 10 })).data).toEqual([{ value: 3 }, { value: 3 }])
+})
+
+it.each(['#total#', 'total+1', 'total '])('R4 declaration %s is not decoded or trimmed into an identifier alias', alias => {
+  const value = input()
+  value.entities.notes.fields.value.computed = Q.select().from('notes', 'n')
+    .field(Fn.abs('n.amount'), alias).orderBy('#total#', 'DESC').limit(1).serialize()
+  invalid(value, /Subquery field total needs a schema table alias/)
+})
+
+it.each(['nested', 'sibling'])('R4 output alias lookup does not inherit from a %s SELECT', mode => {
+  const value = input()
+  const first = Q.select().from('notes', 'n').field(Fn.count('n.id'), 'Total').orderBy('#TOTAL#', 'ASC')
+  const second = Q.select().from('people', 'p').field(Fn.count('p.id'), 'other').orderBy('#total#', 'ASC')
+  value.entities.notes.fields.value.computed = mode === 'nested'
+    ? first.where(Cond.exists(second)).serialize()
+    : Fn.if(Cond.and([Cond.exists(first), Cond.exists(second)])!, 'amount', Q.value(0)).serialize()
+  invalid(value, /Subquery field total needs a schema table alias/)
+})
+
+it('R4 nested SELECTs resolve their own alias spelling and preserve self correlation', async () => {
+  const value = input()
+  const inner = Q.select().from('people', 'p').field(Fn.count('p.id'), 'total')
+    .where(Cond.columnEqual('p.note', 'self.id')).orderBy('#TOTAL#', 'DESC')
+  value.entities.notes.fields.value.computed = Q.select().from('notes', 'n').field(Fn.count('n.id'), 'Total')
+    .where(Cond.exists(inner)).orderBy('#total#', 'ASC').serialize()
+  const { run, kernel, scope } = await fixture(defineInstance(value))
+  const { query, cost } = validateQuery(kernel, scope, { entity: 'notes', select: ['value'], limit: 10 })
+  const statement = compileRoot(kernel, scope, query, undefined, cost)
+  expect(statement.sql).toContain('ORDER BY `total` DESC')
+  expect(statement.sql).toContain('ORDER BY `Total` ASC')
+  expect((await run(query)).data).toEqual([{ value: 2 }, { value: 2 }])
+})
 it.each(['WHERE','JOIN ON','ORDER BY'])('R4 local aggregate in scalar SELECT within %s is valid',async clause=>{
  const v:any=input();const sub=Q.select().from('people','sub').field(Fn.count('sub.id'));
  // Structured subquery operand via IN exercises a distinct SELECT context.
