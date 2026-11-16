@@ -533,7 +533,7 @@ type LinkMember = { user_id: string; display_name?: string | null; email?: strin
 const memberLabel = (member: LinkMember) => [member.display_name, member.email !== member.display_name ? member.email : undefined].filter(Boolean).join(' · ') || member.user_id
 function FindMemberOrInvite(props: Omit<InvitationMutationProps, 'action'>) {
   const { t } = useTranslation(); const access = useApplicationAccess(props)
-  const [search, setSearch] = useState(''); const [query, setQuery] = useState('')
+  const [search, setSearch] = useState(props.email ?? ''); const [query, setQuery] = useState('')
   const [selected, setSelected] = useState<LinkMember>()
   const [rejected, setRejected] = useState<string>()
   const canSearch = access.actions.includes('link')
@@ -552,7 +552,7 @@ function FindMemberOrInvite(props: Omit<InvitationMutationProps, 'action'>) {
   if (!canSearch) return <p role="alert">{t('rowAccessDenied')}</p>
   return <div className="grid gap-3 [&_button]:min-h-11 [&_button]:min-w-11 [&_input]:min-h-11 [&_input]:pr-20 [&_[role=option]]:min-h-11">
     <p className="text-sm text-muted-foreground">{t('rowLinkPickerHint')}</p>
-    <EntityPicker remote label={t('rowFindQuery')} placeholder={t('rowFindQuery')} value={selected?.user_id ?? ''} selectedLabel={selected ? memberLabel(selected) : search}
+    <EntityPicker remote label={t('rowFindQuery')} placeholder={t('rowFindQuery')} value={selected?.user_id ?? ''} selectedLabel={selected ? memberLabel(selected) : search} search={search}
       options={choices.map(member => ({ id: member.user_id, label: memberLabel(member) }))} loading={canSearch && loading} loadingLabel={t('loading')} emptyLabel={query && !members.error ? t('rowInviteNoMembers') : undefined} clearLabel={t('rowFindClear')}
       error={canSearch && conflict ? t('write_account_already_linked') : undefined}
       onSearch={value => { setSearch(value); setSelected(undefined); mutation.reset() }}

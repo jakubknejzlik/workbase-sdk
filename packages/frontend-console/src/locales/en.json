@@ -572,5 +572,5 @@
   "rowFindClear": "Clear selected member",
   "rowInvitationActions": "Invitation actions",
   "rowLinkSupersedes": "Linking this member will cancel the pending invitation to {{email}}. Its old link will stop working.",
-  "rowFindDescription": "Search workspace members by name or email. Select a member to link their account."
+  "rowFindDescription": "Search organization members by name or email. Select a member to link their account."
 }

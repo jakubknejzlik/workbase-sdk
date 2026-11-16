@@ -592,5 +592,5 @@
   "rowFindClear": "Zrušit výběr člena",
   "rowInvitationActions": "Akce pozvánky",
   "rowLinkSupersedes": "Propojení tohoto člena zruší čekající pozvánku pro {{email}}. Její původní odkaz přestane fungovat.",
-  "rowFindDescription": "Hledejte členy pracovního prostoru podle jména nebo e-mailu. Vyberte člena, jehož účet chcete propojit."
+  "rowFindDescription": "Hledejte členy organizace podle jména nebo e-mailu. Vyberte člena, jehož účet chcete propojit."
 }

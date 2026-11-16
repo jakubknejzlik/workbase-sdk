@@ -128,6 +128,30 @@ for (const language of ['en', 'cs'] as const) {
 }
 it('review5 edit embeds invitation controls', async () => { await mount('edit'); expect(await screen.findByRole('button', { name: 'Find member or invite' })).toBeTruthy() })
 
+it.each([true, false])('91 edit search preserves the live contact email until explicit invitation confirmation (v3=%s)', async v3 => {
+  const { user, write } = await mount('edit', { v3, noMembers: true })
+  const contact = screen.getByLabelText('Contact email')
+  await user.clear(contact)
+  await user.type(contact, 'live@example.test')
+  await user.click(await screen.findByRole('button', { name: en.rowFindMember }))
+  const dialog = screen.getByRole('dialog', { name: en.rowFindMember })
+  const input = within(dialog).getByRole('combobox', { name: en.rowFindQuery })
+  expect(input).toHaveProperty('value', 'live@example.test')
+  const confirm = await within(dialog).findByRole('button', { name: en.rowFindSend })
+  await user.tab()
+  await user.click(input)
+  expect(input).toHaveProperty('value', 'live@example.test')
+  expect(write).toHaveBeenCalledWith('/orgs/org/members?eligible=link_account&target_entity=entries&target_row=one&q=live%40example.test', 'GET')
+  expect(write.mock.calls.every(([, method]) => method === 'GET')).toBe(true)
+  await user.click(confirm)
+  await waitFor(() => expect(write).toHaveBeenCalledWith(
+    v3 ? '/api/entries/one/actions/invite' : '/orgs/org/invitations', 'POST',
+    v3 ? { email: 'live@example.test' } : { email: 'live@example.test', target: { entity: 'entries', row: 'one' } },
+  ))
+  expect(write.mock.calls.filter(([, method]) => method !== 'GET')).toHaveLength(1)
+  expect(contact).toHaveProperty('value', 'live@example.test')
+})
+
 async function confirmAction(user: ReturnType<typeof userEvent.setup>, label: string, input?: [string, string]) {
   await waitFor(() => expect(screen.queryByText(en.loading)).toBeNull())
   const find = ['Invite to application', 'Link account'].includes(label) ? screen.queryByRole('button', { name: 'Find member or invite' }) : null
@@ -140,6 +164,7 @@ async function confirmAction(user: ReturnType<typeof userEvent.setup>, label: st
   const dialog = screen.getAllByRole('dialog').at(-1)!
   if (find) {
     const field = within(dialog).getByRole('combobox', { name: 'Name or email' })
+    await user.clear(field)
     await user.type(field, label === 'Link account' ? 'Workspace' : input![1])
     if (label === 'Link account') await user.click(await screen.findByRole('option', { name: 'Workspace member · member@example.test' }))
     await user.click(await within(dialog).findByRole('button', { name: label === 'Link account' ? label : 'Send invitation' }))
@@ -529,6 +554,7 @@ it('91 edit search popup handles Escape before either enclosing dialog', async (
   const { user } = await mount('edit', { state: 'invited' })
   await user.click(await screen.findByRole('button', { name: 'Find member or invite' }))
   const input = screen.getByRole('combobox', { name: 'Name or email' })
+  await user.clear(input)
   await user.type(input, 'Workspace')
   await screen.findByRole('option', { name: 'Workspace member · member@example.test' })
   await user.keyboard('{Escape}')

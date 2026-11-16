@@ -9,7 +9,7 @@ import { Check, ChevronsUpDown, X } from 'lucide-react'
 export interface PickerOption { id: string; label: string }
 interface Props {
   label: string; options: PickerOption[]; value: string; onChange: (id: string) => void; placeholder: string
-  remote?: boolean; selectedLabel?: string; onFocus?: () => void; onSearch?: (search: string) => void; onClose?: () => void
+  remote?: boolean; selectedLabel?: string; search?: string; onFocus?: () => void; onSearch?: (search: string) => void; onClose?: () => void
   loadMore?: () => void; hasMore?: boolean; loading?: boolean; loadingLabel?: string; moreLabel?: string; clearLabel?: string; emptyLabel?: string; error?: string; wizard?: ReactNode
   multiple?: { selected: PickerOption[]; onRemove: (id: string) => void; removeLabel: (option: PickerOption) => string }
 }
@@ -20,9 +20,10 @@ export function EntityPicker(props: Props) {
   if (!props.remote) return <div className="grid gap-2"><Label htmlFor={id}>{props.label}</Label><Select disabled={pending} value={props.value || empty} onValueChange={value => props.onChange(value === empty ? '' : value)}><SelectTrigger id={id} className="w-full" aria-invalid={!!props.error} aria-describedby={props.error ? `${id}-error` : undefined}><SelectValue /></SelectTrigger><SelectContent><SelectItem value={empty}>{props.placeholder}</SelectItem>{props.options.map(option => <SelectItem key={option.id} value={option.id}>{option.label}</SelectItem>)}</SelectContent></Select>{props.error && <p id={`${id}-error`} role="alert">{props.error}</p>}</div>
   return <RemotePicker {...props} />
 }
-function RemotePicker({ label, options, value, selectedLabel, onChange, placeholder, onFocus, onSearch, onClose, loadMore, hasMore, loading, loadingLabel, moreLabel, clearLabel, emptyLabel, error, wizard, multiple }: Props) {
+function RemotePicker({ label, options, value, selectedLabel, search: controlledSearch, onChange, placeholder, onFocus, onSearch, onClose, loadMore, hasMore, loading, loadingLabel, moreLabel, clearLabel, emptyLabel, error, wizard, multiple }: Props) {
   const pending = useMutationSession()?.pending
-  const id = useId(); const input = useRef<HTMLInputElement>(null); const previousValue = useRef(value); const restoringFocus = useRef(false); const [open, setOpen] = useState(false); const [search, setSearch] = useState(''); const [active, setActive] = useState(-1)
+  const id = useId(); const input = useRef<HTMLInputElement>(null); const previousValue = useRef(value); const restoringFocus = useRef(false); const [open, setOpen] = useState(false); const [localSearch, setSearch] = useState(''); const [active, setActive] = useState(-1)
+  const search = controlledSearch ?? localSearch
   const close = () => { if (pending) return; setOpen(false); setSearch(''); setActive(-1); onClose?.() }
   useEffect(() => {
     if (previousValue.current === value) return
