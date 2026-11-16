@@ -6,14 +6,16 @@ export interface SupplementalIndex { entity: string; name: string; fields: strin
 
 const differences = ['rowid', 'columns', 'indexes', 'foreign_keys', 'inline_constraints', 'triggers', 'incoming_actions'] as const
 
-/** Canonical multiset of top-level definitions. Token boundaries and string
- * contents survive normalization. Quoted identifiers (i), bare words (w),
+/** Canonical multiset of top-level definitions from a body ending in ')'.
+ * Token boundaries and string contents survive normalization. Quoted identifiers (i), bare words (w),
  * numbers (n), strings (s) and punctuation (p) remain distinct. Only whitespace,
  * identifier quote style/case and definition order are ignored. Numeric states
  * consume decimal/hex digits and signed exponents without swallowing operators.
  * Comments, unknown characters, incomplete tokens and table suffixes fail closed.
+ * Defaults use the same scanner without identifier folding and require one part;
+ * only lexical whitespace is ignored, including between a sign and a number.
  */
-function definitions(table: string) {
+function definitions(source: string, foldIdentifiers = true) {
   const ch = 'substr(body, pos, 1)', next = 'substr(body, pos + 1, 1)'
   const word = `${ch} GLOB '[a-zA-Z0-9_$]'`
   const digit = `${ch} GLOB '[0-9]'`
@@ -34,9 +36,7 @@ function definitions(table: string) {
   const space = `${ch} IN (' ', char(9), char(10), char(12), char(13))`
   const opening = `${ch} IN (${["'", '"', '`', '['].map(literal).join(', ')})`
   const punctuation = `${ch} IN (${[...'(),.+-*/%<>=~&|!'].map(literal).join(', ')})`
-  return `(WITH RECURSIVE source(body) AS (
-    SELECT substr(sql, instr(sql, '(') + 1) FROM sqlite_schema WHERE type = 'table' AND lower(name) = lower(${table})
-  ), scan(pos, depth, mode, token, definition, parts) AS (
+  return `(WITH RECURSIVE source(body) AS (${source}), scan(pos, depth, mode, token, definition, parts) AS (
     SELECT 1, 0, '', '', '', json_array()
     UNION ALL
     SELECT pos + CASE WHEN ${flush} THEN 0 WHEN ${escaped} THEN 2 ELSE 1 END,
@@ -63,10 +63,10 @@ function definitions(table: string) {
         WHEN ${number} THEN token || ${ch}
         WHEN ${quoted} THEN CASE WHEN ${closing} AND NOT (${escaped}) THEN '' ELSE token || ${ch} END
         WHEN (${word}) OR (${ch} = '.' AND ${next} GLOB '[0-9]') THEN token || ${ch} ELSE '' END,
-      CASE WHEN ${flush} THEN definition || json_quote(CASE WHEN mode = 'word' THEN 'w:' || lower(token) ELSE 'n:' || token END) || ','
+      CASE WHEN ${flush} THEN definition || json_quote(CASE WHEN mode = 'word' THEN 'w:' || ${foldIdentifiers ? 'lower(token)' : 'token'} ELSE 'n:' || token END) || ','
         WHEN ${number} THEN definition
         WHEN ${quoted} THEN CASE WHEN ${closing} AND NOT (${escaped})
-          THEN definition || json_quote(CASE WHEN mode = ${literal("'")} THEN 's:' || token ELSE 'i:' || lower(token) END) || ',' ELSE definition END
+          THEN definition || json_quote(CASE WHEN mode = ${literal("'")} THEN 's:' || token ELSE 'i:' || ${foldIdentifiers ? 'lower(token)' : 'mode || token'} END) || ',' ELSE definition END
         WHEN ${boundary} THEN ''
         WHEN ${opening} OR (${word}) OR (${space}) OR (${ch} = '.' AND ${next} GLOB '[0-9]') THEN definition
         ELSE definition || json_quote('p:' || ${ch}) || ',' END,
@@ -74,14 +74,19 @@ function definitions(table: string) {
     FROM scan, source WHERE mode NOT IN ('done', 'invalid') AND pos <= length(body)
   ) SELECT json_group_array(value) FROM (
     SELECT value FROM scan, source, json_each(parts)
-    WHERE mode = 'done' AND trim(substr(body, pos), ' ' || char(9) || char(10) || char(12) || char(13)) = '' ORDER BY value
+    WHERE mode = 'done' AND trim(substr(body, pos), ' ' || char(9) || char(10) || char(12) || char(13)) = ''
+      ${foldIdentifiers ? '' : "AND json_array_length(parts) = 1 AND value <> ''"} ORDER BY value
   ))`
 }
 
 /** Use SQLite itself to describe both the physical table and a generator-built
  * witness. Keep automatic indexes and auxiliary index columns in the fingerprint.
  * Compare ASCII-case-folded identifiers rather than history-dependent column/FK
- * IDs. Preserve default expressions and string/numeric literal contents exactly.
+ * IDs. Defaults ignore lexical whitespace only via the inline typed-token scanner:
+ * retain token kinds/boundaries, word/identifier case and quoting, string contents,
+ * numeric spelling, operators and parentheses. No default remains distinct from
+ * DEFAULT NULL. Do not evaluate expressions or equate arithmetic/parenthesized
+ * forms; the inline guard also retains parentheses SQLite may omit in dflt_value.
  * Body tokens cover CHECK, COLLATE, conflict clauses and FK deferrability, which
  * PRAGMAs do not expose, so unfamiliar DDL still fails closed.
  */
@@ -90,7 +95,7 @@ function fingerprint(name: string, indexNames: [string, string][] = []) {
   const indexName = indexNames.length ? `CASE lower(name) ${indexNames.map(([physical, canonical]) => `WHEN lower(${literal(physical)}) THEN lower(${literal(canonical)})`).join(' ')} ELSE lower(name) END` : 'lower(name)'
   return `json_object(
     'rowid', (SELECT wr FROM pragma_table_list WHERE schema = 'main' AND lower(name) = lower(${table})),
-    'columns', (SELECT json_group_array(json_array(lower(name), lower(type), "notnull", dflt_value, pk, hidden)) FROM (SELECT * FROM pragma_table_xinfo(${table}) ORDER BY lower(name))),
+    'columns', (SELECT json_group_array(json_array(lower(name), lower(type), "notnull", CASE WHEN dflt_value IS NOT NULL THEN ${definitions("SELECT dflt_value || ')'", false)} END, pk, hidden)) FROM (SELECT * FROM pragma_table_xinfo(${table}) ORDER BY lower(name))),
     'indexes', (SELECT json_group_array(json_array(index_name, origin, "unique", partial, json(columns))) FROM (
       SELECT CASE WHEN origin = 'c' THEN ${indexName} ELSE origin END AS index_name, origin, "unique", partial,
         (SELECT json_group_array(json_array(seqno, CASE WHEN cid < 0 THEN cid END, lower(name), "desc", lower(coll), "key")) FROM (SELECT * FROM pragma_index_xinfo(i.name) ORDER BY seqno)) AS columns
@@ -99,7 +104,7 @@ function fingerprint(name: string, indexNames: [string, string][] = []) {
       SELECT lower("table") AS "table", on_update, on_delete, match,
         (SELECT json_group_array(json_array(seq, lower("from"), lower("to"))) FROM (SELECT * FROM pragma_foreign_key_list(${table}) WHERE id = fk.id ORDER BY seq)) AS columns
       FROM pragma_foreign_key_list(${table}) fk WHERE seq = 0 ORDER BY "table", on_update, on_delete, match, columns)),
-    'inline_constraints', ${definitions(table)},
+    'inline_constraints', ${definitions(`SELECT substr(sql, instr(sql, '(') + 1) FROM sqlite_schema WHERE type = 'table' AND lower(name) = lower(${table})`)},
     'triggers', (SELECT count(*) FROM sqlite_schema WHERE type = 'trigger' AND lower(tbl_name) = lower(${table})),
     'incoming_actions', NOT EXISTS (SELECT 1 FROM sqlite_schema s, pragma_foreign_key_list(s.name) fk WHERE s.type = 'table' AND s.name NOT GLOB '_cf_*' AND s.name NOT GLOB 'sqlite_*' AND lower(fk."table") = lower(${table}) AND (fk.on_delete <> 'NO ACTION' OR fk.on_update <> 'NO ACTION'))
   )`
