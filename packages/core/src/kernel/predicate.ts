@@ -3,6 +3,18 @@ import type { Predicate, PredicateActorLink, PredicateRelation, PredicateValue, 
 
 export class PolicyExpansionLimit extends Error {}
 
+/** Group adjacent rendered leaves without changing their order or Boolean scope.
+ * Explicit binary parentheses keep wide groups below D1's expression-depth cap. */
+function renderBooleanGroup(parts: string[], operator: 'AND' | 'OR'): string {
+  if (parts.length <= 1) return `(${parts[0] ?? (operator === 'AND' ? '1=1' : '0=1')})`
+  function range(start: number, end: number): string {
+    if (end - start === 1) return parts[start]
+    const middle = start + Math.floor((end - start) / 2)
+    return `(${range(start, middle)} ${operator} ${range(middle, end)})`
+  }
+  return range(0, parts.length)
+}
+
 /** Expand every related source before separating mandatory request authority from
  * row selection. Both read and pre/post-image compilers consume this same tree;
  * renderers must not introduce another table policy inside a quantifier. */
@@ -64,7 +76,7 @@ export function renderPredicate(predicate: Predicate, tableAlias: string,
       if (entries.length !== 1) throw new Error('Invalid predicate combinator')
       const [key, children] = logical as ['all' | 'any', Predicate[]]
       const all = (key === 'all') !== negated
-      return `(${children.length ? children.map(child => render(child, negated)).join(all ? ' AND ' : ' OR ') : all ? '1=1' : '0=1'})`
+      return renderBooleanGroup(children.map(child => render(child, negated)), all ? 'AND' : 'OR')
     }
     if (Object.hasOwn(node, 'not')) {
       if (entries.length !== 1) throw new Error('Invalid predicate combinator')
@@ -99,7 +111,7 @@ export function renderPredicate(predicate: Predicate, tableAlias: string,
       quote(relation.entity); quote(relation.field); quote(relation.parentField)
       return `(${renderRelation(relation, tableAlias, (relationKey === 'notExists') !== negated)})`
     }
-    const scalar = `(${entries.flatMap(([field, operators]) => {
+    const scalar = renderBooleanGroup(entries.flatMap(([field, operators]) => {
       const column = `${alias}.${quote(field)}`
       if (!operators || typeof operators !== 'object' || Array.isArray(operators) || !Object.keys(operators).length) throw new Error('Invalid predicate operator')
       return Object.entries(operators).map(([op, value]) => {
@@ -127,7 +139,7 @@ export function renderPredicate(predicate: Predicate, tableAlias: string,
         if (!sqlOp || !Object.hasOwn({ eq: 1, ne: 1, lt: 1, lte: 1, gt: 1, gte: 1 }, op)) throw new Error('Invalid predicate operator')
         return `${column}${sqlOp}${bind(value)}`
       })
-    }).join(' AND ')})`
+    }), 'AND')
     return negated ? `(NOT ${scalar})` : scalar
   }
   return { sql: render(predicate), bindings }

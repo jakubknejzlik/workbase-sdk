@@ -230,3 +230,27 @@ it('administrator account allowance cannot reassign principal identifiers', asyn
   const config = defineInstance({ ...policyGraph, account: { entity: 'users', managedBy: ['administrator'], assignments: ['team_id'] } })
   await expect(atomic(operation({ sql: 'UPDATE users SET id=? WHERE id=?',bindings: ['replacement','reviewer-colleague'],expectRows: 1 },'users','users/change'),'administrator', undefined, new D1AtomicStore(env.DB), config)).rejects.toMatchObject({ status: 403,code: 'field_forbidden' })
 })
+
+it.each([1, 130])('write guards preserve pre/post-image decisions and rollback with %i policy alternatives', async length => {
+  const config = defineInstance({ ...policyGraph, policies: { ...policyGraph.policies,
+    records: { ...policyGraph.policies.records, reviewer: { where: { and: [
+      { team_id: { eq: '$actor.team_id' } },
+      { or: Array.from({ length }, () => ({ name: { isNull: false } })) },
+    ] } } },
+  } })
+  const allowed = operation({ sql: 'UPDATE records SET name=? WHERE id=?', bindings: ['Wide allowed', 'record-own'], expectRows: 1 })
+  expect((await atomic(allowed, 'reviewer', undefined, new D1AtomicStore(env.DB), config)).status).toBe(200)
+  expect(await env.DB.prepare("SELECT name FROM records WHERE id='record-own'").first('name')).toBe('Wide allowed')
+  const before = (await env.DB.prepare('SELECT * FROM records ORDER BY id').all()).results
+  for (const statement of [
+    { sql: 'UPDATE records SET name=? WHERE id=?', bindings: ['Denied pre-image', 'record-CANARY_ROW'], expectRows: 1 as const },
+    { sql: 'UPDATE records SET name=? WHERE id=?', bindings: ['Denied tenant', 'record-CANARY_ORG'], expectRows: 1 as const },
+    { sql: 'UPDATE records SET team_id=? WHERE id=?', bindings: ['team-b', 'record-own'], expectRows: 1 as const },
+  ]) {
+    await expect(atomic(operation(statement), 'reviewer', 'wide-denied', new D1AtomicStore(env.DB), config)).rejects.toMatchObject({ status: 403, code: 'policy_violation' })
+    expect((await env.DB.prepare('SELECT * FROM records ORDER BY id').all()).results).toEqual(before)
+    expect(await env.DB.prepare('SELECT count(*) AS n FROM audit_outbox').first('n')).toBe(1)
+    expect(await env.DB.prepare('SELECT count(*) AS n FROM idempotency_keys').first('n')).toBe(0)
+    expect(await env.DB.prepare('SELECT count(*) AS n FROM atomic_assert').first('n')).toBe(0)
+  }
+})
