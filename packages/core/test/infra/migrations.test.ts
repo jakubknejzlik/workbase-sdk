@@ -26,7 +26,7 @@ it('fresh apply commits SQL and plugin migration receipts', async () => {
   const { db, query, files, kernel } = fixture()
   expect(await migrateInstance(query, files, kernel)).toMatchObject({ applied: 1, total: 1 })
   expect(db.prepare('SELECT filename,checksum FROM _migrations').all()).toEqual(files.map(({ filename, checksum }) => ({ filename, checksum })))
-  expect(db.prepare('SELECT namespace,name,position FROM _plugin_migrations').all()).toEqual([{ namespace: 'workbase-core', name: '001_model_b', position: 0 }, { namespace: 'records', name: '001_index', position: 0 }])
+  expect(db.prepare('SELECT namespace,name,position FROM _plugin_migrations').all()).toEqual([{ namespace: 'workbase-core', name: '001_model_b', position: 0 }, { namespace: 'workbase-core', name: '002_operational_evidence', position: 1 }, { namespace: 'records', name: '001_index', position: 0 }])
   expect(db.prepare("SELECT name FROM sqlite_master WHERE type='index' AND name='records_id'").get()).toBeDefined()
 })
 
