@@ -48,12 +48,15 @@ it('inline registry forms compose without a nested form and submit through their
   await user.type(screen.getByLabelText('name'), 'Ada'); await user.click(screen.getByRole('button', { name: 'Create related' })); expect(submit.mock.calls[0][0]).toEqual({ name: 'Ada' })
 })
 
-it('structured server field errors mark only the named field', () => {
+it('structured server field errors mark only the named field and clear when it changes', async () => {
   render(<RegistryForm schema={{ type: 'object', properties: { name: schema.properties.name, email: { type: 'string' } } }} serverErrors={{ name: 'Closed field error' }} label={name => name} submitLabel="Save" invalidLabel="Invalid" onSubmit={() => {}} />)
   const input = screen.getByLabelText('name'); expect(input.getAttribute('aria-invalid')).toBe('true')
   expect(input.getAttribute('aria-describedby')!.split(' ').map(id => document.getElementById(id)?.textContent).filter(Boolean).join(' ')).toBe('Closed field error')
   expect(screen.getByLabelText('email').getAttribute('aria-invalid')).toBe('false')
   expect(screen.getAllByRole('alert')).toHaveLength(1)
+  await userEvent.setup().type(input, 'New choice')
+  expect(screen.queryByText('Closed field error')).toBeNull()
+  expect(input.getAttribute('aria-invalid')).toBe('false')
 })
 
 // Requirements salvaged from 4e64b58; metadata replaces its recordLayout flag/name heuristic.

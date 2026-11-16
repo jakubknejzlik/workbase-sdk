@@ -57,7 +57,31 @@ export function memberRoutes(app: App, config: InstanceConfig, env: RuntimeEnv) 
   app.get('/orgs/:orgId/members', scoped, async c => {
     const scope = scopeFor(c, 'members.read')
     c.header('Cache-Control', 'no-store')
-    const members = await memberIdentities(config, scope, env.DB, undefined, c.req.query('eligible') === 'link_account')
+    let target: { entity: string; row: string } | undefined
+    if (c.req.query('eligible') === 'link_account') {
+      const parsed = rowTargetSchema.safeParse({ entity: c.req.query('target_entity'), row: c.req.query('target_row') })
+      if (!parsed.success) throw new ApiError(400, 'invalid_link_target')
+      target = parsed.data
+      // Validate target visibility and Link authority before returning any choices.
+      // A single closed error discloses neither target nor conflicting row details.
+      try {
+        rowLink(config, target)
+        const kernel = kernelFor(config)
+        kernel.permission(scope, target.entity, 'read')
+        kernel.permission(scope, target.entity, 'update')
+        kernel.resourcePermission(scope, 'invitations.create')
+        organizationPermission(config, scope, 'invitations.create')
+        for (const operation of ['read', 'update'] as const) {
+          const filter = writeFilter(kernel, scope, target.entity, target.entity, operation)
+          if (!await env.DB.prepare(`SELECT 1 FROM ${quote(target.entity)} WHERE organization_id=? AND id=? AND ${filter.sql}`)
+            .bind(scope.organizationId, target.row, ...(filter.bindings ?? [])).first()) throw new ApiError(400, 'invalid_link_target')
+        }
+      } catch (error) {
+        if (error instanceof ApiError) throw new ApiError(400, 'invalid_link_target')
+        throw error
+      }
+    }
+    const members = await memberIdentities(config, scope, env.DB, undefined, target)
     if (c.req.query('include') !== 'pending') return c.json({ data: members })
     const can = (action: OrganizationAction) => {
       try { kernelFor(config).resourcePermission(scope, action); organizationPermission(config, scope, action); return true } catch { return false }

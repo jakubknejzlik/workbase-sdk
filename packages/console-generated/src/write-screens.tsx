@@ -31,6 +31,7 @@ function writeErrorKey(error: unknown) {
 function writeFieldErrors(error: unknown, schema?: RegistrySchema): Record<string, string> {
   const failure = error as WriteFailure | null; const key = writeErrorKey(error)
   if (!schema || !failure || !codes.includes(failure.code ?? '') || !key) return {}
+  if (failure.status === 409 && failure.code === 'account_already_linked' && Object.hasOwn(schema.properties ?? {}, 'user_id')) return { user_id: key }
   const details = failure.details
   const paths = Array.isArray(details?.paths) ? details.paths : []
   const names = [details?.field, ...(Array.isArray(details?.path) ? [details.path[0]] : []), ...paths.map(path => Array.isArray(path) ? path[0] : undefined)]
@@ -120,7 +121,7 @@ export function HeaderCommands(props: Context) {
 }
 function useRefresh() {
   const client = useQueryClient()
-  return () => Promise.all([client.invalidateQueries({ queryKey: createDataTableQueryKey() }), client.invalidateQueries({ queryKey: ['read'] }), client.invalidateQueries({ queryKey: ['picker'] }), client.invalidateQueries({ queryKey: ['lookup'] }), client.invalidateQueries({ queryKey: ['row-access'] }), client.invalidateQueries({ queryKey: ['row-access-delivery'] })])
+  return () => Promise.all([client.invalidateQueries({ queryKey: createDataTableQueryKey() }), client.invalidateQueries({ queryKey: ['read'] }), client.invalidateQueries({ queryKey: ['picker'] }), client.invalidateQueries({ queryKey: ['lookup'] }), client.invalidateQueries({ queryKey: ['row-access'] }), client.invalidateQueries({ queryKey: ['row-access-delivery'] }), client.invalidateQueries({ queryKey: ['account-link-members'] })])
 }
 function formLabel(model: Model, entity: string, name: string, translate: (key: string, options?: any) => string) {
   const section = model.entities[entity].sections?.find(section => `section:${section.id}` === name)
@@ -440,12 +441,14 @@ async function inviteRecord(props: AccessContext & { write: WriteRequest }, emai
 function RowInvitationMutation(props: Context & AccessContext & { action: string; controls: { close: () => void; submissionKey: string } }) {
   const { t } = useTranslation(); const refresh = useRefresh(); const client = useQueryClient()
   const access = useApplicationAccess(props)
-  const members = useQuery({ queryKey: ['account-link-members', props.orgId, props.caps], retry: false,
+  const [generation, setGeneration] = useState(0)
+  const [rejected, setRejected] = useState<string>()
+  const members = useQuery({ queryKey: ['account-link-members', props.orgId, props.entity, props.row.id, props.caps], retry: false,
     enabled: props.action === 'link' && props.caps.resources?.['members.read'] === true,
     queryFn: async (): Promise<{ data: { user_id: string; display_name?: string | null; email?: string }[] }> =>
-      props.write(`/orgs/${encodeURIComponent(props.orgId)}/members?eligible=link_account`, 'GET'),
+      props.write(`/orgs/${encodeURIComponent(props.orgId)}/members?eligible=link_account&target_entity=${encodeURIComponent(props.entity)}&target_row=${encodeURIComponent(props.row.id)}`, 'GET'),
   })
-  const choices = !members.error && !members.isFetching ? members.data?.data ?? [] : []
+  const choices = !members.error && !members.isFetching ? (members.data?.data ?? []).filter(member => member.user_id !== rejected) : []
   const schema = props.action === 'link' ? { ...rowLinkSchema, properties: { user_id: { type: 'string' as const, enum: choices.map(member => member.user_id) } } } : actionSchema(props.action)
   const mutation = useMutation({ mutationKey: ['account-access', props.orgId, props.entity], gcTime: 0, retry: false, mutationFn: async (values: Record<string, any>) => {
     const base = `/orgs/${encodeURIComponent(props.orgId)}/invitations`
@@ -470,7 +473,14 @@ function RowInvitationMutation(props: Context & AccessContext & { action: string
       } else if (props.action === 'resend') await props.write(`${base}/${encodeURIComponent(access.status.data!.invitation!.id)}/resend`, 'POST', {})
       else if (props.action === 'cancel') await cancel()
       else await remove()
-    } catch (error) { failure = error } finally {
+    } catch (error) {
+      failure = error
+      const conflict = error as WriteFailure
+      if (props.action === 'link' && conflict.status === 409 && conflict.code === 'account_already_linked') {
+        setRejected(values.user_id)
+        setGeneration(value => value + 1)
+      }
+    } finally {
       // Reconcile even an uncertain/partially successful response before retry,
       // retaining the original denial if a reconciliation read also fails.
       try { await refresh(); await props.onChanged?.() } catch (error) { failure ??= error }
@@ -478,9 +488,10 @@ function RowInvitationMutation(props: Context & AccessContext & { action: string
     if (failure) throw failure
     // Credentials are never returned to the mutation cache.
   }, onSuccess: () => props.controls.close(), onError: (error: WriteFailure) => { if (error.status === 403) props.onDenied?.() } })
-  return <><WriteError error={mutation.error ?? (props.action === 'link' ? members.error : null)} />
+  return <><WriteError schema={schema} error={mutation.error ?? (props.action === 'link' ? members.error : null)} />
     {props.action === 'link' && members.isFetching && <span role="status">{t('loading')}</span>}
-    <RegistryForm schema={schema} values={{ email: props.email ?? '' }}
+    {props.action === 'link' && !members.isPending && !members.isFetching && !members.error && !choices.length && <span role="status">{t('rowInviteNoMembers')}</span>}
+    <RegistryForm key={generation} schema={schema} serverErrors={translatedFieldErrors(mutation.error, schema, t)} values={{ email: props.email ?? '' }}
     optionLabel={id => { const member = choices.find(member => member.user_id === id); return member ? [member.display_name, member.email !== member.display_name ? member.email : undefined].filter(Boolean).join(' · ') || id : id }}
     label={name => t(name === 'user_id' ? 'rowInviteAccount' : 'email')} submitLabel={t(`rowInvite_${props.action}`)} invalidLabel={t('invalidField')} pending={mutation.isPending} disabled={access.blocked || props.action === 'link' && (members.isFetching || !!members.error || !choices.length)}
     onSubmit={values => {

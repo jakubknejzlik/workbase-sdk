@@ -556,6 +556,8 @@
   "rowInviteRetry": "Retry invitation",
   "rowAccessRefreshing": "Access status is being reconciled. Account actions are unavailable.",
   "rowInvite_link": "Link account",
+  "write_account_already_linked": "This account is already linked to another record. Choose another member.",
+  "rowInviteNoMembers": "No members available to link.",
   "rowInviteAccount": "Member",
   "rowInvite_change": "Change invitation email",
   "rowInviteDeliveryFailed": "Invitation exists; email delivery failed. Use Resend to try delivery again."

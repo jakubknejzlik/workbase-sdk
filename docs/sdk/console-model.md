@@ -98,6 +98,19 @@ read that is loading, failed, unknown or refetching disables every account
 mutation. Cached refetches preserve the displayed state and invitation draft;
 only the first read without cache shows loading.
 
+The Link picker requests `GET /orgs/:orgId/members?eligible=link_account&target_entity=<entity>&target_row=<row>`.
+This eligibility mode requires both target parameters: a configured entity with a
+user link and a nonempty row ID (at most 200 characters). The target must belong
+to the current organization, be visible and writable under the caller's policies,
+and the caller must have Link authority as well as `members.read`. Missing,
+malformed or inaccessible targets return `400 invalid_link_target` without a
+Members result. Ordinary Members reads keep their existing contract.
+Eligible results exclude accounts linked to another row of the same entity and
+organization, including rows outside the caller's visibility. Same-row relinks
+and accounts linked only in other entities remain eligible. The response never
+identifies a conflicting row. The atomic writer still returns `409 account_already_linked` for a concurrent conflict; the dialog shows a localized
+Member field error, clears the rejected choice, and refreshes eligible members.
+
 Create offers an authorized, opt-in “Invite now”. The entity is saved first,
 without invitation fields in its CRUD payload, then its live access state is
 checked before inviting the returned ID. Invitation failure keeps the record and
