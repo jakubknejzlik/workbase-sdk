@@ -1,3 +1,4 @@
+import { organizationNameApiSchema } from '@workbasehq/core/organization-name'
 import { z } from 'zod'
 import { ulid } from '@workbasehq/core/crypto'
 import { ApiError } from '../../../core/src/errors'
@@ -13,7 +14,7 @@ export function organizationRoutes(app: App, config: InstanceConfig, env: Runtim
   const execute = membershipExecutor(config, env)
   app.post('/internal/organizations', async c => {
     c.header('Cache-Control', 'no-store')
-    const { name, ownerEmail } = z.strictObject({ name: z.string().trim().min(1).max(200), ownerEmail: z.string().trim().email() }).parse(await c.req.json())
+    const { name, ownerEmail } = z.strictObject({ name: organizationNameApiSchema, ownerEmail: z.string().trim().email() }).parse(await c.req.json())
     const result = await provisionOrganization(config, env, name, ownerEmail, c.get('correlationId'))
     return c.json(result.body, result.status)
   })
@@ -23,7 +24,7 @@ export function organizationRoutes(app: App, config: InstanceConfig, env: Runtim
     const resolved = await kernel.requireActor(c.req.raw, env)
     const scope = await requireScope(resolved, c.req.param('orgId')!, config, c.get('correlationId'))
     kernel.resourcePermission(scope, 'organizations.update')
-    const { name } = z.strictObject({ name: z.string().trim().min(1).max(200).refine(value => !/[\u0000-\u001f\u007f]/.test(value)) }).parse(await c.req.json())
+    const { name } = z.strictObject({ name: organizationNameApiSchema }).parse(await c.req.json())
     const result = { id: scope.organizationId, name, invalidates: ['me', 'memberships', 'selectedOrganization'] }
     const guard = issuerGuard(config, scope, 'organizations.update')
     try {
@@ -41,7 +42,7 @@ export function organizationRoutes(app: App, config: InstanceConfig, env: Runtim
     if (!(config.pluginConfig?.organizations as { allowCreate: boolean }).allowCreate) throw new ApiError(403, 'organization_creation_disabled')
     const resolved = await kernelFor(config).requireActor(c.req.raw, env)
     if (!resolved.user) throw new ApiError(403, 'user_required')
-    const { name } = z.strictObject({ name: z.string().trim().min(1).max(200) }).parse(await c.req.json())
+    const { name } = z.strictObject({ name: organizationNameApiSchema }).parse(await c.req.json())
     const id = ulid(); const ownerRole = validateRole(config, config.organizationOwnerRole)
     const scope = await accountScope(resolved, id, ownerRole, c.get('correlationId'))
     const rule = await organizationCreationRule(config, env, resolved.user, id, name, ownerRole)

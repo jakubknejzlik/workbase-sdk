@@ -1,8 +1,9 @@
 import { z } from 'zod'
+import { organizationNameSchema } from '@workbasehq/core/organization-name'
 
 export const schemas = {
   provision_organization: z.strictObject({
-    name: z.string().trim().min(1).max(200), ownerEmail: z.string().trim().email(),
+    name: organizationNameSchema, ownerEmail: z.string().trim().email(),
   }),
   bootstrap_instance_owner: z.strictObject({ ownerEmail: z.string().trim().email() }),
   read_dev_mail: z.strictObject({
