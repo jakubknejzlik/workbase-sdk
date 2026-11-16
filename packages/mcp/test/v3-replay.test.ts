@@ -32,12 +32,13 @@ it.each(['node', 'bun'])('validates a proposal on a V3 instance created through 
   try {
     expect(await call('bootstrap_instance', { id: 'replay_fixture', target: 'cloudflare-github' })).toMatchObject({ ok: true })
     // Use the current checkout as the installed SDK, then follow the template's
-    // documented first step to generate the lock and initial domain migration.
+    // documented generation steps for the lock, domain migration and OpenAPI.
     await symlink(resolve('node_modules'), join(root, 'node_modules'))
     execFileSync('bun', [resolve('packages/core/src/migrations/schema-cli.ts'), 'plan', '--root', root, '--init'], { encoding: 'utf8' })
+    execFileSync('bun', [resolve('packages/core/src/openapi/cli.ts'), '--root', root, '--write'], { encoding: 'utf8' })
     const proposal = await call('propose_change', { instance: 'replay-fixture', baseRevision: 1,
       changes: [{ kind: 'add_field', entity: 'worker', field: 'notes', definition: { type: 'text' } }] })
-    expect(proposal).toMatchObject({ ok: true, status: 'proposed' })
+    expect(proposal, JSON.stringify(proposal)).toMatchObject({ ok: true, status: 'proposed' })
     const validation = await call('validate', { proposalId: proposal!.proposalId })
     expect(validation, JSON.stringify(validation)).toMatchObject({ ok: true, revision: 2 })
     if (runtime === 'bun') await store.init()

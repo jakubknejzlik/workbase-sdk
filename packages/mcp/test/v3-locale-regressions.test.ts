@@ -20,6 +20,7 @@ async function fixture(depth = '') {
   await bootstrapInstance(root, { id: 'demo', target: 'cloudflare-github' })
   await symlink(resolve('node_modules'), join(root, 'node_modules'))
   await runSchemaCli('plan', ['--root', root, '--init'])
+  await runOpenApiCli(['--root', root, '--write'])
   return root
 }
 async function connect(root: string) {
@@ -99,13 +100,7 @@ it.each(['', 'consumer/nested/app'])('promotes locale with SDK-relative imports 
   }
   // A bound artifact exercises the second staged interpretation during OpenAPI generation.
   await runOpenApiCli(['--root', root, '--write'])
-  const source = (await readFile(join(root, 'config.ts'), 'utf8'))
-    .replace('defineConfig, bindSchemaLock', 'defineConfig, bindSchemaLock, bindOpenApi')
-    .replace("import lock from './schema.lock.json'", "import lock from './schema.lock.json'\nimport spec from './openapi.json'")
-    .replace('export default bindSchemaLock(', 'export default bindOpenApi(bindSchemaLock(')
-    .replace('}), lock)', '}), lock), spec)')
-  await writeFile(join(root, 'config.ts'), source)
-  await runOpenApiCli(['--root', root, '--write'])
+  const source = await readFile(join(root, 'config.ts'), 'utf8')
   expect((await loadConfig(join(root, 'config.ts'))).config.languages).toEqual(['en'])
   const preserved = ['access.ts', 'schema/worker.ts', 'schema.lock.json']
   const before = await Promise.all(preserved.map(path => readFile(join(root, path), 'utf8')))

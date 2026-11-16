@@ -31,7 +31,12 @@ it('replays SDK, ordered plugin baselines and domain receipts in deploy order', 
   }))
   expect(actual.meta).toMatchObject({ revision: 1, core_version: CORE_VERSION })
   expect(actual.data).toEqual([{ revision: 7 }])
-  expect(actual.plugins.map(row => row.namespace)).toEqual(['workbase-sdk', 'first', 'second'])
+  expect(actual.plugins).toEqual([
+    { namespace: 'workbase-sdk', name: '001_system' },
+    { namespace: 'workbase-sdk', name: '002_operational_evidence' },
+    { namespace: 'first', name: '001_first' },
+    { namespace: 'second', name: '001_second' },
+  ])
 })
 
 it('preserves legacy schema, metadata and input SQL bytes without replaying plugin baselines', async () => {

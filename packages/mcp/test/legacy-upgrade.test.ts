@@ -31,7 +31,9 @@ it('runs the existing legacy core repair with rows, indexes, triggers and foreig
     for (const table of tables) expect(() => db.exec(`UPDATE ${table} SET role='custom'`)).not.toThrow()
     expect(() => db.exec("INSERT INTO memberships VALUES ('missing','org','custom')")).toThrow(/FOREIGN KEY/)
     expect(() => db.exec("INSERT INTO memberships VALUES ('user','org','blocked')")).toThrow(/blocked/)
-    expect(db.prepare("SELECT name FROM _plugin_migrations WHERE namespace='workbase-core'").all()).toEqual([{ name: '001_model_b' }])
+    expect(db.prepare("SELECT name FROM _plugin_migrations WHERE namespace='workbase-core' ORDER BY position").all()).toEqual([
+      { name: '001_model_b' }, { name: '002_operational_evidence' },
+    ])
     const count = batches.length
     await replayLegacyMigrations(db, replayEngine(config), sql => batches.push(sql))
     expect(batches.slice(count).join('\n')).not.toMatch(/DROP TABLE|INSERT INTO _plugin_migrations/)

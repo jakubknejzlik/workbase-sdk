@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { bootstrapInstance } from '../src/bootstrap.ts'
 import { runSchemaCli } from '@workbasehq/core/migrations/schema-cli'
+import { runOpenApiCli } from '@workbasehq/core/openapi/cli'
 import { Store } from '../src/storage.ts'
 import { Workflow } from '../src/workflow.ts'
 import { rollback } from '../src/versions.ts'
@@ -19,6 +20,7 @@ async function fixture() {
   await bootstrapInstance(root, { id: 'demo', target: 'cloudflare-github' })
   await symlink(resolve('node_modules'), join(root, 'node_modules'))
   await runSchemaCli('plan', ['--root', root, '--init'])
+  await runOpenApiCli(['--root', root, '--write'])
   await rm(join(root, 'migrations/.gitkeep'))
   const store = new Store(root)
   await store.init()
