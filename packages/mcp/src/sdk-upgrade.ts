@@ -1,3 +1,4 @@
+import { SqlTokenizationError } from './sql-tokens.ts'
 import { fileURLToPath } from 'node:url'
 import { join, resolve } from 'node:path'
 import { z } from 'zod'
@@ -78,11 +79,15 @@ const publicMessages: Record<string, string> = {
   invalid_config: 'Instance configuration is invalid',
   unsupported_plugin_source: 'Instance plugin source is unsupported',
   config_schema_mismatch: 'Instance configuration does not match its schema',
+  sql_tokenization_unsupported: 'SQL contains an unsupported or incomplete token',
   migration_blocked: 'Instance migrations require review',
   revision_mismatch: 'Instance migration revision does not match',
   internal_error: 'SDK operation failed; no database was deployed',
 }
 export function sdkWorkflowError(error: unknown): WorkflowError {
+  if (error instanceof SqlTokenizationError || error instanceof WorkflowError && error.code === 'sql_tokenization_unsupported') {
+    return new WorkflowError('sql_tokenization_unsupported', publicMessages.sql_tokenization_unsupported, 422, { phase: 'verification' })
+  }
   if (error instanceof MigrationReplayError) {
     if (error.diagnostic.kind === 'generation') return new WorkflowError('internal_error', publicMessages.internal_error, 500, { file: error.diagnostic.file, migration: error.diagnostic.migration })
     return new WorkflowError(error.code, error.message, 422, error.diagnostic)
@@ -248,7 +253,7 @@ export async function executeSdkUpgrade(store: Store, proposal: SdkUpgradePropos
     // Publication can itself trigger abort/drift. Use the same durable
     // revocation primitive so a failed cleanup rewrite cannot retain proof.
     await store.revokeSdkProposal(proposal.proposalId)
-    if (error instanceof WorkflowError || error instanceof MigrationReplayError) throw error
+    if (error instanceof WorkflowError || error instanceof MigrationReplayError || error instanceof SqlTokenizationError) throw error
     if (signal?.aborted) fail('sdk_upgrade_cancelled', 'SDK upgrade verification was cancelled', 409)
     if (error instanceof RegistrySdkError) throw error
     fail('sdk_upgrade_failed', 'SDK target verification failed; the proposal has no accepted evidence', 409)

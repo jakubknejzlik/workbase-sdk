@@ -23,10 +23,13 @@ export const requestSchema = z.strictObject({
   action: z.enum(['prepare', 'verify']), identity: identitySchema,
   inputHashes: inputHashesSchema, stage: stageSchema.optional(),
 }).refine(value => (value.action === 'verify') === !!value.stage, 'Only verification has a bound stage')
-export const replayFailureSchema = z.strictObject({
+export const replayFailureSchema = z.union([z.strictObject({
   identity: identitySchema, inputHashes: inputHashesSchema,
   diagnostic: z.strictObject({ file: z.string().min(1).max(512), migration: z.string().min(1).max(256), kind: z.enum(Object.keys(replayMessages) as [ReplayErrorKind, ...ReplayErrorKind[]]), sqlError: z.string().min(1).max(2048) }),
-})
+}), z.strictObject({
+  identity: identitySchema, inputHashes: inputHashesSchema, code: z.literal('sql_tokenization_unsupported'),
+  diagnostic: z.strictObject({ phase: z.literal('verification'), offset: z.number().int().nonnegative() }),
+})])
 const packageSchema = z.strictObject({
   name: z.enum(['@workbasehq/core', '@workbasehq/plugins', '@workbasehq/mcp']), version,
   directory: z.string().min(1),
@@ -46,7 +49,7 @@ export type UpgradeIdentity = z.infer<typeof identitySchema>
 export type UpgradeStage = z.infer<typeof stageSchema>
 export type UpgradeResult = z.infer<typeof resultSchema>
 export const digestBytes = (bytes: string | Buffer) => createHash('sha256').update(bytes).digest('hex')
-export const bridgeFiles = ['sdk-upgrade-worker.ts', 'sdk-upgrade-protocol.ts', 'migration-replay.ts'] as const
+export const bridgeFiles = ['sdk-upgrade-worker.ts', 'sdk-upgrade-protocol.ts', 'migration-replay.ts', 'sql-tokens.ts', 'sql-schema.ts'] as const
 export async function bridgeDigest(directory: string) {
   const files = await Promise.all(bridgeFiles.map(async path => [path, digestBytes(await readFile(join(directory, path)))]))
   return digestBytes(JSON.stringify(files))
