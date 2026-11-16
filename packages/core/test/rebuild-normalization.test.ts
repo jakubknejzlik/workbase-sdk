@@ -3,14 +3,16 @@ import { reset } from 'cloudflare:test'
 import { beforeEach, expect, it } from 'vitest'
 import { defineInstance } from '../src/config'
 import { plan } from '../src/migrations/planner'
-import { createEntity, initialSchema } from '../src/migrations/schema'
+import { createEntity, initialSchema, literal } from '../src/migrations/schema'
 
 beforeEach(reset)
+
+const nameDefault = "Keep, (a 'quoted' value)"
 
 function fixture(minimum = 1e-7, defaultValue = 1) {
   const from = defineInstance({ id: 'numeric_ref', revision: 1, roles: ['owner'], entities: {
     people: { fields: {
-      name: { type: 'string' }, n: { type: 'float', min: minimum, default: defaultValue },
+      name: { type: 'string', default: nameDefault }, n: { type: 'float', min: minimum, default: defaultValue },
       fraction: { type: 'float', min: 0.5, default: 0.5 }, negative: { type: 'int', min: -1, default: -1 },
       parent: { type: 'ref', entity: 'people' },
     } },
@@ -73,6 +75,78 @@ it('accepts unchanged numeric CHECK and DEFAULT literals on first rebuild and li
   expect(await snapshot()).toEqual(linked)
 })
 
+it.each(['- 1', '-\t\n\f\r 1'])('accepts DEFAULT %j on first rebuild and linked replay', async expression => {
+  const { from, to } = fixture()
+  const original = createEntity('people', from.entities.people)
+  const changed = original.replace('DEFAULT -1', `DEFAULT ${expression}`)
+  expect(changed).not.toBe(original)
+  await apply(initialSchema(from).replace(original, changed)); await seed()
+  expect(await env.DB.prepare("SELECT dflt_value FROM pragma_table_xinfo('people') WHERE name='negative'").first('dflt_value')).toBe(expression)
+  const before = await snapshot()
+  expect(before.revisions.map(row => row.revision)).toEqual([1])
+  expect(before.rows[0].negative).toBe(-1)
+  const migration = plan(from, to)
+  expect(migration.blocked).toEqual([])
+  await apply(migration.sql)
+  const rebuilt = await snapshot()
+  expect(rebuilt.rows).toEqual(before.rows.map(row => ({ ...row, link: null })))
+  expect(rebuilt.revisions.map(row => row.revision)).toEqual([1, 2])
+  expect(rebuilt.revisions[0]).toEqual(before.revisions[0])
+  expect(await env.DB.prepare("SELECT dflt_value FROM pragma_table_xinfo('people') WHERE name='negative'").first('dflt_value')).toBe('-1')
+  const insert = (id: string) => env.DB.prepare("INSERT INTO people (id,organization_id,created_at,updated_at) VALUES (?,'org','created','updated')").bind(id).run()
+  const defaults = (id: string) => env.DB.prepare('SELECT name,n,fraction,negative,link FROM people WHERE id=?').bind(id).first()
+  const expectedDefaults = { name: nameDefault, n: 1, fraction: 0.5, negative: -1, link: null }
+  await insert('after-apply')
+  expect(await defaults('after-apply')).toEqual(expectedDefaults)
+  await env.DB.prepare("UPDATE people SET link='p' WHERE id='p'").run()
+  const linked = await snapshot()
+  await apply(migration.sql)
+  expect(await snapshot()).toEqual(linked)
+  await insert('after-replay')
+  expect(await defaults('after-replay')).toEqual(expectedDefaults)
+})
+
+it('accepts DEFAULT sign whitespace when the linked replay starts with the next physical shape', async () => {
+  const { from, to } = fixture()
+  const original = createEntity('people', to.entities.people)
+  const changed = original.replace('DEFAULT -1', 'DEFAULT - 1')
+  expect(changed).not.toBe(original)
+  await apply(initialSchema(to).replace(original, changed)); await seed()
+  await env.DB.prepare("UPDATE people SET link='p'").run()
+  const before = await snapshot()
+  expect(before.revisions.map(row => row.revision)).toEqual([2])
+  const migration = plan(from, to)
+  expect(migration.blocked).toEqual([])
+  await apply(migration.sql)
+  const after = await snapshot()
+  expect(after.rows).toEqual(before.rows)
+  expect(after.revisions).toEqual(before.revisions)
+  expect(await env.DB.prepare("SELECT dflt_value FROM pragma_table_xinfo('people') WHERE name='negative'").first('dflt_value')).toBe('-1')
+  await apply(migration.sql)
+  expect(await snapshot()).toEqual(after)
+})
+
+it.each([
+  ['changed literal', 'DEFAULT -1', 'DEFAULT 0', 'columns'],
+  ['changed token kind', 'DEFAULT -1', "DEFAULT '-1'", 'columns'],
+  ['parenthesized literal', 'DEFAULT -1', 'DEFAULT (-1)', 'inline_constraints'],
+  ['arithmetic expression', 'DEFAULT -1', 'DEFAULT (-1 + 0)', 'columns'],
+  ['numeric spelling', 'DEFAULT -1', 'DEFAULT -1.0', 'columns'],
+  ['string contents', `DEFAULT ${literal(nameDefault)}`, `DEFAULT ${literal("Keep,(a 'quoted' value)")}`, 'columns'],
+  ['string case', `DEFAULT ${literal(nameDefault)}`, `DEFAULT ${literal(nameDefault.toLowerCase())}`, 'columns'],
+  ['no default versus NULL', '"parent" TEXT', '"parent" TEXT DEFAULT NULL', 'columns'],
+] as const)('refuses DEFAULT drift with unchanged schema, data and revision: %s', async (_label, search, replacement, difference) => {
+  const { from, to } = fixture()
+  const original = createEntity('people', from.entities.people)
+  const changed = original.replace(search, replacement)
+  expect(changed).not.toBe(original)
+  await apply(initialSchema(from).replace(original, changed)); await seed()
+  const before = await snapshot()
+  expect(before.revisions.map(row => row.revision)).toEqual([1])
+  await expect(apply(plan(from, to).sql)).rejects.toThrow(new RegExp(`rebuild_requires_review_people_${difference}`))
+  expect(await snapshot()).toEqual(before)
+})
+
 it.each(['column', 'index', 'foreign key', 'table', 'all identifiers'] as const)('accepts identifier case differences in %s metadata', async variant => {
   const { from, to } = fixture()
   const original = createEntity('people', from.entities.people)
@@ -112,6 +186,34 @@ async function tokens() {
   const definitions = JSON.parse((await env.DB.prepare(`SELECT ${expression} AS parts`).first<string>('parts'))!) as string[]
   return definitions.flatMap(definition => JSON.parse(`[${definition.slice(0, -1)}]`) as string[])
 }
+
+// Supply synthetic PRAGMA rows to the actual columns expression to exercise
+// malformed defaults that SQLite's DDL parser would otherwise reject first.
+async function defaultTokens(value: string | null) {
+  const { from, to } = fixture()
+  const expression = plan(from, to).sql.match(/'columns', ([\s\S]+?),\n    'indexes'/)![1]
+    .replace("pragma_table_xinfo('people')", `(SELECT 'negative' AS name, 'INTEGER' AS type, 0 AS "notnull", ? AS dflt_value, 0 AS pk, 0 AS hidden)`)
+  const columns = JSON.parse((await env.DB.prepare(`SELECT ${expression} AS columns`).bind(value).first<string>('columns'))!) as [string, string, number, string[] | null, number, number][]
+  return columns[0][3]
+}
+
+it('normalizes only whitespace in default tokens and keeps absent defaults distinct', async () => {
+  expect(await defaultTokens('- 1')).toEqual(await defaultTokens('-1'))
+  expect(await defaultTokens(null)).toBeNull()
+  expect(await defaultTokens('NULL')).not.toEqual(await defaultTokens(null))
+  for (const [left, right] of [
+    ['-1', '-1.0'], ['-1', "'-1'"], ['-1', '(-1)'], ['-1', '(-1 + 0)'],
+    ['1e-7', '1E-7'], ['1', '0x1'], ['NULL', 'null'],
+    ['"Value"', '"value"'], ['"Value"', '[Value]'], ['"Value"', "'Value'"],
+    ["'One Two'", "'OneTwo'"], ["'One Two'", "'one two'"],
+  ]) expect(await defaultTokens(left)).not.toEqual(await defaultTokens(right))
+})
+
+it.each(['', ' \t\n', '1e', '1e+', '0x', "'unterminated", '"unterminated', '(1', '1)', '1,2', '/* unknown */ 1', '1 -- comment', 'é'])(
+  'fails closed on unclassified or incomplete default tokens: %j', async value => {
+    expect(await defaultTokens(value)).toEqual([])
+  },
+)
 
 it('distinguishes numeric, quoted identifier, bare word, string and punctuation tokens in D1', async () => {
   await env.DB.prepare(`CREATE TABLE people (n REAL CHECK (
