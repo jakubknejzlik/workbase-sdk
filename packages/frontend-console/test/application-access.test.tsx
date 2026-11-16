@@ -30,8 +30,10 @@ function fixture(layout: Layout = 'default') {
   const caps = { resources: { 'members.read': true }, revision: 1, commands: ['entries/remove_access', 'entries/link_account'], entities: Object.fromEntries(Object.entries(model.entities).map(([name, entity]) => [name, { operations: ['read'], readable: Object.keys(entity.fields), writable: [] }])) } as Capabilities
   return { model, caps }
 }
-async function mount(options: { layout?: Layout; status?: Record<string, unknown>; error?: number; loading?: boolean; available?: boolean; transport?: boolean; manage?: boolean; commands?: string[] } = {}) {
+async function mount(options: { layout?: Layout; status?: Record<string, unknown>; error?: number; loading?: boolean; available?: boolean; transport?: boolean; manage?: boolean; commands?: string[]; searchLinkAccount?: boolean; membersRead?: boolean } = {}) {
   const { model, caps } = fixture(options.layout)
+  if (options.searchLinkAccount !== undefined) caps.resources!['members.search_link_account'] = options.searchLinkAccount
+  if (options.membersRead !== undefined) caps.resources!['members.read'] = options.membersRead
   Object.assign(model.entities.entries, { rowAccess: options.available ?? true, rowInvitations: options.manage ?? true })
   if (options.manage === false) caps.commands = []
   if (options.commands) caps.commands = options.commands
@@ -228,4 +230,36 @@ it('unknown status is a failure, never an access grant or no-access fallback', a
   await screen.findByRole('alert')
   expect(screen.queryByText('No access')).toBeNull()
   expect(screen.queryByRole('button', { name: 'Invite to application' })).toBeNull()
+})
+
+it.each(['no_account', 'invited', 'expired', 'signed_in'])('120 explicit search capability offers exactly one shared action in %s', async state => {
+  const { write } = await mount({ searchLinkAccount: true, status: { state, can_invite: true, can_cancel: true, inconsistency: null,
+    ...(['invited', 'expired'].includes(state) ? { invitation: { id: 'pending', email: 'one@example.test' } } : {}) } })
+  await screen.findByText({ no_account: 'No access', invited: 'Invited', expired: 'Expired', signed_in: 'Signed in' }[state]!)
+  expect(screen.getAllByRole('button', { name: 'Find member or invite' })).toHaveLength(1)
+  expect(screen.getAllByRole('button', { name: 'Remove access' })).toHaveLength(1)
+  expect(screen.queryByRole('button', { name: 'Link account' })).toBeNull()
+  expect(screen.queryByRole('button', { name: 'Invite to application' })).toBeNull()
+  expect(write.mock.calls.some(([path]) => path.includes('/members?'))).toBe(false)
+})
+
+it.each([{ searchLinkAccount: false }, { membersRead: false }])('120 legacy compatibility never overrides an explicit capability denial: %j', async options => {
+  const { write } = await mount(options)
+  await screen.findByText('No access')
+  expect(screen.queryByRole('button', { name: 'Link account' })).toBeNull()
+  expect(screen.queryByRole('button', { name: 'Find member or invite' })).toBeNull()
+  expect(screen.getAllByRole('button', { name: 'Remove access' })).toHaveLength(1)
+  expect(write.mock.calls.some(([path]) => path.includes('/members?'))).toBe(false)
+})
+
+it.each([403, 404, 500])('120 failed refresh (%s) closes the shared search dialog', async error => {
+  const { write, client } = await mount({ searchLinkAccount: true })
+  const user = userEvent.setup()
+  await user.click(await screen.findByRole('button', { name: 'Find member or invite' }))
+  expect(screen.getByRole('dialog')).toBeTruthy()
+  write.mockRejectedValueOnce({ status: error })
+  await act(async () => { await client.invalidateQueries({ queryKey: ['row-access'] }) })
+  expect((await screen.findByRole('alert')).textContent).toContain(error === 403 ? en.rowAccessDenied : error === 404 ? en.rowAccessUnavailable : en.requestFailed)
+  expect(screen.queryByRole('dialog')).toBeNull()
+  expect(screen.queryByRole('button', { name: 'Find member or invite' })).toBeNull()
 })

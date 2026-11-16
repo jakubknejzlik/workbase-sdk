@@ -394,7 +394,9 @@ function useApplicationAccess(props: Omit<AccessContext, 'row'> & { row?: Record
     ? [...(inviteGranted ? ['resend', ...(data!.state === 'invited' ? ['copy'] : [])] : []), ...(data!.can_cancel && cancelGranted ? ['cancel', ...(inviteGranted ? ['change'] : [])] : [])]
     : []
   if (valid && data!.state === 'expired' && inviteGranted && data!.can_invite && !actions.includes('change')) actions.push('change')
-  if (explicit && props.caps.resources?.['members.read'] === true && props.caps.resources?.['members.search_link_account'] === true && (v3 ? granted('access_link_account') && data?.recordActions?.link_account?.enabled : granted('link_account'))) actions.push('link')
+  // Older servers omit the search capability. Preserve their authorized picker;
+  // an explicit denial still blocks both the picker and the new search flow.
+  if (explicit && props.caps.resources?.['members.read'] === true && props.caps.resources?.['members.search_link_account'] !== false && (v3 ? granted('access_link_account') && data?.recordActions?.link_account?.enabled : granted('link_account'))) actions.push('link')
   if (explicit && (v3 ? granted('access_unlink_account') && data?.recordActions?.unlink_account?.enabled : granted('remove_access'))) actions.push('remove')
   if (valid && data!.state === 'signed_in' && inviteGranted && actions.includes('remove')) actions.push('change')
   return { enabled, supported, status, multiple, valid, explicitOnly, actions, blocked: pending || !!props.disabled || !props.write || !props.row || supported && ((!valid && !explicitOnly) || status.isFetching || !!status.error) }
@@ -435,7 +437,11 @@ function ApplicationAccess(props: AccessContext) {
   const message = !enabled ? 'rowAccessUnavailable' : status.error ? ((status.error as WriteFailure).status === 403 ? 'rowAccessDenied' : (status.error as WriteFailure).status === 404 ? 'rowAccessUnavailable' : 'requestFailed') : !data ? 'loading' : explicitOnly ? 'rowAccessUnavailable' : multiple ? 'rowAccessMultiple' : !valid ? 'requestFailed' : undefined
   // Keep mounted dialogs/drafts during a cached refetch; every trigger and submit
   // is disabled by the same guard until the response settles.
-  const find = actions.includes('link')
+  const find = actions.includes('link') && props.caps.resources?.['members.search_link_account'] === true
+  const selectionAllowed = selected === 'find' ? find : !!selected && actions.includes(selected)
+  useEffect(() => {
+    if (selected && !selectionAllowed) setSelected(undefined)
+  }, [selected, selectionAllowed])
   const overflow: string[] = data?.state === 'invited' ? actions.filter(action => action === 'cancel' || action === 'change') : []
   const label = (action: string) => t(action === 'find' ? 'rowFindMember' : `rowInvite_${action}`)
   const open = (action: string, button: HTMLButtonElement) => { trigger.current = button; setSelected(action) }
@@ -448,7 +454,7 @@ function ApplicationAccess(props: AccessContext) {
     {enabled && !status.isFetching && (status.error || data && !valid && !multiple && !explicitOnly) && <Button type="button" variant="outline" onClick={() => { void status.refetch() }}>{t('reloadRetry')}</Button>}
     {delivery.data === true && <span role="alert">{t('rowInviteDeliveryFailed')}</span>}
     {status.isFetching && data && !multiple && <span role="status">{t('rowAccessRefreshing')}</span>}
-    {actions.filter(action => action !== 'link' && !(find && action === 'invite') && !overflow.includes(action)).map(action =>
+    {actions.filter(action => !(find && (action === 'link' || action === 'invite')) && !overflow.includes(action)).map(action =>
       <Button key={action} type="button" variant="outline" disabled={blocked} onClick={event => open(action, event.currentTarget)}>{label(action)}</Button>)}
     {!!overflow.length && <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}><DropdownMenuTrigger asChild><Button type="button" variant="outline" disabled={blocked} aria-label={t('rowInvitationActions')} onFocus={event => { trigger.current = event.currentTarget }} onClick={event => { trigger.current = event.currentTarget }}>…</Button></DropdownMenuTrigger>
       <DropdownMenuContent align="end" onCloseAutoFocus={event => { if (requested.current) { event.preventDefault(); setSelected(requested.current); requested.current = undefined } }}>
@@ -458,7 +464,7 @@ function ApplicationAccess(props: AccessContext) {
     {find && <Button type="button" variant="outline" className="basis-full sm:basis-auto" disabled={blocked} onClick={event => open('find', event.currentTarget)}>{label('find')}</Button>}
     {selected && <ResourceFormDialog entity={props.entity} key={selected} open onOpenChange={open => { if (!open) setSelected(undefined) }}
       onCloseAutoFocus={event => { event.preventDefault(); trigger.current?.focus() }} schema={actionSchema(selected)}
-      title={label(selected)} description={t(selected === 'find' ? 'rowFindDescription' : selected === 'remove' || selected === 'change' && data?.state === 'signed_in' ? 'rowInviteRemoveDescription' : 'rowInviteDescription')} cancelLabel={t('cancel')}>
+      title={label(selected)} description={t(selected === 'find' ? 'rowFindDescription' : selected === 'link' ? 'rowLinkDescription' : selected === 'remove' || selected === 'change' && data?.state === 'signed_in' ? 'rowInviteRemoveDescription' : 'rowInviteDescription')} cancelLabel={t('cancel')}>
       {controls => selected === 'find' ? <FindMemberOrInvite {...props} write={props.write!} controls={controls} /> : <RowInvitationMutation {...props} write={props.write!} action={selected} controls={controls} />}
     </ResourceFormDialog>}
   </div>
@@ -519,13 +525,25 @@ function useInvitationMutation(props: InvitationMutationProps, access: ReturnTyp
 }
 function RowInvitationMutation(props: InvitationMutationProps) {
   const { t } = useTranslation(); const access = useApplicationAccess(props)
-  const schema = actionSchema(props.action)
-  const mutation = useInvitationMutation(props, access)
-  return <><WriteError schema={schema} error={mutation.error} />
-    <RegistryForm schema={schema} serverErrors={translatedFieldErrors(mutation.error, schema, t)} values={{ email: props.email ?? '' }}
-      label={name => t(name === 'user_id' ? 'rowInviteAccount' : 'email')} submitLabel={t(`rowInvite_${props.action}`)} invalidLabel={t('invalidField')} pending={mutation.isPending} disabled={access.blocked}
+  const [generation, setGeneration] = useState(0)
+  const [rejected, setRejected] = useState<string>()
+  const canLink = props.action === 'link' && access.actions.includes('link')
+  const members = useQuery({ queryKey: ['account-link-members', props.orgId, props.entity, props.row.id, props.caps], retry: false,
+    enabled: canLink && !access.blocked,
+    queryFn: async (): Promise<{ data: LinkMember[] }> => props.write(`/orgs/${encodeURIComponent(props.orgId)}/members?eligible=link_account&target_entity=${encodeURIComponent(props.entity)}&target_row=${encodeURIComponent(props.row.id)}`, 'GET'),
+  })
+  const choices = canLink && !members.error && !members.isFetching ? (members.data?.data ?? []).filter(member => member.user_id !== rejected) : []
+  const schema = props.action === 'link' ? { ...rowLinkSchema, properties: { user_id: { type: 'string' as const, enum: choices.map(member => member.user_id) } } } : actionSchema(props.action)
+  const mutation = useInvitationMutation({ ...props, onLinkConflict: async id => { setRejected(id); setGeneration(value => value + 1) } }, access)
+  return <><WriteError schema={schema} error={mutation.error ?? (props.action === 'link' ? members.error : null)} />
+    {props.action === 'link' && <p className="text-sm text-muted-foreground">{t('rowLinkPickerHint')}</p>}
+    {props.action === 'link' && members.isFetching && <span role="status">{t('loading')}</span>}
+    {props.action === 'link' && !members.isPending && !members.isFetching && !members.error && !choices.length && <span role="status">{t('rowInviteNoMembers')}</span>}
+    <RegistryForm key={generation} schema={schema} serverErrors={translatedFieldErrors(mutation.error, schema, t)} values={{ email: props.email ?? '' }}
+      optionLabel={id => { const member = choices.find(member => member.user_id === id); return member ? memberLabel(member) : id }}
+      label={name => t(name === 'user_id' ? 'rowInviteAccount' : 'email')} submitLabel={t(`rowInvite_${props.action}`)} invalidLabel={t('invalidField')} pending={mutation.isPending} disabled={access.blocked || props.action === 'link' && (members.isFetching || !!members.error || !choices.length)}
       onSubmit={values => {
-        if (access.blocked || !access.actions.includes(props.action)) return Promise.reject({ code: 'action_unavailable' })
+        if (access.blocked || !access.actions.includes(props.action) || props.action === 'link' && !choices.some(member => member.user_id === values.user_id)) return Promise.reject({ code: 'action_unavailable' })
         return mutation.mutateAsync(values)
       }} /></>
 }
