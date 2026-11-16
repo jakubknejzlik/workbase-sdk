@@ -201,7 +201,7 @@ it('14 missing members.read suppresses both identity paths and Members picker ev
 it.each(['v3', 'legacy'])('review6 %s Link submits an eligible Members choice successfully', async transport => {
   app = createApp(identityConfig(), runtime())
   await env.DB.exec("UPDATE worker SET user=NULL WHERE id='linked'")
-  const response = await request('/orgs/org-a/members?eligible=link_account')
+  const response = await request('/orgs/org-a/members?eligible=link_account&target_entity=worker&target_row=linked')
   expect(response.status).toBe(200)
   const members = await response.json() as any
   const choice = members.data.find((member: any) => member.user_id === 'staff')
@@ -214,12 +214,12 @@ it.each(['v3', 'legacy'])('review6 %s Link submits an eligible Members choice su
 })
 it('review6 Link choices hide ineligible cross-home members without changing Members or server 404s', async () => {
   app = createApp(identityConfig(), runtime())
-  const before = await (await request('/orgs/org-a/members?eligible=link_account')).json() as any
+  const before = await (await request('/orgs/org-a/members?eligible=link_account&target_entity=worker&target_row=linked')).json() as any
   expect(before.data.map((member: any) => member.user_id)).toEqual(['admin', 'staff'])
   // Keep A membership, add B membership, then move only the user row to B.
   await env.DB.exec("UPDATE worker SET user=NULL WHERE id='linked'")
   await env.DB.exec("INSERT INTO memberships VALUES ('staff','org-b','staff'); UPDATE users SET organization_id='org-b' WHERE id='staff'")
-  const response = await request('/orgs/org-a/members?eligible=link_account')
+  const response = await request('/orgs/org-a/members?eligible=link_account&target_entity=worker&target_row=linked')
   expect(response.status).toBe(200)
   expect(response.headers.get('Cache-Control')).toBe('no-store')
   const choices = await response.json()
@@ -238,12 +238,12 @@ it('review6 Link choices hide ineligible cross-home members without changing Mem
   }
   // A member with no A membership has exactly the same filtered response.
   await env.DB.exec("DELETE FROM memberships WHERE organization_id='org-a' AND user_id='staff'")
-  expect(await (await request('/orgs/org-a/members?eligible=link_account')).json()).toEqual(choices)
+  expect(await (await request('/orgs/org-a/members?eligible=link_account&target_entity=worker&target_row=linked')).json()).toEqual(choices)
   await env.DB.exec("UPDATE users SET organization_id='org-a' WHERE id='staff'")
-  expect(await (await request('/orgs/org-a/members?eligible=link_account')).json()).toEqual(choices)
+  expect(await (await request('/orgs/org-a/members?eligible=link_account&target_entity=worker&target_row=linked')).json()).toEqual(choices)
 })
 it('review6 staff without members.read receives no Link choices or member information', async () => {
-  for (const query of ['', '?eligible=link_account']) {
+  for (const query of ['', '?eligible=link_account&target_entity=worker&target_row=linked']) {
     const response = await request(`/orgs/org-a/members${query}`, 'staff')
     expect(response.status).toBe(403)
     expect(await response.json()).toEqual({ error: 'permission_denied' })

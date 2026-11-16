@@ -11,7 +11,7 @@ import { writeFilter } from './execution/policies'
 import { kernelFor } from './kernel/registry'
 import { organizationPermission } from './organization-permissions'
 import { issuerGuard } from './organization-rules'
-import { linkableMembers } from './user-link-eligibility'
+import { accountLinkUnique, linkableMembers } from './user-link-eligibility'
 
 type LinkContext = Pick<PlanningContext, 'config' | 'scope' | 'now'>
 // Frozen statement identity, rather than caller-supplied metadata, grants the exception.
@@ -41,12 +41,12 @@ function linkField(config: InstanceConfig, entity: string) {
 export function linkAccountRow(ctx: LinkContext, entity: string, rowId: string, userId: string, invitation = false): AtomicRule {
   const field = linkField(ctx.config, entity); const table = quote(entity)
   const member = linkableMembers(ctx.scope.organizationId, userId)
-  const unique = `NOT EXISTS (SELECT 1 FROM ${table} other WHERE other.organization_id=? AND other.${field}=? AND other.id<>?)`
+  const unique = accountLinkUnique(ctx.config, ctx.scope.organizationId, { entity, row: rowId }, { userId })
   return { name: 'account_link', statements: [writer({
-    sql: `UPDATE ${table} SET ${field}=?,updated_at=?,version=version+1 WHERE organization_id=? AND id=? AND ${unique}
+    sql: `UPDATE ${table} SET ${field}=?,updated_at=?,version=version+1 WHERE organization_id=? AND id=? AND ${unique.sql}
       AND EXISTS (${member.sql})`,
-    bindings: [userId, ctx.now, ctx.scope.organizationId, rowId, ctx.scope.organizationId, userId, rowId, ...(member.bindings ?? [])], expectRows: 1,
-    diagnose: { sql: `SELECT ${unique} AS ok`, bindings: [ctx.scope.organizationId, userId, rowId] }, failureCode: 'account_already_linked',
+    bindings: [userId, ctx.now, ctx.scope.organizationId, rowId, ...(unique.bindings ?? []), ...(member.bindings ?? [])], expectRows: 1,
+    diagnose: { sql: `SELECT ${unique.sql} AS ok`, bindings: unique.bindings }, failureCode: 'account_already_linked',
   }, invitation ? 'cleanup' : 'link')] }
 }
 function revokeAccountInvitations(scope: Scope, userId: string): GuardedStatement {

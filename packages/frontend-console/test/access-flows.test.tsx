@@ -6,11 +6,12 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { I18nextProvider, initReactI18next } from 'react-i18next'
 import i18next from 'i18next'
 import en from '../src/locales/en.json'
+import cs from '../src/locales/cs.json'
 import { ApplicationAccessCard, GeneratedActions, GeneratedCreateDialog, GeneratedRowActions } from '../../console-generated/src/write-screens'
 import type { Model, Capabilities } from '../../console-generated/src/read'
 vi.mock('@tanstack/react-router', () => ({ useNavigate: () => vi.fn(), Link: ({ children }: { children: ReactNode }) => <a>{children}</a> }))
 const family = ['link_account', 'remove_access', 'access_invite', 'access_cancel_invite', 'access_link_account', 'access_unlink_account']
-async function mount(surface: 'detail' | 'menu' | 'create' | 'edit', options: { deferMutation?: boolean; membersRead?: boolean; membersFailure?: boolean; state?: string; grouped?: boolean; unavailable?: boolean; denial?: boolean; inconsistency?: string | null; accounts?: object[]; failure?: boolean; uncertainInvite?: boolean; deliveryFailure?: boolean; contact?: 'contact_email' | 'hidden'; grants?: string[]; v3?: boolean; loading?: boolean; error?: boolean; mutationDenied?: boolean } = {}) {
+async function mount(surface: 'detail' | 'menu' | 'create' | 'edit', options: { language?: 'en' | 'cs'; linkConflict?: boolean; noMembers?: boolean; deferMutation?: boolean; membersRead?: boolean; membersFailure?: boolean; state?: string; grouped?: boolean; unavailable?: boolean; denial?: boolean; inconsistency?: string | null; accounts?: object[]; failure?: boolean; uncertainInvite?: boolean; deliveryFailure?: boolean; contact?: 'contact_email' | 'hidden'; grants?: string[]; v3?: boolean; loading?: boolean; error?: boolean; mutationDenied?: boolean } = {}) {
   const v3 = options.v3 !== false
   const model = { instance: 'neutral', limits: { root: 100, relations: 10 }, entities: { entries: { accountLink: { field: 'user', entity: 'accounts' }, rowAccess: !options.unavailable, rowInvitations: !options.unavailable, fields: { id: { type: 'string' }, version: { type: 'integer' }, name: { type: 'string' }, email: { type: 'string' } }, writeSchema: { type: 'object', properties: { name: { type: 'string' }, email: { type: 'string' } } }, columns: ['name', 'email'], relations: {}, routes: {} } }, commands: family.filter(n => v3 || !n.startsWith('access_')).map(name => ({ name: `entries/${name}`, permission: { entity: 'entries', operation: 'update' }, inputSchema: { type: 'object', properties: { rowId: { type: 'string', referenceEntity: 'entries' } }, required: ['rowId'] } })) } as unknown as Model
   const caps = { resources: { 'members.read': options.membersRead !== false }, revision: 1, commands: (options.grants ?? family).map(n => `entries/${n}`), entities: { entries: { operations: ['read', 'create', 'update'], readable: ['id', 'version', 'name', 'email'], writable: ['name', 'email'] } } } as Capabilities
@@ -20,7 +21,7 @@ async function mount(surface: 'detail' | 'menu' | 'create' | 'edit', options: { 
   const status = () => ({ state: current, can_invite: true, can_cancel: true, inconsistency: options.inconsistency ?? null, linked_accounts: options.accounts, ...(['invited', 'expired'].includes(current) ? { invitation: { id: 'pending', email: 'invited@example.test' } } : {}) })
   const write = vi.fn(async (path: string, method: string, body?: any, _key?: string): Promise<any> => {
     if (method === 'GET') {
-      if (path.endsWith('/members?eligible=link_account')) { if (options.membersFailure) throw { status: 403 }; return { data: [{ user_id: 'account', display_name: 'Workspace member', email: 'member@example.test' }] } }
+      if (path.includes('/members?eligible=link_account')) { if (options.membersFailure) throw { status: 403 }; return { data: options.noMembers ? [] : [...(!failed ? [{ user_id: 'account', display_name: 'Workspace member', email: 'member@example.test' }] : []), ...(options.linkConflict ? [{ user_id: 'free', display_name: 'Free member', email: 'free@example.test' }] : [])] } }
       if (statusBlock) return new Promise(() => {})
       if (statusError) throw { status: 500 }
       if (path.endsWith('/delivery')) return { delivery: { status: options.deliveryFailure ? 'failed' : 'queued' } }
@@ -29,6 +30,7 @@ async function mount(surface: 'detail' | 'menu' | 'create' | 'edit', options: { 
     }
     if (path === '/api/entries') return { ...row, ...body, id: 'created', version }
     if (path === '/api/entries/one' || path === '/api/entries/created') return { ...row, ...body, version: ++version }
+    if (options.linkConflict && (body?.user_id === 'account' || body?.userId === 'account')) { failed = true; throw { status: 409, code: 'account_already_linked' } }
     if (options.mutationDenied) throw { status: 403 }
     if (options.denial) throw { status: 403 }
     if (options.failure && !failed) { failed = true; throw { status: 500 } }
@@ -38,7 +40,7 @@ async function mount(surface: 'detail' | 'menu' | 'create' | 'edit', options: { 
     return options.deliveryFailure ? { delivery: { status: 'failed' } } : {}
   })
   const request = vi.fn(async () => ({ data: [{ ...row, version }], next_cursor: null }))
-  const i18n = i18next.createInstance(); await i18n.use(initReactI18next).init({ lng: 'en', resources: { en: { translation: { ...en, field_name: 'Name', field_email: 'Contact email' } } } })
+  const i18n = i18next.createInstance(); await i18n.use(initReactI18next).init({ lng: options.language ?? 'en', resources: { en: { translation: { ...en, field_name: 'Name', field_email: 'Contact email' } }, cs: { translation: cs } } })
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false, ...(options.deferMutation ? { onMutate: async () => { await new Promise(resolve => setTimeout(resolve, 10)) } } : {}) } } })
   if (options.contact === 'hidden') caps.entities.entries.readable = caps.entities.entries.readable.filter(name => name !== 'email')
   if (options.contact === 'contact_email') { const entity = model.entities.entries; entity.fields.contact_email = entity.fields.email; delete entity.fields.email; entity.columns = ['name', 'contact_email']; entity.writeSchema!.properties.contact_email = entity.writeSchema!.properties.email; delete entity.writeSchema!.properties.email; caps.entities.entries.readable.push('contact_email'); caps.entities.entries.writable.push('contact_email') }
@@ -302,7 +304,7 @@ it('create with unavailable invitation status omits Invite now despite an invita
 it('review6 Link picker requests eligible Members and submits without users capabilities', async () => {
   const { user, write, request } = await mount('detail', { deferMutation: true })
   await user.click(await screen.findByRole('button', { name: 'Link account' }))
-  await waitFor(() => expect(write).toHaveBeenCalledWith('/orgs/org/members?eligible=link_account', 'GET'))
+  await waitFor(() => expect(write).toHaveBeenCalledWith('/orgs/org/members?eligible=link_account&target_entity=entries&target_row=one', 'GET'))
   await user.click(await screen.findByRole('combobox', { name: 'Member' }))
   await user.click(await screen.findByRole('option', { name: 'Workspace member · member@example.test' }))
   await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Link account' }))
@@ -323,4 +325,54 @@ it('14 failed Members read never falls back to a raw account id input', async ()
   expect(screen.queryByRole('textbox', { name: 'Member' })).toBeNull()
   expect(within(screen.getByRole('dialog')).getByRole('button', { name: 'Link account' })).toHaveProperty('disabled', true)
   expect(write.mock.calls.every(([, method]) => method === 'GET')).toBe(true)
+})
+
+it.each(['en', 'cs'].flatMap(language => [true, false].map(v3 => ({ language: language as 'en' | 'cs', v3 }))))
+('89 $language Link conflict stays on Member and retries using refreshed choices (v3=$v3)', async ({ language, v3 }) => {
+  const labels = language === 'cs' ? cs : en
+  const message = language === 'cs' ? 'Tento účet je již propojen s jiným záznamem. Vyberte jiného člena.' : 'This account is already linked to another record. Choose another member.'
+  const { user, write, client } = await mount('detail', { language, v3, linkConflict: true })
+  // Another row/entity's cache cannot provide this target's choices.
+  client.setQueryData(['account-link-members', 'org', 'other', 'two'], { data: [{ user_id: 'wrong', display_name: 'Wrong target' }] })
+  await user.click(await screen.findByRole('button', { name: labels.rowInvite_link }))
+  await user.click(await screen.findByRole('combobox', { name: labels.rowInviteAccount }))
+  expect(screen.queryByRole('option', { name: 'Wrong target' })).toBeNull()
+  await user.click(await screen.findByRole('option', { name: 'Workspace member · member@example.test' }))
+  await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: labels.rowInvite_link }))
+  const error = await screen.findByText(message)
+  const field = screen.getByRole('combobox', { name: labels.rowInviteAccount })
+  expect(field.getAttribute('aria-invalid')).toBe('true')
+  expect(field.getAttribute('aria-describedby')?.split(' ')).toContain(error.id)
+  expect(screen.queryByText(labels.requestFailed)).toBeNull()
+  expect(screen.getByRole('dialog')).toBeTruthy()
+  expect(field.textContent).not.toContain('Workspace member')
+  const memberReads = () => write.mock.calls.filter(([path]) => path.includes('/members?'))
+  await waitFor(() => expect(memberReads().length).toBeGreaterThanOrEqual(2))
+  expect(client.getQueryCache().getAll().find(q => q.queryKey[0] === 'account-link-members' && q.queryKey[2] === 'entries')?.queryKey).toEqual(['account-link-members', 'org', 'entries', 'one', expect.any(Object)])
+  await user.click(field)
+  expect(screen.queryByRole('option', { name: 'Workspace member · member@example.test' })).toBeNull()
+  await user.click(await screen.findByRole('option', { name: 'Free member · free@example.test' }))
+  await waitFor(() => expect(screen.queryByText(message)).toBeNull())
+  await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: labels.rowInvite_link }))
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+  const writes = write.mock.calls.filter(([, method]) => method === 'POST')
+  expect(writes.map(([, , body]) => v3 ? body.user_id : body.userId)).toEqual(['account', 'free'])
+  expect(memberReads().length).toBeGreaterThanOrEqual(3)
+})
+it.each(['en', 'cs'] as const)('89 %s Link displays a localized empty state', async language => {
+  const labels = language === 'cs' ? cs : en
+  const { user } = await mount('detail', { language, noMembers: true })
+  await user.click(await screen.findByRole('button', { name: labels.rowInvite_link }))
+  await screen.findByText(language === 'cs' ? 'Žádní členové k propojení.' : 'No members available to link.')
+  expect(within(screen.getByRole('dialog')).getByRole('button', { name: labels.rowInvite_link })).toHaveProperty('disabled', true)
+})
+
+it.each([true, false])('89 unlink invalidates cached Link choices for other targets (v3=%s)', async v3 => {
+  const { user, client } = await mount('detail', { v3, state: 'signed_in' })
+  const key = ['account-link-members', 'org', 'entries', 'other-row']
+  client.setQueryData(key, { data: [] })
+  await user.click(await screen.findByRole('button', { name: en.rowInvite_remove }))
+  await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: en.rowInvite_remove }))
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+  expect(client.getQueryState(key)?.isInvalidated).toBe(true)
 })

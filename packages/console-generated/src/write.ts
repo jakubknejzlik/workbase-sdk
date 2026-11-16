@@ -106,7 +106,7 @@ export function pickerQuery(model: Model, entity: string, caps: Capabilities, op
   return query
 }
 
-export const writeCodes = ['relation_save_failed', 'validation_error', 'version_conflict', 'field_forbidden', 'policy_violation', 'not_found', 'constraint_conflict', 'idempotency_payload_mismatch', 'rule_failed', 'invalid_transition']
+export const writeCodes = ['account_already_linked', 'relation_save_failed', 'validation_error', 'version_conflict', 'field_forbidden', 'policy_violation', 'not_found', 'constraint_conflict', 'idempotency_payload_mismatch', 'rule_failed', 'invalid_transition']
 export function commandError(failure: { status?: number; code?: string }) {
   const closed = writeCodes.includes(failure.code ?? '')
   const denied = failure.status === 403 && ['permission_denied', 'organization_forbidden', 'membership_required'].includes(failure.code ?? '')
