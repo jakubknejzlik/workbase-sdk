@@ -6,7 +6,7 @@ Read README.md for installation, artifact generation and the review workflow.
 This is the phase-2 handwritten V3 reference path. Keep declarative schema in
 `schema/*`, literal config in `config.ts`, executable composition in `runtime.ts`,
 access rules in `access.ts`, pages in `ui/*` and translations in `locales/*`.
-Generate schema lock and migration, then access locks, then OpenAPI; run
+Generate schema lock and migration, then OpenAPI, then access locks; run
 `bun run check` and `bun run typecheck` before review. Never hand-edit generated
 artifacts.
 The console uses the installed SDK's prebuilt assets from `@workbasehq/plugins`;

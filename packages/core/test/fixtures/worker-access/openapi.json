@@ -4436,6 +4436,9 @@
                     "builtAt": {
                       "type": "string"
                     },
+                    "openapi": {
+                      "type": "string"
+                    },
                     "revision": {
                       "type": "integer"
                     },
@@ -4445,6 +4448,7 @@
                   },
                   "required": [
                     "builtAt",
+                    "openapi",
                     "revision",
                     "sha"
                   ],
@@ -6557,7 +6561,7 @@
     },
     "/openapi.json": {
       "get": {
-        "description": "Committed public specification. Serving is introduced separately.",
+        "description": "Serves the committed public specification anonymously. Returns 503 when no valid OpenAPI artifact is bound.",
         "responses": {
           "200": {
             "content": {
@@ -6568,6 +6572,28 @@
               }
             },
             "description": "Success"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "error": {
+                      "enum": [
+                        "openapi_not_bound"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OpenAPI artifact is not bound"
           },
           "default": {
             "content": {

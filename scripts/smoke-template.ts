@@ -126,8 +126,8 @@ try {
 
   const generate = () => {
     console.log(run('bun', ['run', 'migrate:plan', '--init']).trim())
-    console.log(run('bun', ['run', 'access:lock']).trim())
     console.log(run('bun', ['run', 'openapi:write']).trim())
+    console.log(run('bun', ['run', 'access:lock']).trim())
   }
   generate()
   const artifacts = Object.fromEntries(generated.map(path => [path, readFileSync(join(consumer, path))]))
@@ -145,7 +145,8 @@ try {
   assert(json(join(consumer, 'access.lock.json')).enforcementInputs.plugins.length > 0)
   console.log(run('bun', ['--eval', `import assert from 'node:assert/strict'; import config from './runtime'; import { loadConfig } from '@workbasehq/core/schema/load'; import spec from './openapi.json'; assert.equal(config.id, ${JSON.stringify(id)}); assert.equal(config.revision, 1); assert(config.interactive); const loaded = await loadConfig('./config.ts'); assert.equal(spec['x-workbase-config-hash'], loaded.configHash); console.log('Runtime identity, lock revision and OpenAPI configHash match')`]).trim())
   console.log(run('bun', ['--eval', `import assert from 'node:assert/strict'; import { createApp } from '@workbasehq/core/app'; import config from './runtime'; const app = createApp(config, { DB: { prepare() { throw Error('unexpected DB access') } }, BETTER_AUTH_SECRET: process.env.BETTER_AUTH_SECRET, AUTH_BASE_URL: process.env.AUTH_BASE_URL }); const response = await app.request('https://neutral.example.test/schema'); assert.equal(response.status, 200); const schema = await response.json(); assert.equal(schema.instance, ${JSON.stringify(id)}); assert(schema.commands.some(command => command.name === 'worker/access_invite')); console.log('Packed runtime GET /schema: 200 + valid JSON with account-link commands')`]).trim())
-  console.log('Step 3: schema → access → OpenAPI generated twice; all bytes match; identity verified via runtime/spec')
+  console.log(run('bun', ['--eval', `import assert from 'node:assert/strict'; import { readFileSync } from 'node:fs'; import { createApp } from '@workbasehq/core/app'; import config from './runtime'; const app = createApp(config, { DB: { prepare() { throw Error('unexpected DB access') } } }); const response = await app.request('https://neutral.example.test/openapi.json'); assert.equal(response.status, 200); assert.deepEqual(Buffer.from(await response.arrayBuffer()), readFileSync('./openapi.json')); console.log('Packed runtime anonymous GET /openapi.json: 200 + exact committed artifact bytes')`]).trim())
+  console.log('Step 3: schema → OpenAPI → access generated twice; all bytes match; identity verified via runtime/spec')
   console.log(run('bun', ['run', 'check']).trim())
   console.log(timed('typecheck_ms', () => run('bun', ['run', 'typecheck'])).trim())
   const assets = join(consumer, 'node_modules/@workbasehq/plugins/console/assets')
