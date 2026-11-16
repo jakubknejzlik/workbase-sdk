@@ -36,7 +36,7 @@ it('detail supplies all four access states and a public account projection; staf
     const row = await response.json() as any
     expect(row.access.state).toBe(state)
     expect(row.actions).toHaveProperty('invite')
-    if (state === 'linked') expect(row.access).toEqual({ state, account: { id: 'staff', display_name: 'staff', email: 'staff@example.test' }, invitation: null })
+    if (state === 'linked') expect(row.access).toEqual({ state, account: { id: 'staff', display_name: 'Existing Person', email: 'staff@example.test' }, invitation: null })
     else expect(row.access.account).toBeNull()
     expect(JSON.stringify(row.access)).not.toMatch(/token|accept_url|inviter_id/)
   }
@@ -155,4 +155,44 @@ it('query label projections conform for visible references', async () => {
   expect(sample.data[0].__labels.user.status).toBe('ok')
   const parsed = responseContract('/query', 'post').safeParse(sample)
   expect(parsed.success, JSON.stringify(parsed.error)).toBe(true)
+})
+
+function identityConfig(membersRead = true) {
+  const config = workerAccessFixture()
+  for (const rule of config.effectiveAccess!.entities) if (rule.entity === 'users' && rule.role === 'admin') rule.decision = 'deny'
+  if (!membersRead) config.effectiveAccess!.system.find(rule => rule.role === 'admin' && rule.action === 'members.read')!.decision = 'deny'
+  return config
+}
+it('14 admin users deny retains Members identity and workspace picker, while GET users stays forbidden', async () => {
+  app = createApp(identityConfig(), runtime())
+  // users.organization_id is not a membership: this foreign identity is stored
+  // in A but only belongs to B, and must never be projected into A.
+  await env.DB.exec(`INSERT INTO users (id,organization_id,email,name,role,created_at,updated_at) VALUES ('foreign','org-a','foreign@example.test','Foreign','staff','now','now');
+    INSERT INTO memberships VALUES ('foreign','org-b','staff');`)
+  const members = await (await request('/orgs/org-a/members')).json() as any
+  expect(members.data.map((member: any) => member.user_id)).toEqual(['admin', 'staff'])
+  const member = members.data.find((member: any) => member.user_id === 'staff')
+  expect(member).toMatchObject({ display_name: 'Existing Person', email: 'staff@example.test' })
+  const row = await (await request('/api/worker/linked')).json() as any
+  expect(row.access.account).toEqual({ id: member.user_id, display_name: member.display_name, email: member.email })
+  const legacy = await (await request('/orgs/org-a/row-access/worker/linked')).json() as any
+  expect(legacy.linked_accounts).toEqual([{ id: member.user_id, label: member.display_name }])
+  expect((await request('/api/users')).status).toBe(403)
+  expect((await request('/orgs/org-b/members')).status).toBe(403)
+  await env.DB.exec("UPDATE worker SET user='foreign' WHERE id='linked'")
+  expect((await (await request('/api/worker/linked')).json() as any).access).toEqual({ state: 'linked', account: null, invitation: null })
+  expect((await (await request('/orgs/org-a/row-access/worker/linked')).json() as any).linked_accounts).toEqual([])
+  // A member can belong to this workspace even when their home user row is B.
+  await env.DB.exec("UPDATE users SET organization_id='org-b' WHERE id='staff'")
+  expect((await (await request('/orgs/org-a/members')).json() as any).data).toContainEqual(member)
+})
+it('14 missing members.read suppresses both identity paths and Members picker even with invitations.read', async () => {
+  app = createApp(identityConfig(false), runtime())
+  expect((await (await request('/api/worker/linked')).json() as any).access).toEqual({ state: 'linked', account: null, invitation: null })
+  const legacy = await (await request('/orgs/org-a/row-access/worker/linked')).json() as any
+  expect(legacy.state).toBe('signed_in')
+  expect(legacy).not.toHaveProperty('linked_accounts')
+  expect((await request('/orgs/org-a/members')).status).toBe(403)
+  expect((await request('/orgs/org-a/members', 'staff')).status).toBe(403)
+  expect((await request('/api/users')).status).toBe(403)
 })

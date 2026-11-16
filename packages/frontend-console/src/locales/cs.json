@@ -576,7 +576,7 @@
   "rowInviteRetry": "Zkusit pozvánku znovu",
   "rowAccessRefreshing": "Ověřuje se stav přístupu. Akce účtu nejsou dostupné.",
   "rowInvite_link": "Propojit účet",
-  "rowInviteAccount": "ID účtu",
+  "rowInviteAccount": "Člen",
   "rowInvite_change": "Změnit e-mail pozvánky",
   "rowInviteDeliveryFailed": "Pozvánka existuje; doručení e-mailu selhalo. Zkuste ji znovu odeslat."
 }

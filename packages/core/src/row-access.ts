@@ -1,4 +1,4 @@
-/** Members status discloses account identity only through normal field/row read grants.
+/** Members status discloses account identity through workspace members.read and the source link field grant.
  * Storage currently holds one scalar link. The inconsistency result is reserved for
  * adapters/legacy sources; invitation history is never treated as linked accounts. */
 export interface RowAccessStatus {

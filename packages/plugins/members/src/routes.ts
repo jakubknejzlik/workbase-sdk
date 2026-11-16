@@ -1,14 +1,10 @@
+import { memberIdentities, canReadMembers } from '../../../core/src/member-identities'
 import type { RowAccessStatus } from '../../../core/src/row-access'
-import { executeQuery } from '../../../core/src/query/executor'
-import { QueryError } from '../../../core/src/query/errors'
-import { cursorSecret } from '../../../core/src/query/routes'
-import { readableDisplay } from '../../../core/src/query/labels'
 import { invitationRole, latestRowInvitation } from '../../../core/src/worker-access'
 import { actorAccountId } from '../../../core/src/policies'
 import { rowTargetSchema, rowLink, rowInvitationGuard } from './row-invitations'
 import { quote } from '../../../core/src/migrations/schema'
 import { writeFilter } from '../../../core/src/execution/policies'
-import { displayIdentity } from '../../identity/src/display-identity'
 import { isOrganizationAdministrator } from '../../permissions/src/roles'
 import { recipientRoutes } from './recipient-routes'
 import { invitationTokenSchema } from './invitation-token'
@@ -61,17 +57,8 @@ export function memberRoutes(app: App, config: InstanceConfig, env: RuntimeEnv) 
   app.get('/orgs/:orgId/members', scoped, async c => {
     const scope = scopeFor(c, 'members.read')
     c.header('Cache-Control', 'no-store')
-    // Profile names take precedence, as in Identity's self projection. For an
-    // external identity, only use names synchronized from its current binding.
-    const members = await env.DB.prepare(`SELECT m.user_id,u.email,m.role,a.name,p.first_name AS firstName,p.last_name AS lastName
-      FROM memberships m JOIN users u ON u.id=m.user_id LEFT JOIN "user" a ON a.id=u.id
-      LEFT JOIN identity_profiles p ON p.user_id=u.id AND (
-        NOT EXISTS (SELECT 1 FROM identities i WHERE i.user_id=u.id AND i.provider<>'local')
-        OR (p.synced_at IS NOT NULL
-          AND (SELECT count(*) FROM identities i WHERE i.user_id=u.id AND i.provider<>'local')=1
-          AND EXISTS (SELECT 1 FROM identities i WHERE i.user_id=u.id AND i.provider=p.source_provider AND i.issuer=p.source_issuer AND i.subject=p.source_subject)))
-      WHERE m.organization_id=? ORDER BY m.user_id`).bind(scope.organizationId).all<{ user_id: string; email: string; role: string; name: string | null; firstName: string | null; lastName: string | null }>()
-    if (c.req.query('include') !== 'pending') return c.json({ data: members.results.map(({ name: _name, firstName: _firstName, lastName: _lastName, ...row }) => row) })
+    const members = await memberIdentities(config, scope, env.DB)
+    if (c.req.query('include') !== 'pending') return c.json({ data: members })
     const can = (action: OrganizationAction) => {
       try { kernelFor(config).resourcePermission(scope, action); organizationPermission(config, scope, action); return true } catch { return false }
     }
@@ -86,8 +73,8 @@ export function memberRoutes(app: App, config: InstanceConfig, env: RuntimeEnv) 
     const roleOptions = config.roles.filter(role => (config.baseline === 'workbase-sdk' || role !== 'member') && canGrantRole(config, scope.role, role)).map(id => ({ id, administrator: isOrganizationAdministrator(config, id) }))
     const breadth = (role: string) => Object.values(config.permissions[role] ?? {}).reduce((n, grants) => n + grants.length, 0) + (config.organizationPermissions[role]?.length ?? 0)
     const defaultRole = [...roleOptions].sort((a, b) => breadth(a.id) - breadth(b.id) || a.id.localeCompare(b.id))[0]?.id
-    const administrators = members.results.filter(row => row.role === config.organizationOwnerRole).length
-    return c.json({ role_options: roleOptions, default_role: defaultRole, data: [...members.results.map(({ name, firstName, lastName, ...row }) => ({ ...row, display_name: displayIdentity({ name, firstName, lastName, email: row.email }).displayName,
+    const administrators = members.filter(row => row.role === config.organizationOwnerRole).length
+    return c.json({ role_options: roleOptions, default_role: defaultRole, data: [...members.map(row => ({ ...row,
       last_administrator: administrators === 1 && row.role === config.organizationOwnerRole, kind: 'member', status: 'active',
       actions: [...(can('members.update') ? ['update-role'] : []), ...(can('members.remove') ? ['remove'] : [])],
     })), ...pending] })
@@ -138,27 +125,13 @@ export function memberRoutes(app: App, config: InstanceConfig, env: RuntimeEnv) 
     const canInvite = invitePermission && kernelFor(config).can(scope, target.entity, 'create') && !!await env.DB.prepare(`SELECT 1 WHERE ${guard.sql}`).bind(...guard.values).first()
     let canCancel = false
     try { kernelFor(config).resourcePermission(scope, 'invitations.revoke'); organizationPermission(config, scope, 'invitations.revoke'); canCancel = true } catch {}
-    // Status itself keeps its existing invitations.read + row read gates. Account
-    // identity additionally needs the link field, target field masks and target
-    // row visibility; never infer disclosure permission from invitation management.
+    // Status retains invitations.read + row read. Identity is the limited
+    // workspace Members projection, independently gated by members.read.
     const kernel = kernelFor(config)
-    const accountEntity = config.entities[target.entity].fields[link.field].entity!
     let linkedAccounts: RowAccessStatus['linked_accounts']
-    if (kernel.fieldMask(target.entity, scope).includes(link.field) && kernel.can(scope, accountEntity, 'read') && kernel.fieldMask(accountEntity, scope).includes('id')) {
-      linkedAccounts = []
-      if (row.user) {
-        const display = readableDisplay(kernel, scope, accountEntity)
-        const secret = await cursorSecret(env)
-        try {
-          const result = await executeQuery(kernel, scope, env.DB, secret, {
-            entity: accountEntity, select: ['id', ...(display ? [display] : [])], where: { id: { eq: row.user } }, limit: 1,
-          })
-          linkedAccounts = result.data.map(account => ({ id: account.id, ...(display && account[display] != null ? { label: String(account[display]) } : {}) }))
-        } catch (error) {
-          // A policy-hidden identity does not hide the independently authorized status.
-          if (!(error instanceof QueryError && error.code === 'policy_violation' && error.path.length === 0)) throw error
-        }
-      }
+    if (kernel.fieldMask(target.entity, scope).includes(link.field) && canReadMembers(config, scope)) {
+      linkedAccounts = row.user ? (await memberIdentities(config, scope, env.DB, row.user))
+        .map(member => ({ id: member.user_id, label: member.display_name ?? member.email })) : []
     }
     return c.json({ inconsistency: null, ...(linkedAccounts ? { linked_accounts: linkedAccounts } : {}), can_cancel: canCancel, state: row.user ? 'signed_in' : invitation ? invitation.expired_at || invitation.expires_at <= nowISO() ? 'expired' : 'invited' : 'no_account',
       ...(invitation && (canInvite || canCancel) ? { invitation: { id: invitation.id, email: invitation.email, expires_at: invitation.expires_at } } : {}), can_invite: canInvite } satisfies RowAccessStatus)

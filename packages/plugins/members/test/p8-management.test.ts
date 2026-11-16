@@ -207,7 +207,7 @@ it('combined members prefer profile names over legacy names without exposing pro
   expect(body.data).toContainEqual(expect.objectContaining({ user_id: 'owner-a', email: 'owner.a@example.test', display_name: 'Anna Správcová' }))
   expect(JSON.stringify(body)).not.toMatch(/firstName|lastName|first_name|last_name|synced|source_provider/)
   const plain = await json(await request(app, '/orgs/org-a/members'))
-  expect(plain.data).toContainEqual({ user_id: 'owner-a', email: 'owner.a@example.test', role: 'owner' })
+  expect(plain.data).toContainEqual({ user_id: 'owner-a', email: 'owner.a@example.test', role: 'owner', display_name: 'Anna Správcová' })
 })
 
 it('combined members use external profile names only while their synchronized binding is current', async () => {

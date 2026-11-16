@@ -556,7 +556,7 @@
   "rowInviteRetry": "Retry invitation",
   "rowAccessRefreshing": "Access status is being reconciled. Account actions are unavailable.",
   "rowInvite_link": "Link account",
-  "rowInviteAccount": "Account ID",
+  "rowInviteAccount": "Member",
   "rowInvite_change": "Change invitation email",
   "rowInviteDeliveryFailed": "Invitation exists; email delivery failed. Use Resend to try delivery again."
 }

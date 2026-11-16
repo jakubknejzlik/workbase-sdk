@@ -73,8 +73,11 @@ groups and relation cards. Other references to the same target remain visible.
 Members `GET /orgs/:orgId/row-access/:entity/:rowId` keeps invitation-read and
 source-row read gates. It adds `inconsistency` (`null` or
 `multiple_linked_accounts`) and optional `linked_accounts` entries with `id` and
-an authorized display `label`. Identity disclosure also requires the link field,
-target read/masks and target row visibility. Status-only readers can receive
+an authorized display `label`. Identity disclosure requires the source link field
+and `members.read`, using the same workspace membership and display-name source
+as Members. It never requires or grants general `users` read. V3 record access
+uses the same boundary for its limited account projection. Email is included
+only where the same Members read already exposes it. Status-only readers can receive
 `signed_in` without an account identity. `signed_in` means a linked account, not a
 recent login. Current scalar storage returns at most one summary; invitation
 history is not a source of multiple linked accounts. The card defensively warns
@@ -86,7 +89,11 @@ from generic detail and menu actions. V3 controls read the record's access state
 and action availability and submit to `/api/:entity/:id/actions/:name` with
 `{ email }`, `{ user_id }` or `{}`; legacy controls retain their supported Members
 and account-command transports. Explicit link/unlink controls remain individually
-granted inside the card even without Members invitation-status support. A status
+granted inside the card even without Members invitation-status support. Link
+additionally requires `members.read` and offers existing members of the current
+workspace from `GET /orgs/:orgId/members`, whose entries include `display_name`.
+The picker submits the selected `user_id`; it does not accept a raw account ID.
+A denied or failed Members read disables selection and submission. A status
 read that is loading, failed, unknown or refetching disables every account
 mutation. Cached refetches preserve the displayed state and invitation draft;
 only the first read without cache shows loading.

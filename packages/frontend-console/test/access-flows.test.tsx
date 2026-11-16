@@ -10,16 +10,17 @@ import { ApplicationAccessCard, GeneratedActions, GeneratedCreateDialog, Generat
 import type { Model, Capabilities } from '../../console-generated/src/read'
 vi.mock('@tanstack/react-router', () => ({ useNavigate: () => vi.fn(), Link: ({ children }: { children: ReactNode }) => <a>{children}</a> }))
 const family = ['link_account', 'remove_access', 'access_invite', 'access_cancel_invite', 'access_link_account', 'access_unlink_account']
-async function mount(surface: 'detail' | 'menu' | 'create' | 'edit', options: { state?: string; grouped?: boolean; unavailable?: boolean; denial?: boolean; inconsistency?: string | null; accounts?: object[]; failure?: boolean; uncertainInvite?: boolean; deliveryFailure?: boolean; contact?: 'contact_email' | 'hidden'; grants?: string[]; v3?: boolean; loading?: boolean; error?: boolean; mutationDenied?: boolean } = {}) {
+async function mount(surface: 'detail' | 'menu' | 'create' | 'edit', options: { deferMutation?: boolean; membersRead?: boolean; membersFailure?: boolean; state?: string; grouped?: boolean; unavailable?: boolean; denial?: boolean; inconsistency?: string | null; accounts?: object[]; failure?: boolean; uncertainInvite?: boolean; deliveryFailure?: boolean; contact?: 'contact_email' | 'hidden'; grants?: string[]; v3?: boolean; loading?: boolean; error?: boolean; mutationDenied?: boolean } = {}) {
   const v3 = options.v3 !== false
   const model = { instance: 'neutral', limits: { root: 100, relations: 10 }, entities: { entries: { accountLink: { field: 'user', entity: 'accounts' }, rowAccess: !options.unavailable, rowInvitations: !options.unavailable, fields: { id: { type: 'string' }, version: { type: 'integer' }, name: { type: 'string' }, email: { type: 'string' } }, writeSchema: { type: 'object', properties: { name: { type: 'string' }, email: { type: 'string' } } }, columns: ['name', 'email'], relations: {}, routes: {} } }, commands: family.filter(n => v3 || !n.startsWith('access_')).map(name => ({ name: `entries/${name}`, permission: { entity: 'entries', operation: 'update' }, inputSchema: { type: 'object', properties: { rowId: { type: 'string', referenceEntity: 'entries' } }, required: ['rowId'] } })) } as unknown as Model
-  const caps = { revision: 1, commands: (options.grants ?? family).map(n => `entries/${n}`), entities: { entries: { operations: ['read', 'create', 'update'], readable: ['id', 'version', 'name', 'email'], writable: ['name', 'email'] } } } as Capabilities
+  const caps = { resources: { 'members.read': options.membersRead !== false }, revision: 1, commands: (options.grants ?? family).map(n => `entries/${n}`), entities: { entries: { operations: ['read', 'create', 'update'], readable: ['id', 'version', 'name', 'email'], writable: ['name', 'email'] } } } as Capabilities
   const row = { id: 'one', version: 1, name: 'Original', email: 'contact@example.test' }
   let current = options.state ?? 'no_account', version = 1, failed = false
   const statusBlock = options.loading, statusError = options.error
   const status = () => ({ state: current, can_invite: true, can_cancel: true, inconsistency: options.inconsistency ?? null, linked_accounts: options.accounts, ...(['invited', 'expired'].includes(current) ? { invitation: { id: 'pending', email: 'invited@example.test' } } : {}) })
   const write = vi.fn(async (path: string, method: string, body?: any, _key?: string): Promise<any> => {
     if (method === 'GET') {
+      if (path.endsWith('/members')) { if (options.membersFailure) throw { status: 403 }; return { data: [{ user_id: 'account', display_name: 'Workspace member', email: 'member@example.test' }] } }
       if (statusBlock) return new Promise(() => {})
       if (statusError) throw { status: 500 }
       if (path.endsWith('/delivery')) return { delivery: { status: options.deliveryFailure ? 'failed' : 'queued' } }
@@ -38,7 +39,7 @@ async function mount(surface: 'detail' | 'menu' | 'create' | 'edit', options: { 
   })
   const request = vi.fn(async () => ({ data: [{ ...row, version }], next_cursor: null }))
   const i18n = i18next.createInstance(); await i18n.use(initReactI18next).init({ lng: 'en', resources: { en: { translation: { ...en, field_name: 'Name', field_email: 'Contact email' } } } })
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false, ...(options.deferMutation ? { onMutate: async () => { await new Promise(resolve => setTimeout(resolve, 10)) } } : {}) } } })
   if (options.contact === 'hidden') caps.entities.entries.readable = caps.entities.entries.readable.filter(name => name !== 'email')
   if (options.contact === 'contact_email') { const entity = model.entities.entries; entity.fields.contact_email = entity.fields.email; delete entity.fields.email; entity.columns = ['name', 'contact_email']; entity.writeSchema!.properties.contact_email = entity.writeSchema!.properties.email; delete entity.writeSchema!.properties.email; caps.entities.entries.readable.push('contact_email'); caps.entities.entries.writable.push('contact_email') }
   if (options.grouped) model.entities.entries.detail = { groups: [{ id: 'main', label: 'Main', fields: ['name', 'email'] }] }
@@ -73,7 +74,7 @@ it('review5 edit embeds invitation controls', async () => { await mount('edit');
 async function confirmAction(user: ReturnType<typeof userEvent.setup>, label: string, input?: [string, string]) {
   await user.click(await screen.findByRole('button', { name: label }))
   const dialog = screen.getAllByRole('dialog').at(-1)!
-  if (input) { const field = within(dialog).getByLabelText(input[0]); await user.clear(field); await user.type(field, input[1]) }
+  if (input) { const field = await within(dialog).findByLabelText(input[0]); if (input[0] === 'Member') { await waitFor(() => expect(field).not.toHaveProperty('disabled', true)); await user.click(field); await user.click(await screen.findByRole('option', { name: 'Workspace member · member@example.test' })) } else { await user.clear(field); await user.type(field, input[1]) } }
   await user.click(within(dialog).getByRole('button', { name: label }))
 }
 it.each(['detail', 'menu', 'edit'] as const)('V3 dedicated invite/link/unlink/cancel succeed on %s without generic commands', async surface => {
@@ -82,7 +83,7 @@ it.each(['detail', 'menu', 'edit'] as const)('V3 dedicated invite/link/unlink/ca
   await waitFor(() => expect(write).toHaveBeenCalledWith('/api/entries/one/actions/invite', 'POST', { email: 'recipient@example.test' }))
   await confirmAction(user, 'Cancel invitation')
   await waitFor(() => expect(write).toHaveBeenCalledWith('/api/entries/one/actions/cancel_invite', 'POST', {}))
-  await confirmAction(user, 'Link account', ['Account ID', 'account'])
+  await confirmAction(user, 'Link account', ['Member', 'account'])
   await waitFor(() => expect(write).toHaveBeenCalledWith('/api/entries/one/actions/link_account', 'POST', { user_id: 'account' }))
   await confirmAction(user, 'Remove access')
   await waitFor(() => expect(write).toHaveBeenCalledWith('/api/entries/one/actions/unlink_account', 'POST', {}))
@@ -296,4 +297,27 @@ it.each(['unknown', 'error', 'refetch'] as const)('explicit-only V3 availability
 it('create with unavailable invitation status omits Invite now despite an invitation grant', async () => {
   await mount('create', { unavailable: true, grants: ['access_invite'] })
   expect(screen.queryByRole('checkbox', { name: 'Invite now' })).toBeNull()
+})
+
+it('14 Link picker uses workspace Members under members.read without users capabilities', async () => {
+  const { user, write, request } = await mount('detail', { deferMutation: true })
+  await confirmAction(user, 'Link account', ['Member', 'account'])
+  expect(write).toHaveBeenCalledWith('/orgs/org/members', 'GET')
+  await waitFor(() => expect(write).toHaveBeenCalledWith('/api/entries/one/actions/link_account', 'POST', { user_id: 'account' }))
+  expect(write.mock.calls.some(([path]) => /users|accounts/.test(path))).toBe(false)
+  expect(request.mock.calls).toEqual([])
+})
+it('14 staff without members.read has no Link picker even with an explicit link grant', async () => {
+  const { write } = await mount('detail', { membersRead: false, grants: ['access_link_account'] })
+  await screen.findByText('No access')
+  expect(screen.queryByRole('button', { name: 'Link account' })).toBeNull()
+  expect(write.mock.calls.some(([path]) => path.endsWith('/members'))).toBe(false)
+})
+it('14 failed Members read never falls back to a raw account id input', async () => {
+  const { user, write } = await mount('detail', { membersFailure: true })
+  await user.click(await screen.findByRole('button', { name: 'Link account' }))
+  await screen.findByRole('alert')
+  expect(screen.queryByRole('textbox', { name: 'Member' })).toBeNull()
+  expect(within(screen.getByRole('dialog')).getByRole('button', { name: 'Link account' })).toHaveProperty('disabled', true)
+  expect(write.mock.calls.every(([, method]) => method === 'GET')).toBe(true)
 })

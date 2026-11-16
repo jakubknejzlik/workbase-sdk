@@ -27,7 +27,7 @@ function fixture(layout: Layout = 'default') {
   } } as unknown as Model
   if (layout === 'separate') model.limits.exists = 1
   model.commands = ['link_account', 'remove_access'].map(action => ({ name: `entries/${action}`, permission: { entity: 'entries', operation: 'update' }, inputSchema: { type: 'object', properties: { rowId: { type: 'string', referenceEntity: 'entries' } }, required: ['rowId'] } }))
-  const caps = { revision: 1, commands: ['entries/remove_access', 'entries/link_account'], entities: Object.fromEntries(Object.entries(model.entities).map(([name, entity]) => [name, { operations: ['read'], readable: Object.keys(entity.fields), writable: [] }])) } as Capabilities
+  const caps = { resources: { 'members.read': true }, revision: 1, commands: ['entries/remove_access', 'entries/link_account'], entities: Object.fromEntries(Object.entries(model.entities).map(([name, entity]) => [name, { operations: ['read'], readable: Object.keys(entity.fields), writable: [] }])) } as Capabilities
   return { model, caps }
 }
 async function mount(options: { layout?: Layout; status?: Record<string, unknown>; error?: number; loading?: boolean; available?: boolean; transport?: boolean; manage?: boolean; commands?: string[] } = {}) {
@@ -38,6 +38,7 @@ async function mount(options: { layout?: Layout; status?: Record<string, unknown
   const i18n = i18next.createInstance()
   await i18n.use(initReactI18next).init({ lng: 'en', resources: { en: { translation: { ...en, field_user: 'Raw User', relation_user_account: 'Raw User account', relation_alias: 'Raw account alias', field_reviewer: 'Reviewer', relation_reviewer_account: 'Reviewer account', field_name: 'Name' } } } })
   const write = vi.fn(async (_path: string, _method: string, _body?: unknown, _key?: string) => {
+    if (_path.endsWith('/members')) return { data: [{ user_id: 'account', display_name: 'Workspace member' }] }
     if (options.loading) return new Promise<never>(() => {})
     if (options.error) throw { status: options.error }
     return options.status ?? { state: 'no_account', can_invite: false, can_cancel: false, inconsistency: null }
@@ -93,10 +94,10 @@ it.each(['link_account', 'remove_access'])('unavailable status preserves the aut
   const user = userEvent.setup()
   const label = action === 'link_account' ? 'Link account' : 'Remove access'
   await user.click(screen.getByRole('button', { name: label }))
-  if (action === 'link_account') await user.type(within(screen.getByRole('dialog')).getByLabelText('Account ID'), 'account')
+  if (action === 'link_account') { const field = await screen.findByRole('combobox', { name: 'Member' }); await waitFor(() => expect(field).not.toHaveProperty('disabled', true)); await user.click(field); await user.click(await screen.findByRole('option', { name: 'Workspace member' })) }
   await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: label }))
   await waitFor(() => expect(write).toHaveBeenCalledWith(`/commands/entries/${action}`, 'POST', { rowId: 'entry', ...(action === 'link_account' ? { userId: 'account' } : {}), idempotencyKey: expect.any(String) }))
-  expect(write.mock.calls.every(([, method]) => method !== 'GET')).toBe(true)
+  expect(write.mock.calls.every(([path, method]) => method !== 'GET' || path === '/orgs/org/members')).toBe(true)
 })
 it.each(['no_account', 'invited', 'expired', 'signed_in'])('available %s status offers each authorized account command exactly once', async state => {
   await mount({ status: { state, can_invite: true, can_cancel: true, inconsistency: null,

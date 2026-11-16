@@ -70,7 +70,7 @@ it('legacy row-access retains the pending invitation after manual account linkin
   expect(response.status, await response.clone().text()).toBe(200)
   const after = await status()
   expect(after.status).toBe(200)
-  expect(await json(after)).toEqual({ ...pending, state: 'signed_in', linked_accounts: [{ id: 'member-a', label: 'member-a' }] })
+  expect(await json(after)).toEqual({ ...pending, state: 'signed_in', linked_accounts: [{ id: 'member-a', label: 'Existing Person' }] })
   expect(await env.DB.prepare('SELECT revoked_at FROM invitations WHERE id=?').bind(i.id).first('revoked_at')).toBeNull()
 })
 
@@ -347,7 +347,7 @@ it('14 status returns only an authorized minimal account summary for zero/one sc
   const response = await status()
   expect(response.headers.get('Cache-Control')).toBe('private, no-store')
   const body = await json(response)
-  expect(body).toMatchObject({ state: 'signed_in', inconsistency: null, linked_accounts: [{ id: 'member-a', label: 'member-a' }] })
+  expect(body).toMatchObject({ state: 'signed_in', inconsistency: null, linked_accounts: [{ id: 'member-a', label: 'Existing Person' }] })
   expect(Object.keys(body.linked_accounts[0]).sort()).toEqual(['id', 'label'])
   expect(JSON.stringify(body)).not.toMatch(/email|password|token_hash|accept_url/)
 })
@@ -364,7 +364,7 @@ it('14 status-only token retains signed-in state without disclosing an unreadabl
   expect(body.model.entities.people.relations.account).toBeUndefined()
   expect(body.capabilities.commands).not.toContain('people/remove_access')
 })
-it.each(['source-field', 'target-row', 'target-field'])('14 summary respects %s disclosure restrictions', async restriction => {
+it.each(['source-field', 'target-row', 'target-field'])('14 Members summary respects source masks independently of users %s restrictions', async restriction => {
   await env.DB.prepare("UPDATE people SET user='member-a' WHERE id='p1'").run()
   const config = configuration()
   if (restriction === 'source-field') config.policies.people.owner = { where: {}, fields: ['name'] }
@@ -376,10 +376,10 @@ it.each(['source-field', 'target-row', 'target-field'])('14 summary respects %s 
   const body = await json(response)
   expect(body.state).toBe('signed_in')
   if (restriction === 'source-field') expect(body.linked_accounts).toBeUndefined()
-  if (restriction === 'target-row') expect(body.linked_accounts).toEqual([])
-  if (restriction === 'target-field') expect(body.linked_accounts).toEqual([{ id: 'member-a' }])
+  if (restriction === 'target-row') expect(body.linked_accounts).toEqual([{ id: 'member-a', label: 'Existing Person' }])
+  if (restriction === 'target-field') expect(body.linked_accounts).toEqual([{ id: 'member-a', label: 'Existing Person' }])
 })
-it('14 forbidden identity row preserves status and actions without disclosing the account', async () => {
+it('14 forbidden users query preserves independently authorized Members identity and actions', async () => {
   await invitation()
   await env.DB.prepare("UPDATE people SET user='member-a' WHERE id='p1'").run()
   const before = await json(await status())
@@ -392,16 +392,15 @@ it('14 forbidden identity row preserves status and actions without disclosing th
   expect(await json(account)).toMatchObject({ error: 'policy_violation' })
   const response = await status()
   expect(response.status).toBe(200)
-  expect(await json(response)).toEqual({ ...before, state: 'signed_in', linked_accounts: [], can_invite: true, can_cancel: true })
+  expect(await json(response)).toEqual({ ...before, state: 'signed_in', can_invite: true, can_cancel: true })
 })
-it('14 unrelated identity query failure still propagates from status', async () => {
+it('14 Members identity does not query the domain users display field', async () => {
   await env.DB.prepare("UPDATE people SET user='member-a' WHERE id='p1'").run()
-  // Break only the selected account display column, leaving authentication and
-  // the source-row/status queries intact. The executor reports query_invalid.
+  // Members names come from the identity profile, not the users entity label.
   await env.DB.exec('ALTER TABLE users RENAME COLUMN name TO unavailable_name')
   const response = await status()
-  expect(response.status).toBe(400)
-  expect(await json(response)).toMatchObject({ error: 'query_invalid' })
+  expect(response.status).toBe(200)
+  expect(await json(response)).toMatchObject({ linked_accounts: [{ id: 'member-a', label: 'Existing Person' }] })
 })
 it.each(['invitations', 'entity'])('14 status still denies missing %s read and hides foreign rows', async missing => {
   await env.DB.prepare("UPDATE people SET user='member-a' WHERE id='p1'").run()
@@ -426,4 +425,16 @@ it('14 structural metadata survives missing Members or status rights, with grant
   expect(without.model.entities.people.fields).toEqual(owner.model.entities.people.fields)
   expect(without.model.entities.people.relations).toEqual(owner.model.entities.people.relations)
   expect(without.model.entities.users.accountLink).toBeUndefined()
+})
+
+it('14 legacy agent cannot disclose Members identity even with a requested members.read operation', async () => {
+  await env.DB.prepare("UPDATE people SET user='member-a' WHERE id='p1'").run()
+  for (const membersRead of [false, true]) {
+    await env.DB.exec('DELETE FROM access_tokens')
+    const call = await agentToken('owner', ['people.read', 'users.read', 'invitations.read', ...(membersRead ? ['members.read'] : [])])
+    const body = await json(await call('/orgs/org-a/row-access/people/p1', 'GET'))
+    expect(body.state).toBe('signed_in')
+    expect(body).not.toHaveProperty('linked_accounts')
+    expect((await call('/orgs/org-a/members', 'GET')).status).toBe(403)
+  }
 })
