@@ -1,3 +1,4 @@
+import { invitationMailbox } from './helpers/invitation-mailbox'
 import { completeInvitationProfiles } from '@workbasehq/test-support/helpers'
 import { env } from 'cloudflare:workers'
 import { beforeEach, expect, it } from 'vitest'
@@ -6,8 +7,9 @@ import { createApp } from '../src/app'
 import { defineInstance } from '../src/config'
 import sample from './fixtures/sample/config'
 import { sha256 } from '../src/crypto'
+let mailbox: ReturnType<typeof invitationMailbox>
 let app: Awaited<ReturnType<typeof setup>>
-beforeEach(async () => { app = await setup() })
+beforeEach(async () => { await setup(); mailbox = invitationMailbox(); app = createApp(sample, { ...runtime(), ...mailbox.delivery }) })
 beforeEach(completeInvitationProfiles)
 it('authenticates PBKDF2 passwords, stores only session hashes, and revokes logout', async () => {
   expect((await request(app, '/auth/login', 'POST', { email: 'owner.a@example.test', password: 'wrong' })).status).toBe(401)
@@ -58,8 +60,7 @@ it('generates CRUD for a config-added field, filters/paginates, and checks optim
 async function invite(role = 'viewer', address = 'invitee@example.test') {
   const res = await request(app, '/orgs/org-a/invitations', 'POST', { email: address, role })
   expect(res.status).toBe(201)
-  const row = await env.DB.prepare('SELECT body FROM email_outbox WHERE recipient=? ORDER BY created_at DESC').bind(address).first<{ body: string }>()
-  return /token=([a-f0-9]{64})/.exec(row!.body)![1]
+  return mailbox.acceptUrl().searchParams.get('token')!
 }
 it('accepts invitations once, ignores forged role, rejects expiry, and requires owners', async () => {
   for (const user of ['viewer-a', 'dispatcher-a']) expect((await request(app, '/orgs/org-a/invitations', 'POST', { email: 'x@example.test', role: 'owner' }, user)).status).toBe(403)
@@ -81,8 +82,7 @@ it('atomically resolves concurrent invitation claims and binds existing-user acc
   expect(await env.DB.prepare("SELECT count(*) AS n FROM users WHERE email='owner.b@example.test'").first('n')).toBe(1)
   const existingResponse = await request(app, '/orgs/org-b/invitations', 'POST', { email: 'dispatcher.a@example.test', role: 'viewer' }, 'owner-b', 'org-b')
   expect(existingResponse.status).toBe(201)
-  const existingMail = await env.DB.prepare("SELECT body FROM email_outbox WHERE recipient='dispatcher.a@example.test'").first<string>('body')
-  const existing = /token=([a-f0-9]{64})/.exec(existingMail!)![1]
+  const existing = mailbox.acceptUrl().searchParams.get('token')!
   expect((await request(app, '/invitations/accept', 'POST', { token: existing })).status).toBe(403)
   expect((await request(app, '/invitations/accept', 'POST', { token: existing }, 'dispatcher-a', 'org-a')).status).toBe(201)
 })

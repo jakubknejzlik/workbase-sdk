@@ -1,3 +1,4 @@
+import { invitationMailbox } from './helpers/invitation-mailbox'
 import { env } from 'cloudflare:workers'
 import { beforeEach, expect, it } from 'vitest'
 import sample from './fixtures/sample/config'
@@ -6,9 +7,10 @@ import { defineInstance } from '../src/config'
 import { createApp } from '../src/app'
 import { setup, runtime } from '@workbasehq/test-support/helpers'
 import { sha256 } from '../src/crypto'
+let mailbox: ReturnType<typeof invitationMailbox>
 let app: ReturnType<typeof createApp>
 let ip = 100
-const settings = () => ({ ...runtime(), IDENTITY: { ...runtime().IDENTITY, localPassword: false } })
+const settings = () => ({ ...runtime(), ...mailbox.delivery, IDENTITY: { ...runtime().IDENTITY, localPassword: false } })
 function call(path: string, body?: unknown, bearer?: string, org = 'org-a', method?: string) {
   return app.request(`http://localhost${path}`, { method: method ?? (body === undefined ? 'GET' : 'POST'), headers: { Origin: 'http://localhost', 'Content-Type': 'application/json', 'CF-Connecting-IP': `192.0.2.${ip++}`, 'X-Organization-Id': org, ...(bearer ? { Authorization: `Bearer ${bearer}` } : {}) }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) })
 }
@@ -27,8 +29,7 @@ async function invite(email: string, role = 'reviewer', org = 'org-a') {
   const response = await call(`/orgs/${org}/invitations`, { email, role }, admin, org)
   expect(response.status, await response.clone().text()).toBe(201)
   const row = await response.json() as { id: string }
-  const body = await env.DB.prepare("SELECT body FROM email_outbox WHERE recipient=? AND subject<>'Workbase sign-in' ORDER BY created_at DESC LIMIT 1").bind(email).first<string>('body')
-  const link = new URL(body!.replace('Accept: ', ''))
+  const link = mailbox.acceptUrl()
   expect([...link.searchParams.keys()]).toEqual(['token'])
   return { id: row.id, token: link.searchParams.get('token')!, admin }
 }
@@ -42,7 +43,7 @@ async function enterAndAccept(token: string) {
   const response = await call('/invitations/accept', { token, role: 'administrator' }, bearer)
   return { response, bearer }
 }
-beforeEach(async () => { await setup(accounts); app = createApp(accounts, settings()) })
+beforeEach(async () => { mailbox = invitationMailbox(); await setup(accounts); app = createApp(accounts, settings()) })
 it('F11: unknown accounts email signs in without a domain account, role or workspace access', async () => {
   const bearer = await signIn('fresh@example.test')
   const response = await call('/me', undefined, bearer)
@@ -135,9 +136,8 @@ it('invite-only permits the live invitation credential but never grants an impli
   expect((await enterAndAccept(anonymous.token)).response.status).toBe(201)
 })
 it('invitation delivery uses the mail adapter after committing the intent, including resend', async () => {
-  const sent: EmailMessageBuilder[] = []
-  const mailEnv = { ...settings(), EMAIL_FROM: 'noreply@example.test', EMAIL: { send: async (message: EmailMessage | EmailMessageBuilder) => { sent.push(message as EmailMessageBuilder); return { messageId: 'synthetic' } } } }
-  app = createApp(accounts, mailEnv)
+  const sent = mailbox.messages
+  app = createApp(accounts, settings())
   const invitation = await invite('mail@example.test')
   const message = sent.find(message => message.to === 'mail@example.test')!
   const link = message.text!.match(/http[^\s]+/)![0]
