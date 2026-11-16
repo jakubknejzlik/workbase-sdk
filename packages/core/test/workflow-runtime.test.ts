@@ -185,6 +185,29 @@ it('does not execute a retry before its persisted next_attempt_at', async () => 
   expect(await pump.tick()).toEqual({ claimed: 0, released: 0 })
 })
 
+it('fails an invalid checkpoint durably and advances the next due run in the same tick', async () => {
+  let invalidRunId: string
+  const steps: WorkflowStep[] = [{
+    ...step('first'), policy: { ...policy, maxAttempts: 1 },
+    run: async args => args.runId === invalidRunId ? { toJSON: () => undefined } : step('first').run(args),
+  }]
+  const bad = await fixture(steps)
+  invalidRunId = bad.id
+  const good = await fixture(steps, env.DB, 'after_invalid_checkpoint')
+  const now = Date.now()
+  // Ensure the invalid checkpoint is encountered before the healthy run.
+  await env.DB.prepare('UPDATE workflow_runs SET next_attempt_at=? WHERE id=?').bind(now - 2, bad.id).run()
+  await env.DB.prepare('UPDATE workflow_runs SET next_attempt_at=? WHERE id=?').bind(now - 1, good.id).run()
+
+  expect(await bad.pump.tick()).toEqual({ claimed: 2, released: 0 })
+  expect(await state(bad.id)).toMatchObject({ status: 'failed', last_error_code: 'workflow.step_failed', lease_token: null, lease_until: null })
+  expect(await env.DB.prepare('SELECT status,attempts,last_error_code,checkpoint_json FROM workflow_steps WHERE run_id=?').bind(bad.id).first())
+    .toEqual({ status: 'failed', attempts: 1, last_error_code: 'workflow.step_failed', checkpoint_json: null })
+  expect(await env.DB.prepare("SELECT count(*) n FROM audit_outbox WHERE json_extract(payload,'$.entity_id')=? AND json_extract(payload,'$.operation')='workflow.step.failed' AND json_extract(payload,'$.details.code')='workflow.step_failed'").bind(bad.id).first('n')).toBe(1)
+  expect(await state(good.id)).toMatchObject({ status: 'completed', lease_token: null, lease_until: null })
+  expect(await counts(good.id)).toEqual({ effects: 1, receipts: 1, keys: 1 })
+})
+
 it('pauses on live permission revocation between chained steps', async () => {
   const db = interceptBatches({ after: async sql => {
     if (finishesStep(sql)) await env.DB.prepare("DELETE FROM memberships WHERE user_id='dispatcher-a' AND organization_id='org-a'").run()

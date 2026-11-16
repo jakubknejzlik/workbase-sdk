@@ -42,6 +42,11 @@ interface Step {
   step_id: string; status: string; attempts: number; compensation_attempts: number; deadline_at: number | null
   compensation_deadline_at: number | null; compensation_checkpoint_json: string | null; last_error_code: string | null; checkpoint_json: string | null; next_attempt_at: number
 }
+function serializeCheckpoint(result: unknown): string {
+  const serialized = JSON.stringify(result)
+  if (serialized === undefined) throw new TypeError('Workflow checkpoint must be JSON serializable')
+  return serialized
+}
 function publicCheckpoint(serialized: string) {
   const value = JSON.parse(serialized)
   if (!value || typeof value !== 'object' || Array.isArray(value)) return value
@@ -330,7 +335,7 @@ export class D1WorkflowRuntime implements WorkflowRuntime {
       context = coreExecutionContext(this.config, live, store, new D1AtomicReader(this.env.DB), key, undefined, { policyReceipt: !compensating })
       // If an atomic effect committed before a crash, recover its receipt without repeating it or spending another attempt.
       const receipt = compensating ? saved.compensation_checkpoint_json : saved.checkpoint_json
-      if (receipt) return this.finishStep(run, optionsNow(), step, compensating, JSON.parse(receipt))
+      if (receipt) return this.finishStep(run, optionsNow(), step, compensating, serializeCheckpoint(JSON.parse(receipt)))
       if (optionsNow() >= deadline) throw new ApiError(408, 'workflow.deadline_exceeded')
       if (count >= step.policy.maxAttempts && !compensating && step.kind === 'external' && step.recover) {
         const controller = new AbortController()
@@ -338,7 +343,7 @@ export class D1WorkflowRuntime implements WorkflowRuntime {
         const result = await Promise.race([step.recover(Object.freeze({ context, runId: run.id, input: JSON.parse(run.input_json), checkpoints: Object.fromEntries(rows.filter(s => s.checkpoint_json).map(s => [s.step_id, publicCheckpoint(s.checkpoint_json!)])), signal: controller.signal })), new Promise<never>((_, reject) => {
           timer = setTimeout(() => { controller.abort(); reject(new ApiError(408, 'workflow.external_timeout')) }, Math.min(step.policy.timeoutMs, deadline - optionsNow()))
         })]).finally(() => clearTimeout(timer))
-        if (result !== null && optionsNow() < deadline) return this.finishStep(run, optionsNow(), step, false, result)
+        if (result !== null && optionsNow() < deadline) return this.finishStep(run, optionsNow(), step, false, serializeCheckpoint(result))
       }
       if (count >= step.policy.maxAttempts) throw new ApiError(408, 'workflow.attempts_exhausted')
       await this.submit([this.fence(run, optionsNow()), {
@@ -354,10 +359,11 @@ export class D1WorkflowRuntime implements WorkflowRuntime {
       })]).finally(() => clearTimeout(timer))
       // No late response can checkpoint after the deadline or a newer runner's lease.
       if (optionsNow() >= deadline) throw new ApiError(408, 'workflow.deadline_exceeded')
-      // Return the finalization promise without catching its storage errors as
+      // Validate the checkpoint inside the step failure boundary, then return
+      // the finalization promise without catching its storage errors as
       // step failures. Retrying a transition could mask the original fault with
       // a fence rejection after expiry; the committed receipt enables recovery.
-      return this.finishStep(run, optionsNow(), step, compensating, result ?? null)
+      return this.finishStep(run, optionsNow(), step, compensating, serializeCheckpoint(result ?? null))
     } catch (error) {
       const time = optionsNow()
       if (error instanceof PermissionRevoked) { await this.transition(run, time, 'needs_attention', 'workflow.needs_attention', 'permission_revoked'); return }
@@ -380,13 +386,13 @@ export class D1WorkflowRuntime implements WorkflowRuntime {
       ], step.id, exhausted ? time : next)
     }
   }
-  private finishStep(run: Run, now: number, step: WorkflowStep, undo: boolean, result: unknown) {
+  private finishStep(run: Run, now: number, step: WorkflowStep, undo: boolean, serialized: string) {
     const checkpoint = undo ? 'compensation_checkpoint_json' : 'checkpoint_json'
     return this.transition(run, now, undo ? 'compensating' : 'running', undo ? 'workflow.step.compensated' : 'workflow.step.completed', undo ? run.last_error_code : null, [{
       // Keep the execution-owned policy receipt committed with an atomic effect.
       // The public return value has already stripped the affected-row metadata.
       sql: `UPDATE workflow_steps SET status=?,${checkpoint}=COALESCE(${checkpoint},?),last_error_code=NULL,next_attempt_at=0 WHERE run_id=? AND step_id=?`,
-      bindings: [undo ? 'compensated' : 'completed', JSON.stringify(result), run.id, step.id], expectRows: 1,
+      bindings: [undo ? 'compensated' : 'completed', serialized, run.id, step.id], expectRows: 1,
     }], step.id)
   }
 }
