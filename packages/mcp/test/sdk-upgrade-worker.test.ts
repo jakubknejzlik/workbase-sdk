@@ -295,3 +295,14 @@ export default bindSchemaLock(config, schemaLock(config))
   expect(() => replayFailureError(failure, { ...request, identity: { ...request.identity, runId: randomUUID() } })).toThrow(/replay error identity/)
   expect(() => replayFailureError(failure, { ...request, inputHashes: {} })).toThrow(/replay error inputs/)
 })
+
+it.each([
+  'CREATE TABLE unsupported (id TEXT COLLATE NOCASE)',
+  'CREATE TABLE unsupported (id DEFAULT ABORT)',
+])('fails closed with a typed bridge diagnostic even when both schemas contain %s', async sql => {
+  const root = await localConsumer()
+  const path = join(root, 'config.ts'), config = await readFile(path, 'utf8')
+  await writeFile(path, config.replace('plugins: [', `plugins: [{ name: 'unsupported', version: '1.0.0', migrations: [{ name: '001_table', sql: ${JSON.stringify(sql)} }] },`))
+  const { request } = await preparedDatabase(root)
+  await expect(bridge(root, request)).rejects.toMatchObject({ code: 'migration_instance_verification_failed', diagnostic: { phase: 'verification', hint: expect.any(String) } })
+})

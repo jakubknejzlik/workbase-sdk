@@ -2,6 +2,8 @@
 // It never imports the target MCP's planning/offline/disposable implementation.
 import { replayInstance, replayQuery, replayError, readInstanceMeta, usesBaseline, MigrationReplayError } from './migration-replay.ts'
 import { DatabaseSync } from 'node:sqlite'
+import { tokenizeSQL, isPunct, SqlTokenizationError } from './sql-tokens.ts'
+import { tableSemantics, ddlFingerprint, SqlSchemaError } from './sql-schema.ts'
 import { registerHooks } from 'node:module'
 import { lstat, readFile, readdir, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
@@ -9,16 +11,24 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { assertBound, bridgeDigest, consumerModules, digestBytes, inside, requestSchema, type UpgradeRequest } from './sdk-upgrade-protocol.ts'
 
 const q = (name: string) => `"${name.replaceAll('"', '""')}"`
-const normalize = (sql: string) => sql.trim().replace(/;$/, '').replace(/('(?:''|[^'])*')|"(?:""|[^"])*"|\s+/g, match => /^\s/.test(match) ? ' ' : match)
+
 // Compare full DDL (constraints/triggers included), columns, FKs and indexes.
 function physical(db: DatabaseSync) {
-  return db.prepare("SELECT type,name,tbl_name,sql FROM sqlite_master WHERE type IN ('table','index','trigger') AND sql IS NOT NULL AND name NOT GLOB 'sqlite_*' AND name NOT GLOB '_cf_*' AND name NOT IN ('_migrations','_plugin_migrations','d1_migrations') AND tbl_name NOT IN ('_migrations','_plugin_migrations','d1_migrations') ORDER BY type,name").all().map(row => ({
-    type: row.type, name: row.name, table: row.tbl_name, sql: normalize(String(row.sql)),
-    ...(row.type === 'table' ? {
-      columns: db.prepare(`PRAGMA table_info(${q(String(row.name))})`).all(),
-      foreignKeys: db.prepare(`PRAGMA foreign_key_list(${q(String(row.name))})`).all(),
-    } : row.type === 'index' ? { columns: db.prepare(`PRAGMA index_info(${q(String(row.name))})`).all() } : {}),
-  }))
+  return db.prepare("SELECT type,name,tbl_name,sql FROM sqlite_master WHERE type IN ('table','index','trigger') AND sql IS NOT NULL AND name NOT GLOB 'sqlite_*' AND name NOT GLOB '_cf_*' AND name NOT IN ('_migrations','_plugin_migrations','d1_migrations') AND tbl_name NOT IN ('_migrations','_plugin_migrations','d1_migrations') ORDER BY type,name").all().map(row => {
+    if (row.type === 'table') {
+      const columns = db.prepare(`PRAGMA table_xinfo(${q(String(row.name))})`).all()
+      const tokens = tokenizeSQL(String(row.sql))
+      if (isPunct(tokens.at(-1), ';')) tokens.pop()
+      tableSemantics(tokens, columns.map(column => ({ name: column.name, type: column.type })))
+    }
+    return {
+      type: row.type, name: row.name, table: row.tbl_name, sql: ddlFingerprint(String(row.sql), String(row.type), String(row.name)),
+      ...(row.type === 'table' ? {
+        columns: db.prepare(`PRAGMA table_info(${q(String(row.name))})`).all(),
+        foreignKeys: db.prepare(`PRAGMA foreign_key_list(${q(String(row.name))})`).all(),
+      } : row.type === 'index' ? { columns: db.prepare(`PRAGMA index_info(${q(String(row.name))})`).all() } : {}),
+    }
+  })
 }
 async function sqliteFiles(directory: string): Promise<string[]> {
   const paths: string[] = []
@@ -44,7 +54,11 @@ export async function runBridge(root: string, raw: unknown) {
       && resolved.url.startsWith('file:') && !inside(root, fileURLToPath(resolved.url))) throw new Error(`Module resolution outside consumer: ${specifier}`)
     return resolved
   } })
-  try { return await executeBridge(root, raw) } finally { hooks.deregister() }
+  try { return await executeBridge(root, raw) }
+  catch (error) {
+    if (error instanceof SqlTokenizationError || error instanceof SqlSchemaError) throw new MigrationReplayError({ file: '@workbasehq/core/infra', migration: 'verification', phase: 'verification', kind: 'verification' }, error, 'migration_instance_verification_failed')
+    throw error
+  } finally { hooks.deregister() }
 }
 async function executeBridge(root: string, raw: unknown) {
   const request = requestSchema.parse(raw)

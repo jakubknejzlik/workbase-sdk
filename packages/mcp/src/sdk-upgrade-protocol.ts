@@ -48,7 +48,7 @@ export type UpgradeIdentity = z.infer<typeof identitySchema>
 export type UpgradeStage = z.infer<typeof stageSchema>
 export type UpgradeResult = z.infer<typeof resultSchema>
 export const digestBytes = (bytes: string | Buffer) => createHash('sha256').update(bytes).digest('hex')
-export const bridgeFiles = ['sdk-upgrade-worker.ts', 'sdk-upgrade-protocol.ts', 'migration-replay.ts'] as const
+export const bridgeFiles = ['sdk-upgrade-worker.ts', 'sdk-upgrade-protocol.ts', 'migration-replay.ts', 'sql-tokens.ts', 'sql-schema.ts'] as const
 export async function bridgeDigest(directory: string) {
   const files = await Promise.all(bridgeFiles.map(async path => [path, digestBytes(await readFile(join(directory, path)))]))
   return digestBytes(JSON.stringify(files))

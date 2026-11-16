@@ -8,6 +8,8 @@ import { replayInstance, replayError, readInstanceMeta, usesBaseline, MigrationR
 import { initialSchema, revisionSQL } from '@workbasehq/core/migrations/schema'
 import { fail, WorkflowError } from './schemas.ts'
 import { indexSQL, rebuildBlock, rebuildBlockMessage } from './planning.ts'
+import { tokenizeSQL, tokenFingerprint, sqlFingerprint, foldIdentifier, isPunct, SqlTokenizationError } from './sql-tokens.ts'
+import { tableSemantics, ddlFingerprint, SqlSchemaError } from './sql-schema.ts'
 
 // Only server-generated SQL and checked-in instance migrations enter this offline database.
 export function replay<T>(migrations: Migration[], fn: (db: DatabaseSync) => T, entities: readonly string[] = []): T {
@@ -46,134 +48,23 @@ export async function replayBundle<T>(bundle: Pick<Bundle, 'config' | 'runtime'>
   } finally { db.close() }
 }
 const q = (name: string) => `"${name.replaceAll('"', '""')}"`
-// Token boundaries and string literals matter; whitespace, comments, keyword
-// case and identifier quoting do not. Do not strip quotes from literal values.
-function sqlTokens(sql: string) {
-  return (sql.match(/--[^\n]*|\/\*[\s\S]*?\*\/|'(?:''|[^'])*'|"(?:""|[^"])*"|`(?:``|[^`])*`|\[[^\]]*\]|[\p{L}_][\p{L}\p{N}_$]*|\d+(?:\.\d+)?(?:e[+-]?\d+)?|<>|!=|<=|>=|==|\|\||->>?|[^\s]/giu) ?? [])
-    .filter(token => !token.startsWith('--') && !token.startsWith('/*'))
-}
-function canonicalToken(token: string) {
-  if (token.startsWith("'")) return token
-  const identifier = token.startsWith('"') ? token.slice(1, -1).replaceAll('""', '"')
-    : token.startsWith('`') ? token.slice(1, -1).replaceAll('``', '`')
-      : token.startsWith('[') ? token.slice(1, -1) : token
-  // SQLite folds ASCII identifier case only.
-  return identifier.replace(/[A-Z]/g, char => char.toLowerCase())
-}
-const canonicalSQL = (sql: string) => JSON.stringify(sqlTokens(sql.replace(/;\s*$/, '')).map(canonicalToken))
-function canonicalCheck(tokens: string[]) {
-  // Parentheses around the entire expression and literal IN-list order are inert.
-  while (tokens[0] === '(' && tokens.at(-1) === ')') {
-    let depth = 0
-    if (tokens.some((token, i) => { depth += token === '(' ? 1 : token === ')' ? -1 : 0; return depth === 0 && i < tokens.length - 1 })) break
-    tokens = tokens.slice(1, -1)
-  }
-  for (let i = 0; i < tokens.length; i++) {
-    if (tokens[i] !== 'in' || tokens[i + 1] !== '(') continue
-    let end = i + 2
-    while (end < tokens.length && tokens[end] !== ')') end++
-    const list = tokens.slice(i + 2, end)
-    if (list.length % 2 === 1 && list.every((token, j) => j % 2 ? token === ',' : /^(?:'(?:''|[^'])*'|\d+(?:\.\d+)?)$/.test(token))) {
-      tokens.splice(i + 2, list.length, ...list.filter((_, j) => j % 2 === 0).sort().flatMap((token, j) => j ? [',', token] : [token]))
-    }
-  }
-  return JSON.stringify(tokens)
-}
-function checkConstraints(sql: string) {
-  const tokens = sqlTokens(sql), checks: string[] = []
-  for (let i = 0; i < tokens.length; i++) {
-    if (tokens[i].toLowerCase() !== 'check' || tokens[i + 1] !== '(') continue
-    const start = i + 2
-    let depth = 1
-    for (i = start; i < tokens.length; i++) {
-      if (tokens[i] === '(') depth++
-      if (tokens[i] === ')' && --depth === 0) break
-    }
-    checks.push(canonicalCheck(tokens.slice(start, i).map(canonicalToken)))
-  }
-  // CHECKs are a conjunction, independent of column/constraint declaration order.
-  return checks.sort()
-}
 function unsupportedSchema(): never {
   throw new WorkflowError('config_schema_mismatch', 'Schema contains semantics unsupported by offline verification', 400,
     { phase: 'verification', hint: 'Use schema constructs covered by offline verification before retrying.' })
 }
-// PRAGMAs omit column collations, conflict policies, generated expressions and
-// FK deferral. Retain generated SQL and reject clauses not otherwise covered.
-// This is a consumption grammar: an unknown clause fails, even on both sides.
-function assertRepresentableTable(sql: string, columns: { name: unknown; type: unknown }[]) {
-  const raw = sqlTokens(sql.replace(/;\s*$/, '')), tokens = raw.map(canonicalToken)
-  const generated: { name: string; expression: string }[] = []
-  let at = 0
-  const take = (token: string) => tokens[at] === token ? (++at, true) : false
-  const need = (token: string) => { if (!take(token)) unsupportedSchema() }
-  const identifier = () => { if (tokens[at] === undefined) unsupportedSchema(); at++ }
-  const group = () => {
-    const start = at
-    need('(')
-    let depth = 1
-    while (depth && at < tokens.length) {
-      const token = tokens[at++]
-      depth += token === '(' ? 1 : token === ')' ? -1 : 0
-    }
-    if (depth) unsupportedSchema()
-    return JSON.stringify(raw.slice(start, at))
-  }
-  const reference = () => {
-    identifier()
-    if (tokens[at] === '(') group()
-    while (take('on')) {
-      if (!take('delete') && !take('update')) unsupportedSchema()
-      if (take('set')) { if (!take('null') && !take('default')) unsupportedSchema() }
-      else if (take('no')) need('action')
-      else if (!take('cascade') && !take('restrict')) unsupportedSchema()
-    }
-  }
-  need('create'); need('table'); identifier(); need('(')
-  do {
-    if (take('constraint')) identifier()
-    if (take('primary')) { need('key'); group() }
-    else if (take('unique') || take('check')) group()
-    else if (take('foreign')) { need('key'); group(); need('references'); reference() }
-    else {
-      const name = tokens[at++]
-      const column = columns.find(c => canonicalToken(String(c.name)) === name)
-      if (!column) unsupportedSchema()
-      for (const token of sqlTokens(String(column.type)).map(canonicalToken)) need(token)
-      while (tokens[at] !== ',' && tokens[at] !== ')' && at < tokens.length) {
-        if (take('constraint')) identifier()
-        else if (take('not')) need('null')
-        else if (take('null') || take('unique')) { /* represented in column/index metadata */ }
-        else if (take('primary')) { need('key'); take('asc') || take('desc') }
-        else if (take('check')) group()
-        else if (take('references')) reference()
-        else if (tokens[at] === 'generated' || tokens[at] === 'as') {
-          if (take('generated')) take('always')
-          need('as')
-          generated.push({ name, expression: group() })
-          take('virtual') || take('stored')
-        }
-        else if (take('default')) {
-          if (tokens[at] === '(') group()
-          else {
-            take('+') || take('-')
-            if (tokens[at] === 'x' && raw[at + 1]?.startsWith("'")) at++
-            identifier()
-          }
-        } else unsupportedSchema()
-      }
-    }
-  } while (take(','))
-  need(')')
-  if (at < tokens.length) do {
-    if (take('without')) need('rowid')
-    else need('strict')
-  } while (take(','))
-  if (at !== tokens.length) unsupportedSchema()
-  return sorted(generated)
+const canonicalType = (type: string) => {
+  const tokens = tokenizeSQL(type)
+  return tokenFingerprint(tokens, new Set(tokens.map(token => foldIdentifier(token.value))))
 }
 const sorted = <T>(values: T[]) => values.sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)))
 export function snapshot(db: DatabaseSync, domainLedger = false) {
+  try { return schemaSnapshot(db, domainLedger) }
+  catch (error) {
+    if (error instanceof SqlTokenizationError || error instanceof SqlSchemaError) unsupportedSchema()
+    throw error
+  }
+}
+function schemaSnapshot(db: DatabaseSync, domainLedger: boolean) {
   if (db.prepare('PRAGMA database_list').all().some(row => row.name !== 'main' && row.name !== 'temp')
     || db.prepare('SELECT 1 FROM sqlite_temp_master LIMIT 1').get()) unsupportedSchema()
   // Exclude only known transport/receipt tables and their indexes. A trigger's
@@ -184,14 +75,16 @@ export function snapshot(db: DatabaseSync, domainLedger = false) {
     const base = { type: row.type, name: row.name, table: row.tbl_name }
     if (row.type === 'trigger' || row.type === 'index') {
       if (typeof row.sql !== 'string') unsupportedSchema()
-      return { ...base, sql: canonicalSQL(row.sql) }
+      return { ...base, sql: ddlFingerprint(row.sql, String(row.type), String(row.name)) }
     }
     if (row.type !== 'table' || typeof row.sql !== 'string') unsupportedSchema()
     const table = tables.find(t => t.schema === 'main' && t.name === row.name)
     if (table?.type !== 'table') unsupportedSchema()
     const columns = db.prepare(`PRAGMA table_xinfo(${q(String(row.name))})`).all()
     if (!columns.length || columns.some(c => ![0, 2, 3].includes(Number(c.hidden)))) unsupportedSchema()
-    const generated = assertRepresentableTable(row.sql, columns.map(c => ({ name: c.name, type: c.type })))
+    const tokens = tokenizeSQL(row.sql)
+    if (isPunct(tokens.at(-1), ';')) tokens.pop()
+    const { generated, checks } = tableSemantics(tokens, columns.map(c => ({ name: c.name, type: c.type })))
     const indexes = db.prepare(`PRAGMA index_list(${q(String(row.name))})`).all().map(index => {
       if (!['c', 'u', 'pk'].includes(String(index.origin))) unsupportedSchema()
       return {
@@ -205,10 +98,10 @@ export function snapshot(db: DatabaseSync, domainLedger = false) {
       const group = foreignKeys.get(id) ?? []
       group.push(fk); foreignKeys.set(id, group)
     }
-    return { ...base, checks: checkConstraints(row.sql), generated, withoutRowid: table.wr, strict: table.strict,
-      columns: sorted(columns.map(({ cid: _cid, ...c }) => ({ ...c, type: canonicalSQL(String(c.type)),
+    return { ...base, checks, generated, withoutRowid: table.wr, strict: table.strict,
+      columns: sorted(columns.map(({ cid: _cid, ...c }) => ({ ...c, type: canonicalType(String(c.type)),
         // A quoted DEFAULT is a literal even when it spells CURRENT_TIME.
-        dflt_value: c.dflt_value === null ? null : JSON.stringify(sqlTokens(String(c.dflt_value))) }))),
+        dflt_value: c.dflt_value === null ? null : sqlFingerprint(String(c.dflt_value)) }))),
       indexes: sorted(indexes), foreignKeys: sorted([...foreignKeys.values()]),
     }
   })
