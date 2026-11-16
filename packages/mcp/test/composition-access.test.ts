@@ -24,8 +24,16 @@ import { members } from '@workbasehq/plugins/members'
 import config from './config'
 export default { ...config, plugins: [identity, permissions({ roles: ['admin', 'staff'], ownerRole: 'admin' }), members] }
 `)
-  execFileSync('bun', ['run', 'access:lock'], { cwd: root, encoding: 'utf8' })
   if (openapi) execFileSync('bun', [resolve('packages/core/src/openapi/cli.ts'), '--root', root, '--write'], { encoding: 'utf8' })
+  else {
+    // Keep the absent-artifact cases on a valid, unbound V3 config. The scaffold
+    // now binds OpenAPI (#105), so its normal runtime requires generation first.
+    const path = join(root, 'config.ts')
+    await writeFile(path, (await readFile(path, 'utf8'))
+      .replace(', bindOpenApi', '').replace("import spec from './openapi.json'\n", '')
+      .replace('bindOpenApi(bindSchemaLock(', 'bindSchemaLock(').replace('}), lock), spec)', '}), lock)'))
+  }
+  execFileSync('bun', ['run', 'access:lock'], { cwd: root, encoding: 'utf8' })
   await store.init()
   const call = (name: string, args: Record<string, unknown>) => workflow.call(name, args) as Promise<any>
   const propose = async (changes: unknown[]) => {

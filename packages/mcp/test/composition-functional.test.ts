@@ -43,6 +43,7 @@ async function fixture() {
   expect(await workflow.call('bootstrap_instance', { id: 'functional', target: 'cloudflare-github' })).toMatchObject({ ok: true })
   await symlink(resolve('node_modules'), join(root, 'node_modules'))
   execFileSync('bun', [resolve('packages/core/src/migrations/schema-cli.ts'), 'plan', '--root', root, '--init'], { encoding: 'utf8' })
+  execFileSync('bun', [resolve('packages/core/src/openapi/cli.ts'), '--root', root, '--write'], { encoding: 'utf8' })
   await writeFile(join(root, 'runtime.ts'), `import { identity } from '@workbasehq/plugins/identity'
 import { permissions } from '@workbasehq/plugins/permissions'
 import { members } from '@workbasehq/plugins/members'

@@ -13,6 +13,7 @@ import { hydrateRuntimePlugins } from './registry.ts'
 import { accessPlan, compositionPlan, localePlan } from './plan.ts'
 import { compositionRequirements, assertCompositionRequirements } from './requirements.ts'
 import { promotionHash, submitChange } from '../submit-change.ts'
+import { replaySources } from '../replay-sources.ts'
 import type { GitHubConfiguration } from '../github.ts'
 
 async function save(store: Store, proposal: CompositionProposal) {
@@ -52,7 +53,7 @@ async function prepare(bundle: Bundle, changes: CompositionChange[], root: strin
 }
 function proof(bundle: Bundle, prepared: Awaited<ReturnType<typeof prepare>> & Awaited<ReturnType<typeof compositionPlan>>, changes: CompositionChange[], requirementGuards: Bundle['guards']) {
   return { fingerprint: bundle.fingerprint, planHash: hash({ files: prepared.files, ledger: prepared.ledger, statements: prepared.statements, model: prepared.model, changes, requirementGuards }),
-    ...(bundle.dependencyDigest === undefined ? {} : { dependencyDigest: bundle.dependencyDigest }) }
+    ...(bundle.dependencyDigest === undefined ? {} : { dependencyDigest: bundle.dependencyDigest }), openapiHash: bundle.guards['openapi.json'] ?? null }
 }
 export async function proposeComposition(store: Store, instance: string, baseRevision: number, changes: CompositionChange[], proposalId: string) {
   const bundle = await load(store, instance, changes)
@@ -85,11 +86,19 @@ export async function executeComposition(store: Store, proposal: CompositionProp
     await save(store, proposal)
     return { ok: true, status: proposal.status }
   }
+  const root = await store.directory(proposal.instance)
+  if (name === 'promote' && proposal.validation) {
+    // Check the captured artifact before importing a config that binds it: a
+    // removed or malformed replacement must still invalidate the saved proof.
+    const spec = (await replaySources(root, { accessLock: true }))['openapi.json']
+    if ((spec === undefined ? null : hash(spec.toString('utf8'))) !== proposal.validation.openapiHash) {
+      fail('stale_revision', 'Instance files changed since validation', 409)
+    }
+  }
   const bundle = await load(store, proposal.instance, proposal.changes)
   if (name === 'promote') revision(bundle, input.expectedRevision!)
   revision(bundle, proposal.baseRevision)
   if (name === 'promote' && proposal.validation && proposal.validation.fingerprint !== bundle.fingerprint) fail('stale_revision', 'Instance files changed since validation', 409)
-  const root = await store.directory(proposal.instance)
   const target = await prepare(bundle, proposal.changes, root)
   const prepared = { ...target, ...await compositionPlan(bundle, target.target, target.source, root, target.files) }
   const { requirements, guards: requirementGuards } = await compositionRequirements(await store.directory(proposal.instance), prepared.model)

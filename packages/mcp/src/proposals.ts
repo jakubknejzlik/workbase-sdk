@@ -22,7 +22,8 @@ const compositionProposalSchema = z.strictObject({
   ...envelope, kind: z.literal('composition_change'),
   status: z.enum(['proposed', 'validated', 'verified', 'promoted', 'discarded']),
   changes: z.array(compositionChangeSchema).min(1).max(50),
-  validation: proofSchema.optional(), verification: proofSchema.optional(),
+  validation: proofSchema.extend({ openapiHash: sha256Schema.nullable() }).optional(),
+  verification: proofSchema.extend({ openapiHash: sha256Schema.nullable() }).optional(),
   promotedFiles: promotedFilesSchema.optional(), migrationPreview: migrationPreviewSchema.optional(), promotionHash: z.string().optional(),
   dependencyDigest: z.string().optional(), promotedRevision: z.number().int().optional(),
 })

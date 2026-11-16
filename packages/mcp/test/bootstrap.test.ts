@@ -52,7 +52,9 @@ it('creates registry-only files, substitutes ids and resolves the release versio
   const config = await readFile(join(root, 'config.ts'), 'utf8')
   expect(config).toContain('bindSchemaLock(defineConfig({')
   expect(config).toContain('entities: { worker }, access')
-  expect(config).not.toContain('openapi.json')
+  expect(config).toContain("import spec from './openapi.json'")
+  expect(config).toContain('bindOpenApi(bindSchemaLock(defineConfig({')
+  expect(config).toContain('}), lock), spec)')
   expect(config).not.toContain('assets:')
   const sst = await readFile(join(root, 'sst.config.ts'), 'utf8')
   expect(sst).toContain('@workbasehq/core/infra/provision')
@@ -140,8 +142,8 @@ it('ships authored V3 sources and excludes Instance-generated artifacts', async 
   expect(await readFile(join(root, 'runtime.ts'), 'utf8')).toContain('createOrganizations({ allowCreate: false })')
   expect(await readFile(join(root, 'config.ts'), 'utf8')).toContain("registration: 'open'")
   const guide = await readFile(join(root, 'README.md'), 'utf8')
-  expect(guide.indexOf('bun run migrate:plan --init')).toBeLessThan(guide.indexOf('bun run access:lock'))
-  expect(guide.indexOf('bun run access:lock')).toBeLessThan(guide.indexOf('bun run openapi:write'))
+  expect(guide.indexOf('bun run migrate:plan --init')).toBeLessThan(guide.indexOf('bun run openapi:write'))
+  expect(guide.indexOf('bun run openapi:write')).toBeLessThan(guide.indexOf('bun run access:lock'))
   expect(guide).toContain('file:vendor/sdk/workbasehq-core-')
   expect(guide).toContain('"overrides"')
 })
@@ -362,6 +364,8 @@ it('starts generated workbase_config with no optional environment variables', as
   for (const name of ['core', 'plugins', 'mcp']) await symlink(resolve('packages', name), join(root, 'node_modules/@workbasehq', name))
   const plan = spawnSync('bun', [resolve('packages/core/src/migrations/schema-cli.ts'), 'plan', '--root', root, '--init'], { encoding: 'utf8' })
   expect(plan.status, plan.stderr).toBe(0)
+  const openapi = spawnSync('bun', [resolve('packages/core/src/openapi/cli.ts'), '--root', root, '--write'], { encoding: 'utf8' })
+  expect(openapi.status, openapi.stderr).toBe(0)
   const config = JSON.parse(await readFile(join(root, '.mcp.json'), 'utf8')).mcpServers.workbase_config
   const transport = new StdioClientTransport({
     command: config.command, args: config.args, cwd: root, stderr: 'pipe',
