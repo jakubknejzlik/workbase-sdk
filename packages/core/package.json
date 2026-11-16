@@ -31,6 +31,7 @@
     "./policies": "./src/policies.ts",
     "./identity-providers": "./src/identity-providers.ts",
     "./console-contract": "./src/console-contract.ts",
+    "./organization-name": "./src/organization-name.ts",
     "./organization-permissions": "./src/organization-permissions.ts",
     "./session-contract": "./src/session-contract.ts",
     "./infra": "./src/infra/index.ts",

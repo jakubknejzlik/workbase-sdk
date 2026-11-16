@@ -1,8 +1,9 @@
+import { organizationNameReasons, type OrganizationNameReason } from '@workbasehq/core/organization-name'
 import { z } from 'zod'
 import type { ToolName } from './schemas.ts'
 
 export class ToolError extends Error {
-  constructor(public code: string, public status: number) { super('Workbase request failed') }
+  constructor(public code: string, public status: number, public detail?: { field: 'name'; reason: OrganizationNameReason }) { super('Workbase request failed') }
 }
 const baseUrl = z.url().refine(value => {
   try {
@@ -55,6 +56,12 @@ export function createApi(env: ReturnType<typeof loadEnvironment>, request: type
     } catch { throw new ToolError('transport_error', 502) }
     // Upstream error text is never reflected, including non-JSON proxy failures.
     if (!response.ok) {
+      if (name === 'provision_organization' && response.status === 400) {
+        const body = await response.json().catch(() => null) as { error?: unknown; detail?: { field?: unknown; reason?: unknown } } | null
+        if (body?.error === 'invalid_organization_name' && body.detail?.field === 'name' && organizationNameReasons.includes(body.detail.reason as OrganizationNameReason)) {
+          throw new ToolError('invalid_organization_name', 400, { field: 'name', reason: body.detail.reason as OrganizationNameReason })
+        }
+      }
       let code = 'http_error'
       if (provisioning) {
         if (response.status === 403) code = 'internal_token_required'

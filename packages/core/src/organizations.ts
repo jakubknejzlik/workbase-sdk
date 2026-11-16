@@ -1,3 +1,4 @@
+import { requireOrganizationName } from './organization-name'
 import { authorizeOperation } from './authorization'
 import { organizationPermission } from './execution/permissions'
 import { ApiError } from './errors'
@@ -52,6 +53,7 @@ export function membershipExecutor(config: InstanceConfig, env: RuntimeEnv) {
 
 /** Shared creation statements: organization, optional domain account, then owner membership. */
 export async function organizationCreationRule(config: InstanceConfig, env: RuntimeEnv, owner: { id: string; email: string }, id: string, name: string, role: string, ownerGuard?: SqlStatement) {
+  name = requireOrganizationName(name)
   if (!kernelFor(config).providers.has('members')) throw new ApiError(403, 'members_required')
   const provision = await accountProvisioning(env, config, owner, id, role, new Date().toISOString())
   return organizationRule('organization_create',
@@ -62,6 +64,7 @@ export async function organizationCreationRule(config: InstanceConfig, env: Runt
 
 /** Called only by the ops-guarded organization route; no user session or credential is minted. */
 export async function provisionOrganization(config: InstanceConfig, env: RuntimeEnv, name: string, ownerEmail: string, correlationId: string) {
+  name = requireOrganizationName(name)
   const signInRequired = { status: 409 as const, body: { error: 'owner_sign_in_required' } }
   const verifiedOwner = () => env.DB.prepare('SELECT id,email FROM "user" WHERE lower(email)=? AND "emailVerified"=1').bind(ownerEmail.toLowerCase()).first<{ id: string; email: string }>()
   const owner = await verifiedOwner()

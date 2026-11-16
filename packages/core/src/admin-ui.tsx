@@ -11,6 +11,7 @@ import { type InstanceConfig, type OrganizationAction } from './config'
 import type { App, AppContext, RuntimeEnv, Scope } from './types'
 import type { CommandRegistry, CommandDefinition } from './commands'
 import { ApiError } from './errors'
+import { organizationNameApiSchema } from './organization-name'
 import { assertIdentityTransport } from './identity-settings'
 import { adminForm, browserRequest, csrfToken, isLoopbackDev, submissionKey, verifySubmissionKey } from './admin-security'
 import { CommandInput, FieldInput, Form, Hidden, commandBody, commandFields, entityBody } from './admin-forms'
@@ -150,10 +151,10 @@ export function adminRoutes(app: App, config: InstanceConfig, env: RuntimeEnv, c
     const csrf = await csrfToken(c, secret)
     if (c.req.path === '/admin' || c.req.path === '/admin/') {
       const organizationsForm = async (error?: ApiError) => page(c, 'Organizations', <><ul>{actor.organizations.map(org => <li><a href={`/admin/o/${enc(org.id)}`}>{org.name}</a> ({org.role})</li>)}</ul>
-        <h2>Create organization</h2>{error ? errorMessage(error) : null}<Form action="/admin" csrf={csrf} label="Create organization"><label>Name<input name="name" required maxlength={200} value={form?.get('name') ?? ''} /></label></Form></>, csrf, undefined, error?.status)
+        <h2>Create organization</h2>{error && error.code !== 'invalid_organization_name' ? errorMessage(error) : null}<Form action="/admin" csrf={csrf} label="Create organization"><label>Name<input name="name" required value={form?.get('name') ?? ''} aria-invalid={error?.code === 'invalid_organization_name' ? 'true' : undefined} aria-describedby={error?.code === 'invalid_organization_name' ? 'name-error' : undefined} /></label>{error?.code === 'invalid_organization_name' ? <p id="name-error" class="error" role="alert">Invalid organization name: {String(error.detail?.reason)}.</p> : null}</Form></>, csrf, undefined, error?.status)
       onError(organizationsForm)
       if (form) {
-        const org = await api(c, '/orgs', undefined, 'POST', { name: form.get('name') })
+        const org = await api(c, '/orgs', undefined, 'POST', { name: organizationNameApiSchema.parse(form.get('name')) })
         return c.redirect(`/admin/o/${enc(org.id)}`, 303)
       }
       return organizationsForm()

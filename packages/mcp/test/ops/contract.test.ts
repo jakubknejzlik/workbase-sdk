@@ -1,3 +1,4 @@
+import { organizationNameCases } from '../../../test-support/src/organization-name-cases'
 import { afterEach, expect, test, vi } from 'vitest'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
@@ -197,4 +198,44 @@ test('data server still strips accept_url from invitation results', async () => 
   const result = await call('invite_from_row', { entity: 'workers', id: 'worker', email: 'a@example.test' })
   expect(result.structuredContent).toEqual({ ok: true, data: { id: 'invite', role: 'member' } })
   expect(JSON.stringify(result)).not.toMatch(/accept_url|secret-link/)
+})
+
+
+test.each(organizationNameCases)('organization name contract: $label', async c => {
+  let stored: string | undefined
+  const request = vi.fn<typeof fetch>().mockImplementation(async (_url, init) => {
+    stored = JSON.parse(init!.body as string).name
+    return Response.json({ id: 'org', name: stored, role: 'owner', replayed: false }, { status: 201 })
+  })
+  const { call } = await connect(request)
+  const result = await call('provision_organization', { name: c.input, ownerEmail: 'owner@example.test' })
+  if (c.reason) {
+    expect(result.isError).toBe(true)
+    expect(result.structuredContent).toEqual({ ok: false, code: 'invalid_organization_name', status: 400, detail: { field: 'name', reason: c.reason } })
+    expect(request).not.toHaveBeenCalled()
+    expect(stored).toBeUndefined()
+  } else {
+    expect(result.isError).toBe(false)
+    expect(result.structuredContent).toEqual({ ok: true, data: { id: 'org', name: c.value, role: 'owner', replayed: false } })
+    expect(stored).toBe(c.value)
+  }
+})
+
+const organizationNameReasonCases = [...new Set(organizationNameCases.flatMap(c => c.reason ? [c.reason] : []))]
+test.each(organizationNameReasonCases)('preserves upstream organization-name reason %s', async reason => {
+  const request = vi.fn<typeof fetch>().mockResolvedValue(Response.json({ error: 'invalid_organization_name', detail: { field: 'name', reason }, hint: token }, { status: 400 }))
+  const { call } = await connect(request)
+  const result = await call('provision_organization', { name: 'Valid label', ownerEmail: 'owner@example.test' })
+  expect(result.structuredContent).toEqual({ ok: false, code: 'invalid_organization_name', status: 400, detail: { field: 'name', reason } })
+  expect(JSON.stringify(result)).not.toContain(token)
+})
+
+test('does not reflect unknown upstream organization-name details', async () => {
+  const request = vi.fn<typeof fetch>()
+  for (const detail of [{ field: 'name', reason: token }, { field: token, reason: 'empty' }, null]) {
+    request.mockResolvedValueOnce(Response.json({ error: 'invalid_organization_name', detail }, { status: 400 }))
+  }
+  const { call } = await connect(request)
+  for (let i = 0; i < 3; i++) expect((await call('provision_organization', { name: 'Valid label', ownerEmail: 'owner@example.test' })).structuredContent)
+    .toEqual({ ok: false, code: 'http_error', status: 400 })
 })
