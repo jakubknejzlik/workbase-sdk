@@ -41,10 +41,10 @@ function step(id: string): WorkflowStep {
 }
 const config = { ...sample, commands: [...sample.commands, create.name, remove.name] }
 beforeEach(() => setup(config))
-async function fixture(steps = [step('first'), step('second')], db = env.DB) {
+async function fixture(steps = [step('first'), step('second')], db = env.DB, key = 'pump') {
   const definitions = createWorkflowRegistry([{ name: 'clients/pump', version: '1', input: z.object({}), steps }])
   const app = createApp(config, runtime(), { workflows: definitions })
-  const response = await request(app, '/workflows/clients/pump', 'POST', { idempotencyKey: 'pump' }, 'dispatcher-a')
+  const response = await request(app, '/workflows/clients/pump', 'POST', { idempotencyKey: key }, 'dispatcher-a')
   expect(response.status).toBe(202)
   const { id } = await json(response) as { id: string }
   const makeRuntime = (database = db) => new D1WorkflowRuntime({ ...runtime(), DB: database }, new KernelRegistry(config).config, definitions)
@@ -223,4 +223,149 @@ it('rechecks the definition version between chained steps', async () => {
   expect(await pump.continueRun(id)).toEqual({ status: 'paused', claimed: true })
   expect(await state(id)).toMatchObject({ status: 'needs_attention', last_error_code: 'workflow.definition_mismatch', lease_token: null })
   expect(await counts(id)).toEqual({ effects: 1, receipts: 1, keys: 1 })
+})
+
+// Review1 probes: count each D1 request/batch once, with fixture creation outside
+// the counter. Effects and their private receipts still use real atomic batches.
+it('shares one pass allowance across many due runs and leaves unfinished work due', async () => {
+  let queries = 0
+  const db = new Proxy(env.DB, { get(database, key) {
+    if (key === 'prepare') return (sql: string) => {
+      const wrap = (statement: D1PreparedStatement): D1PreparedStatement => new Proxy(statement, { get(st, method) {
+        if (method === 'bind') return (...values: unknown[]) => wrap(st.bind(...values))
+        const value = Reflect.get(st, method)
+        if (['first', 'all', 'run', 'raw'].includes(String(method))) return (...args: unknown[]) => {
+          queries++; return value.apply(st, args)
+        }
+        return typeof value === 'function' ? value.bind(st) : value
+      } })
+      return wrap(database.prepare(sql))
+    }
+    if (key === 'batch') return (statements: D1PreparedStatement[]) => { queries++; return database.batch(statements) }
+    const value = Reflect.get(database, key)
+    return typeof value === 'function' ? value.bind(database) : value
+  } })
+  const steps = Array.from({ length: 20 }, (_, i) => step(`step_${i}`))
+  let pump!: D1WorkflowRuntime
+  const ids: string[] = []
+  for (let i = 0; i < 20; i++) {
+    const f = await fixture(steps, db, `pump_${i}`)
+    pump = f.pump; ids.push(f.id)
+  }
+  const advance = vi.spyOn(pump as any, 'advance')
+  try {
+    expect(await pump.tick()).toEqual({ claimed: 20, released: 0 })
+    expect.soft(advance.mock.calls.length).toBe(32)
+    // Leave ample headroom below 1,000 for hold sweeping and the rest of cron.
+    expect.soft(queries).toBeLessThanOrEqual(400)
+    expect(await env.DB.prepare('SELECT count(*) n FROM clients').first('n')).toBe(32)
+    for (const id of ids) {
+      expect(await state(id)).toMatchObject({ status: 'running', lease_token: null, lease_until: null })
+      expect((await state(id))!.next_attempt_at).toBeLessThanOrEqual(Date.now())
+    }
+  } finally { vi.restoreAllMocks() }
+})
+
+it('gives every due run a quantum before any run gets another', async () => {
+  let pump!: D1WorkflowRuntime
+  const ids: string[] = []
+  for (let i = 0; i < 10; i++) {
+    const f = await fixture(undefined, env.DB, `fair_${i}`)
+    pump = f.pump; ids.push(f.id)
+  }
+  const order: string[] = []
+  const advance = (pump as any).advance.bind(pump)
+  vi.spyOn(pump as any, 'advance').mockImplementation(async (...args: any[]) => {
+    order.push(args[0].id)
+    return advance(...args)
+  })
+  try {
+    expect(await pump.tick()).toEqual({ claimed: 10, released: 0 })
+    expect(new Set(order.slice(0, 10))).toEqual(new Set(ids))
+    expect(order).toHaveLength(30) // Two effects and terminal completion per run.
+    for (let offset = 0; offset < order.length; offset += 10) {
+      expect(order.slice(offset, offset + 10)).toEqual(order.slice(0, 10))
+    }
+    for (const id of ids) expect((await state(id))!.status).toBe('completed')
+  } finally { vi.restoreAllMocks() }
+})
+
+it('shares one elapsed deadline across a 100-run tick', async () => {
+  let pump!: D1WorkflowRuntime
+  for (let i = 0; i < 100; i++) pump = (await fixture(undefined, env.DB, `clock_${i}`)).pump
+  const base = Date.now()
+  let elapsed = 0
+  const passes = new Map<string, number>()
+  const starts: number[] = []
+  vi.spyOn(Date, 'now').mockImplementation(() => base + elapsed)
+  vi.spyOn(pump as any, 'advance').mockImplementation(async (...args: any[]) => {
+    const run = args[0] as { id: string }
+    const count = passes.get(run.id) ?? 0
+    starts.push(elapsed)
+    passes.set(run.id, count + 1)
+    // One pass may overrun the shared deadline by its existing in-flight timeout.
+    elapsed += count === 0 ? 4900 : 10000
+    await env.DB.prepare('UPDATE workflow_runs SET lease_token=NULL,lease_until=NULL WHERE id=?').bind(run.id).run()
+  })
+  try {
+    const result = await pump.tick({ limit: 100 })
+    expect(elapsed).toBe(9800)
+    expect(result).toEqual({ claimed: 2, released: 0 })
+    expect(starts).toEqual([0, 4900])
+    expect([...passes.values()]).toEqual([1, 1])
+    expect(await env.DB.prepare('SELECT count(*) n FROM workflow_runs WHERE lease_token IS NULL AND next_attempt_at<=?').bind(base + elapsed).first('n')).toBe(100)
+  } finally { vi.restoreAllMocks() }
+})
+
+it.each([
+  ['continueRun', false], ['continueRun', true], ['tick', false], ['tick', true],
+] as const)('propagates finalization storage failure after same-token expiry (%s, persistent=%s)', async (entry, persistent) => {
+  const failure = new Error('storage unavailable during finalization')
+  let failures = 0
+  const db = interceptBatches({ before: async sql => {
+    if (sql.some(s => s.startsWith('UPDATE workflow_runs SET status=?,resume_status=')) && (persistent || failures === 0)) {
+      failures++
+      await env.DB.prepare('UPDATE workflow_runs SET lease_until=0').run()
+      throw failure
+    }
+  } })
+  const { id, pump } = await fixture(undefined, db)
+  await expect(entry === 'tick' ? pump.tick() : pump.continueRun(id)).rejects.toBe(failure)
+  expect(await state(id)).toMatchObject({ status: 'running', lease_token: expect.any(String), lease_until: 0 })
+  expect(await counts(id)).toEqual({ effects: 1, receipts: 1, keys: 1 })
+  expect(await env.DB.prepare('SELECT status,attempts FROM workflow_steps WHERE run_id=? AND step_id=?').bind(id, 'first').first()).toEqual({ status: 'executing', attempts: 1 })
+})
+
+// An actual CAS fence rejection remains a normal lease loss, including when
+// D1 expires the same token while the effect's receipt is already durable.
+it('reports a real finalization fence rejection after same-token expiry as lease_lost', async () => {
+  const db = interceptBatches({ before: async sql => {
+    if (finishesStep(sql)) await env.DB.prepare('UPDATE workflow_runs SET lease_until=0').run()
+  } })
+  const { id, pump, makeRuntime } = await fixture(undefined, db)
+  expect(await pump.continueRun(id)).toEqual({ status: 'lease_lost', claimed: true })
+  expect(await counts(id)).toEqual({ effects: 1, receipts: 1, keys: 1 })
+  expect(await makeRuntime(env.DB).continueRun(id)).toEqual({ status: 'terminal', claimed: true })
+  expect(await counts(id)).toEqual({ effects: 2, receipts: 2, keys: 2 })
+})
+
+it.each([{}, { maxSteps: 1000, maxDurationMs: 1e9 }])('keeps standalone pass and elapsed caps bounded (%j)', async budget => {
+  const { id, pump } = await fixture()
+  const base = Date.now()
+  let elapsed = 0
+  let duration = 0
+  vi.spyOn(Date, 'now').mockImplementation(() => base + elapsed)
+  const advance = vi.spyOn(pump as any, 'advance').mockImplementation(async () => {
+    elapsed += duration
+    await env.DB.prepare('UPDATE workflow_runs SET lease_token=NULL,lease_until=NULL WHERE id=?').bind(id).run()
+  })
+  try {
+    expect(await pump.continueRun(id, budget)).toEqual({ status: 'budget_exhausted', claimed: true })
+    expect(advance).toHaveBeenCalledTimes(32)
+    advance.mockClear()
+    duration = 2500
+    expect(await pump.continueRun(id, budget)).toEqual({ status: 'budget_exhausted', claimed: true })
+    expect(advance).toHaveBeenCalledTimes(2)
+    expect(elapsed).toBe(5000)
+  } finally { vi.restoreAllMocks() }
 })
