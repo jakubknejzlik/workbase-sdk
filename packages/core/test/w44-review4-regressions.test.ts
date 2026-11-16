@@ -109,6 +109,24 @@ it.each(['scalar', 'count'].flatMap(projection => ['total', 'Total'].flatMap(ali
   }
 })
 
+it.each(['order', 'select', 'key'])('keyword-named ORDER BY alias %s preserves base SQL and results', async alias => {
+  const value = input()
+  const query = Q.select().from('notes', 'n').field('n.amount', alias).orderBy(alias, 'ASC').limit(1)
+  const wire = query.serialize()
+  value.entities.notes.fields.value.computed = wire
+  const config = defineInstance(value)
+  const info = expressionInfo(config, 'notes', 'value', wire)
+  // Verified against expressionInfo on base 3f502a81 using this exact builder wire.
+  const baseline = { sql: `SELECT \`n\`.\`amount\` AS \`${alias}\` FROM \`notes\` AS \`n\` ORDER BY \`${alias}\` ASC LIMIT ?`, bindings: [1] }
+  expect(toSQLWithBindings(info.ast, Q.flavors.sqlite)).toEqual(baseline)
+  expect(toSQLWithBindings(rebindExpression(query, new Map([[alias, 'row.amount']])), Q.flavors.sqlite)).toEqual(baseline)
+  expect(query.serialize()).toBe(wire)
+  const { run } = await fixture(config)
+  await env.DB.prepare("UPDATE notes SET amount=-5 WHERE id='n2'").run()
+  expect((await env.DB.prepare(baseline.sql).bind(...baseline.bindings).all()).results).toEqual([{ [alias]: -5 }])
+  expect((await run({ entity: 'notes', select: ['value'], limit: 10 })).data).toEqual([{ value: -5 }, { value: -5 }])
+})
+
 it('SQL NULL keeps literal ordering beside an output alias named null', async () => {
   const value = input()
   const query = Q.select().from('notes', 'n').field('n.amount', 'null')
@@ -129,18 +147,30 @@ it('SQL NULL keeps literal ordering beside an output alias named null', async ()
   expect((await run({ entity: 'notes', select: ['value'], limit: 10 })).data).toEqual([{ value: 3 }, { value: 3 }])
 })
 
-it.each(['TRUE', 'FALSE', 'CURRENT_TIME', 'CURRENT_DATE', 'CURRENT_TIMESTAMP', 'CASE', 'SELECT'])
-('SQL keyword %s cannot gain validity through an output alias', keyword => {
+it.each(['TRUE', 'FALSE', 'CURRENT_TIME', 'CURRENT_DATE', 'CURRENT_TIMESTAMP'])
+('SQL value token %s cannot gain validity through an output alias', keyword => {
   const config = defineInstance(input())
   const select = (alias: string) => Q.select().from('notes', 'n').field('n.amount', alias)
     .orderBy(Q.expr(keyword), 'ASC').limit(1)
-  // These bare keywords are outside the supported scalar wire grammar, with or
+  // These value tokens are outside the supported scalar wire grammar, with or
   // without a matching alias. Alias resolution must not bypass that validation.
   expect(() => expressionInfo(config, 'notes', 'value', select('other').serialize())).toThrow(ExpressionError)
   const query = select(keyword.toLowerCase())
   expect(() => expressionInfo(config, 'notes', 'value', query.serialize())).toThrow(ExpressionError)
   expect(toSQLWithBindings(rebindExpression(query, new Map()), Q.flavors.sqlite))
     .toEqual(toSQLWithBindings(query, Q.flavors.sqlite))
+})
+
+it.each(['CASE', 'SELECT'])('nonliteral keyword %s resolves a declared ORDER BY alias', keyword => {
+  const config = defineInstance(input())
+  const select = (alias: string) => Q.select().from('notes', 'n').field('n.amount', alias)
+    .orderBy(Q.expr(keyword), 'ASC').limit(1)
+  expect(() => expressionInfo(config, 'notes', 'value', select('other').serialize())).toThrow(ExpressionError)
+  const alias = keyword.toLowerCase()
+  const query = select(alias)
+  const canonical = toSQLWithBindings(expressionInfo(config, 'notes', 'value', query.serialize()).ast, Q.flavors.sqlite)
+  expect(canonical.sql).toContain(`ORDER BY \`${alias}\` ASC`)
+  expect(toSQLWithBindings(rebindExpression(query, new Map()), Q.flavors.sqlite)).toEqual(canonical)
 })
 
 it.each(['null', 'true', 'false', 'current_time', 'current_date', 'current_timestamp', 'case', 'select'])
