@@ -38,6 +38,14 @@ beforeEach(async () => {
 })
 
 
+it('120 admin capabilities advertise member search together with link authority', async () => {
+  const response = await request('/o/org-a/capabilities')
+  expect(response.status).toBe(200)
+  const caps = await response.json() as any
+  expect(caps.resources).toMatchObject({ 'members.read': true, 'members.search_link_account': true })
+  expect(caps.commands).toContain('worker/access_link_account')
+})
+
 it('91 search alone leaves the pending invitation byte-identical', async () => {
   await state('invited')
   const before = await env.DB.prepare("SELECT * FROM invitations WHERE id='pending'").first()

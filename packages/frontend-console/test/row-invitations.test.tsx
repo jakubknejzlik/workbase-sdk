@@ -44,11 +44,17 @@ it.each(['no_account', 'invited', 'expired', 'signed_in'])('176 renders Czech st
 it('176 cancellation refreshes the row so another email can be invited', async () => {
   const { write, user } = await mount('invited')
   await screen.findByText('Pozváno')
-  await user.click(screen.getByRole('button', { name: 'Zrušit pozvánku' }))
+  await user.click(screen.getByRole('button', { name: 'Akce pozvánky' }))
+  await user.click(screen.getByRole('menuitem', { name: 'Zrušit pozvánku' }))
   await user.click(screen.getAllByRole('button', { name: 'Zrušit pozvánku' }).at(-1)!)
   await waitFor(() => expect(write).toHaveBeenCalledWith('/orgs/org/invitations/pending', 'DELETE'))
   await screen.findByText('Bez přístupu')
   expect(screen.getByRole('button', { name: 'Pozvat do aplikace' })).toBeTruthy()
+  await user.click(screen.getByRole('button', { name: 'Pozvat do aplikace' }))
+  await user.type(screen.getByLabelText('E-mail'), 'two@example.test')
+  await user.click(screen.getAllByRole('button', { name: 'Pozvat do aplikace' }).at(-1)!)
+  await screen.findByText('Pozváno')
+  expect(write).toHaveBeenCalledWith('/orgs/org/invitations', 'POST', { email: 'two@example.test', target: { entity: 'people', row: 'person' } })
 })
 
 it('176b expired row offers resend and hides copy-link', async () => {
