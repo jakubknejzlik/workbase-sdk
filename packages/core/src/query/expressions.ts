@@ -33,6 +33,30 @@ const arities: Record<string, [number, number]> = {
 const base: Record<string, Kind> = { id: 'string', organization_id: 'string', created_at: 'datetime', updated_at: 'datetime', version: 'number' }
 const fieldKind = (config: Config, entity: string, field: string): Kind => (Object.hasOwn(base, field) ? base[field] : undefined) ?? ({ int: 'number', float: 'number', bool: 'bool', datetime: 'datetime' } as Record<string, Kind>)[config.entities[entity].fields[field]?.type] ?? 'string'
 const cache = new WeakMap<Config, Map<string, ExpressionInfo>>()
+type OperandToken = { kind: 'identifier'; name: string } | { kind: 'literal'; type: 'null' | 'number' | 'string' } | { kind: 'keyword' | 'other' }
+// SQLite keywords are not unquoted identifiers. Wrapped wire operands explicitly
+// opt into identifier syntax, even when their names coincide with these words.
+const sqlKeywords = new Set(`ABORT ACTION ADD AFTER ALL ALTER ANALYZE AND AS ASC ATTACH AUTOINCREMENT
+  BEFORE BEGIN BETWEEN BY CASCADE CASE CAST CHECK COLLATE COLUMN COMMIT CONFLICT CONSTRAINT CREATE CROSS
+  CURRENT CURRENT_DATE CURRENT_TIME CURRENT_TIMESTAMP DATABASE DEFAULT DEFERRABLE DEFERRED DELETE DESC DETACH
+  DISTINCT DO DROP EACH ELSE END ESCAPE EXCEPT EXCLUDE EXCLUSIVE EXISTS EXPLAIN FAIL FALSE FILTER FIRST FOLLOWING
+  FOR FOREIGN FROM FULL GENERATED GLOB GROUP GROUPS HAVING IF IGNORE IMMEDIATE IN INDEX INDEXED INITIALLY INNER
+  INSERT INSTEAD INTERSECT INTO IS ISNULL JOIN KEY LAST LEFT LIKE LIMIT MATCH MATERIALIZED NATURAL NO NOT NOTHING
+  NOTNULL NULL NULLS OF OFFSET ON OR ORDER OTHERS OUTER OVER PARTITION PLAN PRAGMA PRECEDING PRIMARY QUERY RAISE
+  RANGE RECURSIVE REFERENCES REGEXP REINDEX RELEASE RENAME REPLACE RESTRICT RETURNING RIGHT ROLLBACK ROW ROWS
+  SAVEPOINT SELECT SET TABLE TEMP TEMPORARY THEN TIES TO TRANSACTION TRIGGER TRUE UNBOUNDED UNION UNIQUE UPDATE
+  USING VACUUM VALUES VIEW VIRTUAL WHEN WHERE WINDOW WITH WITHOUT`.split(/\s+/))
+function operandToken(operand: unknown): OperandToken {
+  if (typeof operand !== 'string') return { kind: 'other' }
+  const wrapped = operand.match(/^#([A-Za-z_][A-Za-z0-9_]*)#$/)
+  if (wrapped && wrapped[0] === operand) return { kind: 'identifier', name: wrapped[1] }
+  if (operand === 'NULL') return { kind: 'literal', type: 'null' }
+  if (/^[+-]?\d+(?:\.\d+)?$/.test(operand)) return { kind: 'literal', type: 'number' }
+  if (/^&[^#]*&$/.test(operand)) return { kind: 'literal', type: 'string' }
+  if (sqlKeywords.has(operand.toUpperCase())) return { kind: 'keyword' }
+  const identifier = operand.match(/^[A-Za-z_][A-Za-z0-9_]*$/)
+  return identifier && identifier[0] === operand ? { kind: 'identifier', name: operand } : { kind: 'other' }
+}
 /** Output aliases belong only to this SELECT. Fold ASCII comparison keys, while
  * retaining declaration spelling and accepting only whole identifier operands.
  */
@@ -41,10 +65,9 @@ function selectOutputAliases<T extends { alias?: string }>(fields: readonly T[])
   const aliases = new Map<string, T>()
   for (const field of fields) if (typeof field.alias === 'string' && !aliases.has(fold(field.alias))) aliases.set(fold(field.alias), field)
   return (operand: unknown): T | undefined => {
-    if (typeof operand !== 'string') return
-    const match = operand.match(/^(?:#([A-Za-z_][A-Za-z0-9_]*)#|([A-Za-z_][A-Za-z0-9_]*))$/)
-    if (!match || match[0] !== operand) return
-    return aliases.get(fold(match[1] ?? match[2]))
+    const token = operandToken(operand)
+    if (token.kind !== 'identifier') return
+    return aliases.get(fold(token.name))
   }
 }
 /** Clone the validated AST, replacing operand nodes rather than identifier escaping.
@@ -61,7 +84,7 @@ export function rebindExpression<T>(node: T, columns: Map<string, string | ISequ
     preserved = new Map()
     for (const order of node.getOrderBy()) {
       const projection = outputAlias(order.field.serialize())
-      if (projection) preserved.set(order.field, projection.alias!)
+      if (projection) preserved.set(order.field, `#${projection.alias!}#`)
     }
   } else if ('serialize' in node && typeof node.serialize === 'function') {
     const wire = node.serialize()
@@ -187,9 +210,8 @@ export function expressionInfo(config: Config, entity: string, field: string, wi
       return { type: 'string', dateOnly: fn === 'CONCAT' && values.every(value => value.dateOnly || value.type === 'null'), textDependencies, ...(fn === 'CONCAT' ? { parts: { concat: values.map(value => value.parts!) } } : {}) }
     }
     if (node.startsWith('{')) return object(JSON.parse(node), context, depth + 1)
-    if (/^[+-]?\d+(?:\.\d+)?$/.test(node)) return { type: 'number', dateOnly: false }
-    if (node === 'NULL') return { type: 'null', dateOnly: false }
-    if (/^&[^#]*&$/.test(node)) return { type: 'string', dateOnly: false } // Library Fn.string encoding.
+    const token = operandToken(node)
+    if (token.kind === 'literal') return { type: token.type, dateOnly: false }
     if (node.startsWith('!!')) fail('Raw SQL is forbidden; use structured ts-query expressions')
     const column = node.match(/^#([^#]+)#$/)?.[1] ?? node
     const type = reference(column, context); return { type, dateOnly: type === 'datetime', textDependencies: type === 'string' ? [dependencies[dependencies.length - 1]] : [] }
@@ -300,7 +322,11 @@ export function expressionInfo(config: Config, entity: string, field: string, wi
           result.fields = node.fields?.map((field: any) => ({ ...field, name: canonical(field.name) }))
           result.joins = node.joins?.map((join: any) => ({ ...join, table: canonical(join.table), condition: canonical(join.condition) }))
           result.where = node.where?.map(canonical)
-          result.orderBy = node.orderBy?.map((order: any) => ({ ...order, field: outputAlias(order.field)?.alias ?? canonical(order.field) }))
+          result.orderBy = node.orderBy?.map((order: any) => {
+            const projection = outputAlias(order.field)
+            // Keep the identifier token kind when declaration spelling is a keyword.
+            return { ...order, field: projection ? `#${projection.alias}#` : canonical(order.field) }
+          })
           break
         }
         case 'BinaryCondition': case 'NullCondition': case 'LikeCondition': case 'BetweenCondition':
