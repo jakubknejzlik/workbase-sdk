@@ -12,7 +12,7 @@ export function invitationMailbox() {
     },
     acceptUrl(): URL {
       for (const message of [...messages].reverse()) {
-        const link = message.text?.match(/https?:\/\/[^\s]+\/invitations\/accept\?token=[a-f0-9]+\.[a-f0-9]+/)?.[0]
+        const link = message.text?.match(/https?:\/\/[^\s"'<>]+\/invitations\/accept\?[^\s"'<>]+/)?.[0]
         if (link) return new URL(link)
       }
       // Never include captured mail or credentials in assertion output.
