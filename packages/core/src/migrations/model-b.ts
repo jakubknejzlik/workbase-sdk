@@ -1,3 +1,4 @@
+import { operationalEvidenceMigration } from './operational-evidence'
 import type { InstanceConfig } from '../config'
 import type { PluginMigration } from '../kernel/plugin'
 import { accountRoleValue } from '../account-provisioning'
@@ -141,5 +142,5 @@ export function coreMigrations(config?: InstanceConfig): readonly PluginMigratio
     const accounts = config?.account?.entity === 'users' ? [`INSERT INTO ${guard} (ok) SELECT NOT EXISTS (SELECT user_id FROM memberships GROUP BY user_id HAVING count(DISTINCT organization_id)>1) AND NOT EXISTS (SELECT 1 FROM memberships m WHERE NOT EXISTS (SELECT 1 FROM users u WHERE u.id=m.user_id AND u.organization_id=m.organization_id))`] : []
     return [`CREATE TABLE ${guard} (ok INTEGER CONSTRAINT rebuild_requires_review CHECK (ok = 1))`, 'PRAGMA defer_foreign_keys = ON', ...witnesses, ...statements, ...accounts,
       `INSERT INTO ${guard} (ok) SELECT NOT EXISTS (SELECT 1 FROM pragma_foreign_key_check)`, `DROP TABLE ${guard}`, 'PRAGMA defer_foreign_keys = OFF']
-  } }]
+  } }, operationalEvidenceMigration]
 }

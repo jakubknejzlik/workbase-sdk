@@ -49,5 +49,5 @@ it('upgrades an installed audit plugin without losing pending events or reapplyi
   expect(await env.FRESH_DB.prepare('SELECT event_id,payload,attempts,next_attempt_at,delivered_at FROM audit_outbox').first()).toEqual({
     event_id: 'pending-upgrade', payload: '{"immutable":"event"}', attempts: 0, next_attempt_at: null, delivered_at: null,
   })
-  expect(await env.FRESH_DB.prepare("SELECT count(*) n FROM _plugin_migrations WHERE namespace='audit'").first('n')).toBe(2)
+  expect(await env.FRESH_DB.prepare("SELECT count(*) n FROM _plugin_migrations WHERE namespace='audit'").first('n')).toBe(3)
 })

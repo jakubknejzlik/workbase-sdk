@@ -93,7 +93,7 @@ export function mailOutbox(): WorkbasePlugin {
     name: 'mail-outbox', version: '0.1.0', provides: { 'mail-outbox': '1.x' }, mailOutbox: mailPort,
     migrations,
     async checkSchema(db) {
-      await db.prepare('SELECT id,sender_name,recipient,subject,body,delivery_text,delivery_html,expires_at,delivery_status,attempts,sent_at,last_error,lease_until FROM email_outbox INDEXED BY email_outbox_delivery_queue LIMIT 0').all()
+      await db.prepare('SELECT id,sender_name,recipient,subject,body,delivery_text,delivery_html,expires_at,delivery_status,attempts,sent_at,last_error,lease_until,operational_history FROM email_outbox INDEXED BY email_outbox_delivery_queue LIMIT 0').all()
     },
   })
 }

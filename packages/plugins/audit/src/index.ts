@@ -15,7 +15,7 @@ export function audit(): WorkbasePlugin {
     audit: Object.freeze({ relay: relayAudit, deliver: deliverAudit }), routes: auditRoutes,
     migrations,
     async checkSchema(db) {
-      await db.prepare('SELECT event_id,organization_id,payload,created_at,delivered_at,attempts,last_error,next_attempt_at FROM audit_outbox INDEXED BY audit_outbox_delivery_queue LIMIT 0').all()
+      await db.prepare('SELECT event_id,organization_id,payload,created_at,delivered_at,attempts,last_error,next_attempt_at,operational_history FROM audit_outbox INDEXED BY audit_outbox_delivery_queue LIMIT 0').all()
     },
     async checkEnvironment(env) {
       if (!env.AUDIT_KV || typeof env.AUDIT_KV.list !== 'function' || typeof env.AUDIT_KV.get !== 'function' || typeof env.AUDIT_KV.put !== 'function') throw new Error('audit_kv_required')
