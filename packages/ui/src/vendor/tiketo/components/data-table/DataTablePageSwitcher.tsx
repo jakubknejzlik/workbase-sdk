@@ -19,7 +19,7 @@ export function DataTablePageSwitcher<TData>() {
         table.setPageSize(Number(value))
       }}
     >
-      <SelectTrigger aria-label={presentation.pageSizeLabel} disabled={presentation.busy} className="h-8 w-[120px]" size="sm">
+      <SelectTrigger aria-label={presentation.pageSizeLabel} disabled={presentation.busy} className="h-8 w-max min-w-[120px] shrink-0" size="sm">
         <SelectValue placeholder={table.getState().pagination.pageSize} />
       </SelectTrigger>
       <SelectContent side="top">
