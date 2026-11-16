@@ -26,6 +26,7 @@ it.each(['node', 'bun'])('composes through MCP under %s and deployment preserves
   expect(await workflow.call('bootstrap_instance', { id: 'composition_deploy', target: 'cloudflare-github' })).toMatchObject({ ok: true })
   await symlink(resolve('node_modules'), join(root, 'node_modules'))
   execFileSync('bun', [resolve('packages/core/src/migrations/schema-cli.ts'), 'plan', '--root', root, '--init'], { encoding: 'utf8' })
+  execFileSync('bun', [resolve('packages/core/src/openapi/cli.ts'), '--root', root, '--write'], { encoding: 'utf8' })
   // Start with a valid machine-only deployment, then add interactive login.
   const source = await readFile(join(root, 'runtime.ts'), 'utf8')
   await writeFile(join(root, 'runtime.ts'), source.replace('interactive: true', 'interactive: false')

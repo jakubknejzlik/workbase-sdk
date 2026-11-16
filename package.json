@@ -52,6 +52,7 @@
   "patchedDependencies": {
     "sonner@2.0.7": "patches/sonner@2.0.7.patch",
     "@radix-ui/react-select@2.2.6": "patches/@radix-ui%2Freact-select@2.2.6.patch",
-    "wrangler@4.126.0": "patches/wrangler@4.126.0.patch"
+    "wrangler@4.126.0": "patches/wrangler@4.126.0.patch",
+    "tsx@4.23.15": "patches/tsx-4.23.15.patch"
   }
 }

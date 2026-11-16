@@ -34,7 +34,7 @@ async function regular(path: string) {
 /** Capture raw application/dependency bytes, including the complete SQL list. */
 export async function captureSdkInputs(root: string): Promise<SdkInputs> {
   if (!(await lstat(join(root, 'migrations'))).isDirectory()) throw new Error('Linked migrations directory')
-  const names = [...dependencyNames, ...(await readdir(root)).filter(name => /^config(?:\.[a-z0-9_-]+)?\.(ts|json)$/.test(name)),
+  const names = [...dependencyNames, ...(await readdir(root)).filter(name => /^config(?:\.[a-z0-9_-]+)?\.(ts|json)$/.test(name) || name === 'openapi.json'),
     ...(await readdir(join(root, 'migrations'))).filter(name => name !== '.gitkeep').map(name => `migrations/${name}`)].sort()
   if (!names.includes('config.ts')) throw new Error('Missing captured configuration')
   const inputs: SdkInputs = {}

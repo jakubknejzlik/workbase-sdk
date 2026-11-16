@@ -24,6 +24,7 @@ async function fixture() {
   expect(await workflow.call('bootstrap_instance', { id: 'composition_fixture', target: 'cloudflare-github' })).toMatchObject({ ok: true })
   await symlink(resolve('node_modules'), join(root, 'node_modules'))
   execFileSync('bun', [resolve('packages/core/src/migrations/schema-cli.ts'), 'plan', '--root', root, '--init'], { encoding: 'utf8' })
+  execFileSync('bun', [resolve('packages/core/src/openapi/cli.ts'), '--root', root, '--write'], { encoding: 'utf8' })
   await writeFile(join(root, 'runtime.ts'), `// authored header
 import { identity } from '@workbasehq/plugins/identity'
 import { permissions } from '@workbasehq/plugins/permissions'
@@ -230,6 +231,7 @@ it('keeps SDK source capture compatible when a composition access lock exists', 
     const inputs = await captureSdkInputs(root)
     expect(inputs).toHaveProperty('runtime.ts')
     expect(inputs).toHaveProperty('schema.lock.json')
+    expect(inputs['openapi.json']).toEqual(await readFile(join(root, 'openapi.json')))
     expect(inputs).not.toHaveProperty('access.lock.json')
     expect(inputs).not.toHaveProperty('access.lock.md')
   } finally { await server.close() }

@@ -9,7 +9,7 @@ import { dirname, isAbsolute, join, relative, sep } from 'node:path'
 export const BRIDGE_VERSION = 1
 export const sha256Schema = z.string().regex(/^[a-f0-9]{64}$/)
 const version = z.string().regex(/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/)
-export const inputPath = z.string().regex(/^(?:package\.json|bun\.lock|runtime\.ts|access\.ts|schema\.lock\.json|schema\/(?:[a-zA-Z0-9_-]+\/)*[a-zA-Z0-9_-]+\.ts|config(?:\.[a-z0-9_-]+)?\.(?:ts|json)|migrations\/[0-9]{4}_[a-zA-Z0-9_-]+\.sql)$/)
+export const inputPath = z.string().regex(/^(?:package\.json|bun\.lock|runtime\.ts|access\.ts|schema\.lock\.json|openapi\.json|schema\/(?:[a-zA-Z0-9_-]+\/)*[a-zA-Z0-9_-]+\.ts|config(?:\.[a-z0-9_-]+)?\.(?:ts|json)|migrations\/[0-9]{4}_[a-zA-Z0-9_-]+\.sql)$/)
 export const inputHashesSchema = z.record(inputPath, sha256Schema)
 export const identitySchema = z.strictObject({
   runId: z.uuid(), instanceId: z.string().regex(/^[a-z][a-z0-9_]*$/),

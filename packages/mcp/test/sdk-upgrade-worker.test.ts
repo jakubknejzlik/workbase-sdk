@@ -168,7 +168,11 @@ export default bindSchemaLock(config, schemaLock(config))
   const db = new DatabaseSync(database)
   try {
     expect(db.prepare('SELECT * FROM example').all()).toEqual([{ revision: 7 }])
-    expect(db.prepare('SELECT namespace FROM _plugin_migrations ORDER BY rowid').all()).toEqual([{ namespace: 'workbase-sdk' }, { namespace: 'example' }])
+    expect(db.prepare('SELECT namespace,name FROM _plugin_migrations ORDER BY rowid').all()).toEqual([
+      { namespace: 'workbase-sdk', name: '001_system' },
+      { namespace: 'workbase-sdk', name: '002_operational_evidence' },
+      { namespace: 'example', name: '001_example' },
+    ])
   } finally { db.close() }
 })
 it('rejects invalid target configuration', async () => {
@@ -186,12 +190,15 @@ it('captures the current V3 template sources and verifies its runtime plugin bas
   await writeFile(join(root, 'config.indexes.json'), '[]\n')
   await bootstrapInstance(root, { id: 'sdk_upgrade_fixture', target: 'cloudflare-github' })
   execFileSync('bun', [resolve('packages/core/src/migrations/schema-cli.ts'), 'plan', '--root', root, '--init'], { encoding: 'utf8' })
+  execFileSync('bun', [resolve('packages/core/src/openapi/cli.ts'), '--root', root, '--write'], { encoding: 'utf8' })
   const { request } = await preparedDatabase(root)
-  for (const path of ['runtime.ts', 'access.ts', 'schema.lock.json', 'schema/worker.ts']) expect(request.inputHashes[path]).toBe(digestBytes(await readFile(join(root, path))))
+  for (const path of ['runtime.ts', 'access.ts', 'schema.lock.json', 'schema/worker.ts', 'openapi.json']) expect(request.inputHashes[path]).toBe(digestBytes(await readFile(join(root, path))))
   const result = resultSchema.parse(await bridge(root, request))
   expect(result.schema.expected).toBe(result.schema.applied)
   expect(result.plugins.expected).toBe(result.plugins.applied)
   expect(result.marker).toEqual({ revision: 1, version: CORE_VERSION })
+  await writeFile(join(root, 'openapi.json'), (await readFile(join(root, 'openapi.json'), 'utf8')) + '\n')
+  await expect(bridge(root, request)).rejects.toThrow('Changed bridge input: openapi.json')
 })
 it('prepares historical rbac and tenancy through consumer-resolved target exports', async () => {
   const root = await localConsumer()
