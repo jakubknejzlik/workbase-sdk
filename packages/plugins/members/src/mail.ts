@@ -6,7 +6,7 @@ import type { RuntimeEnv } from '../../../core/src/types'
 import { kernelFor } from '@workbasehq/core/kernel/registry'
 import { sha256 } from '@workbasehq/core/crypto'
 import { renderInvitationEmail } from './emails/invitation-email'
-import { invitationMailToken, invitationSelector } from './invitation-token'
+import { hasInvitationMailboxProof, invitationMailToken, invitationSelector, invitationTokenSchema } from './invitation-token'
 
 /** The sole display-identity seam; replace with Identity's projection when available. */
 export async function inviterDisplay(db: D1Database, userId: string): Promise<string> {
@@ -34,12 +34,34 @@ export async function invitationDeliveryEligible(db: D1Database, id: string, org
 
 /** Finalize a durable invitation payload on every send/retry, without writing proof to a plan or row. */
 export const invitationMailRenderer = (env: RuntimeEnv): MailDeliveryRenderer => async ({ body, text, html }) => {
+  const fail = (): never => { throw new Error('invitation_mail_finalization_failed') }
   const link = body.replace(/^Accept: /, '')
   const url = new URL(link)
-  const selector = invitationSelector(url.searchParams.get('token')!)
-  url.searchParams.set('token', await invitationMailToken(env, selector))
+  const token = invitationTokenSchema.safeParse(url.searchParams.get('token'))
+  if (!token.success || body !== `Accept: ${link}`) fail()
+  const selector = invitationSelector(token.data!)
+  const proof = await invitationMailToken(env, selector)
+  if (!await hasInvitationMailboxProof(env, proof)) fail()
+  url.searchParams.set('token', proof)
   const escape = (value: string) => value.replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]!)
-  return { text: text.replaceAll(link, url.href), html: html.replaceAll(escape(link), escape(url.href)) }
+  const finalize = (part: string, source: string, signed: string, expected: number) => {
+    const slots = part.split(source)
+    // The Members template has one text link and three HTML occurrences (two
+    // hrefs and the visible fallback). Never accept a partially matched template.
+    if (slots.length - 1 !== expected) fail()
+    const remainder = slots.join('')
+    // Catch extra unsigned occurrences, including percent/entity-encoded copies.
+    const decoded = remainder.replace(/&#(?:x([0-9a-f]+)|([0-9]+));?/gi,
+      (_, hex, decimal) => String.fromCodePoint(Number.parseInt(hex ?? decimal, hex ? 16 : 10)))
+      .replace(/%([0-9a-f]{2})/gi, (_, byte) => String.fromCharCode(Number.parseInt(byte, 16)))
+    if (decoded.includes(selector) || decoded.includes('/invitations/accept')) fail()
+    const result = slots.join(signed)
+    if (result.split(signed).length - 1 !== expected || result.replaceAll(signed, '').includes(selector)) fail()
+    return result
+  }
+  // Body is the durable source of the selector, never a transport-ready proof.
+  finalize(body, link, url.href, 1)
+  return { text: finalize(text, link, url.href, 1), html: finalize(html, escape(link), escape(url.href), 3) }
 }
 
 /** Members owns the P10 template and credential eligibility; the shared port owns transport. */

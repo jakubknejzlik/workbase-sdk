@@ -524,3 +524,29 @@ it('post-commit callbacks are isolated by operation identity even with a shared 
   expect(log).toHaveBeenCalledTimes(1)
   expect(JSON.parse(log.mock.calls[0][0])).toEqual({ event: 'post_commit_failed', operationId: expect.stringMatching(/^[0-9a-f-]{36}$/) })
 })
+
+// Review2 probe: equivalent URL encoding must fail closed before native transport.
+it.each(['text', 'html', 'both', 'html-one', 'body', 'text-extra', 'html-extra'])('worker invite mail: rejects unfinalized stored links in %s', async part => {
+  const send = vi.fn().mockRejectedValueOnce(new Error('synthetic fail')).mockResolvedValue(undefined)
+  vi.spyOn(console, 'error').mockImplementation(() => {})
+  app = createApp(workerAccessFixture(), mailRuntime(send))
+  const result = await (await act('local', 'invite', { email: 'recipient@example.test' })).json() as any
+  const row = (await env.DB.prepare('SELECT * FROM email_outbox').first<{ id: string; body: string; delivery_text: string; delivery_html: string }>())!
+  const link = row.body.replace('Accept: ', '')
+  const encodedLink = link.replace(/token=([a-f0-9])/, (_, ch) => `token=%${ch.charCodeAt(0).toString(16)}`)
+  expect(new URL(encodedLink).searchParams.get('token')).toBe(new URL(link).searchParams.get('token'))
+  let text = row.delivery_text, html = row.delivery_html, body = row.body
+  if (part === 'text' || part === 'both') text = text.replaceAll(link, encodedLink)
+  if (part === 'html' || part === 'both') html = html.replaceAll(link, encodedLink)
+  if (part === 'html-one') html = html.replace(link, encodedLink)
+  if (part === 'body') body = body.replace(link, encodedLink)
+  if (part === 'text-extra') text += `\n${encodedLink}`
+  if (part === 'html-extra') html += `<a href="${encodedLink}">Extra</a>`
+  await env.DB.prepare('UPDATE email_outbox SET body=?,delivery_text=?,delivery_html=? WHERE id=?').bind(body, text, html, row.id).run()
+  const retry = await request(`/orgs/org-a/invitations/${result.invitation_id}/retry-delivery`, 'admin', 'POST', {})
+  expect(retry.status).toBe(200)
+  expect(await retry.json()).toMatchObject({ delivery: { status: 'failed', attempts: 2, error: 'email_send_failed' } })
+  expect(send).toHaveBeenCalledTimes(1)
+  expect(await invitationOutbox(result.invitation_id)).toMatchObject({ delivery_status: 'failed', attempts: 2, last_error: 'email_send_failed' })
+  expect(await env.DB.prepare('SELECT sent_at FROM email_outbox WHERE id=?').bind(row.id).first('sent_at')).toBeNull()
+})
