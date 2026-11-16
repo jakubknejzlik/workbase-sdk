@@ -800,3 +800,32 @@ it('89 shared predicate derives the configured field and scopes both correlated 
   expect(await env.DB.prepare(statement.diagnose!.sql).bind(...(statement.diagnose!.bindings ?? [])).first('ok')).toBe(0)
   expect(await env.DB.prepare("SELECT account,updated_at,version FROM link_probe WHERE id='target'").first()).toEqual({ account: 'owner-a', updated_at: 'before', version: 1 })
 })
+
+
+it.each(['Unique', 'owner-a@example.test', 'Unique Person owner-a@example.test', 'Person <owner-a@example.test>'])('91 eligible search matches name/email tokens: %s', async q => {
+  await env.DB.exec("UPDATE identity_profiles SET first_name='Unique',last_name='Person' WHERE user_id='owner-a'")
+  const response = await request(app, `/orgs/org-a/members?eligible=link_account&target_entity=people&target_row=p1&q=${encodeURIComponent(q)}`)
+  expect(response.status).toBe(200)
+  expect((await json(response)).data.map((member: any) => member.user_id)).toEqual(['owner-a'])
+  expect((await link('p1', 'owner-a')).status).toBe(200)
+})
+it.each(['nobody', 'new@example.test', '%', "' OR 1=1 --"])('91 no match is empty and does not mutate: %s', async q => {
+  const before = await accountLinkRows()
+  const response = await request(app, `/orgs/org-a/members?eligible=link_account&target_entity=people&target_row=p1&q=${encodeURIComponent(q)}`)
+  expect(await json(response)).toEqual({ data: [] })
+  expect(await accountLinkRows()).toEqual(before)
+  expect(await env.DB.prepare('SELECT count(*) n FROM audit_outbox').first('n')).toBe(0)
+})
+it('91 nonadministrator with members.read and link authority cannot search or receive identities/counts', async () => {
+  const c = config(); c.organizationPermissions.dispatcher = ['members.read', 'invitations.create']
+  app = createApp(c, runtime())
+  const response = await request(app, '/orgs/org-a/members?eligible=link_account&target_entity=people&target_row=p1&q=Existing&include=pending', 'GET', undefined, 'dispatcher-a')
+  expect([response.status, await json(response)]).toEqual([403, { error: 'permission_denied' }])
+})
+
+it('91 search uses trusted profile names with Czech case folding and no legacy-name leakage', async () => {
+  await env.DB.exec("UPDATE identity_profiles SET first_name='Šárka',last_name='Nová' WHERE user_id='owner-a'")
+  const search = (q: string) => request(app, `/orgs/org-a/members?eligible=link_account&target_entity=people&target_row=p1&q=${encodeURIComponent(q)}`)
+  expect((await json(await search('šárka nová'))).data.map((member: any) => member.user_id)).toEqual(['owner-a'])
+  expect((await json(await search('owner-a@example.test Existing'))).data).toEqual([])
+})

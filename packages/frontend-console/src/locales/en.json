@@ -565,5 +565,12 @@
   "rowInviteNoMembers": "No members available to link.",
   "rowInviteAccount": "Member",
   "rowInvite_change": "Change invitation email",
-  "rowInviteDeliveryFailed": "Invitation exists; email delivery failed. Use Resend to try delivery again."
+  "rowInviteDeliveryFailed": "Invitation exists; email delivery failed. Use Resend to try delivery again.",
+  "rowFindMember": "Find member or invite",
+  "rowFindQuery": "Name or email",
+  "rowFindSend": "Send invitation",
+  "rowFindClear": "Clear selected member",
+  "rowInvitationActions": "Invitation actions",
+  "rowLinkSupersedes": "Linking this member will cancel the pending invitation to {{email}}. Its old link will stop working.",
+  "rowFindDescription": "Search workspace members by name or email. Select a member to link their account."
 }

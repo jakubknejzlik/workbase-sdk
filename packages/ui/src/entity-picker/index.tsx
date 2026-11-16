@@ -29,6 +29,18 @@ function RemotePicker({ label, options, value, selectedLabel, onChange, placehol
     previousValue.current = value; close()
     restoringFocus.current = true; input.current?.focus(); restoringFocus.current = false
   }, [value])
+  useEffect(() => {
+    if (!open) return
+    // An inline popup owns the first Escape, before a parent dialog handles it
+    // in its native document listener. A second Escape can close the dialog.
+    const escape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.target !== input.current) return
+      event.preventDefault(); event.stopPropagation()
+      if (!pending) { setOpen(false); setSearch(''); setActive(-1); onClose?.() }
+    }
+    window.addEventListener('keydown', escape, true)
+    return () => window.removeEventListener('keydown', escape, true)
+  }, [open, pending, onClose])
   const select = (option: PickerOption) => { if (pending) return; onChange(option.id); close(); input.current?.focus() }
   return <div className="wb-picker grid gap-2"><Label htmlFor={id}>{label}</Label>
     <div data-picker-control className={multiple ? 'min-w-0 rounded-md border border-input p-2 shadow-xs focus-within:border-ring focus-within:ring-ring/50 focus-within:ring-[3px]' : undefined}>
@@ -47,6 +59,6 @@ function RemotePicker({ label, options, value, selectedLabel, onChange, placehol
     {error && <p id={`${id}-error`} role="alert">{error}</p>}
     {open && <div className="wb-picker-popup"><div id={`${id}-options`} role="listbox" aria-label={label} className="wb-picker-options" onScroll={event => { const node = event.currentTarget; if (node.scrollHeight - node.scrollTop - node.clientHeight < 50 && hasMore && !loading) loadMore?.() }}>
       {options.map((option, index) => <div role="option" id={`${id}-${index}`} key={option.id} aria-selected={active === index} onMouseDown={event => event.preventDefault()} onClick={() => select(option)}><Check aria-hidden="true" className={value === option.id ? "mr-2 h-4 w-4 shrink-0" : "mr-2 h-4 w-4 shrink-0 opacity-0"} />{option.label}</div>)}
-    </div>{loading && <p role="status">{loadingLabel}</p>}{!loading && !options.length && <p>{emptyLabel}</p>}{hasMore && <Button type="button" variant="outline" disabled={loading || pending} onClick={loadMore}>{moreLabel}</Button>}{wizard}</div>}
+    </div>{loading && <p role="status">{loadingLabel}</p>}{!loading && !options.length && <p role="status">{emptyLabel}</p>}{hasMore && <Button type="button" variant="outline" disabled={loading || pending} onClick={loadMore}>{moreLabel}</Button>}{wizard}</div>}
   </div>
 }

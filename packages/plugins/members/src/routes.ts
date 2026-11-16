@@ -59,6 +59,7 @@ export function memberRoutes(app: App, config: InstanceConfig, env: RuntimeEnv) 
     c.header('Cache-Control', 'no-store')
     let target: { entity: string; row: string } | undefined
     if (c.req.query('eligible') === 'link_account') {
+      if (!isOrganizationAdministrator(config, scope.role)) throw new ApiError(403, 'permission_denied')
       const parsed = rowTargetSchema.safeParse({ entity: c.req.query('target_entity'), row: c.req.query('target_row') })
       if (!parsed.success) throw new ApiError(400, 'invalid_link_target')
       target = parsed.data
@@ -81,7 +82,10 @@ export function memberRoutes(app: App, config: InstanceConfig, env: RuntimeEnv) 
         throw error
       }
     }
-    const members = await memberIdentities(config, scope, env.DB, undefined, target)
+    const query = target ? z.string().trim().max(200).refine(value => value.split(/\s+/).length <= 20).safeParse(c.req.query('q') ?? '') : undefined
+    if (query && !query.success) throw new ApiError(400, 'invalid_member_search')
+    const members = await memberIdentities(config, scope, env.DB, undefined, target, query?.data)
+    if (target) return c.json({ data: members })
     if (c.req.query('include') !== 'pending') return c.json({ data: members })
     const can = (action: OrganizationAction) => {
       try { kernelFor(config).resourcePermission(scope, action); organizationPermission(config, scope, action); return true } catch { return false }
