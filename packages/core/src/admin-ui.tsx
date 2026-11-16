@@ -154,7 +154,7 @@ export function adminRoutes(app: App, config: InstanceConfig, env: RuntimeEnv, c
         <h2>Create organization</h2>{error && error.code !== 'invalid_organization_name' ? errorMessage(error) : null}<Form action="/admin" csrf={csrf} label="Create organization"><label>Name<input name="name" required value={form?.get('name') ?? ''} aria-invalid={error?.code === 'invalid_organization_name' ? 'true' : undefined} aria-describedby={error?.code === 'invalid_organization_name' ? 'name-error' : undefined} /></label>{error?.code === 'invalid_organization_name' ? <p id="name-error" class="error" role="alert">Invalid organization name: {String(error.detail?.reason)}.</p> : null}</Form></>, csrf, undefined, error?.status)
       onError(organizationsForm)
       if (form) {
-        const org = await api(c, '/orgs', undefined, 'POST', { name: organizationNameApiSchema.parse(form.get('name')) })
+        const org = await api(c, '/orgs', undefined, 'POST', { name: organizationNameApiSchema.parse(form.get('name') ?? undefined) })
         return c.redirect(`/admin/o/${enc(org.id)}`, 303)
       }
       return organizationsForm()

@@ -18,6 +18,18 @@ beforeEach(async () => {
   expect(html).not.toContain('maxlength="200"') // HTML counts UTF-16, unlike the shared contract.
 })
 
+it('Admin form: missing name reports required', async () => {
+  const before = (await env.DB.prepare('SELECT id,name FROM organizations ORDER BY id').all()).results
+  const response = await app.request('http://localhost/admin', { method: 'POST', headers: {
+    Cookie: cookie, Origin: 'http://localhost', 'Content-Type': 'application/x-www-form-urlencoded',
+  }, body: new URLSearchParams({ _csrf: csrf }) })
+  expect(response.status).toBe(400)
+  const html = await response.text()
+  expect(html).toContain('Invalid organization name: required.')
+  expect(html).toContain('aria-invalid="true" aria-describedby="name-error"')
+  expect((await env.DB.prepare('SELECT id,name FROM organizations ORDER BY id').all()).results).toEqual(before)
+})
+
 // URLSearchParams converts lone surrogates to U+FFFD before transport. Those two
 // cases run through the JSON endpoints, core guards, validator, MCP and Console.
 it.each(organizationNameCases.filter(c => !/\p{Cs}/u.test(c.input)))('Admin form: $label', async c => {
