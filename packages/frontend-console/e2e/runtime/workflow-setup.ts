@@ -4,6 +4,7 @@ import { closeSync, mkdirSync, mkdtempSync, openSync, readFileSync, writeFileSyn
 import { resolve } from 'node:path'
 import { assertPortsFree } from '../harness-ports'
 import { causeChain } from './workflow-diagnostics'
+import { assertNoSecrets } from './workflow-artifacts'
 export const artifactRoot = resolve(process.env.C5_ARTIFACT_DIR ?? 'test-results/c5-workflow')
 export const origin = `http://127.0.0.1:${Number(process.env.C5_PORT ?? 19497)}`
 export async function setupWorkflowFixture() {
@@ -13,16 +14,19 @@ export async function setupWorkflowFixture() {
   const persist = resolve(directory, 'state')
   const logPath = resolve(directory, 'worker.log')
   const token = randomBytes(24).toString('hex')
+  const authSecret = randomBytes(32).toString('hex')
   const root = resolve(import.meta.dirname, '../../../..')
   const configPath = resolve(directory, 'wrangler.json')
-  const childEnv = { ...process.env, TMPDIR: directory, WRANGLER_REGISTRY_PATH: resolve(directory, 'registry'),
+  const childEnv = { ...process.env, TMPDIR: process.env.TMPDIR ?? directory, WRANGLER_REGISTRY_PATH: resolve(directory, 'registry'),
+    C5_CONTROL_TOKEN: token, BETTER_AUTH_SECRET: authSecret,
     WRANGLER_LOG_PATH: resolve(directory, 'wrangler-logs'), CLOUDFLARE_SEND_METRICS: 'false', WRANGLER_SEND_METRICS: 'false' }
   writeFileSync(configPath, JSON.stringify({ name: 'c5-workflow-repro', main: resolve(import.meta.dirname, 'workflow-worker.ts'),
     compatibility_date: '2026-08-01', compatibility_flags: ['nodejs_compat'],
     d1_databases: [{ binding: 'DB', database_name: 'c5-workflow', database_id: '00000000-0000-0000-0000-000000000097' }],
     kv_namespaces: [{ binding: 'AUDIT_KV', id: '00000000000000000000000000000097' }],
     assets: { directory: resolve(root, 'packages/frontend-console/dist'), binding: 'ASSETS', html_handling: 'none', not_found_handling: 'none', run_worker_first: true },
-    vars: { STAGE: 'local', DEV_LOCAL_IDENTITY: 'true', AUTH_BASE_URL: origin, BETTER_AUTH_SECRET: 'c5-synthetic-local-secret-at-least-32-characters', C5_CONTROL_TOKEN: token },
+    vars: { STAGE: 'local', DEV_LOCAL_IDENTITY: 'true', AUTH_BASE_URL: origin },
+    secrets: { required: ['BETTER_AUTH_SECRET', 'C5_CONTROL_TOKEN'] },
   }))
   const log = openSync(logPath, 'a')
   let child: ChildProcess | undefined
@@ -35,6 +39,7 @@ export async function setupWorkflowFixture() {
       await Promise.race([exited, new Promise<void>(done => { timer = setTimeout(() => { try { process.kill(-child!.pid!, 'SIGKILL') } catch {}; done() }, 3000) })])
       clearTimeout(timer)
     }
+    assertNoSecrets(directory, [token, authSecret])
   }
   try {
     // Synchronous child completion includes both seed proxy disposals. Only the Worker

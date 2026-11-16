@@ -40,14 +40,20 @@ future time. No browser responses are mocked and no production cadence changes.
 Artifacts are deliberately retained under `C5_ARTIFACT_DIR` (default:
 `test-results/c5-workflow`): `results.json`, per-run `summary.json`, `worker.log`,
 persisted D1, Wrangler logs, and `failure.json` on assertion/setup failure.
-Playwright also attaches diagnostics and retains traces on failure. Diagnostics
-include operation labels, HTTP statuses/body, nested D1 error causes before HTTP
-sanitization, Worker log excerpt, and persistence directory. The D1 adapter only
+Playwright also attaches diagnostics and retains traces on failure. Fixture
+control/auth secret values enter Wrangler through the child environment,
+privileged control calls use untraced Node fetch, and teardown
+checks every retained run file for both values. The final artifact reporter
+redacts bearer credentials in trace ZIPs and retained JSON/logs after Playwright
+finishes writing them, including the synthetic browser session header.
+Diagnostics include operation labels, HTTP statuses/body, nested D1 error causes
+before HTTP sanitization, Worker log excerpt, and persistence directory. The D1 adapter only
 observes and rethrows errors; it never retries. `maxFailures: 1` stops repetitions
 on failure, including any BUSY found in Worker logs. Stop and report a
 Worker-owned BUSY rather than adding a runtime fix in this reproduction slice.
 
 `C5_PORT` overrides the default 19497; occupied ports are rejected. Fixture
 teardown stops the Worker even when the test fails. For task-specific scratch
-constraints set both `C5_ARTIFACT_DIR` and `TMPDIR` to the allowed scratch root.
+constraints set `C5_ARTIFACT_DIR` to the allowed scratch root and use a short
+`TMPDIR` (a short symlink into that root also works for Unix socket limits).
 Do not set `WORKBASE_KEEP_TMP`.

@@ -17,7 +17,12 @@ const test = base.extend<{ worker: Awaited<ReturnType<typeof setupWorkflowFixtur
   },
 })
 
-test('C5: running render barrier → completed stops polling; navigation unmounts an active poller', async ({ page, request, worker: fixture }, testInfo) => {
+test('C5: running render barrier → completed stops polling; navigation unmounts an active poller', async ({ page, worker: fixture }, testInfo) => {
+  // Node fetch keeps fixture credentials out of Playwright API call/network traces.
+  const controlRequest = (data: unknown, authenticated = true) => fetch(`${origin}/__test/c5`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', ...(authenticated ? { Authorization: `Bearer ${fixture.token}` } : {}) },
+    body: JSON.stringify(data),
+  })
   const events: unknown[] = []
   const checkpoints: { phase: string; workflowGets: number; quietWindowMs: number }[] = []
   let phase = 'browser-workflow-GET'
@@ -49,10 +54,10 @@ test('C5: running render barrier → completed stops polling; navigation unmount
   })
   const control = async (action: string, id: string, token?: string) => {
     phase = 'fixture-mutation/barrier'
-    const response = await request.post(`${origin}/__test/c5`, { headers: { Authorization: `Bearer ${fixture.token}` }, data: { action, id, token } })
-    const event = { operation: phase, action, id, status: response.status(), body: await response.text() }
+    const response = await controlRequest({ action, id, token })
+    const event = { operation: phase, action, id, status: response.status, body: await response.text() }
     events.push(event)
-    expect(response.ok(), JSON.stringify(event)).toBe(true)
+    expect(response.ok, JSON.stringify(event)).toBe(true)
     phase = 'browser-workflow-GET'
   }
   const renderRunning = async (id: string) => {
@@ -67,9 +72,9 @@ test('C5: running render barrier → completed stops polling; navigation unmount
   }
   try {
     // Verify the fixture guard and authentication before allowing the transition.
-    expect((await request.post(`${origin}/__test/c5`, { data: { action: 'complete', id: 'c5-terminal' } })).status()).toBe(401)
-    const premature = await request.post(`${origin}/__test/c5`, { headers: { Authorization: `Bearer ${fixture.token}` }, data: { action: 'complete', id: 'c5-terminal' } })
-    expect(premature.status()).toBe(409)
+    expect((await controlRequest({ action: 'complete', id: 'c5-terminal' }, false)).status).toBe(401)
+    const premature = await controlRequest({ action: 'complete', id: 'c5-terminal' })
+    expect(premature.status).toBe(409)
     await renderRunning('c5-terminal')
     await control('complete', 'c5-terminal')
     await expect(page.getByTestId('run-status')).toHaveText('Completed', { timeout: 10_000 })
