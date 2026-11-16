@@ -17,9 +17,10 @@ export { isAccountAccessCommand } from './account-command'
  * and cannot supply selectors, grants or server credential destinations. */
 export function workerAccessCommands(config: InstanceConfig, env?: RuntimeEnv): AtomicOperation<any>[] {
   return Object.keys(config.effectiveAccess?.accountLinks ?? {}).flatMap(entity => {
-    const legacy = userLinkCommands(config)
-    const link = legacy.find(command => command.name === `${entity}/link_account`)!
-    const unlink = legacy.find(command => command.name === `${entity}/remove_access`)!
+    // Only record-action links supersede pending row invitations.
+    const commands = userLinkCommands(config, 'record-action')
+    const link = commands.find(command => command.name === `${entity}/link_account`)!
+    const unlink = commands.find(command => command.name === `${entity}/remove_access`)!
     const id = z.string().min(1).meta({ referenceEntity: entity })
     const adapt = (target: AtomicOperation<any>, name: string): AtomicOperation<any> => {
       const map = (input: any) => ({ rowId: input.id, ...(name === 'link_account' ? { userId: input.user_id } : {}) })

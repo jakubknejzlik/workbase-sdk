@@ -38,7 +38,17 @@ beforeEach(async () => {
 })
 
 
-it.each(['action', 'legacy'])('91 search preserves pending invitation; confirmed %s link revokes it and accept rejects', async path => {
+it('91 search alone leaves the pending invitation byte-identical', async () => {
+  await state('invited')
+  const before = await env.DB.prepare("SELECT * FROM invitations WHERE id='pending'").first()
+  const search = await request('/orgs/org-a/members?eligible=link_account&target_entity=worker&target_row=local&q=staff')
+  expect(search.status).toBe(200)
+  expect((await search.json() as any).data.map((member: any) => member.user_id)).toContain('staff')
+  expect(await env.DB.prepare("SELECT * FROM invitations WHERE id='pending'").first()).toEqual(before)
+  expect(await env.DB.prepare("SELECT user FROM worker WHERE id='local'").first('user')).toBeNull()
+})
+
+it('91 search preserves pending invitation; confirmed action link revokes it and accept rejects', async () => {
   await state('invited')
   await env.DB.exec("DELETE FROM memberships WHERE user_id='recipient'")
   const before = await env.DB.prepare("SELECT * FROM invitations WHERE id='pending'").first()
@@ -46,7 +56,7 @@ it.each(['action', 'legacy'])('91 search preserves pending invitation; confirmed
   expect(search.status).toBe(200)
   expect((await search.json() as any).data.map((member: any) => member.user_id)).toContain('staff')
   expect(await env.DB.prepare("SELECT * FROM invitations WHERE id='pending'").first()).toEqual(before)
-  const response = path === 'action' ? await act('local', 'link_account', { user_id: 'staff' }) : await request('/commands/worker/link_account', 'admin', 'POST', { rowId: 'local', userId: 'staff' })
+  const response = await act('local', 'link_account', { user_id: 'staff' })
   expect(response.status).toBe(200)
   expect(await env.DB.prepare("SELECT revoked_at FROM invitations WHERE id='pending'").first('revoked_at')).toBeTruthy()
   const accepted = await request('/invitations/pending/accept', 'recipient', 'POST', {})
@@ -55,6 +65,21 @@ it.each(['action', 'legacy'])('91 search preserves pending invitation; confirmed
   const oldLink = await request('/invitations/accept', 'recipient', 'POST', { token: 'a'.repeat(64) })
   expect(oldLink.status).toBe(409)
   expect(await oldLink.json()).toMatchObject({ error: 'invitation_revoked' })
+  expect(await env.DB.prepare("SELECT user FROM worker WHERE id='local'").first('user')).toBe('staff')
+  expect(await env.DB.prepare("SELECT count(*) n FROM memberships WHERE user_id='recipient'").first('n')).toBe(0)
+})
+
+it('107 legacy link leaves the pending invitation unchanged and visible in row-access status', async () => {
+  await state('invited')
+  await env.DB.exec("DELETE FROM memberships WHERE user_id='recipient'")
+  const before = await env.DB.prepare("SELECT * FROM invitations WHERE id='pending'").first()
+  const response = await request('/commands/worker/link_account', 'admin', 'POST', { rowId: 'local', userId: 'staff' })
+  expect(response.status).toBe(200)
+  expect(await env.DB.prepare("SELECT * FROM invitations WHERE id='pending'").first()).toEqual(before)
+  expect(await env.DB.prepare("SELECT revoked_at FROM invitations WHERE id='pending'").first('revoked_at')).toBeNull()
+  const status = await request('/orgs/org-a/row-access/worker/local')
+  expect(status.status).toBe(200)
+  expect(await status.json()).toMatchObject({ state: 'signed_in', invitation: { id: before!.id, email: before!.email, expires_at: before!.expires_at } })
   expect(await env.DB.prepare("SELECT user FROM worker WHERE id='local'").first('user')).toBe('staff')
   expect(await env.DB.prepare("SELECT count(*) n FROM memberships WHERE user_id='recipient'").first('n')).toBe(0)
 })
