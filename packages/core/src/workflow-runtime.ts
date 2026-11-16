@@ -13,10 +13,26 @@ import { PermissionRevoked } from './execution/errors'
 import type { ExecutionContext, GuardedStatement, AtomicStore } from './execution/types'
 import type { WorkflowDefinition, WorkflowRuntime, WorkflowStatus, WorkflowStep } from './execution/workflow'
 export type WorkflowRegistry = ReadonlyMap<string, WorkflowDefinition<any>>
+export interface WorkflowContinuationBudget {
+  /** Advancement passes, including recovery, retries, undo and terminal completion. Capped at 32. */
+  maxSteps?: number
+  /** Stop starting passes after this elapsed time. Capped at 5 seconds; an in-flight
+   * pass retains its existing step timeout (at most 10 seconds). */
+  maxDurationMs?: number
+  /** Reference clock, matching tick's deterministic recovery clock. */
+  now?: number
+}
+export type WorkflowReadiness =
+  | { status: 'terminal' }
+  | { status: 'paused' }
+  | { status: 'due_at'; dueAt: number }
+  | { status: 'budget_exhausted' }
+  | { status: 'lease_lost' }
+export type WorkflowContinuationResult = WorkflowReadiness & { claimed: boolean }
 interface Run {
   id: string; organization_id: string; actor_id: string; actor_type: 'user' | 'agent'; token_id: string | null
   definition_name: string; definition_version: string; definition_signature: string; input_json: string
-  cancel_actor_id: string | null; status: WorkflowStatus; resume_status: WorkflowStatus | null; correlation_id: string; lease_token: string; last_error_code: string | null
+  cancel_actor_id: string | null; status: WorkflowStatus; resume_status: WorkflowStatus | null; correlation_id: string; lease_token: string | null; lease_until: number | null; next_attempt_at: number; last_error_code: string | null
 }
 interface Step {
   step_id: string; status: string; attempts: number; compensation_attempts: number; deadline_at: number | null
@@ -209,19 +225,46 @@ export class D1WorkflowRuntime implements WorkflowRuntime {
     const rows = await this.env.DB.prepare(`SELECT id FROM workflow_runs WHERE status IN (${active}) AND next_attempt_at<=? AND (lease_until IS NULL OR lease_until<=?) ORDER BY next_attempt_at,id LIMIT ?`).bind(scanNow, scanNow, limit).all<{ id: string }>()
     let claimed = 0
     for (const row of rows.results) {
-      const now = scanNow + Date.now() - started
-      const run = await this.env.DB.prepare(`UPDATE workflow_runs SET lease_token=?,lease_until=? WHERE id=? AND status IN (${active}) AND next_attempt_at<=? AND (lease_until IS NULL OR lease_until<=?) RETURNING *`).bind(crypto.randomUUID(), now + 60000, row.id, now, now).first<Run>()
-      if (!run) continue
-      claimed++
-      try { await this.advance(run, scanNow + Date.now() - started) }
+      const result = await this.continueRun(row.id, { now: scanNow + Date.now() - started })
+      if (result.claimed) claimed++
+    }
+    return { claimed, released }
+  }
+  private readiness(run: Run | null, now: number): WorkflowReadiness | null {
+    // A deleted/stale wake has no work, just like a terminal run.
+    if (!run) return { status: 'terminal' }
+    if (run.status === 'needs_attention') return { status: 'paused' }
+    if (!['pending', 'running', 'waiting_external', 'compensating'].includes(run.status)) return { status: 'terminal' }
+    if (run.next_attempt_at > now) return { status: 'due_at', dueAt: run.next_attempt_at }
+    if (run.lease_until !== null && run.lease_until > now) return { status: 'lease_lost' }
+    return null
+  }
+  async continueRun(runId: string, budget: WorkflowContinuationBudget = {}): Promise<WorkflowContinuationResult> {
+    const started = Date.now(); const referenceNow = budget.now ?? started
+    const maxSteps = budget.maxSteps ?? 32; const maxDurationMs = budget.maxDurationMs ?? 5000
+    if (![maxSteps, maxDurationMs, referenceNow].every(Number.isFinite) || maxSteps < 0 || maxDurationMs < 0) throw new RangeError('invalid_workflow_continuation_budget')
+    const time = () => referenceNow + Date.now() - started
+    const load = () => this.env.DB.prepare('SELECT * FROM workflow_runs WHERE id=?').bind(runId).first<Run>()
+    let claimed = false
+    for (let passes = 0; ; passes++) {
+      // Every committed transition releases its lease. Never carry the old snapshot
+      // or token into another pass: D1 decides readiness and ownership again.
+      const readiness = this.readiness(await load(), time())
+      if (readiness) return { ...readiness, claimed }
+      if (passes >= Math.min(32, Math.trunc(maxSteps)) || Date.now() - started >= Math.min(5000, maxDurationMs)) return { status: 'budget_exhausted', claimed }
+      const now = time()
+      const run = await this.env.DB.prepare(`UPDATE workflow_runs SET lease_token=?,lease_until=? WHERE id=? AND status IN (${active}) AND next_attempt_at<=? AND (lease_until IS NULL OR lease_until<=?) RETURNING *`).bind(crypto.randomUUID(), now + 60000, runId, now, now).first<Run>()
+      if (!run) return { ...(this.readiness(await load(), time()) ?? { status: 'lease_lost' as const }), claimed }
+      claimed = true
+      try { await this.advance(run, time()) }
       catch (error) {
         // Losing a lease is an expected race. Other storage failures leave the lease
         // for crash recovery and remain visible to the caller/cron metrics.
-        const owner = await this.env.DB.prepare('SELECT lease_token FROM workflow_runs WHERE id=?').bind(run.id).first<{ lease_token: string | null }>()
-        if (owner?.lease_token === run.lease_token) throw error
+        const owner = await this.env.DB.prepare("SELECT lease_token,lease_until>max(?,CAST((julianday('now')-2440587.5)*86400000 AS INTEGER)) AS lease_live FROM workflow_runs WHERE id=?").bind(time(), runId).first<{ lease_token: string | null; lease_live: number }>()
+        if (owner?.lease_token === run.lease_token && owner.lease_live) throw error
+        return { status: 'lease_lost', claimed }
       }
     }
-    return { claimed, released }
   }
   private async advance(run: Run, now: number) {
     // Include permission/checkpoint reads in elapsed time, not only the effect.
