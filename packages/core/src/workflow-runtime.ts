@@ -112,6 +112,17 @@ export class D1WorkflowRuntime implements WorkflowRuntime {
     const event = makeEvent(this.config, scope, code, 'workflows', id, {}, {}, { run_id: id, ...(stepId ? { step_id: stepId } : {}), ...(errorCode ? { code: errorCode } : {}) })
     return outboxInsert(event)
   }
+  // Snapshot budgets before the fenced commit; a stolen lease rolls back both
+  // the transition and its audit event. Keep the Queue envelope identical to D1.
+  private async evidence(statement: GuardedStatement, id: string, status: WorkflowStatus) {
+    const event = statement.outboxEvent
+    if (!event) return statement
+    const stepId = event.details?.step_id
+    const counts = await this.env.DB.prepare(`SELECT coalesce(sum(attempts),0) AS attempts,coalesce(sum(compensation_attempts),0) AS compensation_attempts FROM workflow_steps WHERE run_id=? AND (? IS NULL OR step_id=?)`)
+      .bind(id, stepId ?? null, stepId ?? null).first<{ attempts: number; compensation_attempts: number }>()
+    return outboxInsert({ ...event, details: { ...event.details, state: status, ...counts } })
+  }
+
   private scope(run: Run): Scope {
     if (run.cancel_actor_id) return { organizationId: run.organization_id, actor: { type: 'user', id: run.cancel_actor_id }, role: '', correlationId: run.correlation_id }
     return { organizationId: run.organization_id, actor: { type: run.actor_type, id: run.actor_id, ...(run.token_id ? { tokenId: run.token_id } : {}) }, role: '', correlationId: run.correlation_id }
@@ -121,10 +132,12 @@ export class D1WorkflowRuntime implements WorkflowRuntime {
     return { sql: `UPDATE workflow_runs SET updated_at=? WHERE id=? AND lease_token=? AND lease_until>max(?,CAST((julianday('now')-2440587.5)*86400000 AS INTEGER))${run.cancel_actor_id ? " AND EXISTS(SELECT 1 FROM memberships WHERE user_id=? AND organization_id=workflow_runs.organization_id AND role='owner')" : ''}`, bindings: [new Date(now).toISOString(), run.id, run.lease_token, now, ...(run.cancel_actor_id ? [run.cancel_actor_id] : [])], expectRows: 1 }
   }
   private async transition(run: Run, now: number, status: WorkflowStatus, event: string, code: string | null = null, statements: GuardedStatement[] = [], stepId?: string, nextAt = now) {
+    statements = await Promise.all(statements.map(statement => this.evidence(statement, run.id, status)))
+    const audit = await this.evidence(this.audit(this.scope(run), run.id, event, stepId, code ?? undefined), run.id, status)
     await this.submit([this.fence(status === 'needs_attention' ? { ...run, cancel_actor_id: null } : run, now), ...statements, {
       sql: 'UPDATE workflow_runs SET status=?,resume_status=?,last_error_code=?,next_attempt_at=?,lease_until=NULL,lease_token=NULL WHERE id=?',
       bindings: [status, status === 'needs_attention' ? (run.status === 'compensating' ? 'compensating' : 'running') : null, code, nextAt, run.id], expectRows: 1,
-    }, this.audit(this.scope(run), run.id, event, stepId, code ?? undefined)])
+    }, audit])
   }
   async resume(id: string, context: ExecutionContext) {
     if (infrastructure(context).workflowRuntime !== this || context.config.id !== this.config.id || context.config.revision !== this.config.revision) throw new ApiError(403, 'workflow_context_mismatch')
@@ -138,7 +151,7 @@ export class D1WorkflowRuntime implements WorkflowRuntime {
     if (run.status !== 'needs_attention') throw new ApiError(409, 'workflow_not_paused')
     const definition = this.definitions.get(run.definition_name)
     if (!definition || definition.version !== run.definition_version || workflowSignature(definition) !== run.definition_signature) {
-      await this.submit([{ sql: "UPDATE workflow_runs SET last_error_code='workflow.definition_mismatch' WHERE id=? AND status='needs_attention'", bindings: [id], expectRows: 1 }, this.audit(this.scope(run), id, 'workflow.needs_attention', undefined, 'workflow.definition_mismatch')])
+      await this.submit([{ sql: "UPDATE workflow_runs SET last_error_code='workflow.definition_mismatch' WHERE id=? AND status='needs_attention'", bindings: [id], expectRows: 1 }, await this.evidence(this.audit(this.scope(run), id, 'workflow.needs_attention', undefined, 'workflow.definition_mismatch'), id, 'needs_attention')])
       throw new ApiError(409, 'workflow.definition_mismatch')
     }
     const saved = (await this.env.DB.prepare('SELECT * FROM workflow_steps WHERE run_id=? ORDER BY position').bind(id).all<Step>()).results
@@ -366,7 +379,7 @@ export class D1WorkflowRuntime implements WorkflowRuntime {
       return this.finishStep(run, optionsNow(), step, compensating, serializeCheckpoint(result ?? null))
     } catch (error) {
       const time = optionsNow()
-      if (error instanceof PermissionRevoked) { await this.transition(run, time, 'needs_attention', 'workflow.needs_attention', 'permission_revoked'); return }
+      if (error instanceof PermissionRevoked) { await this.transition(run, time, 'needs_attention', 'workflow.needs_attention', 'permission_revoked', [], step.id); return }
       let code = error instanceof ApiError && ['workflow.external_timeout', 'workflow.deadline_exceeded', 'workflow.attempts_exhausted', 'rule_failed', 'workflow.external_not_configured', 'workflow.external_transport_failed', 'workflow.external_forbidden', 'workflow.external_rejected', 'workflow.external_invalid_receipt'].includes(error.code) ? error.code : 'workflow.step_failed'
       const uncertainCodes = ['workflow.external_timeout', 'workflow.external_transport_failed']
       const waitForDeadline = !compensating && step.kind === 'external' && time < deadline

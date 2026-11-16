@@ -1,3 +1,4 @@
+import operationalEvidence from './003-operational-evidence'
 import adoptDelivery from './001-adopt-delivery'
 import senderName from './002-sender-name'
 
@@ -5,4 +6,5 @@ import senderName from './002-sender-name'
 export const migrations = [
   adoptDelivery,
   senderName,
+  operationalEvidence,
 ]

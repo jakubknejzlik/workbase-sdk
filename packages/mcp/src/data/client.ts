@@ -75,6 +75,7 @@ export function createApi(env: ReturnType<typeof loadEnvironment>, request: type
       }
       case 'get_workflow': return get(`/workflows/${segment(args.id)}`)
       case 'list_workflows': return get('/workflows' + query({ status: args.status }))
+      case 'read_operations': return get('/audit/operations' + query({ source: args.source, source_id: args.sourceId, limit: args.limit, offset: args.offset }))
       case 'read_audit': return get('/audit/events' + query({ entity: args.entity, entity_id: args.entityId, limit: args.limit, cursor: args.cursor }))
     }
   }

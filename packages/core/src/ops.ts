@@ -15,8 +15,10 @@ export async function recordRelayRun(env: RuntimeEnv, metrics: Awaited<ReturnTyp
 }
 async function lastRelayRun(env: RuntimeEnv) {
   try {
-    const row = await env.DB.prepare('SELECT ts,backlog,oldest_age_seconds AS oldestAgeSeconds,failed,delivered,webhook_delivered AS webhookDelivered,errors FROM _ops_relay_run WHERE id=1').first()
-    return row
+    const row = await env.DB.prepare('SELECT ts,backlog,oldest_age_seconds AS oldestAgeSeconds,failed,delivered,webhook_delivered AS webhookDelivered,errors,operational_history FROM _ops_relay_run WHERE id=1').first()
+    if (!row) return null
+    const { operational_history, ...latest } = row
+    return { ...latest, history: JSON.parse(operational_history as string) }
   } catch { return null } // Local-only schema fixtures may omit the optional cron snapshot.
 }
 const tables = async (db: D1Database) => (await db.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all<{ name: string }>()).results.map(row => row.name)

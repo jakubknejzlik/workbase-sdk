@@ -1,3 +1,4 @@
+import { operationalRoutes } from './operations'
 import { scopeMiddleware } from '../../../core/src/authorization'
 import { kernelFor } from '@workbasehq/core/kernel/registry'
 import type { AuditEvent } from '../../../core/src/events'
@@ -17,6 +18,7 @@ const listPageSize = 90
 const valueBudget = 600
 
 export function auditRoutes(app: App, config: InstanceConfig, env: RuntimeEnv) {
+  operationalRoutes(app, config, env)
   app.get('/audit/events', scopeMiddleware(env, config, kernelFor(config)), async c => {
     const scope = c.get('scope')
     if (!hasOwnerRole(scope, config)) throw new ApiError(403, 'owner_required')

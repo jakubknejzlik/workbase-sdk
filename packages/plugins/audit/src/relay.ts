@@ -24,7 +24,7 @@ export async function deliverAudit(env: RuntimeEnv, message: AuditOutboxRow, opt
     if (options.failAfterSinkInsert) throw new Error('injected_after_sink')
     // The webhook intent and audit acknowledgment commit together; a retry cannot lose the automation.
     const statements: D1PreparedStatement[] = []
-    if (env.WEBHOOK_EVENTS?.split(',').map(name => name.trim()).includes(event.operation)) statements.push(env.DB.prepare('INSERT OR IGNORE INTO webhook_deliveries (event_id,organization_id,payload,next_attempt_at) VALUES (?,?,?,?)').bind(row.event_id, row.organization_id, row.payload, timestamp))
+    if (env.WEBHOOK_EVENTS?.split(',').map(name => name.trim()).includes(event.operation)) statements.push(env.DB.prepare('INSERT OR IGNORE INTO webhook_deliveries (event_id,organization_id,payload,next_attempt_at,created_at) VALUES (?,?,?,?,?)').bind(row.event_id, row.organization_id, row.payload, timestamp, timestamp))
     statements.push(env.DB.prepare('UPDATE audit_outbox SET delivered_at=?,next_attempt_at=NULL WHERE event_id=? AND organization_id=? AND delivered_at IS NULL').bind(timestamp, row.event_id, row.organization_id))
     await env.DB.batch(statements)
   } catch {
@@ -48,6 +48,6 @@ export async function relayAudit(env: RuntimeEnv, options: AuditRelayOptions = {
   } else for (const row of rows.results) {
     try { await deliverAudit(env, row, options); delivered++ } catch { errors++ }
   }
-  await env.DB.prepare('DELETE FROM audit_outbox WHERE delivered_at IS NOT NULL AND delivered_at<?').bind(new Date(now - 7 * 86400000).toISOString()).run()
+  await env.DB.prepare(`DELETE FROM audit_outbox WHERE delivered_at IS NOT NULL AND delivered_at<? AND json_array_length(operational_history)=0 AND coalesce(json_extract(payload,'$.operation'),'') NOT IN ('workflow.step.failed','workflow.failed','workflow.needs_attention')`).bind(new Date(now - 7 * 86400000).toISOString()).run()
   return { delivered, errors }
 }
