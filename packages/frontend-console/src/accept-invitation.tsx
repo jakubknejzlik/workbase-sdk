@@ -9,6 +9,8 @@ import { api, ApiError, safeReturnTo, signInLocation } from './api/client'
 import { invitationClient, type AcceptedInvitation, type InvitationSelector, type InvitationSummary } from './api/invitations'
 import { profileOptions, type SelfProfile } from './api/profile'
 import { ProfileEditor } from './profile'
+import { meOptions, type Me } from './api/queries'
+import { scopeHomeDestination, useScopeHome } from '../../console-generated/src/scope-home'
 
 const terminalErrors: Record<string, string> = {
   invitation_expired: 'invitationExpired', invitation_revoked: 'invitationRevoked', invitation_used: 'invitationUsed',
@@ -18,6 +20,7 @@ const terminalErrors: Record<string, string> = {
 
 /** Source AcceptInvitationPage Card composition; P8 owns eligibility and every mutation. */
 export function AcceptInvitation() {
+  const home = useScopeHome()
   const { t } = useTranslation(); const client = useQueryClient()
   const [selector, setSelector] = useState<InvitationSelector | null>(() => {
     const params = new URLSearchParams(window.location.search)
@@ -81,7 +84,10 @@ export function AcceptInvitation() {
   const code = error instanceof ApiError ? error.code : null
   const terminal = code && terminalErrors[code] || error instanceof ApiError && [400, 404, 410].includes(error.status) && 'invitationInvalid'
   const wrongAccount = summary?.account_match === false || code === 'invitation_not_for_this_account'
-  const recover = <Button className="w-full" variant="outline" onClick={() => window.location.replace('/organizations')}>{t('p10GoHome')}</Button>
+  const recover = <Button className="w-full" variant="outline" onClick={async () => {
+    const me = await client.fetchQuery({ ...meOptions, queryFn: () => api<Me>('/me', { redirect401: false }) }).catch(() => undefined)
+    window.location.replace(me ? scopeHomeDestination(me) : '/')
+  }}>{t('p10GoHome')}</Button>
   const shell = (title: string, icon: ReactNode, content: ReactNode, footer: ReactNode) => <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background to-muted p-4">
     <Card className="w-full max-w-md">
       <CardHeader className="text-center"><div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-primary/10" aria-hidden="true">{icon}</div><h1 tabIndex={-1} className="text-2xl font-semibold">{title}</h1></CardHeader>
@@ -94,7 +100,7 @@ export function AcceptInvitation() {
   const entryOrganization = summary?.organization.id ?? memberOrganization
   const entryTarget = accepted?.entry_target ?? (entryOrganization ? `/o/${encodeURIComponent(entryOrganization)}` : null)
   const usedByAccount = summary?.account_match === true && (summary.state === 'accepted' || code === 'invitation_used')
-  if (accepted || alreadyMember || usedByAccount) return shell(t(alreadyMember ? 'p10AlreadyMemberTitle' : 'p10JoinedTitle'), <CheckCircle className="h-6 w-6 text-green-600" />, <>{summary && <p className="font-medium break-words">{organization}</p>}<p className="text-sm text-muted-foreground">{t(alreadyMember ? 'p10AlreadyMemberDescription' : 'p10JoinedDescription')}</p></>, entryTarget ? <Button className="w-full" onClick={() => window.location.replace(safeReturnTo(entryTarget))}>{t('p10GoToOrganization')}</Button> : recover)
+  if (accepted || alreadyMember || usedByAccount) return shell(t(alreadyMember ? 'p10AlreadyMemberTitle' : 'p10JoinedTitle'), <CheckCircle className="h-6 w-6 text-green-600" />, <>{summary && <p className="font-medium break-words">{organization}</p>}<p className="text-sm text-muted-foreground">{t(alreadyMember ? 'p10AlreadyMemberDescription' : 'p10JoinedDescription')}</p></>, entryTarget ? <Button className="w-full" onClick={() => window.location.replace(safeReturnTo(entryTarget, home))}>{t('p10GoToOrganization')}</Button> : recover)
   if (declined || summary?.state === 'declined') return shell(t('p10DeclinedTitle'), <XCircle className="h-6 w-6" />, <p className="text-sm text-muted-foreground">{t('p10DeclinedDescription')}</p>, recover)
   if (loading || profile.isPending) return <div role="status" aria-label={t('p10LoadingInvitation')} className="min-h-screen flex items-center justify-center p-4"><Card className="w-full max-w-md"><CardHeader><Skeleton className="mx-auto h-8 w-3/4" /><Skeleton className="h-4 w-full" /></CardHeader><CardContent><Skeleton className="h-20 w-full" /></CardContent></Card></div>
   const stateError = summary && summary.state !== 'pending' ? ({ expired: 'invitationExpired', revoked: 'invitationRevoked', accepted: 'invitationUsed' } as Record<string, string>)[summary.state] : null

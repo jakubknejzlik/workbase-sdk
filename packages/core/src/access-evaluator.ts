@@ -21,6 +21,9 @@ export function effectiveSystemGrant(policy: EffectiveAccessPolicy, roles: strin
   if (roles.some(role => !policy.roles.includes(role))) return false
   const rules = policy.system.filter(rule => roles.includes(rule.role) && rule.action === action)
   if (rules.some(rule => rule.decision === 'deny') || !rules.some(rule => rule.decision === 'allow')) return false
+  // Recipients consume an issued grant; acceptance does not grant invitation CRUD.
+  // The recipient route separately verifies the signed-in account's e-mail.
+  if (action === 'invitations.accept') return true
   return rules.some(rule => effectiveEntityGrants(policy, roles, rule.target.entity, rule.target.operation).length > 0)
 }
 export function systemAccessTarget(action: string): { entity: string; operation: Operation } {
