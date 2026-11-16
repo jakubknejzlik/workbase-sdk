@@ -17,17 +17,35 @@ END;
 CREATE INDEX ${table}_evidence_org ON ${table}(organization_id,${id});`
 }
 
-export const operationalEvidenceMigration: PluginMigration = { name: '002_operational_evidence', sql: `
-ALTER TABLE webhook_deliveries ADD COLUMN created_at TEXT;
+const webhookEvidenceSql = `ALTER TABLE webhook_deliveries ADD COLUMN created_at TEXT;
 CREATE TRIGGER webhook_deliveries_created AFTER INSERT ON webhook_deliveries WHEN NEW.created_at IS NULL BEGIN
   UPDATE webhook_deliveries SET created_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE event_id=NEW.event_id;
 END;
 ${deliveryHistorySql('webhook_deliveries', 'event_id', "CASE WHEN NEW.state='failed' THEN 'failed' ELSE 'pending' END", ['delivery_failed', 'delivery_interrupted'])}
-ALTER TABLE _ops_relay_run ADD COLUMN operational_history TEXT NOT NULL DEFAULT '[]' CHECK(json_valid(operational_history) AND json_type(operational_history)='array');
+`
+const relayEvidenceSql = `ALTER TABLE _ops_relay_run ADD COLUMN operational_history TEXT NOT NULL DEFAULT '[]' CHECK(json_valid(operational_history) AND json_type(operational_history)='array');
 CREATE TRIGGER ops_relay_evidence_insert AFTER INSERT ON _ops_relay_run BEGIN
   UPDATE _ops_relay_run SET operational_history=json_insert(operational_history,'$[#]',json_object('occurred_at',NEW.ts,'backlog',NEW.backlog,'oldest_age_seconds',NEW.oldest_age_seconds,'failed',NEW.failed,'delivered',NEW.delivered,'webhook_delivered',NEW.webhook_delivered,'errors',NEW.errors)) WHERE id=1;
 END;
 CREATE TRIGGER ops_relay_evidence_update AFTER UPDATE OF ts ON _ops_relay_run BEGIN
   UPDATE _ops_relay_run SET operational_history=json_insert(operational_history,'$[#]',json_object('occurred_at',NEW.ts,'backlog',NEW.backlog,'oldest_age_seconds',NEW.oldest_age_seconds,'failed',NEW.failed,'delivered',NEW.delivered,'webhook_delivered',NEW.webhook_delivered,'errors',NEW.errors)) WHERE id=1;
 END;
-` }
+`
+
+export const operationalEvidenceMigration: PluginMigration = {
+  name: '002_operational_evidence', sql: `\n${webhookEvidenceSql}${relayEvidenceSql}`,
+}
+
+// Model B also accepts migration-only databases without the SDK system schema.
+// Keep the static identity/receipt, but only alter source tables that exist.
+export const modelBOperationalEvidenceMigration: PluginMigration = {
+  ...operationalEvidenceMigration,
+  async statements(db) {
+    const { results } = await db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('webhook_deliveries','_ops_relay_run')").all<{ name: string }>()
+    const tables = new Set(results.map(row => row.name))
+    return [
+      ...(tables.has('webhook_deliveries') ? [webhookEvidenceSql] : []),
+      ...(tables.has('_ops_relay_run') ? [relayEvidenceSql] : []),
+    ]
+  },
+}

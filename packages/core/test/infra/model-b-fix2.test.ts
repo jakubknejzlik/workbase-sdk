@@ -1,8 +1,10 @@
 import { DatabaseSync } from 'node:sqlite'
 import { afterEach, expect, it } from 'vitest'
-import { applyPluginMigrations } from '../../src/kernel/migrations'
+import { applyPluginMigrations, pluginMigrationStatus } from '../../src/kernel/migrations'
 import { queryDatabase, type D1Query } from '../../src/infra'
 import { withoutRoleChecks } from '../../src/migrations/model-b'
+import { systemSchema } from '../../src/migrations/system-schema'
+import { opsSchema } from '../../src/ops-schema'
 
 const databases: DatabaseSync[] = []
 afterEach(() => { for (const db of databases.splice(0)) db.close() })
@@ -60,4 +62,54 @@ it.each(['ROLLBACK', 'ABORT', 'FAIL', 'IGNORE', 'REPLACE'])('table conflict acti
   const output = withoutRoleChecks(sql)
   expect(output).toBe('CREATE TABLE memberships(role TEXT/* keep */)')
   database().db.exec(output)
+})
+
+it.each([
+  [false, false], [true, false], [false, true], [true, true],
+])('Model B evidence handles webhook=%s relay=%s and retains a verifiable receipt on retry', async (webhook, relay) => {
+  const { db, query } = database()
+  if (webhook) db.exec(systemSchema)
+  if (relay) db.exec(opsSchema)
+  const adapter = queryDatabase(query)
+  await applyPluginMigrations(adapter, [])
+  const receipt = db.prepare("SELECT name,position FROM _plugin_migrations WHERE namespace='workbase-core' ORDER BY position").all()
+  expect(receipt).toEqual([{ name: '001_model_b', position: 0 }, { name: '002_operational_evidence', position: 1 }])
+  const status = await pluginMigrationStatus(adapter, [], { entities: {} })
+  expect(status.applied).toBe(status.expected)
+  if (webhook) {
+    db.exec("INSERT INTO webhook_deliveries (event_id,organization_id,payload,next_attempt_at) VALUES ('event','org','{}','now')")
+    db.exec("UPDATE webhook_deliveries SET last_error='delivery_failed',state='failed',attempts=1 WHERE event_id='event'")
+    const row = db.prepare("SELECT created_at,operational_history FROM webhook_deliveries WHERE event_id='event'").get()!
+    expect(row.created_at).toEqual(expect.any(String))
+    expect(JSON.parse(row.operational_history as string)).toMatchObject([
+      { state: 'pending', error_code: 'backlog_pending', attempts: 0 },
+      { state: 'failed', error_code: 'delivery_failed', attempts: 1 },
+    ])
+  } else expect(db.prepare("SELECT name FROM sqlite_master WHERE name='webhook_deliveries'").get()).toBeUndefined()
+  if (relay) {
+    db.exec("INSERT INTO _ops_relay_run VALUES (1,'first',2,3,4,5,6,7,'[]')")
+    db.exec("UPDATE _ops_relay_run SET ts='second',backlog=0 WHERE id=1")
+    expect(JSON.parse(db.prepare('SELECT operational_history FROM _ops_relay_run').get()!.operational_history as string)).toMatchObject([
+      { occurred_at: 'first', backlog: 2 }, { occurred_at: 'second', backlog: 0 },
+    ])
+  } else expect(db.prepare("SELECT name FROM sqlite_master WHERE name='_ops_relay_run'").get()).toBeUndefined()
+  const schema = db.prepare('SELECT * FROM sqlite_master ORDER BY name').all()
+  await applyPluginMigrations(adapter, [])
+  expect(db.prepare('SELECT * FROM sqlite_master ORDER BY name').all()).toEqual(schema)
+  expect(db.prepare("SELECT name,position FROM _plugin_migrations WHERE namespace='workbase-core' ORDER BY position").all()).toEqual(receipt)
+})
+
+it('Model B evidence rolls back both table alterations and its receipt when the batch fails', async () => {
+  const { db, query } = database()
+  db.exec(systemSchema + opsSchema)
+  // A conflicting final trigger fails after both table alterations were staged.
+  db.exec('CREATE TRIGGER ops_relay_evidence_update AFTER UPDATE OF ts ON _ops_relay_run BEGIN SELECT 1; END;')
+  await expect(applyPluginMigrations(queryDatabase(query), [])).rejects.toThrow('002_operational_evidence')
+  for (const table of ['webhook_deliveries', '_ops_relay_run']) {
+    expect(db.prepare(`PRAGMA table_info(${table})`).all().some(row => row.name === 'operational_history')).toBe(false)
+  }
+  expect(db.prepare("SELECT name FROM _plugin_migrations WHERE name='002_operational_evidence'").get()).toBeUndefined()
+  db.exec('DROP TRIGGER ops_relay_evidence_update')
+  await expect(applyPluginMigrations(queryDatabase(query), [])).resolves.toBeUndefined()
+  expect(db.prepare("SELECT name FROM _plugin_migrations WHERE name='002_operational_evidence'").get()).toBeDefined()
 })
