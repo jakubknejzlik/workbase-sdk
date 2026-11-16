@@ -11,7 +11,7 @@ import { ApplicationAccessCard, GeneratedActions, GeneratedCreateDialog, Generat
 import type { Model, Capabilities } from '../../console-generated/src/read'
 vi.mock('@tanstack/react-router', () => ({ useNavigate: () => vi.fn(), Link: ({ children }: { children: ReactNode }) => <a>{children}</a> }))
 const family = ['link_account', 'remove_access', 'access_invite', 'access_cancel_invite', 'access_link_account', 'access_unlink_account']
-async function mount(surface: 'detail' | 'menu' | 'create' | 'edit', options: { language?: 'en' | 'cs'; linkConflict?: boolean; noMembers?: boolean; deferMutation?: boolean; membersRead?: boolean; membersFailure?: boolean; state?: string; grouped?: boolean; unavailable?: boolean; denial?: boolean; inconsistency?: string | null; accounts?: object[]; failure?: boolean; uncertainInvite?: boolean; deliveryFailure?: boolean; contact?: 'contact_email' | 'hidden'; grants?: string[]; v3?: boolean; loading?: boolean; error?: boolean; mutationDenied?: boolean } = {}) {
+async function mount(surface: 'detail' | 'menu' | 'create' | 'edit', options: { labels?: Record<string, string>; language?: 'en' | 'cs'; linkConflict?: boolean; noMembers?: boolean; deferMutation?: boolean; membersRead?: boolean; membersFailure?: boolean; state?: string; grouped?: boolean; unavailable?: boolean; denial?: boolean; inconsistency?: string | null; accounts?: object[]; failure?: boolean; uncertainInvite?: boolean; deliveryFailure?: boolean; contact?: 'contact_email' | 'hidden'; grants?: string[]; v3?: boolean; loading?: boolean; error?: boolean; mutationDenied?: boolean } = {}) {
   const v3 = options.v3 !== false
   const model = { instance: 'neutral', limits: { root: 100, relations: 10 }, entities: { entries: { accountLink: { field: 'user', entity: 'accounts' }, rowAccess: !options.unavailable, rowInvitations: !options.unavailable, fields: { id: { type: 'string' }, version: { type: 'integer' }, name: { type: 'string' }, email: { type: 'string' } }, writeSchema: { type: 'object', properties: { name: { type: 'string' }, email: { type: 'string' } } }, columns: ['name', 'email'], relations: {}, routes: {} } }, commands: family.filter(n => v3 || !n.startsWith('access_')).map(name => ({ name: `entries/${name}`, permission: { entity: 'entries', operation: 'update' }, inputSchema: { type: 'object', properties: { rowId: { type: 'string', referenceEntity: 'entries' } }, required: ['rowId'] } })) } as unknown as Model
   const caps = { resources: { 'members.read': options.membersRead !== false }, revision: 1, commands: (options.grants ?? family).map(n => `entries/${n}`), entities: { entries: { operations: ['read', 'create', 'update'], readable: ['id', 'version', 'name', 'email'], writable: ['name', 'email'] } } } as Capabilities
@@ -40,7 +40,7 @@ async function mount(surface: 'detail' | 'menu' | 'create' | 'edit', options: { 
     return options.deliveryFailure ? { delivery: { status: 'failed' } } : {}
   })
   const request = vi.fn(async () => ({ data: [{ ...row, version }], next_cursor: null }))
-  const i18n = i18next.createInstance(); await i18n.use(initReactI18next).init({ lng: options.language ?? 'en', resources: { en: { translation: { ...en, field_name: 'Name', field_email: 'Contact email' } }, cs: { translation: cs } } })
+  const i18n = i18next.createInstance(); await i18n.use(initReactI18next).init({ lng: options.language ?? 'en', resources: { en: { translation: { ...en, field_name: 'Name', field_email: 'Contact email', ...options.labels } }, cs: { translation: { ...cs, ...options.labels } } } })
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false, ...(options.deferMutation ? { onMutate: async () => { await new Promise(resolve => setTimeout(resolve, 10)) } } : {}) } } })
   if (options.contact === 'hidden') caps.entities.entries.readable = caps.entities.entries.readable.filter(name => name !== 'email')
   if (options.contact === 'contact_email') { const entity = model.entities.entries; entity.fields.contact_email = entity.fields.email; delete entity.fields.email; entity.columns = ['name', 'contact_email']; entity.writeSchema!.properties.contact_email = entity.writeSchema!.properties.email; delete entity.writeSchema!.properties.email; caps.entities.entries.readable.push('contact_email'); caps.entities.entries.writable.push('contact_email') }
@@ -71,6 +71,64 @@ it('review5 create offers opt-in Invite now with live contact prefill', async ()
   await user.type(screen.getByLabelText('Contact email'), 'live@example.test')
   expect((screen.getByLabelText('Invitation email') as HTMLInputElement).value).toBe('live@example.test')
 })
+for (const language of ['en', 'cs'] as const) for (const v3 of [true, false]) {
+  it(`${language} ${v3 ? 'V3' : 'legacy'} create shows a localized invitation email error and preserves the draft`, async () => {
+    const locale = language === 'cs' ? cs : en
+    const message = language === 'cs' ? 'Zadejte platnou e-mailovou adresu.' : 'Enter a valid email address.'
+    expect(locale).toHaveProperty('rowInviteEmailInvalid', message)
+    const { user, write, request } = await mount('create', { language, v3 })
+    await user.type(screen.getByLabelText(locale.field_name), 'Draft name')
+    await user.click(screen.getByRole('checkbox', { name: locale.rowInviteNow }))
+    const email = screen.getByLabelText(locale.rowInviteEmail)
+    await user.type(email, 'bad@invalid')
+    await user.click(screen.getByRole('button', { name: locale.create }))
+    const error = await screen.findByRole('alert')
+    expect(error.textContent).toBe(message)
+    expect(email.getAttribute('aria-invalid')).toBe('true')
+    expect(email.getAttribute('aria-describedby')?.split(' ')).toContain(error.id)
+    const item = email.closest('[data-slot="form-item"]')!
+    expect(item.querySelector('[data-slot="form-label"]')?.textContent).toBe(locale.rowInviteEmail)
+    expect(item.querySelector('[data-slot="form-control"]')).toBe(email)
+    expect(item.querySelector('[data-slot="form-message"]')).toBe(error)
+    expect(screen.queryByText(locale.requestFailed)).toBeNull()
+    expect(screen.getByLabelText(locale.field_name)).toHaveProperty('value', 'Draft name')
+    expect(email).toHaveProperty('value', 'bad@invalid')
+    expect(write).not.toHaveBeenCalled()
+    expect(request).not.toHaveBeenCalled()
+    await user.clear(email)
+    await user.type(email, 'valid@example.test')
+    expect(screen.queryByText(message)).toBeNull()
+    await user.click(screen.getByRole('button', { name: locale.create }))
+    await waitFor(() => expect(write.mock.calls.some(([path, method]) => path === '/api/entries' && method === 'POST')).toBe(true))
+    expect(write.mock.calls.filter(([path, method]) => path === '/api/entries' && method === 'POST')).toHaveLength(1)
+  })
+}
+for (const language of ['en', 'cs'] as const) {
+  it(`${language} create uses a localized record title when the entity has no translation`, async () => {
+    await mount('create', { language, labels: { entity_entries: 'Worker' } })
+    expect(screen.getByRole('dialog', { name: language === 'cs' ? 'Přidat záznam' : 'Add record' })).toBeTruthy()
+  })
+  it(`${language} create preserves the translated object form of the entity`, async () => {
+    const name = language === 'cs' ? 'pracovníka' : 'person'
+    await mount('create', { language, labels: { entityObject_entries: name, entitySingular_entries: 'Worker' } })
+    expect(screen.getByRole('dialog', { name: language === 'cs' ? 'Přidat pracovníka' : 'Add person' })).toBeTruthy()
+  })
+  for (const v3 of [true, false]) it(`${language} ${v3 ? 'V3' : 'legacy'} link explains immediate access and keeps invitation copy in invite`, async () => {
+    const locale = language === 'cs' ? cs : en
+    const { user } = await mount('detail', { language, v3 })
+    await user.click(await screen.findByRole('button', { name: locale.rowInvite_link }))
+    let dialog = screen.getByRole('dialog')
+    expect(within(dialog).getByText(locale.rowLinkDescription)).toBeTruthy()
+    expect(within(dialog).getByText(locale.rowLinkPickerHint)).toBeTruthy()
+    expect(within(dialog).queryByText(locale.rowInviteDescription)).toBeNull()
+    await user.click(within(dialog).getByRole('button', { name: locale.cancel }))
+    await user.click(screen.getByRole('button', { name: locale.rowInvite_invite }))
+    dialog = screen.getByRole('dialog')
+    expect(within(dialog).getByText(locale.rowInviteDescription)).toBeTruthy()
+    expect(within(dialog).queryByText(locale.rowLinkDescription)).toBeNull()
+    expect(within(dialog).queryByText(locale.rowLinkPickerHint)).toBeNull()
+  })
+}
 it('review5 edit embeds invitation controls', async () => { await mount('edit'); expect(await screen.findByRole('button', { name: 'Invite to application' })).toBeTruthy() })
 
 async function confirmAction(user: ReturnType<typeof userEvent.setup>, label: string, input?: [string, string]) {
