@@ -14,7 +14,7 @@ export interface MailStatus {
   attempts: number; sent_at: string | null; last_error: string | null
 }
 /** Runtime-only finalization; returned credentials go directly to the transport. */
-export type MailDeliveryRenderer = (message: { body: string; text: string; html: string }) => Promise<{ text: string; html: string }>
+export type MailDeliveryRenderer = (message: { body: string; text: string; html: string }) => Promise<{ text: string; html: string; subject?: string }>
 export interface MailOutboxPort {
   /** Include this statement in the caller's transaction; guard preserves mutation chaining. */
   intent(message: MailIntent, guard?: string): GuardedStatement

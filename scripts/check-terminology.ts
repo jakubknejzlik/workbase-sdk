@@ -4,6 +4,8 @@ import { existsSync, lstatSync, readFileSync, readdirSync } from 'node:fs'
 import { relative, resolve } from 'node:path'
 import { fileURLToPath, URL } from 'node:url'
 import ts from 'typescript'
+import type { RuntimeEnv } from '../packages/core/src/types'
+import { buildInvitationAcceptUrl } from '../packages/plugins/members/src/invitation-url'
 import { renderInvitationEmail, type InvitationEmailInput, type RenderedInvitationEmail } from '../packages/plugins/members/src/emails/invitation-email'
 
 export interface Finding {
@@ -179,7 +181,7 @@ const sourceRoots = [
   'packages/console-generated/scripts', 'packages/plugins/members/src/emails',
 ]
 const buildRoots = ['packages/frontend-console/dist', 'packages/ui/dist']
-export function checkTerminology(root = resolve(fileURLToPath(new URL('..', import.meta.url))), options: {
+export async function checkTerminology(root = resolve(fileURLToPath(new URL('..', import.meta.url))), options: {
   renderMail?: boolean
   mailRenderer?: (input: InvitationEmailInput) => RenderedInvitationEmail
   requireBuild?: boolean
@@ -238,7 +240,9 @@ export function checkTerminology(root = resolve(fileURLToPath(new URL('..', impo
     const mail = (options.mailRenderer ?? renderInvitationEmail)({
       language, kind, inviterDisplayName: 'Jana Nováková', organizationName: tenant === 'organization' ? 'Example Organization' : undefined,
       roleLabel: language === 'en' ? 'Member' : 'Člen', expiresAt: new Date('2026-11-04T12:00:00Z'), timeZone: 'Europe/Prague',
-      configuredOrigin: 'https://console.example.test', acceptUrl: 'https://console.example.test/invitation?token=synthetic',
+      configuredOrigin: 'https://console.example.test', acceptUrl: await buildInvitationAcceptUrl({
+        AUTH_BASE_URL: 'https://console.example.test', BETTER_AUTH_SECRET: 'synthetic-terminology-fixture-key',
+      } as RuntimeEnv, { selector: 'a'.repeat(64), purpose: 'email' }),
     })
     for (const channel of ['subject', 'preheader', 'html', 'text'] as const) {
       const inspect = channel === 'html' ? inspectHtml : inspectCopy
@@ -251,7 +255,7 @@ export function checkTerminology(root = resolve(fileURLToPath(new URL('..', impo
 }
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
-    const result = checkTerminology(undefined, { requireBuild: process.argv.includes('--require-build') })
+    const result = await checkTerminology(undefined, { requireBuild: process.argv.includes('--require-build') })
     console.log(`Terminology and brand: ${result.files} files; ${result.mailVariants} rendered mail variants (4 channels each) passed`)
   } catch (error) { console.error(error instanceof Error ? error.message : error); process.exitCode = 1 }
 }

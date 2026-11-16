@@ -7,13 +7,17 @@ export interface InvitationMailOptions {
   /** Bind delivery to the exact committed invitation, plus the caller's live row guard. */
   invitationId?: string
   eligible?: () => Promise<boolean>
+  /** Local development only; production destination always comes from configuration. */
+  localFallback?: string
 }
 export interface InvitationDeliveryStatus {
   status: string; attempts: number; sent_at: string | null; error: string | null
 }
 /** Members owns rendering and delivered-email credentials; core only orchestrates. */
 export interface InvitationMailPort {
-  prepare(env: RuntimeEnv, config: InstanceConfig, outboxId: string, organizationId: string, recipient: string, link: string,
+  /** Unsigned management link: recipient sign-in is still required. */
+  copyLink(env: RuntimeEnv, selector: string, localFallback?: string): Promise<string>
+  prepare(env: RuntimeEnv, config: InstanceConfig, outboxId: string, organizationId: string, recipient: string, selector: string,
     options: InvitationMailOptions): Promise<{
       intent(expiresAt: string): GuardedStatement
       deliver(): Promise<void>

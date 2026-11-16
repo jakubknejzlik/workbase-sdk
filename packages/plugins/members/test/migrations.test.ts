@@ -11,5 +11,6 @@ it('pins the append-only migration names, order and SQL checksums', async () => 
     { name: '002_pending_invitations', sha256: 'ed9b4dd26a84c31663752bc7d65ffe005be940e08e77e49d56b4cb495f147ccc' },
     { name: '003_recipients', sha256: '4cac1f377e300e468ce413f4fe2b9ea3f474ad893d109162d3891bd38a54185a' },
     { name: '004_row_invitations', sha256: '457f9c7ed8f8adc56bc14dc0e049e570514a5cc1048640c914dd9131f6fb40fc' },
+    { name: '005_delivery_credential', sha256: 'e2dcc20461a4ceda98d1ea20a941a818a3ced2c63613a40f93212b29145bb0a9' },
   ])
 })

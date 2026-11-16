@@ -75,7 +75,7 @@ it('single-tenant Members supports invitations with one stable scope and no Orga
   const invited = await request(app, `/orgs/${scope}/invitations`, 'POST', { email: 'viewer.a@example.test', role: 'viewer' }, 'owner-a', scope)
   expect(invited.status).toBe(201)
   const raw = await env.DB.prepare("SELECT body FROM email_outbox WHERE recipient='viewer.a@example.test'").first<string>('body')
-  const token = new URL(raw!.replace('Accept: ', '')).searchParams.get('token')
+  const token = JSON.parse(raw!).selector
   const accepted = await request(app, '/invitations/accept', 'POST', { token }, 'viewer-a', scope)
   expect(accepted.status).toBe(201)
   expect(await env.DB.prepare('SELECT scope_id FROM memberships WHERE user_id=? AND organization_id=?').bind('viewer-a', scope).first('scope_id')).toBe(scope)

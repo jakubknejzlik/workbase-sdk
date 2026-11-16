@@ -759,7 +759,7 @@
       "value": "localhost@evil.test",
       "reason": "Synthetic reserved .test URL authority attack fixture, not a mailbox.",
       "line": "it.each(['http://example.test', 'http://localhost.example.test', 'http://127.0.0.2', 'http://localhost@evil.test'])('local development never permits non-loopback origin %s', origin => {",
-      "lineNumber": 183
+      "lineNumber": 189
     }
   ],
   "encoded": [

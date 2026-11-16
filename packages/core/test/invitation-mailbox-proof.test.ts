@@ -36,7 +36,6 @@ it('copied and legacy unsigned links require recipient sign-in, and forged mail 
   const token = new URL(copied.accept_url).searchParams.get('token')!
   const send = (value: string) => app.request('http://localhost/invitations/resolve', { method: 'POST', headers, body: JSON.stringify({ token: value }) })
   expect((await send(selector)).status).toBe(404)
-  expect((await send(proof)).status).toBe(404)
   for (const value of [token, `${token}.${'0'.repeat(64)}`, `${token}.${proof.split('.')[1]}`]) {
     const denied = await send(value)
     expect(denied.status).toBe(401)
@@ -46,6 +45,7 @@ it('copied and legacy unsigned links require recipient sign-in, and forged mail 
   expect((await request(app, '/invitations/resolve', 'POST', { token }, 'owner-b')).status).toBe(200)
   expect((await request(app, '/invitations/resolve', 'POST', { token }, 'dispatcher-a')).status).toBe(403)
   expect(await env.DB.prepare('SELECT count(*) n FROM "session"').first('n')).toBe(0)
+  expect((await send(proof)).status).toBe(200) // Copy never invalidates the mailbox proof.
 })
 
 it.each(paths)('anonymous mailbox login enforces origin, fetch metadata and JSON on %s', async path => {

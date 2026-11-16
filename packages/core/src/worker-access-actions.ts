@@ -45,19 +45,17 @@ export function workerAccessCommands(config: InstanceConfig, env?: RuntimeEnv): 
     const invite = registerPostCommit(registerUserLinkAction({ name: accountCommand(entity, 'invite'), permission: { entity, operation: 'create' }, input: z.strictObject({ id, email: z.string().trim().pipe(z.email()).transform(email => email.toLowerCase()) }),
       async prepare(ctx, input) {
         // Prepare the unsigned selector and mail metadata outside config/locks.
-        const configured = env?.IDENTITY?.baseURL ?? env?.AUTH_BASE_URL
-        if (!configured) throw new Error('invitation_origin_required')
         const role = invitationRole(ctx.config, entity)
-        const token = randomToken(), invitationId = ulid(), outboxId = ulid()
+        const token = randomToken(), deliveryToken = randomToken(), invitationId = ulid(), outboxId = ulid()
         const expires = new Date(Date.now() + 7 * 86400000).toISOString()
-        const url = new URL('/invitations/accept', configured); url.searchParams.set('token', token)
         const port = kernelFor(ctx.config).invitationMail
+        const url = await port.copyLink(env!, token)
         const guard = rowInvitationGuard(ctx.config, ctx.scope, { entity, row: input.id })
-        const mail = await port.prepare(env!, ctx.config, outboxId, ctx.scope.organizationId, input.email, url.href, {
+        const mail = await port.prepare(env!, ctx.config, outboxId, ctx.scope.organizationId, input.email, deliveryToken, {
           inviterId: actorAccountId(ctx.scope), role, expiresAt: expires, kind: 'invite', invitationId,
           eligible: async () => !!await env!.DB.prepare(`SELECT 1 WHERE ${guard.sql}`).bind(...guard.values).first(),
         })
-        return { role, invitationId, outboxId, expires, hash: await sha256(token), url: url.href, mail, deliveryStatus: () => port.status(env!, ctx.config, outboxId) }
+        return { role, invitationId, outboxId, expires, hash: await sha256(token), deliveryHash: await sha256(deliveryToken), url, mail, deliveryStatus: () => port.status(env!, ctx.config, outboxId) }
       },
       plan(ctx, input) {
         const p = ctx.prepared
@@ -65,8 +63,8 @@ export function workerAccessCommands(config: InstanceConfig, env?: RuntimeEnv): 
         return { rules: [{ name: 'invite', statements: [{
           // Migration 004's BEFORE INSERT trigger expires the stale row before
           // its partial unique index is checked, within this same D1 batch.
-          sql: `INSERT INTO invitations (id,organization_id,email,role,token_hash,expires_at,inviter_id,created_at,delivery_outbox_id,target_entity,target_row) SELECT ?,?,?,?,?,?,?,?,?,?,? WHERE ${guard.sql}`,
-          bindings: [p.invitationId, ctx.scope.organizationId, input.email, p.role, p.hash, p.expires, actorAccountId(ctx.scope), ctx.now, p.outboxId, entity, input.id, ...guard.values], expectRows: 1,
+          sql: `INSERT INTO invitations (id,organization_id,email,role,token_hash,delivery_token_hash,expires_at,inviter_id,created_at,delivery_outbox_id,target_entity,target_row) SELECT ?,?,?,?,?,?,?,?,?,?,?,? WHERE ${guard.sql}`,
+          bindings: [p.invitationId, ctx.scope.organizationId, input.email, p.role, p.hash, p.deliveryHash, p.expires, actorAccountId(ctx.scope), ctx.now, p.outboxId, entity, input.id, ...guard.values], expectRows: 1,
         }, p.mail.intent(p.expires)] }], event: { operation: 'invitation.created', entity: 'invitations', entityId: p.invitationId },
           result: { status: 201, body: { invitation_id: p.invitationId, expires_at: p.expires, accept_url: p.url,
             delivery: { status: 'unknown', attempts: 0, sent_at: null, error: 'email_delivery_unknown' } } } }

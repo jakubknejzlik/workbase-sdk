@@ -318,12 +318,14 @@ it('worker invite mail: delivers exactly once after commit, with Members renderi
   const outbox = (await invitationOutbox(result.invitation_id))!
   expect(outbox).toMatchObject({ delivery_status: 'sent', attempts: 1, last_error: null })
   const deliveredLink = message.text.match(/https?:\/\/[^\s]+\/invitations\/accept\?token=[a-f0-9]+\.[a-f0-9]+/)![0]
-  expect(outbox.body).toBe(`Accept: ${result.accept_url}`);
+  expect(JSON.parse(outbox.body).version).toBe(1)
   expect(message.text).toContain(deliveredLink); expect(message.html).toContain(deliveredLink.replaceAll('&', '&amp;'))
   const selector = new URL(result.accept_url).searchParams.get('token')!
   const proof = new URL(deliveredLink).searchParams.get('token')!
   expect(selector).toMatch(/^[a-f0-9]{64}$/)
-  expect(proof).toMatch(new RegExp(`^${selector}\\.[a-f0-9]{64}$`))
+  expect(proof).toMatch(/^[a-f0-9]{64}\.[a-f0-9]{64}$/)
+  expect(proof.split('.')[0]).not.toBe(selector)
+  expect(JSON.parse(outbox.body).selector).toBe(proof.split('.')[0])
   const anonymous = (token: string) => app.request('http://localhost/invitations/resolve', { method: 'POST', headers: { Origin: 'http://localhost', 'Sec-Fetch-Site': 'same-origin', 'Content-Type': 'application/json' }, body: JSON.stringify({ token }) })
   expect((await anonymous(selector)).status).toBe(401)
   expect((await anonymous(proof)).status).toBe(200)
@@ -331,8 +333,8 @@ it('worker invite mail: delivers exactly once after commit, with Members renderi
   expect(send).toHaveBeenCalledTimes(1)
   const copied = await (await request(`/orgs/org-a/invitations/${result.invitation_id}/copy-link`, 'admin', 'POST', {})).json() as any
   expect(new URL(copied.accept_url).searchParams.get('token')).toMatch(/^[a-f0-9]{64}$/)
-  expect(await env.DB.prepare('SELECT delivery_outbox_id FROM invitations WHERE id=?').bind(result.invitation_id).first('delivery_outbox_id')).toBeNull()
-  expect((await anonymous(proof)).status).toBe(404)
+  expect(await env.DB.prepare('SELECT delivery_outbox_id FROM invitations WHERE id=?').bind(result.invitation_id).first('delivery_outbox_id')).toBe(outbox.id)
+  expect((await anonymous(proof)).status).toBe(200)
 })
 it('worker invite mail: provider failure is failed and retry-delivery sends the same intent once', async () => {
   const send = vi.fn().mockRejectedValueOnce(new Error('synthetic provider failure')).mockResolvedValue(undefined)
@@ -525,30 +527,28 @@ it('post-commit callbacks are isolated by operation identity even with a shared 
   expect(JSON.parse(log.mock.calls[0][0])).toEqual({ event: 'post_commit_failed', operationId: expect.stringMatching(/^[0-9a-f-]{36}$/) })
 })
 
-// Review2 probe: equivalent URL encoding must fail closed before native transport.
-it.each(['text', 'html', 'both', 'html-one', 'body', 'text-extra', 'html-extra'])('worker invite mail: rejects unfinalized stored links in %s', async part => {
-  const send = vi.fn().mockRejectedValueOnce(new Error('synthetic fail')).mockResolvedValue(undefined)
-  vi.spyOn(console, 'error').mockImplementation(() => {})
+// Review2 encodings are inert because stored output is never a source of links.
+it.each(['text', 'html', 'both', 'html-one', 'body', 'text-extra', 'html-extra'])('worker invite mail: reconstructs stored %s or fails invalid inputs before send', async part => {
+  const send = vi.fn().mockResolvedValue(undefined)
   app = createApp(workerAccessFixture(), mailRuntime(send))
+  // Commit without a transport; retry must send exactly once with fresh proof.
+  app = createApp(workerAccessFixture(), runtime())
   const result = await (await act('local', 'invite', { email: 'recipient@example.test' })).json() as any
-  const row = (await env.DB.prepare('SELECT * FROM email_outbox').first<{ id: string; body: string; delivery_text: string; delivery_html: string }>())!
-  const link = row.body.replace('Accept: ', '')
-  const encodedLink = link.replace(/token=([a-f0-9])/, (_, ch) => `token=%${ch.charCodeAt(0).toString(16)}`)
-  expect(new URL(encodedLink).searchParams.get('token')).toBe(new URL(link).searchParams.get('token'))
-  let text = row.delivery_text, html = row.delivery_html, body = row.body
-  if (part === 'text' || part === 'both') text = text.replaceAll(link, encodedLink)
-  if (part === 'html' || part === 'both') html = html.replaceAll(link, encodedLink)
-  if (part === 'html-one') html = html.replace(link, encodedLink)
-  if (part === 'body') body = body.replace(link, encodedLink)
-  if (part === 'text-extra') text += `\n${encodedLink}`
-  if (part === 'html-extra') html += `<a href="${encodedLink}">Extra</a>`
-  await env.DB.prepare('UPDATE email_outbox SET body=?,delivery_text=?,delivery_html=? WHERE id=?').bind(body, text, html, row.id).run()
-  const retry = await request(`/orgs/org-a/invitations/${result.invitation_id}/retry-delivery`, 'admin', 'POST', {})
-  expect(retry.status).toBe(200)
-  expect(await retry.json()).toMatchObject({ delivery: { status: 'failed', attempts: 2, error: 'email_send_failed' } })
-  expect(send).toHaveBeenCalledTimes(1)
-  expect(await invitationOutbox(result.invitation_id)).toMatchObject({ delivery_status: 'failed', attempts: 2, last_error: 'email_send_failed' })
-  expect(await env.DB.prepare('SELECT sent_at FROM email_outbox WHERE id=?').bind(row.id).first('sent_at')).toBeNull()
+  const row = (await env.DB.prepare('SELECT id,body FROM email_outbox').first<{ id: string; body: string }>())!
+  const inputs = JSON.parse(row.body)
+  const encodedLink = `/invitations/accept&quest;token&equals;%${inputs.selector.charCodeAt(0).toString(16)}${inputs.selector.slice(1)}`
+  await env.DB.prepare('UPDATE email_outbox SET body=?,delivery_text=?,delivery_html=? WHERE id=?')
+    .bind(part === 'body' ? '{}' : row.body, encodedLink, `<a title=">" href="${encodedLink}">Extra</a>`, row.id).run()
+  app = createApp(workerAccessFixture(), mailRuntime(send))
+  const retry = () => request(`/orgs/org-a/invitations/${result.invitation_id}/retry-delivery`, 'admin', 'POST', {})
+  expect(await (await retry()).json()).toMatchObject({ delivery: { status: part === 'body' ? 'failed' : 'delivered', attempts: 1 } })
+  expect(send).toHaveBeenCalledTimes(part === 'body' ? 0 : 1)
+  if (part !== 'body') {
+    expect(send.mock.calls[0][0].html).not.toContain('Extra')
+    expect(send.mock.calls[0][0].text).not.toContain(encodedLink)
+    expect(await (await retry()).json()).toMatchObject({ delivery: { status: 'delivered', attempts: 1 } })
+    expect(send).toHaveBeenCalledTimes(1)
+  }
 })
 
 // Review3 V3_METADATA_REPRO: use the real worker action and native transport.

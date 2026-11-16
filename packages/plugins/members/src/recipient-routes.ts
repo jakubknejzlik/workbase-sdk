@@ -18,6 +18,8 @@ import { invitationOrigin, inviterDisplay } from './mail'
 import { hasInvitationMailboxProof, invitationSelector, invitationTokenSchema } from './invitation-token'
 
 interface Invitation {
+  /** Hash of the credential used for this lookup, independent of the other purpose. */
+  credential_hash: string
   target_entity: string | null; target_row: string | null
   id: string; organization_id: string; email: string; role: string; token_hash: string; inviter_id: string
   expires_at: string; accepted_at: string | null; accepted_user_id: string | null; revoked_at: string | null
@@ -64,11 +66,13 @@ export function recipientRoutes(app: App, config: InstanceConfig, env: RuntimeEn
       && (!row.bound_user_id || row.bound_user_id === actor.user.id)
   }
   async function lookup(selector: { id: string } | { token: string }, actor?: ResolvedActor | null) {
-    const row = await env.DB.prepare(`SELECT * FROM invitations WHERE ${'id' in selector ? 'id' : 'token_hash'}=?`)
-      .bind('id' in selector ? selector.id : await sha256(invitationSelector(selector.token))).first<Invitation>()
+    const hash = 'token' in selector ? await sha256(invitationSelector(selector.token)) : undefined
+    const row = 'id' in selector
+      ? await env.DB.prepare('SELECT * FROM invitations WHERE id=?').bind(selector.id).first<Invitation>()
+      : await env.DB.prepare('SELECT * FROM invitations WHERE token_hash=? OR delivery_token_hash=?').bind(hash, hash).first<Invitation>()
     if (!row || ('id' in selector && (!actor || !matches(row, actor)))) throw new ApiError(404, 'invitation_not_found')
     await kernel.resolveScopeId(env.DB, row.organization_id)
-    return row
+    return { ...row, credential_hash: hash ?? row.token_hash }
   }
   async function eligible(row: Invitation, actor: ResolvedActor, checkMember = true) {
     if (!matches(row, actor)) throw new ApiError(403, 'invitation_not_for_this_account')
@@ -105,10 +109,10 @@ export function recipientRoutes(app: App, config: InstanceConfig, env: RuntimeEn
   }
   async function bind(row: Invitation, actor: ResolvedActor) {
     await eligible(row, actor)
-    const result = await env.DB.prepare(`UPDATE invitations SET bound_user_id=? WHERE id=? AND token_hash=?
+    const result = await env.DB.prepare(`UPDATE invitations SET bound_user_id=? WHERE id=? AND (token_hash=? OR delivery_token_hash=?)
       AND accepted_at IS NULL AND revoked_at IS NULL AND declined_at IS NULL AND expired_at IS NULL AND expires_at>?
       AND (bound_user_id IS NULL OR bound_user_id=?)
-      AND EXISTS (SELECT 1 FROM "user" WHERE id=? AND lower(email)=lower(trim(invitations.email)))`).bind(actor.user!.id, row.id, row.token_hash, nowISO(), actor.user!.id, actor.user!.id).run()
+      AND EXISTS (SELECT 1 FROM "user" WHERE id=? AND lower(email)=lower(trim(invitations.email)))`).bind(actor.user!.id, row.id, row.credential_hash, row.credential_hash, nowISO(), actor.user!.id, actor.user!.id).run()
     if (result.meta.changes !== 1) throw new ApiError(409, 'invitation_conflict')
     row.bound_user_id = actor.user!.id
     if (row.name_first && row.name_last) {
@@ -236,7 +240,7 @@ export function recipientRoutes(app: App, config: InstanceConfig, env: RuntimeEn
       await execute(scope, `invitations/${action}`, 'invitations.accept', {
         rules: [organizationRule('invitation_recipient_once', ...provision, {
           sql: `UPDATE invitations SET ${action === 'accept' ? 'accepted_at=?,accepted_user_id=?,' : 'declined_at=?,'}bound_user_id=?
-            WHERE id=? AND token_hash=? AND accepted_at IS NULL AND declined_at IS NULL AND revoked_at IS NULL AND expired_at IS NULL AND expires_at>?
+            WHERE id=? AND (token_hash=? OR delivery_token_hash=?) AND accepted_at IS NULL AND declined_at IS NULL AND revoked_at IS NULL AND expired_at IS NULL AND expires_at>?
             AND (bound_user_id IS NULL OR bound_user_id=?)
             AND role=? AND inviter_id=? AND ${grant.sql}
             AND EXISTS (SELECT 1 FROM "user" WHERE id=? AND lower(email)=lower(trim(invitations.email)) AND (?=1 OR "emailVerified"=1))
@@ -246,7 +250,7 @@ export function recipientRoutes(app: App, config: InstanceConfig, env: RuntimeEn
               AND (NOT EXISTS (SELECT 1 FROM identities WHERE user_id=p.user_id AND provider<>'local') OR (p.synced_at IS NOT NULL
                 AND (SELECT count(*) FROM identities WHERE user_id=p.user_id AND provider<>'local')=1
                 AND EXISTS (SELECT 1 FROM identities WHERE user_id=p.user_id AND provider=p.source_provider AND issuer=p.source_issuer AND subject=p.source_subject)))))`,
-          bindings: [...(action === 'accept' ? [now, actor.user!.id] : [now]), actor.user!.id, row.id, row.token_hash, now,
+          bindings: [...(action === 'accept' ? [now, actor.user!.id] : [now]), actor.user!.id, row.id, row.credential_hash, row.credential_hash, now,
             actor.user!.id, row.role, row.inviter_id, ...grant.values, actor.user!.id, dev || provider ? 1 : 0, row.target_entity ? 1 : 0, actor.user!.id, ...(config.account?.entity === 'users' ? [actor.user!.id] : []), action === 'accept' ? 1 : 0, actor.user!.id],
         }), ...(action === 'accept' ? [{ name: 'invitation_membership', statements: [{
           sql: 'INSERT INTO memberships (user_id,organization_id,role) SELECT ?,organization_id,role FROM invitations WHERE id=? AND accepted_user_id=? AND accepted_at=? AND NOT EXISTS (SELECT 1 FROM memberships WHERE organization_id=invitations.organization_id AND user_id=?)',

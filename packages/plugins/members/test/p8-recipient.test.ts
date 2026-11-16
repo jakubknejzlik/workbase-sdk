@@ -1,3 +1,4 @@
+import { D1AtomicStore } from '../../../core/src/execution/d1'
 import { env } from 'cloudflare:workers'
 import { beforeEach, expect, it, vi } from 'vitest'
 import sample from '../../../core/test/fixtures/sample/config'
@@ -153,7 +154,7 @@ it.each(['revoked', 'expired', 'rotated'])('rechecks %s after preview on both mu
   expect((await call(`/invitations/${a.id}/preview`)).status).toBe(200)
   if (mode === 'revoked') await env.DB.prepare('UPDATE invitations SET revoked_at=? WHERE id=?').bind('now', a.id).run()
   if (mode === 'expired') await env.DB.prepare('UPDATE invitations SET expires_at=? WHERE id=?').bind('2000-01-01', a.id).run()
-  if (mode === 'rotated') await request(app, `/orgs/org-a/invitations/${a.id}/copy-link`, 'POST', {})
+  if (mode === 'rotated') await request(app, `/orgs/org-a/invitations/${a.id}/resend`, 'POST', {})
   for (const action of ['accept', 'decline']) expect((await call(`/invitations/${action}`, { token: a.token })).status).toBe(mode === 'rotated' ? 404 : mode === 'expired' ? 410 : 409)
 })
 it('failed atomic audit leaves invitation and membership unchanged', async () => {
@@ -191,7 +192,7 @@ it('new session is revoked if the credential rotates during session creation', a
   const a = await invite('raced@example.test')
   const wrapped = { ...localAuth, async signInInvitation(this: PluginContext, ...args: Parameters<NonNullable<typeof localAuth.signInInvitation>>) {
     const login = await localAuth.signInInvitation!.apply(this, args)
-    await env.DB.prepare('UPDATE invitations SET token_hash=? WHERE id=?').bind(await sha256('b'.repeat(64)), a.id).run()
+    await env.DB.prepare('UPDATE invitations SET delivery_token_hash=? WHERE id=?').bind(await sha256('b'.repeat(64)), a.id).run()
     return login
   } }
   app = createApp({ ...sample, plugins: sample.plugins!.map(p => p.name === 'local-auth' ? wrapped : p) }, runtime())
@@ -265,4 +266,16 @@ it('unrelated recipients retain separate rate limits during invitation mailbox p
     const response = await anonymous('/invitations/resolve', { token: value.token }, { 'CF-Connecting-IP': `198.20.1.${index}` })
     expect(response.status, `recipient ${index}: ${await response.clone().text()}`).toBe(200)
   }
+})
+
+it('copy selector rotation during the acceptance commit preserves the delivered credential', async () => {
+  const a = await invite()
+  await complete()
+  const original = D1AtomicStore.prototype.run
+  vi.spyOn(D1AtomicStore.prototype, 'run').mockImplementationOnce(async function(this: D1AtomicStore, plan) {
+    await env.DB.prepare('UPDATE invitations SET token_hash=? WHERE id=?').bind(await sha256('b'.repeat(64)), a.id).run()
+    return original.call(this, plan)
+  })
+  expect((await call('/invitations/accept', { token: a.token })).status).toBe(201)
+  expect(await env.DB.prepare('SELECT accepted_user_id FROM invitations WHERE id=?').bind(a.id).first('accepted_user_id')).toBe('owner-b')
 })

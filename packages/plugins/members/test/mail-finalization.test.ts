@@ -1,82 +1,118 @@
+import { sha256 } from '@workbasehq/core/crypto'
 import { env } from 'cloudflare:workers'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import sample from '../../../core/test/fixtures/sample/config'
 import { createApp } from '@workbasehq/core/app'
 import { runtime, setup, request, json } from '@workbasehq/test-support/helpers'
+import { KernelRegistry } from '@workbasehq/core/kernel/registry'
 import { invitationMailRenderer } from '../src/mail'
-import { renderInvitationEmail } from '../src/emails/invitation-email'
-import { invitationMailToken, invitationTokenSchema, hasInvitationMailboxProof } from '../src/invitation-token'
+import { buildInvitationAcceptUrl, verifyInvitationAcceptUrl, InvitationLinkError } from '../src/invitation-url'
+import * as tokens from '../src/invitation-token'
+import { hasInvitationMailboxProof } from '../src/invitation-token'
 
 beforeEach(async () => { await setup() })
 afterEach(() => vi.restoreAllMocks())
 const escape = (v: string) => v.replaceAll('&', '&amp;')
 const cases = (['en', 'cs'] as const).flatMap(locale => (['invite', 'reminder'] as const).flatMap(kind =>
-  (['unsigned', 'signed', 'rotated'] as const).flatMap(tokenKind => [false, true].map(amp => ({ locale, kind, tokenKind, amp })))))
-it.each(cases)('legitimate payload $locale $kind $tokenKind amp=$amp retries and sends once', async ({ locale, kind, tokenKind, amp }) => {
+  [false, true].map(rotated => ({ locale, kind, rotated }))))
+it.each(cases)('stored inputs $locale $kind rotated=$rotated re-render with current proof and send once', async ({ locale, kind, rotated }) => {
   const config = { ...sample, locale }
-  const created = await json(await request(createApp(config, runtime()), '/orgs/org-a/invitations', 'POST', { email: 'legacy@example.test', role: 'viewer' }))
-  expect(created.delivery).toMatchObject({ status: 'queued', attempts: 0 })
-  const row = (await env.DB.prepare('SELECT * FROM email_outbox').first<{ id: string }>())!
-  const oldEnv = runtime()
-  const selector = new URL(created.accept_url).searchParams.get('token')!
-  const token = tokenKind === 'unsigned' ? selector : await invitationMailToken(oldEnv, selector)
-  expect(invitationTokenSchema.safeParse(token).success).toBe(true)
-  const link = new URL(created.accept_url)
-  link.searchParams.set('token', token)
-  if (amp) { link.searchParams.set('source', 'email'); link.searchParams.set('label', 'A & B') }
-  const rendered = renderInvitationEmail({ language: locale, kind, inviterDisplayName: 'Alex & Al', organizationName: 'Team & Co', roleLabel: 'Viewer & reviewer', timeZone: 'Europe/Prague', expiresAt: new Date(created.expires_at), acceptUrl: link.href, configuredOrigin: 'http://localhost', allowLocalHttp: true })
-  await env.DB.prepare('UPDATE email_outbox SET body=?,delivery_text=?,delivery_html=? WHERE id=?').bind(`Accept: ${link.href}`, rendered.text, rendered.html, row.id).run()
+  const created = await json(await request(createApp(config, runtime()), '/orgs/org-a/invitations', 'POST', { email: 'inputs@example.test', role: 'viewer' }))
+  const row = (await env.DB.prepare('SELECT id,body FROM email_outbox').first<{ id: string; body: string }>())!
+  const inputs = JSON.parse(row.body)
+  inputs.template = { ...inputs.template, kind, inviterDisplayName: 'Alex & Al', organizationName: 'Team & <a href="/invitations/accept">', roleLabel: 'Viewer & reviewer' }
+  await env.DB.prepare('UPDATE email_outbox SET body=? WHERE id=?').bind(JSON.stringify(inputs), row.id).run()
   const send = vi.fn().mockResolvedValue(undefined)
   const settings = { ...runtime(), EMAIL: { send }, EMAIL_FROM: 'noreply@example.test' }
-  if (tokenKind === 'rotated') settings.IDENTITY.secret = 'synthetic-rotated-key-at-least-32-characters'
+  if (rotated) settings.IDENTITY.secret = 'synthetic-rotated-key-at-least-32-characters'
+  const acceptUrl = await buildInvitationAcceptUrl(settings, { selector: inputs.selector, purpose: 'email' })
   const app = createApp(config, settings)
   const retry = () => request(app, `/orgs/org-a/invitations/${created.id}/retry-delivery`, 'POST', {})
   expect(await json(await retry())).toMatchObject({ delivery: { status: 'delivered', attempts: 1, error: null } })
   expect(send).toHaveBeenCalledTimes(1)
-  const signed = new URL(link.href)
-  signed.searchParams.set('token', await invitationMailToken(settings, selector))
-  expect(await hasInvitationMailboxProof(settings, signed.searchParams.get('token')!)).toBe(true)
-  expect(send.mock.calls[0][0].text.split(signed.href)).toHaveLength(2)
-  expect(send.mock.calls[0][0].html.split(escape(signed.href))).toHaveLength(4)
+  const message = send.mock.calls[0][0]
+  expect(message.text.split(acceptUrl)).toHaveLength(2)
+  expect(message.html.split(escape(acceptUrl))).toHaveLength(4)
+  expect(new Set(message.text.match(/https?:\/\/[^\s]+/g))).toEqual(new Set([acceptUrl]))
+  expect(message.html).toContain('Team &amp; &lt;a href=&quot;/invitations/accept&quot;&gt;')
+  expect(message.text).toContain('Team & <a href="/invitations/accept">')
+  expect(message.html).toContain(`<html lang="${locale}">`)
+  expect(message.subject.startsWith(locale === 'cs' ? 'Připomenutí: ' : 'Reminder: ')).toBe(kind === 'reminder')
   expect(await json(await retry())).toMatchObject({ delivery: { status: 'delivered', attempts: 1 } })
   expect(send).toHaveBeenCalledTimes(1)
-  expect(await env.DB.prepare('SELECT sent_at FROM email_outbox WHERE id=?').bind(row.id).first('sent_at')).not.toBeNull()
 })
-it('failed finalization can be repaired and retried without duplicate native send', async () => {
-  const created = await json(await request(createApp(sample, runtime()), '/orgs/org-a/invitations', 'POST', { email: 'repair@example.test', role: 'viewer' }))
-  const row = (await env.DB.prepare('SELECT * FROM email_outbox').first<{ id: string; delivery_text: string }>())!
-  await env.DB.prepare('UPDATE email_outbox SET delivery_text=? WHERE id=?').bind('Unmatched legitimate template link', row.id).run()
+const legacyCases = (['en', 'cs'] as const).flatMap(locale => (['invite', 'reminder'] as const).flatMap(kind =>
+  (['unsigned', 'signed', 'rotated'] as const).flatMap(tokenKind => [false, true].map(amp => ({ locale, kind, tokenKind, amp })))))
+it.each(legacyCases)('legacy $locale $kind $tokenKind amp=$amp fails closed without template inputs', async ({ locale, tokenKind, amp }) => {
+  const config = { ...sample, locale }
+  const created = await json(await request(createApp(config, runtime()), '/orgs/org-a/invitations', 'POST', { email: 'legacy@example.test', role: 'viewer' }))
+  const row = (await env.DB.prepare('SELECT id,body FROM email_outbox').first<{ id: string; body: string }>())!
+  const inputs = JSON.parse(row.body)
+  const link = new URL(await buildInvitationAcceptUrl(runtime(), { selector: inputs.selector, purpose: tokenKind === 'unsigned' ? 'copy' : 'email' }))
+  if (amp) { link.searchParams.set('source', 'email'); link.searchParams.set('label', 'A & B') }
+  await env.DB.prepare('UPDATE email_outbox SET body=?,delivery_text=?,delivery_html=? WHERE id=?').bind(`Accept: ${link.href}`, link.href, `<a href="${escape(link.href)}">Accept</a>`, row.id).run()
   const send = vi.fn().mockResolvedValue(undefined)
   const settings = { ...runtime(), EMAIL: { send }, EMAIL_FROM: 'noreply@example.test' }
-  const app = createApp(sample, settings)
+  if (tokenKind === 'rotated') settings.IDENTITY.secret = 'synthetic-rotated-key-at-least-32-characters'
+  const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+  const app = createApp(config, settings)
+  expect(await json(await request(app, `/orgs/org-a/invitations/${created.id}/retry-delivery`, 'POST', {})))
+    .toMatchObject({ delivery: { status: 'failed', attempts: 1, sent_at: null, error: 'email_send_failed' } })
+  expect(send).not.toHaveBeenCalled()
+  expect(log).toHaveBeenCalledWith(JSON.stringify({ event: 'email_send_failed', outboxId: row.id, reason: 'invitation_mail_inputs_required' }))
+})
+it('invalid inputs can be repaired and retried with exactly one native send', async () => {
+  const created = await json(await request(createApp(sample, runtime()), '/orgs/org-a/invitations', 'POST', { email: 'repair@example.test', role: 'viewer' }))
+  const row = (await env.DB.prepare('SELECT id,body FROM email_outbox').first<{ id: string; body: string }>())!
+  await env.DB.prepare('UPDATE email_outbox SET body=? WHERE id=?').bind('{}', row.id).run()
+  const send = vi.fn().mockResolvedValue(undefined)
+  const app = createApp(sample, { ...runtime(), EMAIL: { send }, EMAIL_FROM: 'noreply@example.test' })
   const retry = () => request(app, `/orgs/org-a/invitations/${created.id}/retry-delivery`, 'POST', {})
-  expect(await json(await retry())).toMatchObject({ delivery: { status: 'failed', attempts: 1, sent_at: null, error: 'email_send_failed' } })
+  for (const attempts of [1, 2]) expect(await json(await retry())).toMatchObject({ delivery: { status: 'failed', attempts, sent_at: null, error: 'email_send_failed' } })
   expect(send).not.toHaveBeenCalled()
-  expect(await json(await retry())).toMatchObject({ delivery: { status: 'failed', attempts: 2, sent_at: null, error: 'email_send_failed' } })
-  expect(send).not.toHaveBeenCalled()
-  await env.DB.prepare('UPDATE email_outbox SET delivery_text=? WHERE id=?').bind(row.delivery_text, row.id).run()
-  expect(await json(await retry())).toMatchObject({ delivery: { status: 'delivered', attempts: 3, error: null } })
-  expect(send).toHaveBeenCalledTimes(1)
+  await env.DB.prepare('UPDATE email_outbox SET body=? WHERE id=?').bind(row.body, row.id).run()
+  expect(await json(await retry())).toMatchObject({ delivery: { status: 'delivered', attempts: 3 } })
   expect(await json(await retry())).toMatchObject({ delivery: { status: 'delivered', attempts: 3 } })
   expect(send).toHaveBeenCalledTimes(1)
 })
-it('missing signing key fails closed when generated proof does not verify', async () => {
-  const settings = { ...runtime(), IDENTITY: { ...runtime().IDENTITY, secret: '' } }
-  const link = `http://localhost/invitations/accept?token=${'a'.repeat(64)}`
-  await expect(invitationMailRenderer(settings)({ body: `Accept: ${link}`, text: link, html: link })).rejects.toThrow('invitation_mail_finalization_failed')
-})
-it.each(['plain', 'percent', 'decimal-entity', 'hex-entity'])('residual unsigned %s copies fail closed before transport', async mode => {
-  const created = await json(await request(createApp(sample, runtime()), '/orgs/org-a/invitations', 'POST', { email: 'residual@example.test', role: 'viewer' }))
-  const row = (await env.DB.prepare('SELECT * FROM email_outbox').first<{ id: string; body: string; delivery_html: string }>())!
-  const link = row.body.slice(8)
-  const token = new URL(link).searchParams.get('token')!
-  const encoded = [...token].map(ch => mode === 'plain' ? ch : mode === 'percent' ? `%${ch.charCodeAt(0).toString(16)}` : mode === 'decimal-entity' ? `&#${ch.charCodeAt(0)};` : `&#x${ch.charCodeAt(0).toString(16)};`).join('')
-  await env.DB.prepare('UPDATE email_outbox SET delivery_html=? WHERE id=?').bind(row.delivery_html+`<a href="${link.replace(token, encoded)}">extra</a>`, row.id).run()
+it.each(['missing', 'invalid', 'non-verifying', 'wrong-origin', 'wrong-selector', 'missing-key'] as const)('%s fails before native send', async mode => {
+  const created = await json(await request(createApp(sample, runtime()), '/orgs/org-a/invitations', 'POST', { email: 'fail@example.test', role: 'viewer' }))
+  const row = (await env.DB.prepare('SELECT id,body FROM email_outbox').first<{ id: string; body: string }>())!
+  const inputs = JSON.parse(row.body)
+  if (mode === 'wrong-origin') inputs.origin = 'https://foreign.example.test'
+  if (mode === 'wrong-selector') inputs.selector = 'a'.repeat(64)
+  await env.DB.prepare('UPDATE email_outbox SET body=? WHERE id=?').bind(JSON.stringify(inputs), row.id).run()
+  if (['missing', 'invalid', 'non-verifying'].includes(mode)) vi.spyOn(tokens, 'invitationMailToken').mockResolvedValue(
+    mode === 'missing' ? inputs.selector : mode === 'invalid' ? `${inputs.selector}.invalid` : `${inputs.selector}.${'0'.repeat(64)}`)
   const send = vi.fn().mockResolvedValue(undefined)
-  const app = createApp(sample, { ...runtime(), EMAIL: { send }, EMAIL_FROM: 'noreply@example.test' })
-  expect(await json(await request(app, `/orgs/org-a/invitations/${created.id}/retry-delivery`, 'POST', {}))).toMatchObject({ delivery: { status: 'failed', attempts: 1, sent_at: null, error: 'email_send_failed' } })
+  const settings = { ...runtime(), EMAIL: { send }, EMAIL_FROM: 'noreply@example.test' }
+  if (mode === 'missing-key') settings.IDENTITY.secret = ''
+  if (mode === 'missing-key') {
+    const kernel = new KernelRegistry(sample)
+    await kernel.mailOutbox.retry(settings, kernel.config, row.id, async () => true, invitationMailRenderer(settings, await sha256(inputs.selector)))
+    expect(await kernel.mailOutbox.status(env.DB, row.id)).toMatchObject({ delivery_status: 'failed', attempts: 1, sent_at: null, last_error: 'email_send_failed' })
+  } else {
+    const app = createApp(sample, settings)
+    expect(await json(await request(app, `/orgs/org-a/invitations/${created.id}/retry-delivery`, 'POST', {})))
+      .toMatchObject({ delivery: { status: 'failed', attempts: 1, sent_at: null, error: 'email_send_failed' } })
+  }
   expect(send).not.toHaveBeenCalled()
 })
+it('URL verifier rejects wrong origin, path and proof with a typed error', async () => {
+  const settings = runtime()
+  const valid = await buildInvitationAcceptUrl(settings, { selector: 'a'.repeat(64), purpose: 'email' })
+  for (const value of [valid.replace('localhost', 'foreign.example.test'), valid.replace('/invitations/accept', '/other'), valid.split('.')[0], valid + '&token=duplicate', valid + '#fragment']) {
+    await expect(verifyInvitationAcceptUrl(settings, value, 'email')).rejects.toBeInstanceOf(InvitationLinkError)
+  }
+  expect(await verifyInvitationAcceptUrl(settings, valid, 'email')).toBe(valid)
+})
+it('AUTH_BASE_URL is the exact configured origin even when IDENTITY differs', async () => {
+  const settings = { ...runtime(), AUTH_BASE_URL: 'https://console.example.test', STAGE: 'production' }
+  const value = await buildInvitationAcceptUrl(settings, { selector: 'a'.repeat(64), purpose: 'email' })
+  expect(new URL(value).origin).toBe(settings.AUTH_BASE_URL)
+  await expect(buildInvitationAcceptUrl({ ...settings, AUTH_BASE_URL: settings.AUTH_BASE_URL + '/path' }, { selector: 'a'.repeat(64), purpose: 'email' })).rejects.toBeInstanceOf(InvitationLinkError)
+})
+
 // Review3 METADATA_REPRO: a path in display text is not an invitation link.
 it('Members invitation delivers with acceptance path in organization display text and retry does not resend', async () => {
   const send = vi.fn().mockResolvedValue(undefined)
@@ -98,33 +134,4 @@ it('Members invitation delivers with acceptance path in organization display tex
   expect(await json(await request(app, `/orgs/org-a/invitations/${created.id}/retry-delivery`, 'POST', {})))
     .toMatchObject({ delivery: { status: 'delivered', attempts: 1, error: null } })
   expect(send).toHaveBeenCalledTimes(1)
-})
-
-it.each([
-  '/invitations/accept',
-  `/invitations/accept?token=${'b'.repeat(64)}`,
-  `?token=${'b'.repeat(64)}`,
-  `/invitations/accept?token=${'b'.repeat(64)}.${'c'.repeat(64)}`,
-])('residual unsigned or unverified href %s fails closed', async href => {
-  const app = createApp(sample, runtime())
-  const created = await json(await request(app, '/orgs/org-a/invitations', 'POST', { email: 'unsigned@example.test', role: 'viewer' }))
-  const row = (await env.DB.prepare('SELECT id,delivery_html FROM email_outbox').first<{ id: string; delivery_html: string }>())!
-  await env.DB.prepare('UPDATE email_outbox SET delivery_html=? WHERE id=?').bind(row.delivery_html + `<a href="${href}">extra</a>`, row.id).run()
-  const send = vi.fn().mockResolvedValue(undefined)
-  const deliveryApp = createApp(sample, { ...runtime(), EMAIL: { send }, EMAIL_FROM: 'noreply@example.test' })
-  expect(await json(await request(deliveryApp, `/orgs/org-a/invitations/${created.id}/retry-delivery`, 'POST', {})))
-    .toMatchObject({ delivery: { status: 'failed', attempts: 1, sent_at: null, error: 'email_send_failed' } })
-  expect(send).not.toHaveBeenCalled()
-})
-
-it('escaped display metadata resembling a relative href is still display text', async () => {
-  const link = `http://localhost/invitations/accept?token=${'a'.repeat(64)}`
-  const rendered = renderInvitationEmail({ language: 'en', kind: 'invite',
-    inviterDisplayName: 'Alex /invitations/accept', organizationName: 'Team <a href="/invitations/accept">',
-    roleLabel: 'Viewer /invitations/accept', timeZone: 'Europe/Prague', expiresAt: new Date('2099-01-01'),
-    acceptUrl: link, configuredOrigin: 'http://localhost', allowLocalHttp: true,
-  })
-  const finalized = await invitationMailRenderer(runtime())({ body: `Accept: ${link}`, text: rendered.text, html: rendered.html })
-  expect(finalized.html).toContain('Team &lt;a href=&quot;/invitations/accept&quot;&gt;')
-  expect(finalized.text).toContain('Team <a href="/invitations/accept">')
 })
