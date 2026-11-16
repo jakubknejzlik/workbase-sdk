@@ -29,15 +29,11 @@ it.each([
   await bootstrapInstance(root, { id: 'demo', target: 'cloudflare-github' })
   await symlink(resolve('node_modules'), join(root, 'node_modules'))
   await runSchemaCli('plan', ['--root', root, '--init'])
+  await runOpenApiCli(['--root', root, '--write'])
   if (settings.defaultLanguage === 'en') {
     // Cover an existing bound OpenAPI artifact and independently authored UI hints.
-    await runOpenApiCli(['--root', root, '--write'])
     const source = (await readFile(join(root, 'config.ts'), 'utf8'))
-      .replace('defineConfig, bindSchemaLock', 'defineConfig, bindSchemaLock, bindOpenApi')
-      .replace("import lock from './schema.lock.json'", "import lock from './schema.lock.json'\nimport spec from './openapi.json'")
-      .replace('export default bindSchemaLock(', 'export default bindOpenApi(bindSchemaLock(')
       .replace('entities: { worker }, access,', "entities: { worker }, access, ui: { entities: { worker: { list: { columns: ['name'] } } } },")
-      .replace('}), lock)', '}), lock), spec)')
     await writeFile(join(root, 'config.ts'), source)
     await runOpenApiCli(['--root', root, '--write'])
   }
