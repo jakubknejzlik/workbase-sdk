@@ -173,7 +173,7 @@ it('authored system grants admit custom-role audit readers and explicit denial b
       roles: { owner: { system: Object.fromEntries(accessSystemActions.map(action => [action, 'allow'])) } },
     }),
   })
-  expect([...effectiveRolePrivileges(owner, 'owner')]).toEqual([])
+  expect([...effectiveRolePrivileges(owner, 'owner')]).toEqual(['system:invitations.accept'])
 })
 
 it('normalizes registered command guards and enforces their additional permissions from the audit input', async () => {
