@@ -78,7 +78,7 @@ export function baselineContract(database: () => BaselineDatabase) {
     expect(files[0].sql).not.toMatch(/CREATE TABLE (?:atomic_assert|organizations|users|instance_meta)|create table "user"/i)
     expect(await migrateInstance(query, files, kernel)).toMatchObject({ applied: 1, total: 1 })
     expect(plan(null, kernel.config).sql).toBe(files[0].sql)
-    expect((await db.prepare('SELECT namespace FROM _plugin_migrations ORDER BY rowid').all()).results.map(row => row.namespace)).toEqual(['workbase-sdk', 'workbase-sdk', 'identity', 'members', 'members', 'members', 'members'])
+    expect((await db.prepare('SELECT namespace FROM _plugin_migrations ORDER BY rowid').all()).results.map(row => row.namespace)).toEqual(['workbase-sdk', 'workbase-sdk', 'identity', 'members', 'members', 'members', 'members', 'members'])
     const sdk = calls.findIndex(sql => sql.includes('CREATE TABLE atomic_assert'))
     const plugin = calls.findIndex(sql => sql.includes('ALTER TABLE memberships ADD COLUMN scope_id'))
     const domain = calls.findIndex(sql => sql.includes('CREATE TABLE "worker"'))
@@ -205,7 +205,7 @@ export function baselineContract(database: () => BaselineDatabase) {
     expect(await db.prepare("SELECT name FROM sqlite_master WHERE name='worker'").first()).toBeNull()
     expect((await db.prepare('SELECT * FROM _migrations').all()).results).toEqual([])
     expect((await db.prepare('SELECT * FROM instance_meta').all()).results).toEqual([])
-    expect(await db.prepare("SELECT count(*) n FROM _plugin_migrations WHERE namespace='members'").first('n')).toBe(4)
+    expect(await db.prepare("SELECT count(*) n FROM _plugin_migrations WHERE namespace='members'").first('n')).toBe(5)
     await expect(migrateInstance(query, files, kernel)).resolves.toMatchObject({ applied: 1 })
   })
 

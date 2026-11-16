@@ -1,3 +1,4 @@
+import { invitationMailbox } from './helpers/invitation-mailbox'
 import { KernelRegistry } from '../src/kernel/registry'
 import { env } from 'cloudflare:workers'
 import { beforeEach, expect, it } from 'vitest'
@@ -13,8 +14,9 @@ import { createIdentityAuth, SESSION_COOKIE } from '@workbasehq/plugins/local-au
 import { setup, runtime, json, request } from '@workbasehq/test-support/helpers'
 import { sha256 } from '../src/crypto'
 import { accountScope, requireScope, requireVerifiedSession, resolveActor } from '../src/authorization'
+let mailbox: ReturnType<typeof invitationMailbox>
 let app: ReturnType<typeof createApp>
-const settings = () => ({ ...runtime(), IDENTITY: { ...runtime().IDENTITY, localPassword: false } })
+const settings = () => ({ ...runtime(), ...mailbox.delivery, IDENTITY: { ...runtime().IDENTITY, localPassword: false } })
 let ip = 0
 function call(path: string, body?: unknown, token?: string, cookie?: string) {
   return app.request(`http://localhost${path}`, { method: body === undefined ? 'GET' : 'POST', headers: {
@@ -36,7 +38,7 @@ async function magic(email = 'new@example.test') {
   expect(bearer).toBeTruthy()
   return { bearer, cookie: cookie.split(';')[0], response, url: url! }
 }
-beforeEach(async () => { await setup(); ip++; app = createApp(sample, settings()) })
+beforeEach(async () => { mailbox = invitationMailbox(); await setup(); ip++; app = createApp(sample, settings()) })
 it('BA magic link verifies email, creates opaque DB session, supports host cookie/Bearer /me and recovery', async () => {
   const first = await magic()
   const me = await json(await call('/me', undefined, first.bearer))
@@ -90,11 +92,10 @@ it('BA rejects hostile Origins and callback URLs and disables the password surfa
   expect((await call('/auth/link-social', { provider: 'oidc' })).status).toBe(404)
 })
 it('BA invitation acceptance requires current verified email and retains existing email binding', async () => {
-  const invitation = await request(createApp(sample, runtime()), '/orgs/org-a/invitations', 'POST', { email: 'invitee@example.test', role: 'viewer' })
+  const invitation = await request(createApp(sample, { ...runtime(), ...mailbox.delivery }), '/orgs/org-a/invitations', 'POST', { email: 'invitee@example.test', role: 'viewer' })
   expect(invitation.status).toBe(201)
   const fresh = await magic('invitee@example.test')
-  const body = await env.DB.prepare("SELECT body FROM email_outbox WHERE subject<>'Workbase sign-in'").first<string>('body')
-  const token = new URL(body!.replace('Accept: ', '')).searchParams.get('token')!
+  const token = mailbox.acceptUrl().searchParams.get('token')!
   const me = await json(await call('/me', undefined, fresh.bearer))
   await env.DB.prepare('UPDATE "user" SET "emailVerified"=0 WHERE id=?').bind(me.user.id).run()
   expect((await call('/invitations/accept', { token }, fresh.bearer)).status).toBe(403)
@@ -121,15 +122,17 @@ it('BA verified lookup and account/org scopes reject a session expired after res
 
 it.each(['object', 'flat'] as const)('BA invitation links use configured %s identity origin despite spoofed request host', async form => {
   const { bearer } = await magic('owner.a@example.test')
-  if (form === 'flat') app = createApp(sample, { ...runtime(), IDENTITY: undefined, AUTH_BASE_URL: 'http://localhost', BETTER_AUTH_SECRET: runtime().IDENTITY.secret })
+  if (form === 'flat') app = createApp(sample, { ...runtime(), ...mailbox.delivery, IDENTITY: undefined, AUTH_BASE_URL: 'http://localhost', BETTER_AUTH_SECRET: runtime().IDENTITY.secret })
   const response = await app.request('https://attacker.example/orgs/org-a/invitations', {
     method: 'POST', headers: { Authorization: `Bearer ${bearer}`, Host: 'attacker.example', 'X-Organization-Id': 'org-a', 'Content-Type': 'application/json' },
     body: JSON.stringify({ email: 'safe-invite@example.test', role: 'viewer' }),
   })
   expect(response.status).toBe(201)
-  const mail = await env.DB.prepare('SELECT body FROM email_outbox WHERE recipient=?').bind('safe-invite@example.test').first<string>('body')
-  expect(mail).toMatch(/^Accept: http:\/\/localhost\/invitations\/accept\?token=/)
-  expect(mail).not.toContain('attacker.example')
+  const link = mailbox.acceptUrl()
+  expect(link.origin).toBe('http://localhost')
+  expect(link.pathname).toBe('/invitations/accept')
+  expect([...link.searchParams.keys()]).toEqual(['token'])
+
 })
 
 it('G1 a rejecting login hook denies a live cookie on get-session without leaking identity or token', async () => {

@@ -5,6 +5,7 @@ import { CORE_VERSION, defineInstance } from '../src/config'
 import { KernelRegistry } from '../src/kernel/registry'
 import { migrateD1, type D1Query } from '../src/infra/d1-migrations'
 import { migrateInstance } from '../src/infra/instance-migrations'
+import { initialSchema } from '../src/migrations/schema'
 import { sha256 } from '../src/crypto'
 import { pluginMigrationStatus } from '../src/kernel/migrations'
 import { hashMigrationRows, schemaStatus } from '../src/schema-compatibility'
@@ -19,7 +20,7 @@ const query: D1Query = async sql => {
   return [{ success: true }]
 }
 async function fixture() {
-  const sql = "CREATE TABLE instance_meta (revision INTEGER PRIMARY KEY, core_version TEXT NOT NULL, applied_at TEXT NOT NULL); INSERT INTO instance_meta VALUES (1, '0.1.0', '2000-01-01'), (3, '0.1.0', '2000-01-01');"
+  const sql = initialSchema(config) + "DELETE FROM instance_meta; INSERT INTO instance_meta VALUES (1, '0.1.0', '2000-01-01'), (3, '0.1.0', '2000-01-01');"
   const files = [{ filename: '0001_initial.sql', sql, checksum: await sha256(sql) }]
   const kernel = new KernelRegistry(config)
   await migrateD1(query, files)
