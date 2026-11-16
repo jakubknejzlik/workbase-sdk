@@ -118,6 +118,11 @@ export class KernelRegistry {
     if (!port) throw new ApiError(503, 'mail_outbox_required')
     return port
   }
+  get invitationMail() {
+    const port = this.providers.get('members')?.[0]?.invitationMail
+    if (!port) throw new ApiError(503, 'invitation_mail_required')
+    return port
+  }
   get audit() { return this.providers.get('audit')?.[0]?.audit }
   /** Explicit operator action; never run migrations in a request or on uninstall. */
   applyMigrations(db: D1Database) { return applyPluginMigrations(db, this.plugins, this.config) }

@@ -1,13 +1,14 @@
 import { registerTempDir, retainTempDir, cleanupTempDir } from '../../../../scripts/lib/test-temp-dir.mjs'
 import { spawn, execFileSync, type ChildProcess } from 'node:child_process'
 import { mkdtempSync, openSync, writeFileSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { resolve, join } from 'node:path'
+import { tmpdir } from 'node:os'
 import { assertPortsFree } from '../harness-ports'
 export const port = Number(process.env.W29_PORT ?? 19429)
 export const origin = `http://127.0.0.1:${port}`
 export default async function setup(fixture = { worker: 'worker.ts', seed: 'seed.ts' }) {
   await assertPortsFree([port])
-  const directory = registerTempDir(mkdtempSync('/tmp/codex/w29-runtime-'))
+  const directory = registerTempDir(mkdtempSync(join(tmpdir(), 'w29-runtime-')))
   try {
     const configPath = resolve(directory, 'wrangler.json')
     const root = resolve(import.meta.dirname, '../../../..')

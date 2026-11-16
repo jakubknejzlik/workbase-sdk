@@ -3,6 +3,7 @@ import { migrations } from './migrations/index'
 import { z } from 'zod'
 import { builtinPlugin } from '@workbasehq/core/kernel/builtin-source'
 import type { WorkbasePlugin } from '@workbasehq/core/kernel/plugin'
+import { invitationMail, invitationDeliveryStatus } from './mail'
 import { memberRoutes } from './routes'
 import { recipientPendingIndexSQL, recipientExpiryTriggerSQL } from './migrations/003-recipients'
 import { membersConsoleContribution } from './console-contribution'
@@ -25,6 +26,7 @@ export const members: WorkbasePlugin = builtinPlugin({
   },
   policyInConfig: true,
   tableFilter: (_entity, scope) => ({ kind: 'where', predicate: { organization_id: { eq: scope.organizationId } } }),
+  invitationMail: { prepare: invitationMail, status: invitationDeliveryStatus },
   routes: memberRoutes,
 })
 

@@ -1,3 +1,4 @@
+import type { InvitationMailOptions } from '../../../core/src/kernel/invitation-mail-port'
 import { enumLabel } from '../../../core/src/query/search'
 import type { InstanceConfig } from '@workbasehq/core/config'
 import type { RuntimeEnv } from '../../../core/src/types'
@@ -32,7 +33,7 @@ export async function invitationDeliveryEligible(db: D1Database, id: string, org
 
 /** Members owns the P10 template and credential eligibility; the shared port owns transport. */
 export async function invitationMail(env: RuntimeEnv, config: InstanceConfig, id: string, organizationId: string, recipient: string, link: string,
-  options?: { inviterId: string; role: string; expiresAt: string; kind: 'invite' | 'reminder' }) {
+  options?: InvitationMailOptions) {
   const outbox = kernelFor(config).mailOutbox
   const recipientLink = new URL(link)
   const selector = invitationSelector(recipientLink.searchParams.get('token')!)
@@ -56,9 +57,11 @@ export async function invitationMail(env: RuntimeEnv, config: InstanceConfig, id
         text: rendered.text, html: rendered.html, senderName,
       }, 'changes()=1')
     },
-    deliver: () => outbox.deliver(env, config, id, async () => !!await env.DB.prepare(`SELECT id FROM invitations WHERE organization_id=? AND token_hash=? AND delivery_outbox_id=?
+    deliver: () => outbox.deliver(env, config, id, async () => (options?.invitationId
+      ? await invitationDeliveryEligible(env.DB, options.invitationId, organizationId, id, hash)
+      : !!await env.DB.prepare(`SELECT id FROM invitations WHERE organization_id=? AND token_hash=? AND delivery_outbox_id=?
       AND accepted_at IS NULL AND revoked_at IS NULL AND declined_at IS NULL AND expired_at IS NULL AND expires_at>?`)
-      .bind(organizationId, hash, id, new Date().toISOString()).first()),
+      .bind(organizationId, hash, id, new Date().toISOString()).first()) && (!options?.eligible || await options.eligible())),
   }
 }
 

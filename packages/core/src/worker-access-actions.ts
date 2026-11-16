@@ -1,3 +1,4 @@
+import { registerPostCommit } from './execution/post-commit'
 import { z } from 'zod'
 import type { InstanceConfig } from './config'
 import type { RuntimeEnv } from './types'
@@ -41,7 +42,7 @@ export function workerAccessCommands(config: InstanceConfig, env?: RuntimeEnv): 
         }] }], event: { operation: 'invitation.revoked', entity, entityId: input.id }, result: { status: 200, body: { id: input.id } } }
       },
     }, 'invitations.revoke')
-    const invite = registerUserLinkAction({ name: accountCommand(entity, 'invite'), permission: { entity, operation: 'create' }, input: z.strictObject({ id, email: z.string().trim().pipe(z.email()).transform(email => email.toLowerCase()) }),
+    const invite = registerPostCommit(registerUserLinkAction({ name: accountCommand(entity, 'invite'), permission: { entity, operation: 'create' }, input: z.strictObject({ id, email: z.string().trim().pipe(z.email()).transform(email => email.toLowerCase()) }),
       async prepare(ctx, input) {
         // Resolve credentials and outbox payload privately, never into config/locks.
         const configured = env?.IDENTITY?.baseURL ?? env?.AUTH_BASE_URL
@@ -50,10 +51,13 @@ export function workerAccessCommands(config: InstanceConfig, env?: RuntimeEnv): 
         const token = randomToken(), invitationId = ulid(), outboxId = ulid()
         const expires = new Date(Date.now() + 7 * 86400000).toISOString()
         const url = new URL('/invitations/accept', configured); url.searchParams.set('token', token)
-        const mail = kernelFor(ctx.config).mailOutbox.intent({ id: outboxId, organizationId: ctx.scope.organizationId, recipient: input.email,
-          subject: 'Workspace invitation', body: `Accept: ${url.href}`, text: `Accept: ${url.href}`, html: `<a href="${url.href}">Accept</a>`, expiresAt: expires,
-        }, 'changes()=1')
-        return { role, invitationId, outboxId, expires, hash: await sha256(token), url: url.href, mail }
+        const port = kernelFor(ctx.config).invitationMail
+        const guard = rowInvitationGuard(ctx.config, ctx.scope, { entity, row: input.id })
+        const mail = await port.prepare(env!, ctx.config, outboxId, ctx.scope.organizationId, input.email, url.href, {
+          inviterId: actorAccountId(ctx.scope), role, expiresAt: expires, kind: 'invite', invitationId,
+          eligible: async () => !!await env!.DB.prepare(`SELECT 1 WHERE ${guard.sql}`).bind(...guard.values).first(),
+        })
+        return { role, invitationId, outboxId, expires, hash: await sha256(token), url: url.href, mail, deliveryStatus: () => port.status(env!, ctx.config, outboxId) }
       },
       plan(ctx, input) {
         const p = ctx.prepared
@@ -63,9 +67,12 @@ export function workerAccessCommands(config: InstanceConfig, env?: RuntimeEnv): 
           // its partial unique index is checked, within this same D1 batch.
           sql: `INSERT INTO invitations (id,organization_id,email,role,token_hash,expires_at,inviter_id,created_at,delivery_outbox_id,target_entity,target_row) SELECT ?,?,?,?,?,?,?,?,?,?,? WHERE ${guard.sql}`,
           bindings: [p.invitationId, ctx.scope.organizationId, input.email, p.role, p.hash, p.expires, actorAccountId(ctx.scope), ctx.now, p.outboxId, entity, input.id, ...guard.values], expectRows: 1,
-        }, p.mail] }], event: { operation: 'invitation.created', entity: 'invitations', entityId: p.invitationId },
+        }, p.mail.intent(p.expires)] }], event: { operation: 'invitation.created', entity: 'invitations', entityId: p.invitationId },
           result: { status: 201, body: { invitation_id: p.invitationId, expires_at: p.expires, accept_url: p.url } } }
       },
+    }), async (prepared, result) => {
+      await prepared.mail.deliver()
+      return { ...result, body: { ...result.body, delivery: await prepared.deliveryStatus() } }
     })
     return [invite, cancel, adapt(link, 'link_account'), adapt(unlink, 'unlink_account')]
   })

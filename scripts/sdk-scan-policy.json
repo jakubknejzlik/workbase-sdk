@@ -736,7 +736,7 @@
       "value": "00000000000000000000000000000029",
       "reason": "Synthetic local-only database identifier in neutral runtime/template fixtures; not an account ID.",
       "line": "      kv_namespaces: [{ binding: 'AUDIT_KV', id: '00000000000000000000000000000029' }],",
-      "lineNumber": 16
+      "lineNumber": 17
     },
     {
       "path": "packages/mcp/templates/standalone/wrangler.jsonc",
