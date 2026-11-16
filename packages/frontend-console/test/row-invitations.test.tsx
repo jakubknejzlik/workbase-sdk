@@ -26,7 +26,7 @@ async function mount(state: string, canInvite = true) {
 }
 it('176 rendered row state invites an email without submitting the protected link or caching a credential', async () => {
   const { write, client, user } = await mount('no_account')
-  await screen.findByText('Bez účtu')
+  await screen.findByText('Bez přístupu')
   await user.click(screen.getByRole('button', { name: 'Pozvat do aplikace' }))
   await user.type(screen.getByLabelText('E-mail'), 'one@example.test')
   await user.click(screen.getAllByRole('button', { name: 'Pozvat do aplikace' }).at(-1)!)
@@ -36,7 +36,7 @@ it('176 rendered row state invites an email without submitting the protected lin
 })
 it.each(['no_account', 'invited', 'expired', 'signed_in'])('176 renders Czech state %s and hides invitation actions without live authority', async state => {
   await mount(state, false)
-  await screen.findByText({ no_account: 'Bez účtu', invited: 'Pozváno', expired: 'Vypršela', signed_in: 'Přihlášen' }[state]!)
+  await screen.findByText({ no_account: 'Bez přístupu', invited: 'Pozváno', expired: 'Vypršela', signed_in: 'Přihlášen' }[state]!)
   expect(screen.queryByRole('button', { name: 'Pozvat do aplikace' })).toBeNull()
   expect(screen.queryByRole('button', { name: 'Znovu odeslat' })).toBeNull()
   expect(screen.queryByRole('button', { name: 'Kopírovat odkaz' })).toBeNull()
@@ -47,7 +47,7 @@ it('176 cancellation refreshes the row so another email can be invited', async (
   await user.click(screen.getByRole('button', { name: 'Zrušit pozvánku' }))
   await user.click(screen.getAllByRole('button', { name: 'Zrušit pozvánku' }).at(-1)!)
   await waitFor(() => expect(write).toHaveBeenCalledWith('/orgs/org/invitations/pending', 'DELETE'))
-  await screen.findByText('Bez účtu')
+  await screen.findByText('Bez přístupu')
   expect(screen.getByRole('button', { name: 'Pozvat do aplikace' })).toBeTruthy()
 })
 

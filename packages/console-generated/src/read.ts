@@ -1,3 +1,4 @@
+import { accountLinkField, accountLinkRelation } from './account-link'
 import { availableCalendar } from './calendar-model'
 import { detailPlan, detailReadableField } from './detail-plan'
 import type { ListHints } from './list-model'
@@ -5,10 +6,10 @@ import type { ConsoleEntityDisplay } from '../../plugins/console/src/contract'
 export interface Field { type: string; operators?: string[]; values?: string[]; entity?: string; required?: boolean; readOnly?: boolean; sensitive?: boolean; ui?: { hidden?: boolean; format?: 'identifier'; kind?: string; span?: string; section?: string; signedBy?: { field: string; negativeValue: string } } }
 export interface Relation { entity: string; field: string; cardinality: string; quantifiers?: string[]; through?: { entity: string; field: string; createCommand: string; deleteCommand: string } }
 export type DetailHints = NonNullable<ConsoleEntityDisplay['detail']>
-export interface Entity { rowInvitations?: boolean; views?: ConsoleEntityDisplay['views']; labelDependencies?: { entity: string; field: string }[]; form?: ConsoleEntityDisplay['form']; sections?: ConsoleEntityDisplay['sections']; detail?: DetailHints; lookup?: boolean; list?: ListHints; listLimit?: number; writeSchema?: Record<string, any>; updateSchema?: Record<string, any>; fields: Record<string, Field>; columns: string[]; listColumns?: string[]; relations: Record<string, Relation>; displayField?: string; routes: { list: string; detail: string } }
+export interface Entity { accountLink?: { field: string; entity: string }; rowAccess?: boolean; rowInvitations?: boolean; views?: ConsoleEntityDisplay['views']; labelDependencies?: { entity: string; field: string }[]; form?: ConsoleEntityDisplay['form']; sections?: ConsoleEntityDisplay['sections']; detail?: DetailHints; lookup?: boolean; list?: ListHints; listLimit?: number; writeSchema?: Record<string, any>; updateSchema?: Record<string, any>; fields: Record<string, Field>; columns: string[]; listColumns?: string[]; relations: Record<string, Relation>; displayField?: string; routes: { list: string; detail: string } }
 export interface Model { instance: string; revision: number; limits: { root: number; children: number; relations: number; exists: number; [key: string]: number }; entities: Record<string, Entity>; commands?: Command[]; pickerHints?: Record<string, Record<string, { wizard?: boolean; labelTemplate?: string }>> }
 export interface Command { name: string; ui?: { placement?: { entity: string; action: 'create' }; labelKey?: string; label?: string | { en: string; cs: string }; replacesCrud?: string }; permission: { entity: string; operation: string }; additionalPermissions?: { entity: string; operation: string }[]; inputSchema: Record<string, any> }
-export interface Capabilities { commands?: string[]; revision: number; organization?: { role: string }; entities: Record<string, { readable: string[]; writable: string[]; operations: string[]; displayField?: string }> }
+export interface Capabilities { resources?: Record<string, boolean>; commands?: string[]; revision: number; organization?: { role: string }; entities: Record<string, { readable: string[]; writable: string[]; operations: string[]; displayField?: string }> }
 export interface Selection { labels?: string[]; select: string[]; limit?: number; include?: Record<string, Selection> }
 export type RowAccessState = 'no_account' | 'invited' | 'expired' | 'signed_in'
 export interface ReadQuery extends Selection { rowAccess?: RowAccessState; contextList?: { entity: string; list: string; id: string }; search?: { text: string; fields: string[]; locale?: 'en' | 'cs' }; labelWhere?: Record<string, { contains: string; locale?: 'en' | 'cs' }>; entity: string; limit: number; where?: Record<string, unknown>; orderBy?: { field: string; dir: 'asc' | 'desc'; label?: boolean }[]; cursor?: string }
@@ -61,10 +62,10 @@ export function relationQuery(model: Model, entity: string, name: string, row: R
     where: { [many ? relation.field : 'id']: { eq: many ? row.id : row[relation.field] } }, orderBy: [order], ...(cursor ? { cursor } : {}) }
 }
 export function readQuery(model: Model, entity: string, caps: Capabilities, options: ReadOptions = {}): ReadQuery {
-  const definition = model.entities[entity]; const plan = options.id && options.purpose !== 'edit' ? detailPlan(model, entity, caps) : undefined; const select = plan?.select ?? projection(model, entity, caps); const include: Record<string, Selection> = {}
+  const definition = model.entities[entity]; const plan = options.id && options.purpose !== 'edit' ? detailPlan(model, entity, caps) : undefined; const select = plan?.select ?? projection(model, entity, caps).filter(field => !options.id || options.purpose === 'edit' || !accountLinkField(model, entity, field)); const include: Record<string, Selection> = {}
   for (const [name, relation] of (separateRelations(model) || options.id && (definition.detail || Object.values(definition.relations).some(relation => relation.through)) ? [] : Object.entries(definition.relations).slice(0, model.limits.relations))) {
     const target = caps.entities[relation.entity]; const fkEntity = relation.cardinality === '1:n' ? relation.entity : entity
-    if (relation.cardinality === '1:n' || relation.through || !target?.operations.includes('read') || !target.readable.includes('id') || !caps.entities[fkEntity]?.readable.includes(relation.field)) continue
+    if (options.id && options.purpose !== 'edit' && accountLinkRelation(model, entity, relation) || relation.cardinality === '1:n' || relation.through || !target?.operations.includes('read') || !target.readable.includes('id') || !caps.entities[fkEntity]?.readable.includes(relation.field)) continue
     const fields = projection(model, relation.entity, caps)
     const display = target.displayField ?? model.entities[relation.entity].displayField
     include[name] = { select: options.id ? fields : fields.filter(field => field === 'id' || field === display), limit: Math.min(10, model.limits.children) }

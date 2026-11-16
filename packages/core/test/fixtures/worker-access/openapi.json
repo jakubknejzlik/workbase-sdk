@@ -6596,6 +6596,17 @@
               ],
               "type": "string"
             }
+          },
+          {
+            "in": "query",
+            "name": "eligible",
+            "required": false,
+            "schema": {
+              "enum": [
+                "link_account"
+              ],
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -6611,6 +6622,9 @@
                           "items": {
                             "additionalProperties": false,
                             "properties": {
+                              "display_name": {
+                                "type": "string"
+                              },
                               "email": {
                                 "type": "string"
                               },
@@ -6622,6 +6636,7 @@
                               }
                             },
                             "required": [
+                              "display_name",
                               "email",
                               "role",
                               "user_id"

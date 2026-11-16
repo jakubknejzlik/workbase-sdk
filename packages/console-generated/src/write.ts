@@ -1,3 +1,4 @@
+import { isAccountAction } from './account-link'
 import { projection, visibleEntities, type Model, type Capabilities, type ReadQuery, type Command } from './read'
 import { formFieldOrder } from './hints'
 import { editableManyRelations, manyRelationSchema } from './many-to-many'
@@ -53,7 +54,7 @@ export function commandFormSchema(schema: Record<string, any>) {
   return { ...schema, properties: Object.fromEntries(Object.entries(schema.properties ?? {}).map(([name, raw]) => [name, { ...(raw as object), 'x-ui': formFieldMetadata(raw as Record<string, any>) }])) }
 }
 export function commandDefinitions(model: Model, entity: string, caps: Capabilities) {
-  return (model.commands ?? []).filter(command => (command.ui?.placement?.entity === entity || command.permission.entity === entity) && caps.commands?.includes(command.name)
+  return (model.commands ?? []).filter(command => !isAccountAction(model, command.name) && (command.ui?.placement?.entity === entity || command.permission.entity === entity) && caps.commands?.includes(command.name)
     && Object.entries(command.inputSchema.properties ?? {}).every(([name, field]: [string, any]) => !command.inputSchema.required?.includes(name) || !field.referenceEntity || visibleEntities(model, caps).includes(field.referenceEntity))
     && !(command.ui?.replacesCrud && caps.entities[entity]?.operations.includes(command.ui.replacesCrud)))
 }
@@ -88,7 +89,7 @@ export function rowCommands(model: Model, entity: string, caps: Capabilities) {
   })
 }
 export function hasRowActions(model: Model, entity: string, caps: Capabilities) {
-  return visibleEntities(model, caps).includes(entity) && (caps.entities[entity].operations.some(operation => operation === 'delete' || operation === 'update' && caps.entities[entity].readable.includes('version')) || rowCommands(model, entity, caps).some(command => !model.entities[entity].rowInvitations || command.name !== `${entity}/remove_access`))
+  return visibleEntities(model, caps).includes(entity) && (caps.entities[entity].operations.some(operation => operation === 'delete' || operation === 'update' && caps.entities[entity].readable.includes('version')) || rowCommands(model, entity, caps).length > 0)
 }
 export function pickerQuery(model: Model, entity: string, caps: Capabilities, options: { search?: string; cursor?: string; ids?: string[]; locale?: 'en' | 'cs' } = {}): ReadQuery {
   const select = projection(model, entity, caps)

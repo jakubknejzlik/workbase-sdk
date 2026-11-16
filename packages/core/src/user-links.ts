@@ -11,6 +11,7 @@ import { writeFilter } from './execution/policies'
 import { kernelFor } from './kernel/registry'
 import { organizationPermission } from './organization-permissions'
 import { issuerGuard } from './organization-rules'
+import { linkableMembers } from './user-link-eligibility'
 
 type LinkContext = Pick<PlanningContext, 'config' | 'scope' | 'now'>
 // Frozen statement identity, rather than caller-supplied metadata, grants the exception.
@@ -39,11 +40,12 @@ function linkField(config: InstanceConfig, entity: string) {
  * The invitation caller runs this AFTER its membership insert, in the same plan. */
 export function linkAccountRow(ctx: LinkContext, entity: string, rowId: string, userId: string, invitation = false): AtomicRule {
   const field = linkField(ctx.config, entity); const table = quote(entity)
+  const member = linkableMembers(ctx.scope.organizationId, userId)
   const unique = `NOT EXISTS (SELECT 1 FROM ${table} other WHERE other.organization_id=? AND other.${field}=? AND other.id<>?)`
   return { name: 'account_link', statements: [writer({
     sql: `UPDATE ${table} SET ${field}=?,updated_at=?,version=version+1 WHERE organization_id=? AND id=? AND ${unique}
-      AND EXISTS (SELECT 1 FROM users u JOIN memberships m ON m.user_id=u.id AND m.organization_id=u.organization_id WHERE u.id=? AND u.organization_id=?)`,
-    bindings: [userId, ctx.now, ctx.scope.organizationId, rowId, ctx.scope.organizationId, userId, rowId, userId, ctx.scope.organizationId], expectRows: 1,
+      AND EXISTS (${member.sql})`,
+    bindings: [userId, ctx.now, ctx.scope.organizationId, rowId, ctx.scope.organizationId, userId, rowId, ...(member.bindings ?? [])], expectRows: 1,
     diagnose: { sql: `SELECT ${unique} AS ok`, bindings: [ctx.scope.organizationId, userId, rowId] }, failureCode: 'account_already_linked',
   }, invitation ? 'cleanup' : 'link')] }
 }
@@ -103,7 +105,7 @@ export function userLinkCommands(config: InstanceConfig): AtomicOperation<any>[]
         const policy = kernelFor(ctx.config).tableFilter(entity, ctx.scope, 'update')
         if (policy.kind === 'none') throw new ApiError(404, 'not_found')
         if (!await ctx.reader.first({ sql: `SELECT id FROM ${quote(entity)} WHERE organization_id=? AND id=?`, bindings: [ctx.scope.organizationId, input.rowId] })) throw new ApiError(404, 'not_found')
-        if (action === 'link_account' && !await ctx.reader.first({ sql: 'SELECT u.id FROM users u JOIN memberships m ON m.user_id=u.id AND m.organization_id=u.organization_id WHERE u.id=? AND u.organization_id=?', bindings: [input.userId!, ctx.scope.organizationId] })) throw new ApiError(404, 'member_not_found')
+        if (action === 'link_account' && !await ctx.reader.first(linkableMembers(ctx.scope.organizationId, input.userId!))) throw new ApiError(404, 'member_not_found')
         const kernel = kernelFor(ctx.config)
         kernel.atomicPermission(ctx.scope, operation, input)
         return { role: ctx.scope.role, filter: writeFilter(kernel, ctx.scope, entity, entity, 'update') }

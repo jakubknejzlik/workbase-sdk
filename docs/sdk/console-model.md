@@ -61,9 +61,64 @@ Each entity provides:
   `columns`, configured `listColumns`, `listLimit`, route templates and the
   configured list/form/detail/section/calendar/lookup hints.
 
-The document contains only authorized metadata. Read fields, enum choices and
-labels, columns, checks, indexes, relation/FK targets, display fields and expression
-dependencies require live read access to every referenced field/entity. Reference
+For an entity with `userLink`, `accountLink: { field, entity }` describes the
+protected FK and its target independently of invitation or account read rights.
+This structural marker remains present when the FK/target is absent from readable
+metadata. It grants no access to field values. `rowAccess` reports whether Members
+status can be read under the current grants; `rowInvitations` retains its existing
+invitation-management meaning. Generated detail uses one Application access card
+and excludes the FK and all matching to-one relation aliases from generic fields,
+groups and relation cards. Other references to the same target remain visible.
+
+Members `GET /orgs/:orgId/row-access/:entity/:rowId` keeps invitation-read and
+source-row read gates. It adds `inconsistency` (`null` or
+`multiple_linked_accounts`) and optional `linked_accounts` entries with `id` and
+an authorized display `label`. Identity disclosure requires the source link field
+and `members.read`, using the same workspace membership and display-name source
+as Members. It never requires or grants general `users` read. V3 record access
+uses the same boundary for its limited account projection. Email is included
+only where the same Members read already exposes it. Status-only readers can receive
+`signed_in` without an account identity. `signed_in` means a linked account, not a
+recent login. Current scalar storage returns at most one summary; invitation
+history is not a source of multiple linked accounts. The card defensively warns
+and withholds account actions for an explicit inconsistency or multiple summaries.
+Loading, denied, missing and failed status remain distinct from no access.
+The same Application access controller serves detail, list rows, create and edit.
+Legacy `link_account` / `remove_access` and V3 `access_*` commands are excluded
+from generic detail and menu actions. V3 controls read the record's access state
+and action availability and submit to `/api/:entity/:id/actions/:name` with
+`{ email }`, `{ user_id }` or `{}`; legacy controls retain their supported Members
+and account-command transports. Explicit link/unlink controls remain individually
+granted inside the card even without Members invitation-status support. Link
+additionally requires `members.read` and offers existing members of the current
+workspace from `GET /orgs/:orgId/members`, whose entries include `display_name`.
+The picker submits the selected `user_id`; it does not accept a raw account ID.
+A denied or failed Members read disables selection and submission. A status
+read that is loading, failed, unknown or refetching disables every account
+mutation. Cached refetches preserve the displayed state and invitation draft;
+only the first read without cache shows loading.
+
+Create offers an authorized, opt-in “Invite now”. The entity is saved first,
+without invitation fields in its CRUD payload, then its live access state is
+checked before inviting the returned ID. Invitation failure keeps the record and
+shows a retry against that same ID. An uncertain response is reconciled before
+retrying, so an existing invitation is not created again. Prefill uses the live,
+authorized string field `email`, then `contact_email`; otherwise it stays blank.
+It follows contact edits only until the invitation address is manually edited.
+This convention requires no instance-specific mapping.
+
+Edit embeds invite, change, resend, cancel and remove controls with the existing
+confirmations. Changing an email cancels a pending invitation (or removes the
+linked account), reconciles status, then invites the replacement. An expired
+invitation can be replaced directly after checking live invite availability. Access actions
+take effect immediately and remain effective if the entity edit is cancelled.
+They preserve unsaved entity fields and refresh the row version before the next
+entity save. If version reconciliation fails, saving waits for a successful
+retry. Removing a link retains its existing application-wide account effect.
+
+Read/write metadata retains its existing authorization requirements. Read fields,
+enum choices and labels, columns, checks, indexes, relation/FK targets, display
+fields and expression dependencies require live read access to every referenced field/entity. Reference
 fields also require a readable target ID; a source mask alone cannot authorize
 target literals, predicates or ordering. A check or index with any excluded field
 is omitted. Create/update schema properties and

@@ -1,3 +1,4 @@
+import { memberIdentities, canReadMembers } from './member-identities'
 import type { InstanceConfig } from './config'
 import type { Scope } from './types'
 import { ApiError } from './errors'
@@ -37,7 +38,7 @@ export async function latestRowInvitation(db: D1Database, organizationId: string
   return { id: latest.id, email: latest.email, expires_at: latest.expires_at, expired_at: latest.expired_at }
 }
 /** Only public card data leaves this service. The caller checks invitations.read;
- * the row and account lookup independently retain the request's read authority. */
+ * row read and Members identity disclosure retain independent authority. */
 export async function accountAccessState(config: InstanceConfig, scope: Scope, db: D1Database, entity: string, id: string): Promise<AccountAccessState> {
   const link = userLinks(config).find(link => link.entity === entity)
   if (!link) throw new ApiError(400, 'user_link_required')
@@ -48,8 +49,9 @@ export async function accountAccessState(config: InstanceConfig, scope: Scope, d
     .bind(scope.organizationId, id, ...(filter.bindings ?? [])).first<{ account_id: string | null }>()
   if (!row) throw new ApiError(404, 'not_found')
   if (row.account_id) {
-    const account = await db.prepare(`SELECT u.id,u.email,coalesce(nullif(trim(a.name),''),u.email) AS display_name FROM users u LEFT JOIN "user" a ON a.id=u.id WHERE u.id=? AND u.organization_id=?`)
-      .bind(row.account_id, scope.organizationId).first<NonNullable<AccountAccessState['account']>>()
+    const member = kernel.fieldMask(entity, scope).includes(link.field) && canReadMembers(config, scope)
+      ? (await memberIdentities(config, scope, db, row.account_id))[0] : undefined
+    const account = member ? { id: member.user_id, display_name: member.display_name ?? member.email, email: member.email } : null
     return { state: 'linked', account, invitation: null }
   }
   const latest = await latestRowInvitation(db, scope.organizationId, entity, id)

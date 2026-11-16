@@ -21,7 +21,7 @@ function configuration() {
     plugins: [createIdentity(), createLocalAuth(), permissions({ roles: ['owner', 'member', 'creator', 'inviter'] }), createMembers(), consoleUI(), createOrganizations(), machineCredentials(), mailOutbox()],
     roles: ['owner', 'member', 'creator', 'inviter'],
     entities: {
-      users: { fields: { name: { type: 'string' } } },
+      users: { displayField: 'name', fields: { name: { type: 'string' } } },
       people: { fields: { name: { type: 'string' }, user: { type: 'ref', entity: 'users', userLink: true } }, relations: { account: { entity: 'users', field: 'user' } } },
       teams: { fields: { name: { type: 'string' }, user: { type: 'ref', entity: 'users', userLink: true } }, relations: { account: { entity: 'users', field: 'user' } } },
     },
@@ -65,12 +65,12 @@ it('legacy row-access retains the pending invitation after manual account linkin
   const before = await status()
   expect(before.status).toBe(200)
   const pending = await json(before)
-  expect(pending).toEqual({ can_cancel: true, state: 'invited', invitation: { id: i.id, email: i.email, expires_at: i.expires_at }, can_invite: true })
+  expect(pending).toEqual({ inconsistency: null, linked_accounts: [], can_cancel: true, state: 'invited', invitation: { id: i.id, email: i.email, expires_at: i.expires_at }, can_invite: true })
   const response = await request(app, '/commands/people/link_account', 'POST', { rowId: 'p1', userId: 'member-a' })
   expect(response.status, await response.clone().text()).toBe(200)
   const after = await status()
   expect(after.status).toBe(200)
-  expect(await after.text()).toBe(JSON.stringify({ ...pending, state: 'signed_in' }))
+  expect(await json(after)).toEqual({ ...pending, state: 'signed_in', linked_accounts: [{ id: 'member-a', label: 'Existing Person' }] })
   expect(await env.DB.prepare('SELECT revoked_at FROM invitations WHERE id=?').bind(i.id).first('revoked_at')).toBeNull()
 })
 
@@ -314,7 +314,7 @@ it('176b status-only token sees state but no invitation details or management ac
   const call = await agentToken('owner', ['people.read', 'invitations.read'])
   const response = await call('/orgs/org-a/row-access/people/p1', 'GET')
   expect(response.status).toBe(200)
-  expect(await json(response)).toEqual({ state: 'invited', can_invite: false, can_cancel: false })
+  expect(await json(response)).toEqual({ state: 'invited', inconsistency: null, can_invite: false, can_cancel: false })
 })
 it('176b copy link requires verified matching recipient, rotates old token and never appears in list data', async () => {
   const i = await invitation()
@@ -338,4 +338,103 @@ it('176b access filters select live invited and signed-in rows and bind cursors 
   expect(first.next_cursor).toBeTruthy()
   expect((await json(await query('no_account', first.next_cursor))).data).toEqual([{ id: 'p3' }])
   expect((await query('signed_in', first.next_cursor)).status).toBe(400)
+})
+
+
+it('14 status returns only an authorized minimal account summary for zero/one scalar links', async () => {
+  expect(await json(await status())).toMatchObject({ state: 'no_account', inconsistency: null, linked_accounts: [] })
+  await env.DB.prepare("UPDATE people SET user='member-a' WHERE id='p1'").run()
+  const response = await status()
+  expect(response.headers.get('Cache-Control')).toBe('private, no-store')
+  const body = await json(response)
+  expect(body).toMatchObject({ state: 'signed_in', inconsistency: null, linked_accounts: [{ id: 'member-a', label: 'Existing Person' }] })
+  expect(Object.keys(body.linked_accounts[0]).sort()).toEqual(['id', 'label'])
+  expect(JSON.stringify(body)).not.toMatch(/email|password|token_hash|accept_url/)
+})
+it('14 status-only token retains signed-in state without disclosing an unreadable account', async () => {
+  await env.DB.prepare("UPDATE people SET user='member-a' WHERE id='p1'").run()
+  const call = await agentToken('owner', ['people.read', 'invitations.read'])
+  const response = await call('/orgs/org-a/row-access/people/p1', 'GET')
+  expect(response.status).toBe(200)
+  expect(await json(response)).toEqual({ state: 'signed_in', inconsistency: null, can_invite: false, can_cancel: false })
+  const body = await json(await call('/o/org-a/console-model', 'GET'))
+  expect(body.model.entities.people).toMatchObject({ accountLink: { field: 'user', entity: 'users' }, rowAccess: true })
+  expect(body.model.entities.people.rowInvitations).toBeUndefined()
+  expect(body.model.entities.people.fields.user).toBeUndefined()
+  expect(body.model.entities.people.relations.account).toBeUndefined()
+  expect(body.capabilities.commands).not.toContain('people/remove_access')
+})
+it.each(['source-field', 'target-row', 'target-field'])('14 Members summary respects source masks independently of users %s restrictions', async restriction => {
+  await env.DB.prepare("UPDATE people SET user='member-a' WHERE id='p1'").run()
+  const config = configuration()
+  if (restriction === 'source-field') config.policies.people.owner = { where: {}, fields: ['name'] }
+  if (restriction === 'target-row') config.policies.users.owner = { where: { id: { eq: 'owner-a' } } }
+  if (restriction === 'target-field') config.policies.users.owner = { where: {}, fields: ['id'] }
+  app = createApp(config, runtime())
+  const response = await status()
+  expect(response.status).toBe(200)
+  const body = await json(response)
+  expect(body.state).toBe('signed_in')
+  if (restriction === 'source-field') expect(body.linked_accounts).toBeUndefined()
+  if (restriction === 'target-row') expect(body.linked_accounts).toEqual([{ id: 'member-a', label: 'Existing Person' }])
+  if (restriction === 'target-field') expect(body.linked_accounts).toEqual([{ id: 'member-a', label: 'Existing Person' }])
+})
+it('14 forbidden users query preserves independently authorized Members identity and actions', async () => {
+  await invitation()
+  await env.DB.prepare("UPDATE people SET user='member-a' WHERE id='p1'").run()
+  const before = await json(await status())
+  const config = configuration()
+  config.policies.users.owner = { where: { id: { eq: 'owner-a' } }, deny: 'forbidden' }
+  app = createApp(config, runtime())
+  // The account query itself must still enforce its policy.
+  const account = await request(app, '/query', 'POST', { entity: 'users', select: ['id', 'name'], where: { id: { eq: 'member-a' } }, limit: 1 })
+  expect(account.status).toBe(403)
+  expect(await json(account)).toMatchObject({ error: 'policy_violation' })
+  const response = await status()
+  expect(response.status).toBe(200)
+  expect(await json(response)).toEqual({ ...before, state: 'signed_in', can_invite: true, can_cancel: true })
+})
+it('14 Members identity does not query the domain users display field', async () => {
+  await env.DB.prepare("UPDATE people SET user='member-a' WHERE id='p1'").run()
+  // Members names come from the identity profile, not the users entity label.
+  await env.DB.exec('ALTER TABLE users RENAME COLUMN name TO unavailable_name')
+  const response = await status()
+  expect(response.status).toBe(200)
+  expect(await json(response)).toMatchObject({ linked_accounts: [{ id: 'member-a', label: 'Existing Person' }] })
+})
+it.each(['invitations', 'entity'])('14 status still denies missing %s read and hides foreign rows', async missing => {
+  await env.DB.prepare("UPDATE people SET user='member-a' WHERE id='p1'").run()
+  const call = await agentToken('owner', missing === 'invitations' ? ['people.read', 'users.read'] : ['invitations.read', 'users.read'])
+  const response = await call('/orgs/org-a/row-access/people/p1', 'GET')
+  expect(response.status).toBe(403)
+  expect(await response.text()).not.toContain('member-a')
+  expect((await request(app, '/orgs/org-a/row-access/people/foreign')).status).toBe(404)
+})
+it('14 structural metadata survives missing Members or status rights, with grants and relations intact', async () => {
+  const config = configuration()
+  const owner = await json(await request(app, '/o/org-a/console-model'))
+  const call = await agentToken('owner', ['people.read'])
+  const denied = await json(await call('/o/org-a/console-model', 'GET'))
+  expect(denied.model.entities.people).toMatchObject({ accountLink: { field: 'user', entity: 'users' }, rowAccess: false })
+  expect(denied.model.entities.people.rowInvitations).toBeUndefined()
+  const withoutMembers = defineInstance({ ...config, plugins: (config.plugins ?? []).filter(plugin => !['members', 'machine-credentials'].includes(plugin.name)) })
+  app = createApp(withoutMembers, runtime())
+  const without = await json(await request(app, '/o/org-a/console-model'))
+  expect(without.model.entities.people).toMatchObject({ accountLink: { field: 'user', entity: 'users' }, rowAccess: false })
+  expect(without.model.entities.people.rowInvitations).toBeUndefined()
+  expect(without.model.entities.people.fields).toEqual(owner.model.entities.people.fields)
+  expect(without.model.entities.people.relations).toEqual(owner.model.entities.people.relations)
+  expect(without.model.entities.users.accountLink).toBeUndefined()
+})
+
+it('14 legacy agent cannot disclose Members identity even with a requested members.read operation', async () => {
+  await env.DB.prepare("UPDATE people SET user='member-a' WHERE id='p1'").run()
+  for (const membersRead of [false, true]) {
+    await env.DB.exec('DELETE FROM access_tokens')
+    const call = await agentToken('owner', ['people.read', 'users.read', 'invitations.read', ...(membersRead ? ['members.read'] : [])])
+    const body = await json(await call('/orgs/org-a/row-access/people/p1', 'GET'))
+    expect(body.state).toBe('signed_in')
+    expect(body).not.toHaveProperty('linked_accounts')
+    expect((await call('/orgs/org-a/members', 'GET')).status).toBe(403)
+  }
 })

@@ -25,7 +25,7 @@ const profile = object({ id: string, email: string, firstName: nullable(string),
   capabilities: object({ canEditNames: boolean, canEditEmail: { type: 'boolean', enum: [false] } }),
   completeness: object({ complete: boolean, missingFields: array({ type: 'string', enum: ['firstName', 'lastName'] }) }), syncedAt: nullable(string),
 })
-const member = object({ user_id: string, email: string, role: string })
+const member = object({ user_id: string, email: string, role: string, display_name: string })
 const memberPending = object({ ...member.properties, display_name: string, last_administrator: boolean, kind: { type: 'string', enum: ['member'] }, status: { type: 'string', enum: ['active'] }, actions: strings })
 const invited = object({ id: string, email: string, role: string, expires_at: string, created_at: nullable(string), inviter: object({ display_name: string }), kind: { type: 'string', enum: ['invitation'] }, status: { type: 'string', enum: ['pending'] }, actions: strings })
 const revision = object({ revision: { type: 'integer' }, coreVersion: string, migrations: string, pluginMigrations: string }, ['revision', 'coreVersion', 'migrations'])
@@ -43,7 +43,7 @@ export function publicPaths(): Record<string, Schema> {
   return {
     '/me': { get: operation({ '200': response(me) }, { parameters: [parameter('scope', 'query', { type: 'string', enum: ['organization'] }), parameter('X-Organization-Id', 'header', string)] }) },
     '/o/{org}/capabilities': { parameters: [parameter('org', 'path', string, true)], get: operation({ '200': response(ref('Capabilities')) }) },
-    '/orgs/{orgId}/members': { parameters: [parameter('orgId', 'path', string, true)], get: operation({ '200': response({ oneOf: [object({ data: array(member) }), object({ data: array({ oneOf: [memberPending, invited] }), role_options: array(object({ id: string, administrator: boolean })), default_role: string }, ['data', 'role_options'])] }) }, { parameters: [parameter('include', 'query', { type: 'string', enum: ['pending'] })] }) },
+    '/orgs/{orgId}/members': { parameters: [parameter('orgId', 'path', string, true)], get: operation({ '200': response({ oneOf: [object({ data: array(member) }), object({ data: array({ oneOf: [memberPending, invited] }), role_options: array(object({ id: string, administrator: boolean })), default_role: string }, ['data', 'role_options'])] }) }, { parameters: [parameter('include', 'query', { type: 'string', enum: ['pending'] }), parameter('eligible', 'query', { type: 'string', enum: ['link_account'] })] }) },
     '/me/invitations': { get: operation({ '200': response(object({ data: array(object({ ...metadata, navigation_target: string }, [...metadataRequired, 'navigation_target'])), next: string })) }, { parameters: [parameter('return_to', 'query', string)] }) },
     '/invitations/preflight': { post: operation({ '200': response(object(metadata, metadataRequired)) }, { security: [], requestBody: request(tokenBody) }) },
     '/invitations/resolve': { post: operation({ '200': response(preview) }, { security: [], requestBody: request(tokenBody) }) },
