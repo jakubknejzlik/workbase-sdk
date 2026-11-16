@@ -20,7 +20,7 @@ async function mount(surface: 'detail' | 'menu' | 'create' | 'edit', options: { 
   const status = () => ({ state: current, can_invite: true, can_cancel: true, inconsistency: options.inconsistency ?? null, linked_accounts: options.accounts, ...(['invited', 'expired'].includes(current) ? { invitation: { id: 'pending', email: 'invited@example.test' } } : {}) })
   const write = vi.fn(async (path: string, method: string, body?: any, _key?: string): Promise<any> => {
     if (method === 'GET') {
-      if (path.endsWith('/members')) { if (options.membersFailure) throw { status: 403 }; return { data: [{ user_id: 'account', display_name: 'Workspace member', email: 'member@example.test' }] } }
+      if (path.endsWith('/members?eligible=link_account')) { if (options.membersFailure) throw { status: 403 }; return { data: [{ user_id: 'account', display_name: 'Workspace member', email: 'member@example.test' }] } }
       if (statusBlock) return new Promise(() => {})
       if (statusError) throw { status: 500 }
       if (path.endsWith('/delivery')) return { delivery: { status: options.deliveryFailure ? 'failed' : 'queued' } }
@@ -299,10 +299,13 @@ it('create with unavailable invitation status omits Invite now despite an invita
   expect(screen.queryByRole('checkbox', { name: 'Invite now' })).toBeNull()
 })
 
-it('14 Link picker uses workspace Members under members.read without users capabilities', async () => {
+it('review6 Link picker requests eligible Members and submits without users capabilities', async () => {
   const { user, write, request } = await mount('detail', { deferMutation: true })
-  await confirmAction(user, 'Link account', ['Member', 'account'])
-  expect(write).toHaveBeenCalledWith('/orgs/org/members', 'GET')
+  await user.click(await screen.findByRole('button', { name: 'Link account' }))
+  await waitFor(() => expect(write).toHaveBeenCalledWith('/orgs/org/members?eligible=link_account', 'GET'))
+  await user.click(await screen.findByRole('combobox', { name: 'Member' }))
+  await user.click(await screen.findByRole('option', { name: 'Workspace member · member@example.test' }))
+  await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Link account' }))
   await waitFor(() => expect(write).toHaveBeenCalledWith('/api/entries/one/actions/link_account', 'POST', { user_id: 'account' }))
   expect(write.mock.calls.some(([path]) => /users|accounts/.test(path))).toBe(false)
   expect(request.mock.calls).toEqual([])
@@ -311,7 +314,7 @@ it('14 staff without members.read has no Link picker even with an explicit link 
   const { write } = await mount('detail', { membersRead: false, grants: ['access_link_account'] })
   await screen.findByText('No access')
   expect(screen.queryByRole('button', { name: 'Link account' })).toBeNull()
-  expect(write.mock.calls.some(([path]) => path.endsWith('/members'))).toBe(false)
+  expect(write.mock.calls.some(([path]) => path.split('?')[0].endsWith('/members'))).toBe(false)
 })
 it('14 failed Members read never falls back to a raw account id input', async () => {
   const { user, write } = await mount('detail', { membersFailure: true })

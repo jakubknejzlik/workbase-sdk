@@ -196,3 +196,56 @@ it('14 missing members.read suppresses both identity paths and Members picker ev
   expect((await request('/orgs/org-a/members', 'staff')).status).toBe(403)
   expect((await request('/api/users')).status).toBe(403)
 })
+
+
+it.each(['v3', 'legacy'])('review6 %s Link submits an eligible Members choice successfully', async transport => {
+  app = createApp(identityConfig(), runtime())
+  await env.DB.exec("UPDATE worker SET user=NULL WHERE id='linked'")
+  const response = await request('/orgs/org-a/members?eligible=link_account')
+  expect(response.status).toBe(200)
+  const members = await response.json() as any
+  const choice = members.data.find((member: any) => member.user_id === 'staff')
+  expect(choice).toEqual({ user_id: 'staff', display_name: 'Existing Person', email: 'staff@example.test', role: 'staff' })
+  const result = transport === 'v3'
+    ? await request('/api/worker/no_account/actions/link_account', 'admin', 'POST', { user_id: choice.user_id })
+    : await request('/commands/worker/link_account', 'admin', 'POST', { rowId: 'no_account', userId: choice.user_id })
+  expect(result.status, await result.clone().text()).toBe(200)
+  expect(await env.DB.prepare("SELECT user FROM worker WHERE id='no_account'").first('user')).toBe(choice.user_id)
+})
+it('review6 Link choices hide ineligible cross-home members without changing Members or server 404s', async () => {
+  app = createApp(identityConfig(), runtime())
+  const before = await (await request('/orgs/org-a/members?eligible=link_account')).json() as any
+  expect(before.data.map((member: any) => member.user_id)).toEqual(['admin', 'staff'])
+  // Keep A membership, add B membership, then move only the user row to B.
+  await env.DB.exec("UPDATE worker SET user=NULL WHERE id='linked'")
+  await env.DB.exec("INSERT INTO memberships VALUES ('staff','org-b','staff'); UPDATE users SET organization_id='org-b' WHERE id='staff'")
+  const response = await request('/orgs/org-a/members?eligible=link_account')
+  expect(response.status).toBe(200)
+  expect(response.headers.get('Cache-Control')).toBe('no-store')
+  const choices = await response.json()
+  expect(choices).toEqual({ data: before.data.filter((member: any) => member.user_id !== 'staff') })
+  // Exact projection above excludes workspace identifiers, names, reasons or flags.
+  const ordinary = await (await request('/orgs/org-a/members')).json() as any
+  expect(ordinary).toEqual(before)
+  expect((await (await request('/api/worker/no_account')).json() as any).actions.link_account.enabled).toBe(true)
+  for (const [path, body, error] of [
+    ['/api/worker/no_account/actions/link_account', { user_id: 'staff' }, 'not_found'],
+    ['/commands/worker/link_account', { rowId: 'no_account', userId: 'staff' }, 'member_not_found'],
+  ] as const) {
+    const result = await request(path, 'admin', 'POST', body)
+    expect(result.status).toBe(404)
+    expect(await result.json()).toEqual({ error })
+  }
+  // A member with no A membership has exactly the same filtered response.
+  await env.DB.exec("DELETE FROM memberships WHERE organization_id='org-a' AND user_id='staff'")
+  expect(await (await request('/orgs/org-a/members?eligible=link_account')).json()).toEqual(choices)
+  await env.DB.exec("UPDATE users SET organization_id='org-a' WHERE id='staff'")
+  expect(await (await request('/orgs/org-a/members?eligible=link_account')).json()).toEqual(choices)
+})
+it('review6 staff without members.read receives no Link choices or member information', async () => {
+  for (const query of ['', '?eligible=link_account']) {
+    const response = await request(`/orgs/org-a/members${query}`, 'staff')
+    expect(response.status).toBe(403)
+    expect(await response.json()).toEqual({ error: 'permission_denied' })
+  }
+})

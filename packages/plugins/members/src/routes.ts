@@ -57,7 +57,7 @@ export function memberRoutes(app: App, config: InstanceConfig, env: RuntimeEnv) 
   app.get('/orgs/:orgId/members', scoped, async c => {
     const scope = scopeFor(c, 'members.read')
     c.header('Cache-Control', 'no-store')
-    const members = await memberIdentities(config, scope, env.DB)
+    const members = await memberIdentities(config, scope, env.DB, undefined, c.req.query('eligible') === 'link_account')
     if (c.req.query('include') !== 'pending') return c.json({ data: members })
     const can = (action: OrganizationAction) => {
       try { kernelFor(config).resourcePermission(scope, action); organizationPermission(config, scope, action); return true } catch { return false }

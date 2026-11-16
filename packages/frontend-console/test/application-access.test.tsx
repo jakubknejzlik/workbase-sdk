@@ -38,7 +38,7 @@ async function mount(options: { layout?: Layout; status?: Record<string, unknown
   const i18n = i18next.createInstance()
   await i18n.use(initReactI18next).init({ lng: 'en', resources: { en: { translation: { ...en, field_user: 'Raw User', relation_user_account: 'Raw User account', relation_alias: 'Raw account alias', field_reviewer: 'Reviewer', relation_reviewer_account: 'Reviewer account', field_name: 'Name' } } } })
   const write = vi.fn(async (_path: string, _method: string, _body?: unknown, _key?: string) => {
-    if (_path.endsWith('/members')) return { data: [{ user_id: 'account', display_name: 'Workspace member' }] }
+    if (_path.endsWith('/members?eligible=link_account')) return { data: [{ user_id: 'account', display_name: 'Workspace member' }] }
     if (options.loading) return new Promise<never>(() => {})
     if (options.error) throw { status: options.error }
     return options.status ?? { state: 'no_account', can_invite: false, can_cancel: false, inconsistency: null }
@@ -97,7 +97,7 @@ it.each(['link_account', 'remove_access'])('unavailable status preserves the aut
   if (action === 'link_account') { const field = await screen.findByRole('combobox', { name: 'Member' }); await waitFor(() => expect(field).not.toHaveProperty('disabled', true)); await user.click(field); await user.click(await screen.findByRole('option', { name: 'Workspace member' })) }
   await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: label }))
   await waitFor(() => expect(write).toHaveBeenCalledWith(`/commands/entries/${action}`, 'POST', { rowId: 'entry', ...(action === 'link_account' ? { userId: 'account' } : {}), idempotencyKey: expect.any(String) }))
-  expect(write.mock.calls.every(([path, method]) => method !== 'GET' || path === '/orgs/org/members')).toBe(true)
+  expect(write.mock.calls.every(([path, method]) => method !== 'GET' || path === '/orgs/org/members?eligible=link_account')).toBe(true)
 })
 it.each(['no_account', 'invited', 'expired', 'signed_in'])('available %s status offers each authorized account command exactly once', async state => {
   await mount({ status: { state, can_invite: true, can_cancel: true, inconsistency: null,

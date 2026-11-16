@@ -443,7 +443,7 @@ function RowInvitationMutation(props: Context & AccessContext & { action: string
   const members = useQuery({ queryKey: ['account-link-members', props.orgId, props.caps], retry: false,
     enabled: props.action === 'link' && props.caps.resources?.['members.read'] === true,
     queryFn: async (): Promise<{ data: { user_id: string; display_name?: string | null; email?: string }[] }> =>
-      props.write(`/orgs/${encodeURIComponent(props.orgId)}/members`, 'GET'),
+      props.write(`/orgs/${encodeURIComponent(props.orgId)}/members?eligible=link_account`, 'GET'),
   })
   const choices = !members.error && !members.isFetching ? members.data?.data ?? [] : []
   const schema = props.action === 'link' ? { ...rowLinkSchema, properties: { user_id: { type: 'string' as const, enum: choices.map(member => member.user_id) } } } : actionSchema(props.action)
