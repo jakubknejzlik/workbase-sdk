@@ -16,7 +16,7 @@ import { fieldsFor, operatorsFor, querySchema, type Filter, type Selection, type
 function preflight(input: unknown) {
   let nodes = 0
   function visit(value: unknown, depth: number) {
-    if (++nodes > L.nodes || depth > L.filterDepth * 3) throw new QueryError('query_too_expensive', [], { depth, nodes, relations: 0, exists: 0, fieldRows: 0 })
+    if (++nodes > L.nodes || depth > L.filterDepth * 3) throw new QueryError('query_too_expensive', [], { depth, nodes, statements: 0, relations: 0, exists: 0, fieldRows: 0 })
     if (value && typeof value === 'object') {
       if (!Array.isArray(value) && ![Object.prototype, null].includes(Object.getPrototypeOf(value))) invalid()
       for (const [key, child] of Object.entries(value)) {
@@ -32,7 +32,7 @@ export function validateQuery(kernel: KernelRegistry, scope: Scope, input: unkno
   if (!input || typeof input !== 'object' || Array.isArray(input)) invalid()
   const entity = (input as QueryInput).entity
   if (typeof entity !== 'string' || !Object.hasOwn(kernel.config.entities, entity)) throw new QueryError('entity_not_found', ['entity'])
-  const depthCost: QueryCost = { depth: 0, relations: 0, fieldRows: 0, exists: 0, nodes: 0 }
+  const depthCost: QueryCost = { statements: 0, depth: 0, relations: 0, fieldRows: 0, exists: 0, nodes: 0 }
   function relationDepth(name: string, node: unknown, depth: number, path: QueryPath) {
     depthCost.nodes++; depthCost.depth = Math.max(depthCost.depth, depth)
     if (depth > L.relationDepth) throw new QueryError('query_too_expensive', path, depthCost)
@@ -78,7 +78,7 @@ export function validateQuery(kernel: KernelRegistry, scope: Scope, input: unkno
     // This predicate goes through normal field masks, policy-scoped sources and cursor hashing.
     delete query.contextList
   }
-  const cost: QueryCost = { depth: 0, relations: 0, fieldRows: 0, exists: query.rowAccess ? 2 : 0, nodes: 0 }
+  const cost: QueryCost = { statements: 0, depth: 0, relations: 0, fieldRows: 0, exists: query.rowAccess ? 2 : 0, nodes: 0 }
   // Every compiled client table source masks each readable FK once. Visibility
   // probes only test the target's scoped predicate, so do not recursively mask it.
   function foreignKeyCost(name: string) {
@@ -141,6 +141,9 @@ export function validateQuery(kernel: KernelRegistry, scope: Scope, input: unkno
     }
   }
   function selection(name: string, node: Selection, depth: number, parents: number, path: QueryPath, single = false) {
+    // One root plus one per include occurrence, even across repeated branches.
+    // Empty runtime parents may skip an include; SQL subqueries add no statements.
+    cost.statements++
     foreignKeyCost(name)
     permission(name, path); cost.depth = Math.max(cost.depth, depth)
     const limit = single ? 1 : node.limit ?? L.children
@@ -175,7 +178,7 @@ export function validateQuery(kernel: KernelRegistry, scope: Scope, input: unkno
     }
   }
   selection(entity, query, 0, 1, [])
-  if (cost.depth > L.relationDepth || cost.relations > L.relations || cost.exists > L.exists || cost.fieldRows > L.fieldRows || cost.nodes > L.nodes)
+  if (cost.statements > L.statements || cost.depth > L.relationDepth || cost.relations > L.relations || cost.exists > L.exists || cost.fieldRows > L.fieldRows || cost.nodes > L.nodes)
     throw new QueryError('query_too_expensive', [], cost)
   return { query, cost }
 }
