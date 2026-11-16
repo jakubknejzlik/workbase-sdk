@@ -12,6 +12,8 @@ import { instanceConfigSchema, fieldSchema, cloneInstanceConfig, CORE_VERSION, Q
 import { declarationSchema } from '../../src/schema'
 import { publicSchema } from '../../src/public-schema'
 import { createApp } from '../../src/app'
+import { buildInfo } from '../../src/console'
+import type { RuntimeEnv } from '../../src/types'
 import { publicCommands, publicQuery } from '../../src/public-projection'
 import { KernelRegistry } from '../../src/kernel/registry'
 import { loadConfig } from '../../src/schema/load'
@@ -128,6 +130,18 @@ it('validates recorded detail fixtures and rejects malformed or leaking response
     expect(check({ ...sample, access: { ...sample.access, state: 'invented' } })).toBe(false)
     expect(check({ ...sample, token_hash: 'synthetic-access-secret-at-least-32' })).toBe(false)
     expect(check({ ...sample, actions: { invite: { enabled: 'yes' } } })).toBe(false)
+  }
+})
+it('validates real buildInfo output against the generated /build.json response contract', async () => {
+  const kernel = fixture(), doc = JSON.parse(bytes(kernel))
+  const schema = doc.paths['/build.json'].get.responses['200'].content['application/json'].schema
+  for (const env of [{}, { BUILD_SHA: '0'.repeat(40), BUILD_AT: '2026-11-14T00:00:00.000Z', OPENAPI_SHA256: hash }]) {
+    const info = await buildInfo(kernel.config, env as RuntimeEnv, 'https://neutral.example.test/build.json')
+    const check = validate(doc, schema, info)
+    const { openapi, ...missing } = info
+    expect(check(missing)).toBe(false)
+    expect(check({ ...info, openapi: 123 })).toBe(false)
+    expect(check({ ...info, unexpected: true })).toBe(false)
   }
 })
 it('describes request grammar, disjoint entities, both cursor contracts and mutation headers', () => {

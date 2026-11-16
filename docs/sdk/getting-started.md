@@ -52,23 +52,23 @@ The scaffold has one `worker` entity, admin/staff access, English dictionaries,
 and list, new, detail and edit pages. Author literal configuration in `config.ts`,
 entities in `schema/*`, access rules in `access.ts`, pages/navigation in `ui/*`
 and translations in `locales/en/*.json`. `runtime.ts` composes plugins and enables
-interactive login outside the literal loader boundary. Keep the generated
-OpenAPI document out of `config.ts` imports.
+interactive login outside the literal loader boundary. `config.ts` binds the generated
+`openapi.json` for anonymous serving; the literal loader can generate it before it exists.
 
 Run these commands in order for a fresh Instance:
 
 ```sh
 bun run migrate:plan --init
-bun run access:lock --write
 bun run openapi:write
+bun run access:lock --write
 bun run check
 bun run typecheck
 ```
 
 The schema planner writes `schema.lock.json` and `migrations/0001_r1.sql` first.
-Access auditing executes `runtime.ts`, so it needs that lock; `access:lock` already
-includes `--write` and accepts the explicit flag too. OpenAPI generation follows
-and stamps revision and configHash. Commit those files with `access.lock.json`,
+OpenAPI generation follows and stamps revision and configHash. Access auditing
+executes `runtime.ts`, so it needs both generated artifacts; `access:lock` already
+includes `--write` and accepts the explicit flag too. Commit those files with `access.lock.json`,
 `access.lock.md`, `openapi.json` and the install lockfile. Init ships none of these
 artifacts and never overwrites them.
 

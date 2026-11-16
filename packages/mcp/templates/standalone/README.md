@@ -39,13 +39,14 @@ Run `npm install`, commit `package-lock.json`, then use `npm ci` for frozen inst
 
 During phase 2, author `config.ts`, `schema/*`, `access.ts`, `ui/*` and
 `locales/en/*.json` as code. `runtime.ts` composes SDK plugins outside the literal
-config boundary and enables interactive login there. Do not import the generated OpenAPI document into `config.ts`.
+config boundary and enables interactive login there. `config.ts` binds the generated
+`openapi.json` for anonymous serving; the literal loader can generate it before it exists.
 For a fresh Instance run these in order:
 
 ```sh
 bun run migrate:plan --init
-bun run access:lock --write
 bun run openapi:write
+bun run access:lock --write
 bun run check
 bun run typecheck
 ```

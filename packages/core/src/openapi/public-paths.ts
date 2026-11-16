@@ -56,9 +56,9 @@ export function publicPaths(): Record<string, Schema> {
     '/auth/providers': { get: operation({ '200': response(object({ providers: array(object({ id: string })) })) }, { security: [] }) },
     '/auth/logout': { post: operation({ '204': { description: 'Signed out' } }) },
     '/auth/sign-in/magic-link': { post: operation({ '200': response({}, 'Opaque authentication-provider response'), default: response({}, 'Opaque authentication-provider response') }, { security: [], requestBody: request(object({ email: { type: 'string', format: 'email' }, callbackURL: string, name: string }, ['email'])) }) },
-    '/build.json': { get: operation({ '200': response(object({ sha: string, builtAt: string, revision: { type: 'integer' } })) }, { security: [] }) },
+    '/build.json': { get: operation({ '200': response(object({ sha: string, builtAt: string, revision: { type: 'integer' }, openapi: string })) }, { security: [] }) },
     '/health': { get: operation({ '200': response(health), '503': response(health, 'Schema incompatible') }, { security: [] }) },
-    '/openapi.json': { get: operation({ '200': response({ type: 'object' }) }, { security: [], description: 'Committed public specification. Serving is introduced separately.' }) },
+    '/openapi.json': { get: operation({ '200': response({ type: 'object' }), '503': response(object({ error: { type: 'string', enum: ['openapi_not_bound'] } }), 'OpenAPI artifact is not bound') }, { security: [], description: 'Serves the committed public specification anonymously. Returns 503 when no valid OpenAPI artifact is bound.' }) },
   }
 }
 publicPaths.schemas = {
