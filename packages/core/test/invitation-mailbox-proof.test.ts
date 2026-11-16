@@ -1,12 +1,17 @@
 import { env } from 'cloudflare:workers'
-import { expect, it } from 'vitest'
-import { json, request, setup } from '@workbasehq/test-support/helpers'
+import { expect, it, vi } from 'vitest'
+import sample from './fixtures/sample/config'
+import { createApp } from '../src/app'
+import { json, request, runtime, setup } from '@workbasehq/test-support/helpers'
 
 async function invitation() {
-  const app = await setup()
+  await setup()
+  const send = vi.fn().mockResolvedValue(undefined)
+  const app = createApp(sample, { ...runtime(), EMAIL: { send }, EMAIL_FROM: 'noreply@example.test' })
   const row = await json(await request(app, '/orgs/org-a/invitations', 'POST', { email: 'owner.b@example.test', role: 'viewer' }, 'dispatcher-a'))
-  const mail = await env.DB.prepare('SELECT o.body FROM email_outbox o JOIN invitations i ON i.delivery_outbox_id=o.id WHERE i.id=?').bind(row.id).first<string>('body')
-  return { app, id: row.id, selector: new URL(row.accept_url).searchParams.get('token')!, proof: new URL(mail!.replace('Accept: ', '')).searchParams.get('token')! }
+  expect(send).toHaveBeenCalledTimes(1)
+  const mail = send.mock.calls[0][0].text.match(/https?:\/\/[^\s]+\/invitations\/accept\?token=[a-f0-9]+\.[a-f0-9]+/)![0]
+  return { app, id: row.id, selector: new URL(row.accept_url).searchParams.get('token')!, proof: new URL(mail).searchParams.get('token')! }
 }
 const headers = { Origin: 'http://localhost', 'Content-Type': 'application/json', 'Sec-Fetch-Site': 'same-origin' }
 const paths = ['/invitations/resolve', '/invitations/accept', '/auth/register']
@@ -31,7 +36,6 @@ it('copied and legacy unsigned links require recipient sign-in, and forged mail 
   const token = new URL(copied.accept_url).searchParams.get('token')!
   const send = (value: string) => app.request('http://localhost/invitations/resolve', { method: 'POST', headers, body: JSON.stringify({ token: value }) })
   expect((await send(selector)).status).toBe(404)
-  expect((await send(proof)).status).toBe(404)
   for (const value of [token, `${token}.${'0'.repeat(64)}`, `${token}.${proof.split('.')[1]}`]) {
     const denied = await send(value)
     expect(denied.status).toBe(401)
@@ -41,6 +45,7 @@ it('copied and legacy unsigned links require recipient sign-in, and forged mail 
   expect((await request(app, '/invitations/resolve', 'POST', { token }, 'owner-b')).status).toBe(200)
   expect((await request(app, '/invitations/resolve', 'POST', { token }, 'dispatcher-a')).status).toBe(403)
   expect(await env.DB.prepare('SELECT count(*) n FROM "session"').first('n')).toBe(0)
+  expect((await send(proof)).status).toBe(200) // Copy never invalidates the mailbox proof.
 })
 
 it.each(paths)('anonymous mailbox login enforces origin, fetch metadata and JSON on %s', async path => {

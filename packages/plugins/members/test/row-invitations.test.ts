@@ -1,6 +1,6 @@
 import { env } from 'cloudflare:workers'
 import { reset } from 'cloudflare:test'
-import { beforeEach, expect, it } from 'vitest'
+import { beforeEach, expect, it, vi } from 'vitest'
 import { defineInstance } from '@workbasehq/core/config'
 import { createApp } from '@workbasehq/core/app'
 import { initialSchema } from '../../../core/src/migrations/schema'
@@ -132,13 +132,15 @@ it('176 row target rejects foreign rows, nonlinks and role escalation', async ()
 it('176 fresh mailbox login accepts as member and reads only linked own rows, including after a new login', async () => {
   const c = configuration()
   c.policies.people.member = { where: { user: { eq: '$actor.id' } } }
-  app = createApp(c, runtime())
+  const send = vi.fn().mockResolvedValue(undefined)
+  app = createApp(c, { ...runtime(), EMAIL: { send }, EMAIL_FROM: 'noreply@example.test' })
   const created = await request(app, '/api/people', 'POST', { name: 'Invited person' })
   expect(created.status).toBe(201)
   const person = await json(created)
   const i = await invitation('fresh@example.test', person.id)
-  const mail = await env.DB.prepare('SELECT body FROM email_outbox WHERE id=(SELECT delivery_outbox_id FROM invitations WHERE id=?)').bind(i.id).first<string>('body')
-  const token = new URL(mail!.replace('Accept: ', '')).searchParams.get('token')!
+  expect(send).toHaveBeenCalledTimes(1)
+  const link = send.mock.calls[0][0].text.match(/https?:\/\/[^\s]+\/invitations\/accept\?token=[a-f0-9]+\.[a-f0-9]+/)![0]
+  const token = new URL(link).searchParams.get('token')!
   const anonymous = () => app.request('http://localhost/invitations/resolve', { method: 'POST', headers: { Origin: 'http://localhost', 'Content-Type': 'application/json' }, body: JSON.stringify({ token }) })
   const login = await anonymous()
   expect(login.status, await login.clone().text()).toBe(200)

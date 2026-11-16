@@ -1,12 +1,18 @@
-import { describe, expect, it } from 'vitest'
+import { beforeAll, describe, expect, it } from 'vitest'
 import { renderInvitationEmail, type InvitationEmailInput } from '../src/emails/invitation-email'
+
+import { buildInvitationAcceptUrl } from '../src/invitation-url'
+import { runtime } from '@workbasehq/test-support/helpers'
 
 const base: InvitationEmailInput = {
   kind: 'invite', inviterDisplayName: 'Alex Example', organizationName: 'Sample Organization',
   roleLabel: 'Contributor', expiresAt: new Date('2026-10-28T14:05:06Z'), timeZone: 'Europe/Prague',
-  acceptUrl: 'https://console.example.test/invitation?token=synthetic&source=email',
+  acceptUrl: '' as InvitationEmailInput['acceptUrl'],
   configuredOrigin: 'https://console.example.test', language: 'en',
 }
+beforeAll(async () => {
+  base.acceptUrl = await buildInvitationAcceptUrl({ ...runtime(), AUTH_BASE_URL: base.configuredOrigin }, { selector: 'a'.repeat(64), purpose: 'email' })
+})
 const variants = (['en', 'cs'] as const).flatMap(language =>
   (['invite', 'reminder'] as const).map(kind => ({ language, kind })))
 
@@ -90,7 +96,7 @@ describe('Members invitation email', () => {
   })
 
   it('escapes URL quotes and ampersands in attributes and readable fallback without altering the link', () => {
-    const acceptUrl = `${base.acceptUrl}&label="quoted"'value'<tag>`
+    const acceptUrl = `${base.acceptUrl}&label="quoted"'value'<tag>` as InvitationEmailInput['acceptUrl']
     const result = renderInvitationEmail({ ...base, acceptUrl })
     expect(result.html).toContain('&amp;label=&quot;quoted&quot;&#39;value&#39;&lt;tag&gt;')
     expect([...result.html.matchAll(/href="([^"]*)"/g)].map(match => decodeHtml(match[1]))).toEqual([acceptUrl, acceptUrl])
@@ -106,7 +112,7 @@ describe('Members invitation email', () => {
     'https://console.example.test\\@evil.example.test/invitation', ' https://console.example.test/invitation',
     'https://console.example.test/invitation\nInjected:header', 'https:console.example.test/invitation',
   ])('rejects unsafe or foreign acceptance URL %j', acceptUrl => {
-    expect(() => renderInvitationEmail({ ...base, acceptUrl })).toThrow()
+    expect(() => renderInvitationEmail({ ...base, acceptUrl: acceptUrl as InvitationEmailInput['acceptUrl'] })).toThrow()
   })
 
   it.each([
@@ -176,12 +182,12 @@ describe('Members invitation email', () => {
 })
 
 it('allows HTTP only for explicit local development with a matching loopback origin', () => {
-  const input = { ...base, configuredOrigin: 'http://localhost:19540', acceptUrl: 'http://localhost:19540/invitations/accept?token=synthetic' }
+  const input = { ...base, configuredOrigin: 'http://localhost:19540', acceptUrl: 'http://localhost:19540/invitations/accept?token=synthetic' as InvitationEmailInput['acceptUrl'] }
   expect(() => renderInvitationEmail(input)).toThrow(/HTTPS/)
   expect(renderInvitationEmail({ ...input, allowLocalHttp: true }).text).toContain(input.acceptUrl)
 })
 it.each(['http://example.test', 'http://localhost.example.test', 'http://127.0.0.2', 'http://localhost@evil.test'])('local development never permits non-loopback origin %s', origin => {
-  expect(() => renderInvitationEmail({ ...base, configuredOrigin: origin, acceptUrl: `${origin}/invitation`, allowLocalHttp: true })).toThrow(/HTTPS/)
+  expect(() => renderInvitationEmail({ ...base, configuredOrigin: origin, acceptUrl: `${origin}/invitation` as InvitationEmailInput['acceptUrl'], allowLocalHttp: true })).toThrow(/HTTPS/)
 })
 
 it.each(variants)('synthetic HTML/text snapshot: $kind $language', variant => {

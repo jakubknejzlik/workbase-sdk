@@ -1,3 +1,4 @@
+import { postCommitFor } from './post-commit'
 import { needsPolicyReceipt, receiptIdentity, receiptExpression, authorizeReplay } from './policy-receipts'
 import { kernelFor } from '../kernel/registry'
 import { loadActorProjection } from '../policies'
@@ -44,14 +45,17 @@ export async function executeAtomic<S extends z.ZodType>(operation: AtomicOperat
   const prior = await replay()
   if (prior) return prior
   let conflict: string | undefined
+  let prepared: unknown
+  let committed: AtomicResult
+  const postCommit = postCommitFor(identity)
+  const runId = crypto.randomUUID()
   try {
-    const prepared = await operation.prepare?.(Object.freeze({ __proto__: null, ...context, reader: Object.freeze({ __proto__: null, first: <T>(query: Parameters<typeof reader.first>[0]) => reader.first<T>(query) }) }), body)
+    prepared = await operation.prepare?.(Object.freeze({ __proto__: null, ...context, reader: Object.freeze({ __proto__: null, first: <T>(query: Parameters<typeof reader.first>[0]) => reader.first<T>(query) }) }), body)
     const rawPlan = operation.plan(Object.freeze({ __proto__: null, ...context, prepared, now: new Date().toISOString(), newId: crypto.randomUUID() }), body)
     validatePlan(rawPlan)
     const plan = enforcePlan(kernelFor(config), scope, rawPlan, memberMode)
     conflict = plan.conflict
     const event = makeEvent(config, scope, plan.event.operation, plan.event.entity, plan.event.entityId, plan.event.before, plan.event.after, plan.event.details)
-    const runId = crypto.randomUUID()
     const response = policyIdentity ? receiptExpression(config, plan.rules, runId, plan.result, policyIdentity) : { sql: '?', bindings: [JSON.stringify(plan.result)] }
     const submission: StorePlan = { runId, rules: [...plan.rules,
       { name: 'audit_outbox', statements: [outboxInsert(event, { sql: 'NOT EXISTS (SELECT 1 FROM atomic_assert WHERE run_id=? AND ok<>1)', bindings: [runId] })] },
@@ -60,11 +64,21 @@ export async function executeAtomic<S extends z.ZodType>(operation: AtomicOperat
     // Validate for every adapter, including capability markers and SQL shape.
     compile(submission)
     await store.run(submission)
-    return plan.result
+    committed = plan.result
   } catch (error) {
     const winner = await replay()
     if (winner) return winner
     if (error instanceof RuleFailed && conflict) throw new RuleFailed(error.rule, conflict)
     throw error
   }
+  // The commit is final: post-commit failures must never enter rollback/replay
+  // handling, and idempotent replays must never repeat external effects.
+  if (postCommit) {
+    try { return await postCommit(prepared, committed) }
+    catch {
+      // Exceptions may contain credentials or provider payloads.
+      console.error(JSON.stringify({ event: 'post_commit_failed', operationId: runId }))
+    }
+  }
+  return committed
 }

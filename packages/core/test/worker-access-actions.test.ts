@@ -1,3 +1,6 @@
+import { z } from 'zod'
+import { registerPostCommit, postCommitFor } from '../src/execution/post-commit'
+import type { AtomicOperation } from '../src/execution/types'
 import { env } from 'cloudflare:workers'
 import { reset } from 'cloudflare:test'
 import { beforeEach, afterEach, expect, it, vi } from 'vitest'
@@ -5,7 +8,11 @@ import { bootstrap } from '@workbasehq/test-support/bootstrap'
 import { completeInvitationProfiles } from '@workbasehq/test-support/helpers'
 import { workerAccessFixture } from './fixtures/worker-access'
 import { createApp } from '../src/app'
-import { D1AtomicStore } from '../src/execution/d1'
+import { executeAtomic } from '../src/execution/atomic'
+import { coreExecutionContext } from '../src/execution/context'
+import { KernelRegistry } from '../src/kernel/registry'
+import { requireScope } from '../src/authorization'
+import { D1AtomicReader, D1AtomicStore } from '../src/execution/d1'
 import invited from './fixtures/worker-access/detail.invited.json'
 import expired from './fixtures/worker-access/detail.expired.json'
 import linked from './fixtures/worker-access/detail.linked.json'
@@ -91,7 +98,7 @@ it('invite is atomic, returns its credential once with no-store, and supersedes 
   expect(response.status, await response.clone().text()).toBe(201)
   expect(response.headers.get('Cache-Control')).toBe('no-store')
   const result = await response.json() as any
-  expect(Object.keys(result).sort()).toEqual(['accept_url', 'expires_at', 'invitation_id'])
+  expect(Object.keys(result).sort()).toEqual(['accept_url', 'delivery', 'expires_at', 'invitation_id'])
   expect(await env.DB.prepare("SELECT expired_at FROM invitations WHERE id='pending'").first('expired_at')).toBeTruthy()
   const detail = await request('/api/worker/local')
   expect(await detail.text()).not.toMatch(/accept_url|token_hash|invitations\/accept/)
@@ -286,4 +293,280 @@ it('V3 explicit link/unlink remain authorized when invitation status cannot be d
   expect(row.actions.link_account.enabled).toBe(true)
   expect((await act('local', 'link_account', { user_id: 'recipient' })).status).toBe(200)
   expect((await act('local', 'unlink_account')).status).toBe(200)
+})
+
+// These regressions use the real V3 route and native send_email transport seam.
+const mailRuntime = (send: (...args: any[]) => any) => ({ ...runtime(), EMAIL: { send }, EMAIL_FROM: 'noreply@example.test' })
+async function invitationOutbox(id: string) {
+  return env.DB.prepare(`SELECT o.* FROM email_outbox o JOIN invitations i ON i.delivery_outbox_id=o.id WHERE i.id=?`).bind(id)
+    .first<{ id: string; delivery_status: string; attempts: number; last_error: string | null; body: string }>()
+}
+it('worker invite mail: delivers exactly once after commit, with Members rendering and delivered-email proof', async () => {
+  const send = vi.fn(async (_message: unknown) => {
+    expect(await env.DB.prepare('SELECT count(*) n FROM invitations').first('n')).toBe(1)
+    expect(await env.DB.prepare("SELECT count(*) n FROM audit_outbox WHERE json_extract(payload,'$.operation')='invitation.created'").first('n')).toBe(1)
+  })
+  app = createApp(workerAccessFixture(), mailRuntime(send))
+  const response = await act('local', 'invite', { email: 'recipient@example.test' })
+  expect(response.status).toBe(201)
+  const result = await response.json() as any
+  expect(send).toHaveBeenCalledTimes(1)
+  expect(result.delivery).toMatchObject({ status: 'delivered', attempts: 1, error: null })
+  const message = send.mock.calls[0][0] as any
+  expect(message).toMatchObject({ to: 'recipient@example.test', from: '"admin" <noreply@example.test>' })
+  expect(message.text).toContain('admin'); expect(message.html).toContain('admin')
+  const outbox = (await invitationOutbox(result.invitation_id))!
+  expect(outbox).toMatchObject({ delivery_status: 'sent', attempts: 1, last_error: null })
+  const deliveredLink = message.text.match(/https?:\/\/[^\s]+\/invitations\/accept\?token=[a-f0-9]+\.[a-f0-9]+/)![0]
+  expect(message.text).toContain(deliveredLink); expect(message.html).toContain(deliveredLink.replaceAll('&', '&amp;'))
+  const selector = new URL(result.accept_url).searchParams.get('token')!
+  const proof = new URL(deliveredLink).searchParams.get('token')!
+  expect(selector).toMatch(/^[a-f0-9]{64}$/)
+  expect(proof).toMatch(/^[a-f0-9]{64}\.[a-f0-9]{64}$/)
+  expect(proof.split('.')[0]).not.toBe(selector)
+  expect(JSON.parse(outbox.body).selector).toBe(proof.split('.')[0])
+  const anonymous = (token: string) => app.request('http://localhost/invitations/resolve', { method: 'POST', headers: { Origin: 'http://localhost', 'Sec-Fetch-Site': 'same-origin', 'Content-Type': 'application/json' }, body: JSON.stringify({ token }) })
+  expect((await anonymous(selector)).status).toBe(401)
+  expect((await anonymous(proof)).status).toBe(200)
+  expect((await request(`/orgs/org-a/invitations/${result.invitation_id}/retry-delivery`, 'admin', 'POST', {})).status).toBe(200)
+  expect(send).toHaveBeenCalledTimes(1)
+  const copied = await (await request(`/orgs/org-a/invitations/${result.invitation_id}/copy-link`, 'admin', 'POST', {})).json() as any
+  expect(new URL(copied.accept_url).searchParams.get('token')).toMatch(/^[a-f0-9]{64}$/)
+  expect(await env.DB.prepare('SELECT delivery_outbox_id FROM invitations WHERE id=?').bind(result.invitation_id).first('delivery_outbox_id')).toBe(outbox.id)
+  expect((await anonymous(proof)).status).toBe(200)
+})
+it('worker invite mail: provider failure is failed and retry-delivery sends the same intent once', async () => {
+  const send = vi.fn().mockRejectedValueOnce(new Error('synthetic provider failure')).mockResolvedValue(undefined)
+  vi.spyOn(console, 'error').mockImplementation(() => {})
+  app = createApp(workerAccessFixture(), mailRuntime(send))
+  const response = await act('local', 'invite', { email: 'recipient@example.test' })
+  expect(response.status).toBe(201)
+  const result = await response.json() as any
+  expect(result.delivery).toMatchObject({ status: 'failed', attempts: 1, error: 'email_send_failed' })
+  const before = await invitationOutbox(result.invitation_id)
+  expect(before).toMatchObject({ delivery_status: 'failed', attempts: 1, last_error: 'email_send_failed' })
+  const retried = await request(`/orgs/org-a/invitations/${result.invitation_id}/retry-delivery`, 'admin', 'POST', {})
+  expect(retried.status).toBe(200)
+  expect(await retried.json()).toMatchObject({ delivery: { status: 'delivered', attempts: 2 } })
+  expect(await invitationOutbox(result.invitation_id)).toMatchObject({ id: before!.id, delivery_status: 'sent', attempts: 2 })
+  expect(send).toHaveBeenCalledTimes(2); expect(send.mock.calls[1]).toEqual(send.mock.calls[0])
+  await request(`/orgs/org-a/invitations/${result.invitation_id}/retry-delivery`, 'admin', 'POST', {})
+  expect(send).toHaveBeenCalledTimes(2)
+})
+it('worker invite mail: timeout fences retries even when the provider later completes', async () => {
+  vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] })
+  let finish!: () => void, started!: () => void
+  const ready = new Promise<void>(resolve => { started = resolve })
+  const send = vi.fn(() => new Promise<void>(resolve => { finish = resolve; started() }))
+  vi.spyOn(console, 'error').mockImplementation(() => {})
+  app = createApp(workerAccessFixture(), mailRuntime(send))
+  const creation = Promise.resolve(act('local', 'invite', { email: 'recipient@example.test' }))
+  try {
+    await ready; await vi.advanceTimersByTimeAsync(60000)
+    const response = await creation
+    expect(response.status).toBe(201)
+    const result = await response.json() as any
+    expect(result.delivery).toMatchObject({ status: 'failed', attempts: 1 })
+    expect(await invitationOutbox(result.invitation_id)).toMatchObject({ last_error: 'email_send_timeout' })
+    for (const late of [false, true]) {
+      if (late) finish()
+      const retried = await request(`/orgs/org-a/invitations/${result.invitation_id}/retry-delivery`, 'admin', 'POST', {})
+      expect(retried.status).toBe(200)
+      expect(await retried.json()).toMatchObject({ delivery: { status: 'failed', attempts: 1 } })
+      expect(send).toHaveBeenCalledTimes(1)
+    }
+  } finally { finish?.(); await creation.catch(() => {}); vi.useRealTimers() }
+})
+it.each([
+  "UPDATE invitations SET revoked_at='now'",
+  "UPDATE invitations SET accepted_at='now'",
+  "UPDATE invitations SET declined_at='now'",
+  "UPDATE invitations SET expired_at='now'",
+  "UPDATE invitations SET expires_at='2000-01-01'",
+  "UPDATE invitations SET token_hash='rotated',delivery_outbox_id=NULL",
+  "UPDATE invitations SET id='replaced'",
+  "UPDATE invitations SET organization_id='org-b'",
+  "UPDATE worker SET user='recipient' WHERE id='local'",
+  "UPDATE memberships SET role='staff' WHERE user_id='admin'",
+])('worker invite mail: rechecks committed invitation and row guard before send: %s', async sql => {
+  const send = vi.fn().mockResolvedValue(undefined)
+  app = createApp(workerAccessFixture(), mailRuntime(send))
+  const original = D1AtomicStore.prototype.run
+  vi.spyOn(D1AtomicStore.prototype, 'run').mockImplementationOnce(async function(this: D1AtomicStore, plan) {
+    const outcome = await original.call(this, plan)
+    await env.DB.exec(sql)
+    return outcome
+  })
+  const response = await act('local', 'invite', { email: 'recipient@example.test' })
+  expect(response.status).toBe(201)
+  expect((await response.json() as any).delivery).toMatchObject({ status: 'queued', attempts: 0 })
+  expect(send).not.toHaveBeenCalled()
+  expect(await env.DB.prepare('SELECT delivery_status,attempts FROM email_outbox').first()).toMatchObject({ delivery_status: 'pending', attempts: 0 })
+})
+it('worker invite mail: failed atomic commit sends nothing and leaves no intent', async () => {
+  const send = vi.fn().mockResolvedValue(undefined)
+  app = createApp(workerAccessFixture(), mailRuntime(send))
+  const original = D1AtomicStore.prototype.run
+  vi.spyOn(D1AtomicStore.prototype, 'run').mockImplementationOnce(async function(this: D1AtomicStore, plan) {
+    await env.DB.exec("UPDATE memberships SET role='staff' WHERE user_id='admin'")
+    return original.call(this, plan)
+  })
+  expect((await act('local', 'invite', { email: 'recipient@example.test' })).status).toBe(404)
+  expect(send).not.toHaveBeenCalled()
+  expect(await env.DB.prepare('SELECT count(*) n FROM email_outbox').first('n')).toBe(0)
+})
+it('worker invite mail: a pre-existing pending intent stays untouched', async () => {
+  const send = vi.fn().mockResolvedValue(undefined)
+  app = createApp(workerAccessFixture(), mailRuntime(send))
+  await env.DB.prepare(`INSERT INTO email_outbox (id,organization_id,recipient,subject,body,created_at,delivery_text,delivery_html,expires_at)
+    VALUES ('historic','org-a','historic@example.test','Historic invitation','Accept: historic','2000','Historic text','<p>Historic</p>','2099-01-01')`).run()
+  await env.DB.prepare(`INSERT INTO invitations (id,organization_id,email,role,token_hash,expires_at,inviter_id,created_at,delivery_outbox_id,target_entity,target_row)
+    VALUES ('historic','org-a','historic@example.test','staff',?,'2099-01-01','admin','2000','historic','worker','other')`).bind(await sha256('d'.repeat(64))).run()
+  expect((await act('local', 'invite', { email: 'recipient@example.test' })).status).toBe(201)
+  expect(send).toHaveBeenCalledTimes(1)
+  expect(await env.DB.prepare("SELECT delivery_status,attempts,sent_at,last_error FROM email_outbox WHERE id='historic'").first())
+    .toEqual({ delivery_status: 'pending', attempts: 0, sent_at: null, last_error: null })
+})
+
+it('worker invite mail: post-commit failure preserves the committed result and idempotent replay never sends twice', async () => {
+  const send = vi.fn().mockResolvedValue(undefined)
+  const settings = mailRuntime(send)
+  const kernel = new KernelRegistry(workerAccessFixture(), {}, settings)
+  const scope = await requireScope(await kernel.requireActor(new Request('http://localhost', { headers: { Authorization: 'Bearer synthetic-admin' } }), settings), 'org-a', kernel.config)
+  const operation = kernel.commands.get('worker/access_invite')!
+  const context = coreExecutionContext(kernel.config, scope, new D1AtomicStore(env.DB, { env: settings, config: kernel.config }), new D1AtomicReader(env.DB), 'invite-once')
+  vi.spyOn(console, 'error').mockImplementation(() => {})
+  const status = vi.spyOn(kernel.invitationMail, 'status').mockRejectedValueOnce(new Error('synthetic post-commit status failure'))
+  const committed = await executeAtomic(operation, { id: 'local', email: 'recipient@example.test' }, context)
+  expect(committed).toMatchObject({ status: 201, body: { delivery: { status: 'unknown' } } })
+  expect(send).toHaveBeenCalledTimes(1)
+  expect(await env.DB.prepare("SELECT delivery_status FROM email_outbox").first('delivery_status')).toBe('sent')
+  const replay = await executeAtomic(operation, { id: 'local', email: 'recipient@example.test' }, context)
+  expect(replay).toEqual(committed)
+  expect(send).toHaveBeenCalledTimes(1); expect(status).toHaveBeenCalledTimes(1)
+  expect(await env.DB.prepare('SELECT count(*) n FROM invitations').first('n')).toBe(1)
+})
+
+it('worker invite mail: status failure returns 201 and delivery recovery uses the committed invitation', async () => {
+  const send = vi.fn().mockResolvedValue(undefined)
+  const settings = mailRuntime(send)
+  const port = new KernelRegistry(workerAccessFixture(), {}, settings).invitationMail
+  vi.spyOn(port, 'status').mockRejectedValueOnce(new Error('synthetic status read failure with private details'))
+  const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+  app = createApp(workerAccessFixture(), settings)
+  const response = await act('local', 'invite', { email: 'recipient@example.test' })
+  expect(response.status).toBe(201)
+  const result = await response.json() as any
+  expect(result).toMatchObject({ invitation_id: expect.any(String), accept_url: expect.any(String), delivery: { status: 'unknown' } })
+  expect(await env.DB.prepare('SELECT count(*) n FROM invitations').first('n')).toBe(1)
+  expect(await invitationOutbox(result.invitation_id)).toMatchObject({ delivery_status: 'sent', attempts: 1 })
+  expect(send).toHaveBeenCalledTimes(1)
+  const retry = await request(`/orgs/org-a/invitations/${result.invitation_id}/retry-delivery`, 'admin', 'POST', {})
+  expect(retry.status).toBe(200)
+  expect(await retry.json()).toMatchObject({ id: result.invitation_id, delivery: { status: 'delivered', attempts: 1 } })
+  expect(send).toHaveBeenCalledTimes(1)
+  expect(await env.DB.prepare('SELECT count(*) n FROM invitations').first('n')).toBe(1)
+  expect(log.mock.calls).toEqual([[JSON.stringify({ event: 'invitation_post_commit_failed', outboxId: (await invitationOutbox(result.invitation_id))!.id })]])
+})
+
+it('worker invite mail: serialized StorePlans exclude the delivered mailbox proof on creation and retry', async () => {
+  const send = vi.fn().mockRejectedValueOnce(new Error('synthetic provider failure')).mockResolvedValue(undefined)
+  vi.spyOn(console, 'error').mockImplementation(() => {})
+  const config = workerAccessFixture()
+  app = createApp(config, mailRuntime(send))
+  const serializedPlans: string[] = []
+  const original = D1AtomicStore.prototype.run
+  vi.spyOn(D1AtomicStore.prototype, 'run').mockImplementation(async function(this: D1AtomicStore, plan) {
+    serializedPlans.push(JSON.stringify(plan))
+    return original.call(this, plan)
+  })
+  const response = await act('local', 'invite', { email: 'recipient@example.test' })
+  expect(response.status).toBe(201)
+  const result = await response.json() as any
+  expect(result.delivery.status).toBe('failed')
+  const retried = await request(`/orgs/org-a/invitations/${result.invitation_id}/retry-delivery`, 'admin', 'POST', {})
+  expect(retried.status).toBe(200)
+  expect(await retried.json()).toMatchObject({ delivery: { status: 'delivered', attempts: 2 } })
+  expect(send).toHaveBeenCalledTimes(2)
+  const message = send.mock.calls[1][0]
+  const deliveredLink = message.text.match(/https?:\/\/[^\s]+\/invitations\/accept\?token=[a-f0-9]+\.[a-f0-9]+/)![0]
+  const proof = new URL(deliveredLink).searchParams.get('token')!
+  expect(proof).toMatch(/^[a-f0-9]{64}\.[a-f0-9]{64}$/)
+  expect(serializedPlans.length).toBeGreaterThan(0)
+  expect(serializedPlans.some(plan => plan.includes(proof) || /[a-f0-9]{64}\.[a-f0-9]{64}/.test(plan))).toBe(false)
+  expect(JSON.stringify(config).includes(proof)).toBe(false)
+  expect(JSON.stringify(await env.DB.prepare('SELECT payload FROM audit_outbox').all()).includes(proof)).toBe(false)
+  expect(JSON.stringify(result).includes(proof)).toBe(false)
+  expect(JSON.stringify(await invitationOutbox(result.invitation_id)).includes(proof)).toBe(false)
+  expect((await app.request('http://localhost/invitations/resolve', { method: 'POST', headers: { Origin: 'http://localhost', 'Sec-Fetch-Site': 'same-origin', 'Content-Type': 'application/json' }, body: JSON.stringify({ token: proof }) })).status).toBe(200)
+})
+
+it('post-commit callbacks are isolated by operation identity even with a shared plan function', async () => {
+  const kernel = new KernelRegistry(workerAccessFixture(), {}, runtime())
+  const scope = await requireScope(await kernel.requireActor(new Request('http://localhost', { headers: { Authorization: 'Bearer synthetic-admin' } }), runtime()), 'org-a', kernel.config)
+  const context = coreExecutionContext(kernel.config, scope, new D1AtomicStore(env.DB, { env: runtime(), config: kernel.config }), new D1AtomicReader(env.DB))
+  const plan: AtomicOperation['plan'] = () => ({ rules: [{ name: 'touch', statements: [{ sql: "UPDATE worker SET name=name WHERE id='local'" }] }], event: { operation: 'worker.updated', entity: 'worker', entityId: 'local' }, result: { status: 200, body: {} } })
+  const base = { permission: { system: 'invitations.create' as const }, input: z.object({}), plan }
+  const callbackA = vi.fn(async (_prepared, result) => ({ ...result, body: { owner: 'a' } }))
+  const callbackB = vi.fn(async (_prepared, result) => ({ ...result, body: { owner: 'b' } }))
+  const a = registerPostCommit({ ...base, name: 'worker/probe_a' }, callbackA)
+  const b = registerPostCommit({ ...base, name: 'worker/probe_b' }, callbackB)
+  const unregistered = { ...base, name: 'worker/probe_unregistered' }
+  expect(postCommitFor(a)).toBe(callbackA)
+  expect(postCommitFor(b)).toBe(callbackB)
+  expect(postCommitFor(unregistered)).toBeUndefined()
+  expect(await executeAtomic(a, {}, context)).toMatchObject({ body: { owner: 'a' } })
+  expect(await executeAtomic(b, {}, context)).toMatchObject({ body: { owner: 'b' } })
+  expect(await executeAtomic(unregistered, {}, context)).toEqual({ status: 200, body: {} })
+  expect(callbackA).toHaveBeenCalledTimes(1); expect(callbackB).toHaveBeenCalledTimes(1)
+  const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+  const failing = registerPostCommit({ ...base, name: 'worker/probe_failure' }, async () => { throw new Error('private callback details') })
+  expect(await executeAtomic(failing, {}, context)).toEqual({ status: 200, body: {} })
+  expect(log).toHaveBeenCalledTimes(1)
+  expect(JSON.parse(log.mock.calls[0][0])).toEqual({ event: 'post_commit_failed', operationId: expect.stringMatching(/^[0-9a-f-]{36}$/) })
+})
+
+// Review2 encodings are inert because stored output is never a source of links.
+it.each(['text', 'html', 'both', 'html-one', 'body', 'text-extra', 'html-extra'])('worker invite mail: reconstructs stored %s or fails invalid inputs before send', async part => {
+  const send = vi.fn().mockResolvedValue(undefined)
+  app = createApp(workerAccessFixture(), mailRuntime(send))
+  // Commit without a transport; retry must send exactly once with fresh proof.
+  app = createApp(workerAccessFixture(), runtime())
+  const result = await (await act('local', 'invite', { email: 'recipient@example.test' })).json() as any
+  const row = (await env.DB.prepare('SELECT id,body FROM email_outbox').first<{ id: string; body: string }>())!
+  const inputs = JSON.parse(row.body)
+  const encodedLink = `/invitations/accept&quest;token&equals;%${inputs.selector.charCodeAt(0).toString(16)}${inputs.selector.slice(1)}`
+  await env.DB.prepare('UPDATE email_outbox SET body=?,delivery_text=?,delivery_html=? WHERE id=?')
+    .bind(part === 'body' ? '{}' : row.body, encodedLink, `<a title=">" href="${encodedLink}">Extra</a>`, row.id).run()
+  app = createApp(workerAccessFixture(), mailRuntime(send))
+  const retry = () => request(`/orgs/org-a/invitations/${result.invitation_id}/retry-delivery`, 'admin', 'POST', {})
+  expect(await (await retry()).json()).toMatchObject({ delivery: { status: part === 'body' ? 'failed' : 'delivered', attempts: 1 } })
+  expect(send).toHaveBeenCalledTimes(part === 'body' ? 0 : 1)
+  if (part !== 'body') {
+    expect(send.mock.calls[0][0].html).not.toContain('Extra')
+    expect(send.mock.calls[0][0].text).not.toContain(encodedLink)
+    expect(await (await retry()).json()).toMatchObject({ delivery: { status: 'delivered', attempts: 1 } })
+    expect(send).toHaveBeenCalledTimes(1)
+  }
+})
+
+// Review3 V3_METADATA_REPRO: use the real worker action and native transport.
+it('worker invite mail: acceptance path in organization display text delivers once', async () => {
+  const send = vi.fn().mockResolvedValue(undefined)
+  app = createApp(workerAccessFixture(), mailRuntime(send))
+  expect((await request('/orgs/org-a', 'admin', 'PATCH', { name: 'Team /invitations/accept' })).status).toBe(200)
+  const response = await act('local', 'invite', { email: 'recipient@example.test' })
+  expect(response.status).toBe(201)
+  const result = await response.json() as any
+  expect(result.delivery).toMatchObject({ status: 'delivered', attempts: 1, error: null })
+  expect(send).toHaveBeenCalledTimes(1)
+  const message = send.mock.calls[0][0]
+  expect(message.text).toContain('Team /invitations/accept')
+  expect(message.html).toContain('Team /invitations/accept')
+  const delivered = message.text.match(/https?:\/\/[^\s]+\/invitations\/accept\?token=[a-f0-9]+\.[a-f0-9]+/)![0]
+  const proof = new URL(delivered).searchParams.get('token')!
+  expect((await app.request('http://localhost/invitations/resolve', { method: 'POST', headers: {
+    Origin: 'http://localhost', 'Sec-Fetch-Site': 'same-origin', 'Content-Type': 'application/json',
+  }, body: JSON.stringify({ token: proof }) })).status).toBe(200)
+  expect(await invitationOutbox(result.invitation_id)).toMatchObject({ delivery_status: 'sent', attempts: 1, last_error: null })
 })

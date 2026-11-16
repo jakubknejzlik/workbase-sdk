@@ -16,9 +16,9 @@ exports[`synthetic HTML/text snapshot: 'invite' 'cs' 1`] = `
 <p style="margin:0 0 16px;font-size:15px;line-height:24px;color:#1a1a2e;">Alex Example vás zve do organizace Sample Organization ve Workbase.</p>
 <p style="margin:0 0 16px;font-size:15px;line-height:24px;color:#1a1a2e;">Vaše role: Contributor.</p>
 <p style="margin:0 0 16px;font-size:15px;line-height:24px;color:#1a1a2e;">Kliknutím na tlačítko si můžete pozvánku prohlédnout a přijmout:</p>
-<table role="presentation" cellpadding="0" cellspacing="0" align="center" style="margin:12px auto 28px;"><tr><td align="center" bgcolor="#00e6a0" style="background-color:#00e6a0;border-radius:6px;mso-padding-alt:14px 32px;"><a href="https://console.example.test/invitation?token=synthetic&amp;source=email" style="display:inline-block;padding:14px 32px;color:#0a0a5e;font-size:16px;line-height:24px;font-weight:bold;text-decoration:none;">Přijmout pozvánku</a></td></tr></table>
+<table role="presentation" cellpadding="0" cellspacing="0" align="center" style="margin:12px auto 28px;"><tr><td align="center" bgcolor="#00e6a0" style="background-color:#00e6a0;border-radius:6px;mso-padding-alt:14px 32px;"><a href="https://console.example.test/invitations/accept?token=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.0c917f9aa6e7914860dc0a9890a0ca6e8528c887bb110506c8b0bbfaba634b15" style="display:inline-block;padding:14px 32px;color:#0a0a5e;font-size:16px;line-height:24px;font-weight:bold;text-decoration:none;">Přijmout pozvánku</a></td></tr></table>
 <p style="margin:0 0 16px;font-size:15px;line-height:24px;color:#1a1a2e;">Nebo použijte tento odkaz:</p>
-<p style="margin:0 0 20px;word-break:break-all;overflow-wrap:anywhere;"><a href="https://console.example.test/invitation?token=synthetic&amp;source=email" style="color:#0a0a5e;font-size:13px;line-height:20px;text-decoration:underline;">https://console.example.test/invitation?token=synthetic&amp;source=email</a></p>
+<p style="margin:0 0 20px;word-break:break-all;overflow-wrap:anywhere;"><a href="https://console.example.test/invitations/accept?token=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.0c917f9aa6e7914860dc0a9890a0ca6e8528c887bb110506c8b0bbfaba634b15" style="color:#0a0a5e;font-size:13px;line-height:20px;text-decoration:underline;">https://console.example.test/invitations/accept?token=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.0c917f9aa6e7914860dc0a9890a0ca6e8528c887bb110506c8b0bbfaba634b15</a></p>
 <p style="margin:0 0 16px;font-size:15px;line-height:24px;color:#1a1a2e;">Tato pozvánka platí sedm dní a vyprší 28. října 2026 v 15:05:06, GMT+01:00 (Europe/Prague).</p>
 <p style="margin:0 0 16px;font-size:15px;line-height:24px;color:#1a1a2e;">Pokud jste tuto pozvánku neočekávali, můžete tento e-mail ignorovat.</p>
 </td></tr>
@@ -45,7 +45,7 @@ Přijmout pozvánku
 
 Nebo použijte tento odkaz:
 
-https://console.example.test/invitation?token=synthetic&source=email
+https://console.example.test/invitations/accept?token=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.0c917f9aa6e7914860dc0a9890a0ca6e8528c887bb110506c8b0bbfaba634b15
 
 Tato pozvánka platí sedm dní a vyprší 28. října 2026 v 15:05:06, GMT+01:00 (Europe/Prague).
 
@@ -71,9 +71,9 @@ exports[`synthetic HTML/text snapshot: 'invite' 'en' 1`] = `
 <p style="margin:0 0 16px;font-size:15px;line-height:24px;color:#1a1a2e;">Alex Example invites you to the organization Sample Organization on Workbase.</p>
 <p style="margin:0 0 16px;font-size:15px;line-height:24px;color:#1a1a2e;">Your role: Contributor.</p>
 <p style="margin:0 0 16px;font-size:15px;line-height:24px;color:#1a1a2e;">Use the button below to review and accept your invitation:</p>
-<table role="presentation" cellpadding="0" cellspacing="0" align="center" style="margin:12px auto 28px;"><tr><td align="center" bgcolor="#00e6a0" style="background-color:#00e6a0;border-radius:6px;mso-padding-alt:14px 32px;"><a href="https://console.example.test/invitation?token=synthetic&amp;source=email" style="display:inline-block;padding:14px 32px;color:#0a0a5e;font-size:16px;line-height:24px;font-weight:bold;text-decoration:none;">Accept invitation</a></td></tr></table>
+<table role="presentation" cellpadding="0" cellspacing="0" align="center" style="margin:12px auto 28px;"><tr><td align="center" bgcolor="#00e6a0" style="background-color:#00e6a0;border-radius:6px;mso-padding-alt:14px 32px;"><a href="https://console.example.test/invitations/accept?token=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.0c917f9aa6e7914860dc0a9890a0ca6e8528c887bb110506c8b0bbfaba634b15" style="display:inline-block;padding:14px 32px;color:#0a0a5e;font-size:16px;line-height:24px;font-weight:bold;text-decoration:none;">Accept invitation</a></td></tr></table>
 <p style="margin:0 0 16px;font-size:15px;line-height:24px;color:#1a1a2e;">Or use this link:</p>
-<p style="margin:0 0 20px;word-break:break-all;overflow-wrap:anywhere;"><a href="https://console.example.test/invitation?token=synthetic&amp;source=email" style="color:#0a0a5e;font-size:13px;line-height:20px;text-decoration:underline;">https://console.example.test/invitation?token=synthetic&amp;source=email</a></p>
+<p style="margin:0 0 20px;word-break:break-all;overflow-wrap:anywhere;"><a href="https://console.example.test/invitations/accept?token=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.0c917f9aa6e7914860dc0a9890a0ca6e8528c887bb110506c8b0bbfaba634b15" style="color:#0a0a5e;font-size:13px;line-height:20px;text-decoration:underline;">https://console.example.test/invitations/accept?token=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.0c917f9aa6e7914860dc0a9890a0ca6e8528c887bb110506c8b0bbfaba634b15</a></p>
 <p style="margin:0 0 16px;font-size:15px;line-height:24px;color:#1a1a2e;">This invitation is valid for seven days and expires on 28 October 2026 at 15:05:06 GMT+01:00 (Europe/Prague).</p>
 <p style="margin:0 0 16px;font-size:15px;line-height:24px;color:#1a1a2e;">If you were not expecting this invitation, you can ignore this email.</p>
 </td></tr>
@@ -100,7 +100,7 @@ Accept invitation
 
 Or use this link:
 
-https://console.example.test/invitation?token=synthetic&source=email
+https://console.example.test/invitations/accept?token=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.0c917f9aa6e7914860dc0a9890a0ca6e8528c887bb110506c8b0bbfaba634b15
 
 This invitation is valid for seven days and expires on 28 October 2026 at 15:05:06 GMT+01:00 (Europe/Prague).
 
@@ -126,9 +126,9 @@ exports[`synthetic HTML/text snapshot: 'reminder' 'cs' 1`] = `
 <p style="margin:0 0 16px;font-size:15px;line-height:24px;color:#1a1a2e;">Připomínáme, že Alex Example vás zve do organizace Sample Organization ve Workbase.</p>
 <p style="margin:0 0 16px;font-size:15px;line-height:24px;color:#1a1a2e;">Vaše role: Contributor.</p>
 <p style="margin:0 0 16px;font-size:15px;line-height:24px;color:#1a1a2e;">Kliknutím na tlačítko si můžete pozvánku prohlédnout a přijmout:</p>
-<table role="presentation" cellpadding="0" cellspacing="0" align="center" style="margin:12px auto 28px;"><tr><td align="center" bgcolor="#00e6a0" style="background-color:#00e6a0;border-radius:6px;mso-padding-alt:14px 32px;"><a href="https://console.example.test/invitation?token=synthetic&amp;source=email" style="display:inline-block;padding:14px 32px;color:#0a0a5e;font-size:16px;line-height:24px;font-weight:bold;text-decoration:none;">Přijmout pozvánku</a></td></tr></table>
+<table role="presentation" cellpadding="0" cellspacing="0" align="center" style="margin:12px auto 28px;"><tr><td align="center" bgcolor="#00e6a0" style="background-color:#00e6a0;border-radius:6px;mso-padding-alt:14px 32px;"><a href="https://console.example.test/invitations/accept?token=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.0c917f9aa6e7914860dc0a9890a0ca6e8528c887bb110506c8b0bbfaba634b15" style="display:inline-block;padding:14px 32px;color:#0a0a5e;font-size:16px;line-height:24px;font-weight:bold;text-decoration:none;">Přijmout pozvánku</a></td></tr></table>
 <p style="margin:0 0 16px;font-size:15px;line-height:24px;color:#1a1a2e;">Nebo použijte tento odkaz:</p>
-<p style="margin:0 0 20px;word-break:break-all;overflow-wrap:anywhere;"><a href="https://console.example.test/invitation?token=synthetic&amp;source=email" style="color:#0a0a5e;font-size:13px;line-height:20px;text-decoration:underline;">https://console.example.test/invitation?token=synthetic&amp;source=email</a></p>
+<p style="margin:0 0 20px;word-break:break-all;overflow-wrap:anywhere;"><a href="https://console.example.test/invitations/accept?token=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.0c917f9aa6e7914860dc0a9890a0ca6e8528c887bb110506c8b0bbfaba634b15" style="color:#0a0a5e;font-size:13px;line-height:20px;text-decoration:underline;">https://console.example.test/invitations/accept?token=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.0c917f9aa6e7914860dc0a9890a0ca6e8528c887bb110506c8b0bbfaba634b15</a></p>
 <p style="margin:0 0 16px;font-size:15px;line-height:24px;color:#1a1a2e;">Tato pozvánka platí sedm dní a vyprší 28. října 2026 v 15:05:06, GMT+01:00 (Europe/Prague).</p>
 <p style="margin:0 0 16px;font-size:15px;line-height:24px;color:#1a1a2e;">Pokud jste tuto pozvánku neočekávali, můžete tento e-mail ignorovat.</p>
 </td></tr>
@@ -155,7 +155,7 @@ Přijmout pozvánku
 
 Nebo použijte tento odkaz:
 
-https://console.example.test/invitation?token=synthetic&source=email
+https://console.example.test/invitations/accept?token=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.0c917f9aa6e7914860dc0a9890a0ca6e8528c887bb110506c8b0bbfaba634b15
 
 Tato pozvánka platí sedm dní a vyprší 28. října 2026 v 15:05:06, GMT+01:00 (Europe/Prague).
 
@@ -181,9 +181,9 @@ exports[`synthetic HTML/text snapshot: 'reminder' 'en' 1`] = `
 <p style="margin:0 0 16px;font-size:15px;line-height:24px;color:#1a1a2e;">This is a reminder that Alex Example invites you to the organization Sample Organization on Workbase.</p>
 <p style="margin:0 0 16px;font-size:15px;line-height:24px;color:#1a1a2e;">Your role: Contributor.</p>
 <p style="margin:0 0 16px;font-size:15px;line-height:24px;color:#1a1a2e;">Use the button below to review and accept your invitation:</p>
-<table role="presentation" cellpadding="0" cellspacing="0" align="center" style="margin:12px auto 28px;"><tr><td align="center" bgcolor="#00e6a0" style="background-color:#00e6a0;border-radius:6px;mso-padding-alt:14px 32px;"><a href="https://console.example.test/invitation?token=synthetic&amp;source=email" style="display:inline-block;padding:14px 32px;color:#0a0a5e;font-size:16px;line-height:24px;font-weight:bold;text-decoration:none;">Accept invitation</a></td></tr></table>
+<table role="presentation" cellpadding="0" cellspacing="0" align="center" style="margin:12px auto 28px;"><tr><td align="center" bgcolor="#00e6a0" style="background-color:#00e6a0;border-radius:6px;mso-padding-alt:14px 32px;"><a href="https://console.example.test/invitations/accept?token=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.0c917f9aa6e7914860dc0a9890a0ca6e8528c887bb110506c8b0bbfaba634b15" style="display:inline-block;padding:14px 32px;color:#0a0a5e;font-size:16px;line-height:24px;font-weight:bold;text-decoration:none;">Accept invitation</a></td></tr></table>
 <p style="margin:0 0 16px;font-size:15px;line-height:24px;color:#1a1a2e;">Or use this link:</p>
-<p style="margin:0 0 20px;word-break:break-all;overflow-wrap:anywhere;"><a href="https://console.example.test/invitation?token=synthetic&amp;source=email" style="color:#0a0a5e;font-size:13px;line-height:20px;text-decoration:underline;">https://console.example.test/invitation?token=synthetic&amp;source=email</a></p>
+<p style="margin:0 0 20px;word-break:break-all;overflow-wrap:anywhere;"><a href="https://console.example.test/invitations/accept?token=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.0c917f9aa6e7914860dc0a9890a0ca6e8528c887bb110506c8b0bbfaba634b15" style="color:#0a0a5e;font-size:13px;line-height:20px;text-decoration:underline;">https://console.example.test/invitations/accept?token=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.0c917f9aa6e7914860dc0a9890a0ca6e8528c887bb110506c8b0bbfaba634b15</a></p>
 <p style="margin:0 0 16px;font-size:15px;line-height:24px;color:#1a1a2e;">This invitation is valid for seven days and expires on 28 October 2026 at 15:05:06 GMT+01:00 (Europe/Prague).</p>
 <p style="margin:0 0 16px;font-size:15px;line-height:24px;color:#1a1a2e;">If you were not expecting this invitation, you can ignore this email.</p>
 </td></tr>
@@ -210,7 +210,7 @@ Accept invitation
 
 Or use this link:
 
-https://console.example.test/invitation?token=synthetic&source=email
+https://console.example.test/invitations/accept?token=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.0c917f9aa6e7914860dc0a9890a0ca6e8528c887bb110506c8b0bbfaba634b15
 
 This invitation is valid for seven days and expires on 28 October 2026 at 15:05:06 GMT+01:00 (Europe/Prague).
 
