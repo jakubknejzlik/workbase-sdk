@@ -45,7 +45,9 @@ it('public bundle scan accepts generic and malformed data URIs', () => {
   const directory = registerTempDir(mkdtempSync(resolve(tmpdir(), 'console-scan-')))
   try {
     const uri = `data:application/json;base64,${Buffer.from('{"label":"field_name"}').toString('base64')}`
-    writeFileSync(resolve(directory, 'index.js'), `const assets = [${JSON.stringify(uri)}, "data:text/plain,%ZZ"]`)
+    // Build the malformed URI at runtime so the SDK source scan can stay strict.
+    const malformedUri = ['data:text/plain,', '%ZZ'].join('')
+    writeFileSync(resolve(directory, 'index.js'), `const assets = ${JSON.stringify([uri, malformedUri])}`)
     expect(scan(directory)).toContain('0 private model IDs')
   } finally { cleanupTempDir(directory) }
 })

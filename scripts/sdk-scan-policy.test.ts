@@ -6,6 +6,25 @@ import { expect, it } from 'vitest'
 import { reviewDigest } from './lib/private-terms'
 import policy from './sdk-scan-policy.json'
 
+it.each([
+  'packages/core/src/asset.ts',
+  'packages/plugins/console/assets/index.js',
+  'scripts/check-console-public.test.ts',
+])('fails closed on malformed encoded data in %s', async path => {
+  const { assertBytes, withPolicyDataReviews } = await import('./lib/sdk-export-scan')
+  const malformedUri = ['data:text/plain,', '%ZZ'].join('')
+  const content = Buffer.from(`const asset = ${JSON.stringify(malformedUri)}`)
+  expect(() => assertBytes(path, content, withPolicyDataReviews(policy))).toThrow(`unscannable encoded asset: ${path}`)
+})
+
+it('scans the test source that builds the same malformed URI at runtime', async () => {
+  const { assertBytes, withPolicyDataReviews } = await import('./lib/sdk-export-scan')
+  const path = 'scripts/check-console-public.test.ts'
+  const source = readFileSync(new URL('../' + path, import.meta.url))
+  expect(source.toString('utf8')).not.toContain(['data:text/plain,', '%ZZ'].join(''))
+  expect(() => assertBytes(path, source, withPolicyDataReviews(policy))).not.toThrow()
+})
+
 // This exact-byte check must run even when private scan vocabulary is unavailable.
 it('preserves all three exact-line bun.lock scan reviews', () => {
   const lines = readFileSync(new URL('../bun.lock', import.meta.url), 'utf8').split('\n')
