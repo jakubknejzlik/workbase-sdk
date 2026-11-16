@@ -13,8 +13,9 @@ import { hasInvitationMailboxProof } from '../src/invitation-token'
 beforeEach(async () => { await setup() })
 afterEach(() => vi.restoreAllMocks())
 const escape = (v: string) => v.replaceAll('&', '&amp;')
-const cases = (['en', 'cs'] as const).flatMap(locale => (['invite', 'reminder'] as const).map(kind => ({ locale, kind })))
-it.each(cases)('current inputs $locale $kind re-render with verified proof and send once', async ({ locale, kind }) => {
+const cases = (['en', 'cs'] as const).flatMap(locale => (['invite', 'reminder'] as const).flatMap(kind =>
+  [false, true].map(rotated => ({ locale, kind, rotated }))))
+it.each(cases)('current inputs $locale $kind rotated=$rotated re-render with verified proof and send once', async ({ locale, kind, rotated }) => {
   const config = { ...sample, locale }
   const created = await json(await request(createApp(config, runtime()), '/orgs/org-a/invitations', 'POST', { email: 'inputs@example.test', role: 'viewer' }))
   const row = (await env.DB.prepare('SELECT id,body FROM email_outbox').first<{ id: string; body: string }>())!
@@ -23,6 +24,7 @@ it.each(cases)('current inputs $locale $kind re-render with verified proof and s
   await env.DB.prepare('UPDATE email_outbox SET body=? WHERE id=?').bind(JSON.stringify(inputs), row.id).run()
   const send = vi.fn().mockResolvedValue(undefined)
   const settings = { ...runtime(), EMAIL: { send }, EMAIL_FROM: 'noreply@example.test' }
+  if (rotated) settings.IDENTITY.secret = 'synthetic-rotated-key-at-least-32-characters'
   const acceptUrl = await buildInvitationAcceptUrl(settings, { selector: inputs.selector, purpose: 'email' })
   const app = createApp(config, settings)
   const retry = () => request(app, `/orgs/org-a/invitations/${created.id}/retry-delivery`, 'POST', {})
