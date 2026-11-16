@@ -9,18 +9,43 @@ import { requestHash } from './idempotency'
 import { ulid } from './crypto'
 import { coreExecutionContext, assertLivePermission, infrastructure, holdReleaseContext } from './execution/context'
 import { D1AtomicStore, D1AtomicReader } from './execution/d1'
-import { PermissionRevoked } from './execution/errors'
+import { PermissionRevoked, RuleFailed } from './execution/errors'
 import type { ExecutionContext, GuardedStatement, AtomicStore } from './execution/types'
 import type { WorkflowDefinition, WorkflowRuntime, WorkflowStatus, WorkflowStep } from './execution/workflow'
 export type WorkflowRegistry = ReadonlyMap<string, WorkflowDefinition<any>>
+export interface WorkflowContinuationBudget {
+  /** Advancement passes, including recovery, retries, undo and terminal completion. Capped at 32. */
+  maxSteps?: number
+  /** Stop starting passes after this elapsed time. Capped at 5 seconds; an in-flight
+   * pass retains its existing step timeout (at most 10 seconds). */
+  maxDurationMs?: number
+  /** Reference clock, matching tick's deterministic recovery clock. */
+  now?: number
+}
+// Shared by every quantum in one tick; standalone continuations keep their own caps.
+interface WorkflowInvocationBudget { remainingSteps: number; deadline: number }
+const continuationSteps = 32
+const continuationDurationMs = 5000
+export type WorkflowReadiness =
+  | { status: 'terminal' }
+  | { status: 'paused' }
+  | { status: 'due_at'; dueAt: number }
+  | { status: 'budget_exhausted' }
+  | { status: 'lease_lost' }
+export type WorkflowContinuationResult = WorkflowReadiness & { claimed: boolean }
 interface Run {
   id: string; organization_id: string; actor_id: string; actor_type: 'user' | 'agent'; token_id: string | null
   definition_name: string; definition_version: string; definition_signature: string; input_json: string
-  cancel_actor_id: string | null; status: WorkflowStatus; resume_status: WorkflowStatus | null; correlation_id: string; lease_token: string; last_error_code: string | null
+  cancel_actor_id: string | null; status: WorkflowStatus; resume_status: WorkflowStatus | null; correlation_id: string; lease_token: string | null; lease_until: number | null; next_attempt_at: number; last_error_code: string | null
 }
 interface Step {
   step_id: string; status: string; attempts: number; compensation_attempts: number; deadline_at: number | null
   compensation_deadline_at: number | null; compensation_checkpoint_json: string | null; last_error_code: string | null; checkpoint_json: string | null; next_attempt_at: number
+}
+function serializeCheckpoint(result: unknown): string {
+  const serialized = JSON.stringify(result)
+  if (serialized === undefined) throw new TypeError('Workflow checkpoint must be JSON serializable')
+  return serialized
 }
 function publicCheckpoint(serialized: string) {
   const value = JSON.parse(serialized)
@@ -204,24 +229,69 @@ export class D1WorkflowRuntime implements WorkflowRuntime {
   }
   async tick(options: { now?: number; limit?: number } = {}) {
     const started = Date.now(); const scanNow = options.now ?? started
+    const invocation = { remainingSteps: continuationSteps, deadline: started + continuationDurationMs }
     const limit = Math.max(0, Math.min(Math.trunc(options.limit ?? 20), 100))
     const released = await this.sweepHolds(scanNow, limit)
     const rows = await this.env.DB.prepare(`SELECT id FROM workflow_runs WHERE status IN (${active}) AND next_attempt_at<=? AND (lease_until IS NULL OR lease_until<=?) ORDER BY next_attempt_at,id LIMIT ?`).bind(scanNow, scanNow, limit).all<{ id: string }>()
-    let claimed = 0
-    for (const row of rows.results) {
-      const now = scanNow + Date.now() - started
-      const run = await this.env.DB.prepare(`UPDATE workflow_runs SET lease_token=?,lease_until=? WHERE id=? AND status IN (${active}) AND next_attempt_at<=? AND (lease_until IS NULL OR lease_until<=?) RETURNING *`).bind(crypto.randomUUID(), now + 60000, row.id, now, now).first<Run>()
-      if (!run) continue
-      claimed++
-      try { await this.advance(run, scanNow + Date.now() - started) }
+    const claimed = new Set<string>()
+    let pending = rows.results
+    // One pass per run per sweep. Short chains can still finish in one tick,
+    // while long chains share a single work allowance and elapsed deadline.
+    while (pending.length && invocation.remainingSteps > 0 && Date.now() < invocation.deadline) {
+      const next: typeof pending = []
+      for (const row of pending) {
+        if (invocation.remainingSteps <= 0 || Date.now() >= invocation.deadline) break
+        const result = await this.continueRun(row.id, { now: scanNow + Date.now() - started, maxSteps: 1 }, invocation)
+        if (result.claimed) claimed.add(row.id)
+        if (result.claimed && result.status === 'budget_exhausted') next.push(row)
+      }
+      pending = next
+    }
+    return { claimed: claimed.size, released }
+  }
+  private readiness(run: Run | null, now: number): WorkflowReadiness | null {
+    // A deleted/stale wake has no work, just like a terminal run.
+    if (!run) return { status: 'terminal' }
+    if (run.status === 'needs_attention') return { status: 'paused' }
+    if (!['pending', 'running', 'waiting_external', 'compensating'].includes(run.status)) return { status: 'terminal' }
+    if (run.next_attempt_at > now) return { status: 'due_at', dueAt: run.next_attempt_at }
+    if (run.lease_until !== null && run.lease_until > now) return { status: 'lease_lost' }
+    return null
+  }
+  async continueRun(runId: string, budget: WorkflowContinuationBudget = {}, invocation?: WorkflowInvocationBudget): Promise<WorkflowContinuationResult> {
+    const started = Date.now(); const referenceNow = budget.now ?? started
+    const maxSteps = budget.maxSteps ?? continuationSteps; const maxDurationMs = budget.maxDurationMs ?? continuationDurationMs
+    if (![maxSteps, maxDurationMs, referenceNow].every(Number.isFinite) || maxSteps < 0 || maxDurationMs < 0) throw new RangeError('invalid_workflow_continuation_budget')
+    const time = () => referenceNow + Date.now() - started
+    const load = () => this.env.DB.prepare('SELECT * FROM workflow_runs WHERE id=?').bind(runId).first<Run>()
+    let claimed = false
+    for (let passes = 0; ; passes++) {
+      if (invocation && (invocation.remainingSteps <= 0 || Date.now() >= invocation.deadline)) return { status: 'budget_exhausted', claimed }
+      // Every committed transition releases its lease. Never carry the old snapshot
+      // or token into another pass: D1 decides readiness and ownership again.
+      const readiness = this.readiness(await load(), time())
+      if (readiness) return { ...readiness, claimed }
+      if (passes >= Math.min(continuationSteps, Math.trunc(maxSteps)) || Date.now() - started >= Math.min(continuationDurationMs, maxDurationMs)) return { status: 'budget_exhausted', claimed }
+      // Storage reads also consume elapsed time; do not start a pass after them
+      // if the invocation deadline has already passed. Count claim attempts too.
+      if (invocation) {
+        if (Date.now() >= invocation.deadline) return { status: 'budget_exhausted', claimed }
+        invocation.remainingSteps--
+      }
+      const now = time()
+      const run = await this.env.DB.prepare(`UPDATE workflow_runs SET lease_token=?,lease_until=? WHERE id=? AND status IN (${active}) AND next_attempt_at<=? AND (lease_until IS NULL OR lease_until<=?) RETURNING *`).bind(crypto.randomUUID(), now + 60000, runId, now, now).first<Run>()
+      if (!run) return { ...(this.readiness(await load(), time()) ?? { status: 'lease_lost' as const }), claimed }
+      claimed = true
+      try { await this.advance(run, time()) }
       catch (error) {
-        // Losing a lease is an expected race. Other storage failures leave the lease
-        // for crash recovery and remain visible to the caller/cron metrics.
-        const owner = await this.env.DB.prepare('SELECT lease_token FROM workflow_runs WHERE id=?').bind(run.id).first<{ lease_token: string | null }>()
-        if (owner?.lease_token === run.lease_token) throw error
+        // Only an atomic rejection with lost/expired ownership is an expected
+        // fencing race. Expiry alone cannot explain an unrelated storage fault.
+        if (!(error instanceof RuleFailed)) throw error
+        const owner = await this.env.DB.prepare("SELECT lease_token,lease_until>max(?,CAST((julianday('now')-2440587.5)*86400000 AS INTEGER)) AS lease_live FROM workflow_runs WHERE id=?").bind(time(), runId).first<{ lease_token: string | null; lease_live: number }>()
+        if (owner?.lease_token !== run.lease_token || !owner.lease_live) return { status: 'lease_lost', claimed }
+        throw error
       }
     }
-    return { claimed, released }
   }
   private async advance(run: Run, now: number) {
     // Include permission/checkpoint reads in elapsed time, not only the effect.
@@ -265,7 +335,7 @@ export class D1WorkflowRuntime implements WorkflowRuntime {
       context = coreExecutionContext(this.config, live, store, new D1AtomicReader(this.env.DB), key, undefined, { policyReceipt: !compensating })
       // If an atomic effect committed before a crash, recover its receipt without repeating it or spending another attempt.
       const receipt = compensating ? saved.compensation_checkpoint_json : saved.checkpoint_json
-      if (receipt) { await this.finishStep(run, optionsNow(), step, compensating, JSON.parse(receipt)); return }
+      if (receipt) return this.finishStep(run, optionsNow(), step, compensating, serializeCheckpoint(JSON.parse(receipt)))
       if (optionsNow() >= deadline) throw new ApiError(408, 'workflow.deadline_exceeded')
       if (count >= step.policy.maxAttempts && !compensating && step.kind === 'external' && step.recover) {
         const controller = new AbortController()
@@ -273,7 +343,7 @@ export class D1WorkflowRuntime implements WorkflowRuntime {
         const result = await Promise.race([step.recover(Object.freeze({ context, runId: run.id, input: JSON.parse(run.input_json), checkpoints: Object.fromEntries(rows.filter(s => s.checkpoint_json).map(s => [s.step_id, publicCheckpoint(s.checkpoint_json!)])), signal: controller.signal })), new Promise<never>((_, reject) => {
           timer = setTimeout(() => { controller.abort(); reject(new ApiError(408, 'workflow.external_timeout')) }, Math.min(step.policy.timeoutMs, deadline - optionsNow()))
         })]).finally(() => clearTimeout(timer))
-        if (result !== null && optionsNow() < deadline) { await this.finishStep(run, optionsNow(), step, false, result); return }
+        if (result !== null && optionsNow() < deadline) return this.finishStep(run, optionsNow(), step, false, serializeCheckpoint(result))
       }
       if (count >= step.policy.maxAttempts) throw new ApiError(408, 'workflow.attempts_exhausted')
       await this.submit([this.fence(run, optionsNow()), {
@@ -289,7 +359,11 @@ export class D1WorkflowRuntime implements WorkflowRuntime {
       })]).finally(() => clearTimeout(timer))
       // No late response can checkpoint after the deadline or a newer runner's lease.
       if (optionsNow() >= deadline) throw new ApiError(408, 'workflow.deadline_exceeded')
-      await this.finishStep(run, optionsNow(), step, compensating, result ?? null)
+      // Validate the checkpoint inside the step failure boundary, then return
+      // the finalization promise without catching its storage errors as
+      // step failures. Retrying a transition could mask the original fault with
+      // a fence rejection after expiry; the committed receipt enables recovery.
+      return this.finishStep(run, optionsNow(), step, compensating, serializeCheckpoint(result ?? null))
     } catch (error) {
       const time = optionsNow()
       if (error instanceof PermissionRevoked) { await this.transition(run, time, 'needs_attention', 'workflow.needs_attention', 'permission_revoked'); return }
@@ -312,13 +386,13 @@ export class D1WorkflowRuntime implements WorkflowRuntime {
       ], step.id, exhausted ? time : next)
     }
   }
-  private finishStep(run: Run, now: number, step: WorkflowStep, undo: boolean, result: unknown) {
+  private finishStep(run: Run, now: number, step: WorkflowStep, undo: boolean, serialized: string) {
     const checkpoint = undo ? 'compensation_checkpoint_json' : 'checkpoint_json'
     return this.transition(run, now, undo ? 'compensating' : 'running', undo ? 'workflow.step.compensated' : 'workflow.step.completed', undo ? run.last_error_code : null, [{
       // Keep the execution-owned policy receipt committed with an atomic effect.
       // The public return value has already stripped the affected-row metadata.
       sql: `UPDATE workflow_steps SET status=?,${checkpoint}=COALESCE(${checkpoint},?),last_error_code=NULL,next_attempt_at=0 WHERE run_id=? AND step_id=?`,
-      bindings: [undo ? 'compensated' : 'completed', JSON.stringify(result), run.id, step.id], expectRows: 1,
+      bindings: [undo ? 'compensated' : 'completed', serialized, run.id, step.id], expectRows: 1,
     }], step.id)
   }
 }
