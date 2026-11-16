@@ -26,8 +26,8 @@ function request(path: string, actor = 'recipient', method = 'GET', body?: objec
     ...(body ? { body: JSON.stringify(body) } : {}),
   })
 }
-async function invite() {
-  const response = await request('/orgs/org-a/invitations', 'admin', 'POST', { email: 'recipient@example.test', role: 'staff' })
+async function invite(role: 'staff' | 'admin' = 'staff') {
+  const response = await request('/orgs/org-a/invitations', 'admin', 'POST', { email: 'recipient@example.test', role })
   expect(response.status).toBe(201)
   const invitation = await response.json() as { id: string; accept_url: string }
   return { id: invitation.id, token: new URL(invitation.accept_url).searchParams.get('token')! }
@@ -53,17 +53,23 @@ beforeEach(async () => {
   await completeInvitationProfiles()
   app = createApp(selected, runtime())
 })
-it('explicit acceptance allow succeeds without invitation CRUD; staff management stays denied', async () => {
-  const invitation = await invite()
+it.each(['staff', 'admin'] as const)('explicit acceptance allow succeeds for %s invitations', async role => {
+  const invitation = await invite(role)
+  const preflight = await request('/invitations/preflight', 'recipient', 'POST', { token: invitation.token })
+  expect(preflight.status).toBe(200)
+  expect(await preflight.json()).toMatchObject({ state: 'pending', account_match: true })
   const response = await request('/invitations/accept', 'recipient', 'POST', { token: invitation.token })
   expect(response.status).toBe(201)
-  expect(await response.json()).toMatchObject({ organization_id: 'org-a', role: 'staff' })
-  expect(await env.DB.prepare('SELECT role FROM memberships WHERE user_id=?').bind('recipient').first('role')).toBe('staff')
-  for (const path of ['/orgs/org-a/invitations', '/orgs/org-a/members', '/orgs/org-a/tokens']) {
-    expect((await request(path)).status).toBe(403)
+  expect(await response.json()).toEqual({ id: invitation.id, state: 'accepted', replayed: false,
+    organization_id: 'org-a', role, entry_target: '/o/org-a' })
+  expect(await env.DB.prepare('SELECT role FROM memberships WHERE user_id=?').bind('recipient').first('role')).toBe(role)
+  if (role === 'staff') {
+    for (const path of ['/orgs/org-a/invitations', '/orgs/org-a/members', '/orgs/org-a/tokens']) {
+      expect((await request(path)).status).toBe(403)
+    }
+    expect((await request('/orgs/org-a/invitations', 'recipient', 'POST', { email: 'blocked@example.test', role: 'staff' })).status).toBe(403)
+    expect((await request(`/orgs/org-a/invitations/${invitation.id}`, 'recipient', 'DELETE')).status).toBe(403)
   }
-  expect((await request('/orgs/org-a/invitations', 'recipient', 'POST', { email: 'blocked@example.test', role: 'staff' })).status).toBe(403)
-  expect((await request(`/orgs/org-a/invitations/${invitation.id}`, 'recipient', 'DELETE')).status).toBe(403)
 })
 it.each(['deny', 'missing'] as const)('%s acceptance grant fails closed without membership changes', async decision => {
   const invitation = await invite()
