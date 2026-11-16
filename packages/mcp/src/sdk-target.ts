@@ -1,3 +1,4 @@
+import { SqlTokenizationError } from './sql-tokens.ts'
 import { randomUUID, createHash } from 'node:crypto'
 import { access, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import { constants } from 'node:fs'
@@ -124,6 +125,11 @@ async function installedDigests(consumer: string) {
   return result
 }
 
+// Reconstruct only a parsed, request-bound worker diagnostic.
+export function reconstructReplayFailure(failure: ReturnType<typeof replayFailureSchema.parse>) {
+  return 'code' in failure ? new SqlTokenizationError(failure.diagnostic.offset) : new MigrationReplayError(failure.diagnostic)
+}
+
 /** Internal only. No proposal writes, public dispatch or evidence publication.
  * Always await the D1 process runner and delete owned scratch before returning. */
 export async function runSdkTarget(options: TargetOptions) {
@@ -167,7 +173,7 @@ export async function runSdkTarget(options: TargetOptions) {
             assertBound(failure.identity, identity, 'replay error identity')
             const request = JSON.parse(await readFile(join(consumer, '.sdk-bridge/request.json'), 'utf8'))
             assertBound(failure.inputHashes, request.inputHashes, 'replay error inputs')
-            throw new MigrationReplayError(failure.diagnostic)
+            throw reconstructReplayFailure(failure)
           }
         }
         throw new Error(`SDK target command failed (${result.rc}): ${result.stderr}\n${result.stdout}`)

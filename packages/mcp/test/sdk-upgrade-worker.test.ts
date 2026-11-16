@@ -6,10 +6,12 @@ import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { afterEach, expect, it } from 'vitest'
+import { sdkWorkflowError } from '../src/sdk-upgrade'
+import { SqlTokenizationError } from '../src/sql-tokens'
 import { CORE_VERSION } from '@workbasehq/core/config'
 import { execute } from '../src/sdk-process'
-import { captureSdkInputs, runSdkTarget } from '../src/sdk-target'
-import { acceptUpgradeResult, BRIDGE_VERSION, bridgeDigest, bridgeFiles, consumerModules, digestBytes, preparedSchema, resultSchema, type UpgradeRequest, type UpgradeStage } from '../src/sdk-upgrade-protocol'
+import { captureSdkInputs, runSdkTarget, reconstructReplayFailure } from '../src/sdk-target'
+import { acceptUpgradeResult, BRIDGE_VERSION, bridgeDigest, bridgeFiles, consumerModules, digestBytes, preparedSchema, resultSchema, replayFailureSchema, type UpgradeRequest, type UpgradeStage } from '../src/sdk-upgrade-protocol'
 
 const fixture = resolve('packages/mcp/test/fixtures/sdk-upgrade/valid-0.2.9')
 const source = resolve('packages/mcp/src'), checkout = resolve('.')
@@ -253,4 +255,55 @@ it('rejects changed config/history/index/SQL bytes and candidate bridge source',
     await writeFile(join(root, path), (await readFile(join(root, path), 'utf8')) + '\n')
     await expect(bridge(root, request)).rejects.toThrow(/Changed bridge input|source digest/)
   }
+})
+
+it('normalizes index declaration, ON table and column quoting in the worker fingerprint', async () => {
+  const root = await localConsumer(), { request, database } = await preparedDatabase(root)
+  const db = new DatabaseSync(database)
+  try { db.exec('DROP INDEX notes_title_idx; CREATE INDEX [notes_title_idx] ON [notes] ([organization_id], [title])') } finally { db.close() }
+  const result = resultSchema.parse(await bridge(root, request))
+  expect(result.schema.expected).toBe(result.schema.applied)
+})
+
+it('round-trips a worker lexical failure through protocol parsing, parent reconstruction and the public SDK boundary', async () => {
+  const root = await localConsumer(false, true), { request, database } = await preparedDatabase(root)
+  const secret = 'private_sql_payload_104', db = new DatabaseSync(database)
+  try {
+    db.enableDefensive(false)
+    db.exec('PRAGMA writable_schema=ON')
+    db.prepare("UPDATE sqlite_master SET sql=sql||? WHERE name='notes'").run(' /* ' + secret)
+  } finally { db.close() }
+  // The in-process bridge must preserve the lexer type as well.
+  await expect(bridge(root, request)).rejects.toBeInstanceOf(SqlTokenizationError)
+  await writeFile(join(root, '.sdk-bridge/request.json'), JSON.stringify(request))
+  const modules = await consumerModules(root)
+  const result = await execute([process.execPath, '--import', modules.resolutions.tsx, join(root, '.sdk-bridge/sdk-upgrade-worker.ts')], root,
+    { timeoutMs: 30000, maxOutputBytes: 65536 })
+  expect(result.rc).toBe(1)
+  const raw = await readFile(join(root, '.sdk-bridge/replay-error.json'), 'utf8')
+  expect(raw).not.toContain(secret)
+  const failure = replayFailureSchema.parse(JSON.parse(raw))
+  expect(failure).toMatchObject({ identity: request.identity, inputHashes: request.inputHashes, code: 'sql_tokenization_unsupported', diagnostic: { phase: 'verification', offset: expect.any(Number) } })
+  const reconstructed = reconstructReplayFailure(failure)
+  expect(reconstructed).toBeInstanceOf(SqlTokenizationError)
+  const error = sdkWorkflowError(reconstructed)
+  expect(error).toMatchObject({ code: 'sql_tokenization_unsupported', status: 422, message: 'SQL contains an unsupported or incomplete token', details: { phase: 'verification' } })
+  expect(JSON.stringify({ ...error, message: error.message })).not.toContain(secret)
+  expect(() => replayFailureSchema.parse({ ...failure, code: 'other' })).toThrow()
+})
+
+it('accepts keyword-named columns and rejects NULL CHECK drift in the worker fingerprint', async () => {
+  const root = await localConsumer(), path = join(root, 'config.ts')
+  const sql = 'CREATE TABLE token_corpus ("null" INTEGER, "check" TEXT, "unique" TEXT, "constraint" TEXT, "primary" TEXT, "foreign" TEXT, CHECK ("null" IN (0,1)))'
+  await writeFile(path, (await readFile(path, 'utf8')).replace('plugins: [',
+    `plugins: [{ name: 'token-corpus', version: '1.0.0', migrations: [{ name: '001_table', sql: ${JSON.stringify(sql)} }] },`))
+  const { request, database } = await preparedDatabase(root)
+  expect(resultSchema.parse(await bridge(root, request)).schema.status).toBe('pass')
+  const db = new DatabaseSync(database)
+  try {
+    db.enableDefensive(false)
+    db.exec('PRAGMA writable_schema=ON')
+    db.prepare("UPDATE sqlite_master SET sql=? WHERE name='token_corpus'").run(sql.replace('CHECK ("null"', 'CHECK (null'))
+  } finally { db.close() }
+  await expect(bridge(root, request)).rejects.toThrow(/physical schema/)
 })

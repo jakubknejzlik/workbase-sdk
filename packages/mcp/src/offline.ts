@@ -6,8 +6,10 @@ import { PluginMigrationError } from '@workbasehq/core/kernel/migrations'
 import { migrateD1, migrateInstance, instanceMigrationReceipt, migrationErrorMessage, queryDatabase } from '@workbasehq/core/infra'
 import { replayInstance, readInstanceMeta, usesBaseline, MigrationReplayError, privateReplayMessage, sqliteKind, type ReplayMigration } from './migration-replay.ts'
 import { initialSchema, revisionSQL } from '@workbasehq/core/migrations/schema'
-import { fail } from './schemas.ts'
+import { fail, WorkflowError } from './schemas.ts'
 import { indexSQL, rebuildBlock, rebuildBlockMessage } from './planning.ts'
+import { tokenizeSQL, tokenFingerprint, sqlFingerprint, foldIdentifier, isPunct, SqlTokenizationError } from './sql-tokens.ts'
+import { tableSemantics, ddlFingerprint, SqlSchemaError } from './sql-schema.ts'
 
 // Only server-generated SQL and checked-in instance migrations enter this offline database.
 export function replay<T>(migrations: Migration[], fn: (db: DatabaseSync) => T, entities: readonly string[] = []): T {
@@ -54,17 +56,65 @@ export async function replayBundle<T>(bundle: Pick<Bundle, 'config' | 'runtime'>
   } finally { db.close() }
 }
 const q = (name: string) => `"${name.replaceAll('"', '""')}"`
-const normalize = (sql: string) => sql.trim().replace(/;$/, '').replace(/('(?:''|[^'])*')|"(?:""|[^"])*"|\s+/g, match => /^\s/.test(match) ? ' ' : match)
+function unsupportedSchema(): never {
+  throw new WorkflowError('config_schema_mismatch', 'Schema contains semantics unsupported by offline verification', 400,
+    { phase: 'verification', hint: 'Use schema constructs covered by offline verification before retrying.' })
+}
+const canonicalType = (type: string) => {
+  const tokens = tokenizeSQL(type)
+  return tokenFingerprint(tokens, new Set(tokens.map(token => foldIdentifier(token.value))))
+}
+const sorted = <T>(values: T[]) => values.sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)))
 export function snapshot(db: DatabaseSync, domainLedger = false) {
-  const master = db.prepare("SELECT type,name,tbl_name,sql FROM sqlite_master WHERE type IN ('table','index') AND name NOT GLOB 'sqlite_*' AND name NOT GLOB '_cf_*' AND name != 'd1_migrations' AND tbl_name != 'd1_migrations'" + (domainLedger ? " AND name != '_migrations' AND tbl_name != '_migrations'" : '') + ' ORDER BY type,name').all()
-  return master.map(row => ({
-    type: row.type, name: row.name, table: row.tbl_name, sql: normalize(String(row.sql)),
-    // Column/FK/index metadata is stable across SQLite's ALTER formatting changes.
-    ...(row.type === 'table' ? {
-      columns: db.prepare(`PRAGMA table_info(${q(String(row.name))})`).all().map(({ cid: _cid, ...c }) => c),
-      foreignKeys: db.prepare(`PRAGMA foreign_key_list(${q(String(row.name))})`).all(),
-    } : { columns: db.prepare(`PRAGMA index_info(${q(String(row.name))})`).all().map(({ cid: _cid, ...c }) => c) }),
-  }))
+  try { return schemaSnapshot(db, domainLedger) }
+  catch (error) {
+    if (error instanceof SqlTokenizationError) throw new WorkflowError(error.code, error.message, 400, { phase: 'verification', offset: error.offset })
+    if (error instanceof SqlSchemaError) unsupportedSchema()
+    throw error
+  }
+}
+function schemaSnapshot(db: DatabaseSync, domainLedger: boolean) {
+  if (db.prepare('PRAGMA database_list').all().some(row => row.name !== 'main' && row.name !== 'temp')
+    || db.prepare('SELECT 1 FROM sqlite_temp_master LIMIT 1').get()) unsupportedSchema()
+  // Exclude only known transport/receipt tables and their indexes. A trigger's
+  // name (or a reserved-looking prefix) must never hide its behavior.
+  const master = db.prepare("SELECT type,name,tbl_name,sql FROM sqlite_master WHERE name NOT GLOB 'sqlite_*' AND NOT (type IN ('table','index') AND tbl_name IN ('_cf_KV','_cf_METADATA','d1_migrations'" + (domainLedger ? ",'_migrations'" : '') + ')) ORDER BY type,name').all()
+  const tables = db.prepare('PRAGMA table_list').all()
+  return master.map(row => {
+    const base = { type: row.type, name: row.name, table: row.tbl_name }
+    if (row.type === 'trigger' || row.type === 'index') {
+      if (typeof row.sql !== 'string') unsupportedSchema()
+      const scope = { table: String(row.tbl_name), columns: db.prepare(`PRAGMA table_xinfo(${q(String(row.tbl_name))})`).all().map(column => String(column.name)) }
+      return { ...base, sql: ddlFingerprint(row.sql, String(row.type), String(row.name), scope) }
+    }
+    if (row.type !== 'table' || typeof row.sql !== 'string') unsupportedSchema()
+    const table = tables.find(t => t.schema === 'main' && t.name === row.name)
+    if (table?.type !== 'table') unsupportedSchema()
+    const columns = db.prepare(`PRAGMA table_xinfo(${q(String(row.name))})`).all()
+    if (!columns.length || columns.some(c => ![0, 2, 3].includes(Number(c.hidden)))) unsupportedSchema()
+    const tokens = tokenizeSQL(row.sql)
+    if (isPunct(tokens.at(-1), ';')) tokens.pop()
+    const { generated, checks } = tableSemantics(tokens, columns.map(c => ({ name: c.name, type: c.type })))
+    const indexes = db.prepare(`PRAGMA index_list(${q(String(row.name))})`).all().map(index => {
+      if (!['c', 'u', 'pk'].includes(String(index.origin))) unsupportedSchema()
+      return {
+        // Autoindex numbers depend on constraint declaration order.
+        name: index.origin === 'c' ? index.name : null, origin: index.origin, unique: index.unique, partial: index.partial,
+        columns: db.prepare(`PRAGMA index_xinfo(${q(String(index.name))})`).all().map(({ cid, ...c }) => ({ ...c, ...(Number(cid) < 0 ? { cid } : {}) })),
+      }
+    })
+    const foreignKeys = new Map<unknown, Record<string, unknown>[]>()
+    for (const { id, ...fk } of db.prepare(`PRAGMA foreign_key_list(${q(String(row.name))})`).all()) {
+      const group = foreignKeys.get(id) ?? []
+      group.push(fk); foreignKeys.set(id, group)
+    }
+    return { ...base, checks, generated, withoutRowid: table.wr, strict: table.strict,
+      columns: sorted(columns.map(({ cid: _cid, ...c }) => ({ ...c, type: canonicalType(String(c.type)),
+        // A quoted DEFAULT is a literal even when it spells CURRENT_TIME.
+        dflt_value: c.dflt_value === null ? null : sqlFingerprint(String(c.dflt_value)) }))),
+      indexes: sorted(indexes), foreignKeys: sorted([...foreignKeys.values()]),
+    }
+  })
 }
 export async function instanceMeta(bundle: Bundle, supportedVersion: string | null = CORE_VERSION) {
   return replayBundle(bundle, db => {
@@ -83,14 +133,6 @@ export async function instanceMeta(bundle: Bundle, supportedVersion: string | nu
 export async function expectedSnapshot(bundle: Bundle, prepared: { target: Bundle['config']; indexes: Bundle['indexes']; sql: string }) {
   const planned = await replayBundle({ ...bundle, config: prepared.target, currentConfig: bundle.config, migrations: [...bundle.migrations, { name: 'proposal.sql', sql: prepared.sql, syntheticRevision: prepared.target.revision }] }, db => snapshot(db, usesBaseline(bundle.config)), { mode: 'synthetic' })
   const desired = await replayBundle({ config: prepared.target, currentConfig: bundle.config, runtime: bundle.runtime, migrations: [{ name: 'desired.sql', syntheticRevision: prepared.target.revision, sql: initialSchema(prepared.target) + prepared.indexes.map(indexSQL).join('\n') }] }, db => snapshot(db, usesBaseline(prepared.target)), { mode: 'schema' })
-  // Compare logical config semantics without column ordinals or SQLite-assigned FK IDs.
-  const logical = (rows: ReturnType<typeof snapshot>) => rows.map(({ sql, ...r }) => ({ ...r,
-    ...(r.type === 'index' ? { sql: sql.replaceAll('"', '').replace(/\s+/g, '') } : {}),
-    columns: [...r.columns].sort((a, b) => String(a.name).localeCompare(String(b.name))),
-    ...('foreignKeys' in r ? { foreignKeys: r.foreignKeys!.map(({ id: _id, ...fk }) => fk)
-      .sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))) } : {}),
-  }))
-  const canonical = (rows: ReturnType<typeof snapshot>) => JSON.stringify(logical(rows))
-  if (canonical(planned) !== canonical(desired)) fail('config_schema_mismatch', 'Planned schema differs from resulting config')
+  if (JSON.stringify(planned) !== JSON.stringify(desired)) fail('config_schema_mismatch', 'Planned schema differs from resulting config')
   return planned
 }
