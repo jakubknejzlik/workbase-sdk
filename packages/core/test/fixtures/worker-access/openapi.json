@@ -6585,7 +6585,7 @@
     },
     "/orgs/{orgId}/members": {
       "get": {
-        "description": "Link eligibility requires target_entity and target_row plus Link authority. Missing, malformed or inaccessible targets return 400 invalid_link_target. Results exclude accounts linked to another row of that entity in this organization.",
+        "description": "Link eligibility requires an administrator with members.read, target_entity and target_row plus Link authority. Missing, malformed or inaccessible targets return 400 invalid_link_target. Results exclude accounts linked to another row of that entity in this organization.",
         "parameters": [
           {
             "in": "query",
@@ -6595,6 +6595,16 @@
               "enum": [
                 "pending"
               ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "description": "Optional literal name/email search for eligible=link_account; all whitespace-separated tokens must match (at most 20).",
+              "maxLength": 200,
               "type": "string"
             }
           },
