@@ -1,3 +1,4 @@
+import { linkableMembers } from '../../../core/src/user-link-eligibility'
 import { buildInvitationAcceptUrl } from './invitation-url'
 import { memberIdentities, canReadMembers } from '../../../core/src/member-identities'
 import type { RowAccessStatus } from '../../../core/src/row-access'
@@ -86,14 +87,27 @@ export function memberRoutes(app: App, config: InstanceConfig, env: RuntimeEnv) 
     const query = target ? z.string().trim().max(200).refine(value => value.split(/\s+/).length <= 20).safeParse(c.req.query('q') ?? '') : undefined
     if (query && !query.success) throw new ApiError(400, 'invalid_member_search')
     const members = await memberIdentities(config, scope, env.DB, undefined, target, query?.data)
-    if (target) return c.json({ data: members })
+    if (target) {
+      // Search includes ineligible identities so an existing account is never
+      // mistaken for a new invitee. The writer remains the final authority.
+      if (c.req.query('q') === undefined) return c.json({ data: members })
+      const tokens = (query?.data ?? '').toLocaleLowerCase().split(/\s+/).map(token => token.replace(/^[<]+|[>]+$/g, '')).filter(Boolean)
+      const identities = await memberIdentities(config, scope, env.DB)
+      const workspace = linkableMembers(scope.organizationId)
+      const workspaceMembers = await env.DB.prepare(workspace.sql).bind(...(workspace.bindings ?? [])).all<{ id: string }>()
+      const eligible = new Set(members.map(member => member.user_id))
+      const local = new Set(workspaceMembers.results.map(member => member.id))
+      return c.json({ data: identities.filter(member => tokens.every(token => [member.display_name, member.email].some(value => value?.toLocaleLowerCase().includes(token)))).map(member => ({ ...member,
+        linkable: eligible.has(member.user_id), ...(!eligible.has(member.user_id) ? { link_reason: local.has(member.user_id) ? 'account_already_linked' : 'account_not_linkable' } : {}),
+      })) })
+    }
     if (c.req.query('include') !== 'pending') return c.json({ data: members })
     const can = (action: OrganizationAction) => {
       try { kernelFor(config).resourcePermission(scope, action); organizationPermission(config, scope, action); return true } catch { return false }
     }
-    const rows = await env.DB.prepare(`SELECT id,email,role,expires_at,inviter_id,created_at FROM invitations
+    const rows = await env.DB.prepare(`SELECT id,email,role,expires_at,inviter_id,created_at,target_entity,target_row FROM invitations
       WHERE organization_id=? AND accepted_at IS NULL AND revoked_at IS NULL AND declined_at IS NULL AND expired_at IS NULL AND expires_at>? ORDER BY id`)
-      .bind(scope.organizationId, nowISO()).all<{ id: string; email: string; role: string; expires_at: string; inviter_id: string; created_at: string | null }>()
+      .bind(scope.organizationId, nowISO()).all<{ id: string; email: string; role: string; expires_at: string; inviter_id: string; created_at: string | null; target_entity: string | null; target_row: string | null }>()
     const pending = await Promise.all(rows.results.map(async ({ inviter_id, ...row }) => ({ ...row, kind: 'invitation', status: 'pending',
       inviter: { display_name: await inviterDisplay(env.DB, inviter_id) },
       actions: [...(can('invitations.create') && canGrantRole(config, scope.role, row.role) ? ['copy-link', 'resend', 'delivery', 'retry-delivery'] : []), ...(can('invitations.revoke') && canGrantRole(config, scope.role, row.role) ? ['revoke'] : [])],

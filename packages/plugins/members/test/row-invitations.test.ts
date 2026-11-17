@@ -1,3 +1,4 @@
+import { responseContract } from '../../../core/test/fixtures/openapi-contract'
 import { env } from 'cloudflare:workers'
 import { reset } from 'cloudflare:test'
 import { beforeEach, expect, it, vi } from 'vitest'
@@ -442,4 +443,29 @@ it('14 legacy agent cannot disclose Members identity even with a requested membe
     expect(body).not.toHaveProperty('linked_accounts')
     expect((await call('/orgs/org-a/members', 'GET')).status).toBe(403)
   }
+})
+
+it('178 active membership and row-targeted pending link coexist; accept creates no second membership', async () => {
+  const count = () => env.DB.prepare("SELECT count(*) n FROM memberships WHERE organization_id='org-a' AND user_id='member-a'").first('n')
+  expect(await count()).toBe(1)
+  const i = await invitation()
+  const combined = await json(await request(app, '/orgs/org-a/members?include=pending'))
+  expect(responseContract('/orgs/{orgId}/members').safeParse(combined).success).toBe(true)
+  const rows = combined.data
+  expect(rows.filter((row: { email: string }) => row.email === 'member-a@example.test')).toHaveLength(2)
+  expect(rows.find((row: { id: string }) => row.id === i.id)).toMatchObject({ kind: 'invitation', target_entity: 'people', target_row: 'p1' })
+  expect((await accept(i.id)).status).toBe(201)
+  expect(await count()).toBe(1)
+  expect(await linked()).toBe('member-a')
+  expect(await env.DB.prepare("SELECT role FROM memberships WHERE organization_id='org-a' AND user_id='member-a'").first('role')).toBe('member')
+})
+it('178 searched linked account explains ineligibility without changing the eligible-only picker contract', async () => {
+  await env.DB.exec("UPDATE people SET user='member-a' WHERE id='p2'")
+  const base = '/orgs/org-a/members?eligible=link_account&target_entity=people&target_row=p1'
+  expect((await json(await request(app, base))).data.some((row: { user_id: string }) => row.user_id === 'member-a')).toBe(false)
+  const response = await request(app, base + '&q=member-a@example.test')
+  expect(response.status).toBe(200)
+  const searched = await json(response)
+  expect(responseContract('/orgs/{orgId}/members').safeParse(searched).success).toBe(true)
+  expect(searched.data).toEqual([expect.objectContaining({ user_id: 'member-a', linkable: false, link_reason: 'account_already_linked' })])
 })

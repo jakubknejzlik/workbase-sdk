@@ -104,7 +104,7 @@ export function stateFromSearch(search: ListSearch, model: Model, entity: string
     if (!predicate || filters.some(item => item.field === filter.field)) { dropped = true; continue }
     filters.push({ field: filter.field, predicate })
   }
-  if (search.rowAccess && model.entities[entity].rowInvitations) state.rowAccess = search.rowAccess
+  if (search.rowAccess && model.entities[entity].rowInvitations && caps.resources?.['invitations.read'] === true) state.rowAccess = search.rowAccess
   else if (search.rowAccess) dropped = true
   state.userFilters = filters
   const viewId = search.view ?? state.view
@@ -137,7 +137,7 @@ export function toQueryDocument(state: ListState, model: Model, entity: string, 
   const strings = listSearchableFields(model, entity, caps, state.presentation)
   const fields = state.sort ? sortFields(model, entity, caps, state.sort.key) : []
   const labels = labelColumns(model, entity, caps).filter(key => (model.entities[entity].list?.columns ?? model.entities[entity].listColumns ?? model.entities[entity].columns).includes(key))
-  const query: ReadQuery = { entity, ...(state.rowAccess && model.entities[entity].rowInvitations ? { rowAccess: state.rowAccess } : {}), ...(state.search.trim() && strings.length ? { search: { text: state.search.trim(), fields: strings, locale } } : {}), select: select.length ? select : ['id'], ...(labels.length ? { labels } : {}), limit: Math.min(pageSizes.includes(state.limit as any) ? state.limit : 30, model.limits.root),
+  const query: ReadQuery = { entity, ...(state.rowAccess && model.entities[entity].rowInvitations && caps.resources?.['invitations.read'] === true ? { rowAccess: state.rowAccess } : {}), ...(state.search.trim() && strings.length ? { search: { text: state.search.trim(), fields: strings, locale } } : {}), select: select.length ? select : ['id'], ...(labels.length ? { labels } : {}), limit: Math.min(pageSizes.includes(state.limit as any) ? state.limit : 30, model.limits.root),
     ...(conditions.length ? { where: { and: conditions } } : {}),
     ...(Object.keys(labelWhere).length ? { labelWhere } : {}),
     orderBy: (fields.length ? fields : ['id']).map(field => ({ field, dir: fields.length ? state.sort!.direction : 'asc', ...(labelColumns(model, entity, caps).includes(field) ? { label: true } : {}) })),

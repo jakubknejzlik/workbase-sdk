@@ -371,11 +371,12 @@ function accessGuard(data?: AccessStatus) {
   const multiple = !!data && (data.inconsistency === 'multiple_linked_accounts' || (data.linked_accounts?.length ?? 0) > 1)
   return { multiple, valid: !!data && !multiple && ['no_account', 'invited', 'expired', 'signed_in'].includes(data.state) && data.inconsistency == null }
 }
+export function canReadApplicationAccess(caps: Capabilities) { return caps.resources?.['invitations.read'] === true }
 function useApplicationAccess(props: Omit<AccessContext, 'row'> & { row?: Record<string, any> }) {
   const pending = useIsMutating({ mutationKey: ['account-access', props.orgId, props.entity] }) > 0
   const definition = props.model.entities[props.entity]
   const supported = hasRecordAccess(props.model, props.entity) || !!(definition?.rowAccess ?? definition?.rowInvitations)
-  const enabled = !!props.write && !!props.row && supported
+  const enabled = canReadApplicationAccess(props.caps) && !!props.write && !!props.row && supported
   const status = useQuery({ ...accessQuery(props), enabled })
   const data = enabled && !status.error ? status.data : undefined
   const { multiple, valid } = accessGuard(data)
@@ -396,21 +397,21 @@ function useApplicationAccess(props: Omit<AccessContext, 'row'> & { row?: Record
   if (valid && data!.state === 'expired' && inviteGranted && data!.can_invite && !actions.includes('change')) actions.push('change')
   // Older servers omit the search capability. Preserve their authorized picker;
   // an explicit denial still blocks both the picker and the new search flow.
-  if (explicit && props.caps.resources?.['members.read'] === true && props.caps.resources?.['members.search_link_account'] !== false && (v3 ? granted('access_link_account') && data?.recordActions?.link_account?.enabled : granted('link_account'))) actions.push('link')
+  if (data?.state !== 'signed_in' && explicit && props.caps.resources?.['members.read'] === true && props.caps.resources?.['members.search_link_account'] !== false && (v3 ? granted('access_link_account') && data?.recordActions?.link_account?.enabled : granted('link_account'))) actions.push('link')
   if (explicit && (v3 ? granted('access_unlink_account') && data?.recordActions?.unlink_account?.enabled : granted('remove_access'))) actions.push('remove')
-  if (valid && data!.state === 'signed_in' && inviteGranted && actions.includes('remove')) actions.push('change')
   return { enabled, supported, status, multiple, valid, explicitOnly, actions, blocked: pending || !!props.disabled || !props.write || !props.row || supported && ((!valid && !explicitOnly) || status.isFetching || !!status.error) }
 }
 
 /** All account action entry points use this controller, including nested edit dialogs. */
 export function GeneratedRowInvitation(props: Context & { row: Record<string, any>; disabled?: boolean }) {
-  return props.disabled || !(props.model.entities[props.entity]?.accountLink || props.model.entities[props.entity]?.rowInvitations) ? null : <ApplicationAccess {...props} />
+  return !canReadApplicationAccess(props.caps) || !(props.model.entities[props.entity]?.accountLink || props.model.entities[props.entity]?.rowInvitations) ? null : <ApplicationAccess {...props} rowMenu />
 }
 export function ApplicationAccessCard(props: AccessContext) {
   const { t } = useTranslation()
+  if (!canReadApplicationAccess(props.caps)) return null
   return <Card data-application-access=""><CardHeader><CardTitle>{t('rowAccess')}</CardTitle></CardHeader><CardContent><ApplicationAccess {...props} /></CardContent></Card>
 }
-function ApplicationAccess(props: AccessContext) {
+function ApplicationAccess(props: AccessContext & { rowMenu?: boolean }) {
   const [selected, setSelected] = useState<string>()
   const [menuOpen, setMenuOpen] = useState(false)
   const trigger = useRef<HTMLButtonElement | null>(null)
@@ -437,35 +438,35 @@ function ApplicationAccess(props: AccessContext) {
   const message = !enabled ? 'rowAccessUnavailable' : status.error ? ((status.error as WriteFailure).status === 403 ? 'rowAccessDenied' : (status.error as WriteFailure).status === 404 ? 'rowAccessUnavailable' : 'requestFailed') : !data ? 'loading' : explicitOnly ? 'rowAccessUnavailable' : multiple ? 'rowAccessMultiple' : !valid ? 'requestFailed' : undefined
   // Keep mounted dialogs/drafts during a cached refetch; every trigger and submit
   // is disabled by the same guard until the response settles.
-  const find = actions.includes('link') && props.caps.resources?.['members.search_link_account'] === true
+  const find = data?.state !== 'signed_in' && (actions.includes('change') || actions.includes('invite') || actions.includes('link') && props.caps.resources?.['members.search_link_account'] === true)
   const selectionAllowed = selected === 'find' ? find : !!selected && actions.includes(selected)
   useEffect(() => {
     if (selected && !selectionAllowed) setSelected(undefined)
   }, [selected, selectionAllowed])
-  const overflow: string[] = data?.state === 'invited' ? actions.filter(action => action === 'cancel' || action === 'change') : []
+  const visibleActions = [...actions.filter(action => !(find && ['link', 'invite', 'change'].includes(action))), ...(find ? ['find'] : [])]
+  const overflow = props.rowMenu ? visibleActions : visibleActions.filter(action => action === 'cancel')
   const label = (action: string) => t(action === 'find' ? 'rowFindMember' : `rowInvite_${action}`)
   const open = (action: string, button: HTMLButtonElement) => { trigger.current = button; setSelected(action) }
   return <div className="flex flex-wrap items-center gap-2 [&_button]:min-h-11 [&_button]:min-w-11" aria-label={t('rowAccess')}>
     {message ? <span role={status.error || data ? 'alert' : 'status'}>{t(message)}</span> : <>
       <Badge role="status" variant="secondary" className={data!.state === 'expired' ? 'bg-red-100 text-red-800' : data!.state === 'invited' ? 'bg-amber-100 text-amber-800' : data!.state === 'signed_in' ? 'bg-green-100 text-green-800' : undefined}>{t(`rowAccess_${data!.state}`)}</Badge>
-      {data!.linked_accounts?.[0] && <span className="text-sm break-all">{data!.linked_accounts[0].label ?? data!.linked_accounts[0].id}</span>}
-      {data!.invitation && <span className="text-sm break-all">{data!.invitation.email}</span>}
+      {data!.linked_accounts?.[0] && <span className="min-w-0 max-w-full whitespace-normal text-sm [overflow-wrap:anywhere]">{data!.linked_accounts[0].label ?? data!.linked_accounts[0].id}</span>}
+      {data!.invitation && <span className="min-w-0 max-w-full whitespace-normal text-sm [overflow-wrap:anywhere]">{data!.invitation.email}</span>}
     </>}
     {enabled && !status.isFetching && (status.error || data && !valid && !multiple && !explicitOnly) && <Button type="button" variant="outline" onClick={() => { void status.refetch() }}>{t('reloadRetry')}</Button>}
     {delivery.data === true && <span role="alert">{t('rowInviteDeliveryFailed')}</span>}
     {status.isFetching && data && !multiple && <span role="status">{t('rowAccessRefreshing')}</span>}
-    {actions.filter(action => !(find && (action === 'link' || action === 'invite')) && !overflow.includes(action)).map(action =>
+    {visibleActions.filter(action => !overflow.includes(action)).map(action =>
       <Button key={action} type="button" variant="outline" disabled={blocked} onClick={event => open(action, event.currentTarget)}>{label(action)}</Button>)}
-    {!!overflow.length && <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}><DropdownMenuTrigger asChild><Button type="button" variant="outline" disabled={blocked} aria-label={t('rowInvitationActions')} onFocus={event => { trigger.current = event.currentTarget }} onClick={event => { trigger.current = event.currentTarget }}>…</Button></DropdownMenuTrigger>
+    {!!overflow.length && <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}><DropdownMenuTrigger asChild><Button type="button" variant="outline" disabled={blocked} aria-label={t(props.rowMenu ? 'rowAccessActions' : 'rowInvitationActions')} onFocus={event => { trigger.current = event.currentTarget }} onClick={event => { trigger.current = event.currentTarget }}>⋯</Button></DropdownMenuTrigger>
       <DropdownMenuContent align="end" onCloseAutoFocus={event => { if (requested.current) { event.preventDefault(); setSelected(requested.current); requested.current = undefined } }}>
         {overflow.map(action => <DropdownMenuItem className="min-h-11" key={action} onSelect={() => { requested.current = action }}>{label(action)}</DropdownMenuItem>)}
       </DropdownMenuContent>
     </DropdownMenu>}
-    {find && <Button type="button" variant="outline" className="basis-full sm:basis-auto" disabled={blocked} onClick={event => open('find', event.currentTarget)}>{label('find')}</Button>}
     {selected && <ResourceFormDialog entity={props.entity} key={selected} open onOpenChange={open => { if (!open) setSelected(undefined) }}
       onCloseAutoFocus={event => { event.preventDefault(); trigger.current?.focus() }} schema={actionSchema(selected)}
       title={label(selected)} description={t(selected === 'find' ? 'rowFindDescription' : selected === 'link' ? 'rowLinkDescription' : selected === 'remove' || selected === 'change' && data?.state === 'signed_in' ? 'rowInviteRemoveDescription' : 'rowInviteDescription')} cancelLabel={t('cancel')}>
-      {controls => selected === 'find' ? <FindMemberOrInvite {...props} write={props.write!} controls={controls} /> : <RowInvitationMutation {...props} write={props.write!} action={selected} controls={controls} />}
+      {controls => selected === 'find' ? <FindMemberOrInvite {...props} email={data?.invitation?.email ?? props.email} write={props.write!} controls={controls} /> : <RowInvitationMutation {...props} write={props.write!} action={selected} controls={controls} />}
     </ResourceFormDialog>}
   </div>
 }
@@ -497,7 +498,8 @@ function useInvitationMutation(props: InvitationMutationProps, access: ReturnTyp
         if (v3) await props.write(`${record}/link_account`, 'POST', { user_id: values.user_id })
         else await props.write(`/commands/${props.entity}/link_account`, 'POST', { rowId: props.row.id, userId: values.user_id, idempotencyKey: props.controls.submissionKey })
       } else if (props.action === 'change') {
-        if (access.status.data?.state === 'signed_in') await remove(); else if (access.status.data?.state !== 'expired') await cancel()
+        if (!['invited', 'expired'].includes(access.status.data?.state ?? '')) throw { code: 'action_unavailable' }
+        if (access.status.data?.state !== 'expired') await cancel()
         const data = await client.fetchQuery({ ...accessQuery(props), staleTime: 0 })
         if (!accessGuard(data).valid || !data.can_invite) throw { code: 'action_unavailable' }
         await inviteRecord(props, values.email)
@@ -547,14 +549,15 @@ function RowInvitationMutation(props: InvitationMutationProps) {
         return mutation.mutateAsync(values)
       }} /></>
 }
-type LinkMember = { user_id: string; display_name?: string | null; email?: string }
+type LinkMember = { user_id: string; display_name?: string | null; email?: string; linkable?: boolean; link_reason?: 'account_already_linked' | 'account_not_linkable' }
 const memberLabel = (member: LinkMember) => [member.display_name, member.email !== member.display_name ? member.email : undefined].filter(Boolean).join(' · ') || member.user_id
 function FindMemberOrInvite(props: Omit<InvitationMutationProps, 'action'>) {
   const { t } = useTranslation(); const access = useApplicationAccess(props)
   const [search, setSearch] = useState(props.email ?? ''); const [query, setQuery] = useState('')
-  const [selected, setSelected] = useState<LinkMember>()
+  const [selectedMember, setSelected] = useState<LinkMember>()
   const [rejected, setRejected] = useState<string>()
   const canSearch = access.actions.includes('link')
+  const selected = canSearch ? selectedMember : undefined
   useEffect(() => { const timer = setTimeout(() => setQuery(search.trim()), 300); return () => clearTimeout(timer) }, [search])
   const members = useQuery({ queryKey: ['account-link-members', props.orgId, props.entity, props.row.id, props.caps, query], retry: false,
     enabled: canSearch && !access.blocked && !!query && search.trim() === query,
@@ -562,26 +565,25 @@ function FindMemberOrInvite(props: Omit<InvitationMutationProps, 'action'>) {
   })
   const loading = search.trim() !== query || members.isFetching
   // Recheck authority before using cached data, including after a role change.
-  const choices = canSearch && !loading && !members.error ? (members.data?.data ?? []).filter(member => member.user_id !== rejected) : []
-  const mutation = useInvitationMutation({ ...props, action: selected ? 'link' : 'invite', onLinkConflict: async id => { setRejected(id); setSelected(undefined); await members.refetch() } }, access)
+  const choices = canSearch && !loading && !members.error ? (members.data?.data ?? []).map(member => member.user_id === rejected ? { ...member, linkable: false, link_reason: 'account_already_linked' as const } : member) : []
+  const mutation = useInvitationMutation({ ...props, action: selected ? 'link' : access.actions.includes('change') ? 'change' : 'invite', onLinkConflict: async id => { setRejected(id); setSelected(undefined); await members.refetch() } }, access)
   const conflict = (mutation.error as WriteFailure | null)?.code === 'account_already_linked'
-  const invite = access.actions.includes('invite') && !selected && !!query && !loading && members.isSuccess && !members.error && !choices.length && rowInviteValidator.safeParse({ email: search.trim() }).success
-  const disabled = access.blocked || !canSearch || loading || !!members.error
-  if (!canSearch) return <p role="alert">{t('rowAccessDenied')}</p>
+  const invite = (access.actions.includes('invite') || access.actions.includes('change')) && !selected && !!query && !loading && (!canSearch || members.isSuccess) && !members.error && !choices.length && !conflict && rowInviteValidator.safeParse({ email: search.trim() }).success
+  const reason = selected?.linkable === false ? t(selected.link_reason === 'account_already_linked' ? 'write_account_already_linked' : 'rowAccountNotLinkable') : conflict ? t('write_account_already_linked') : !selected && !invite ? t('rowFindRequired') : t('rowLinkPickerHint')
+  const disabled = access.blocked || loading || !!members.error || selected?.linkable === false || !selected && !invite
   return <div className="grid gap-3 [&_button]:min-h-11 [&_button]:min-w-11 [&_input]:min-h-11 [&_input]:pr-20 [&_[role=option]]:min-h-11">
-    <p className="text-sm text-muted-foreground">{t('rowLinkPickerHint')}</p>
     <EntityPicker remote label={t('rowFindQuery')} placeholder={t('rowFindQuery')} value={selected?.user_id ?? ''} selectedLabel={selected ? memberLabel(selected) : search} search={search}
-      options={choices.map(member => ({ id: member.user_id, label: memberLabel(member) }))} loading={canSearch && loading} loadingLabel={t('loading')} emptyLabel={query && !members.error ? t('rowInviteNoMembers') : undefined} clearLabel={t('rowFindClear')}
-      error={canSearch && conflict ? t('write_account_already_linked') : undefined}
+      description={conflict ? undefined : reason} options={choices.map(member => ({ id: member.user_id, label: memberLabel(member) + (member.linkable === false ? ` — ${t(member.link_reason === 'account_already_linked' ? 'write_account_already_linked' : 'rowAccountNotLinkable')}` : '') }))} loading={canSearch && loading} loadingLabel={t('loading')} emptyLabel={query && !members.error ? t('rowInviteNoMembers') : undefined} clearLabel={t('rowFindClear')}
+      error={conflict ? t('write_account_already_linked') : undefined}
       onSearch={value => { setSearch(value); setSelected(undefined); mutation.reset() }}
       onChange={id => { setSelected(choices.find(member => member.user_id === id)); mutation.reset() }} />
-    <WriteError error={canSearch && !conflict ? mutation.error ?? members.error : null} />
-    {selected && canSearch && <div aria-live="polite"><p className="break-all">{memberLabel(selected)}</p><p>{t('rowLinkDescription')}</p>{access.status.data?.state === 'invited' && access.status.data.invitation && <p>{t('rowLinkSupersedes', { email: access.status.data.invitation.email })}</p>}</div>}
+    <WriteError error={!conflict ? mutation.error ?? (canSearch ? members.error : null) : null} />
+    {selected && selected.linkable !== false && canSearch && <div aria-live="polite"><p className="break-all">{memberLabel(selected)}</p><p>{t('rowLinkDescription')}</p>{access.status.data?.state === 'invited' && access.status.data.invitation && <p>{t('rowLinkSupersedes', { email: access.status.data.invitation.email })}</p>}</div>}
     {invite && <p>{t('rowInviteDescription')}</p>}
-    {(selected && canSearch || invite) && <RegistryForm schema={emptyRowSchema} label={name => name} submitLabel={t(selected ? 'rowInvite_link' : 'rowFindSend')} invalidLabel={t('invalidField')} pending={mutation.isPending} disabled={disabled}
+    <RegistryForm schema={emptyRowSchema} label={name => name} submitLabel={t(selected ? 'rowInvite_link' : access.actions.includes('change') ? 'rowInvite_change' : 'rowFindSend')} invalidLabel={t('invalidField')} pending={mutation.isPending} disabled={disabled}
       onSubmit={() => {
         if (disabled || (selected ? !choices.some(member => member.user_id === selected.user_id) : !invite)) return Promise.reject({ code: 'action_unavailable' })
         return mutation.mutateAsync(selected ? { user_id: selected.user_id } : { email: search.trim() })
-      }} />}
+      }} />
   </div>
 }

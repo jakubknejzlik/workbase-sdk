@@ -577,7 +577,7 @@
   "rowInvite_remove": "Odebrat přístup",
   "rowInviteDescription": "Účet se propojí s tímto řádkem až po přijetí pozvánky. Po zrušení můžete pozvat jiný e-mail.",
   "rowLinkDescription": "Propojí existujícího člena organizace s tímto řádkem. Přístup platí hned.",
-  "rowLinkPickerHint": "Nabízí se jen členové, kteří ještě nejsou propojeni s jiným záznamem.",
+  "rowLinkPickerHint": "Vyberte člena k propojení. U nedostupných účtů se zobrazí důvod.",
   "rowInviteRemoveDescription": "Odebere všechny vazby účtu v této aplikaci. Účet zůstane zachován.",
   "rowInvitationTarget": "Přijetím propojíte svůj účet s řádkem {{entity}} ({{row}}).",
   "rowAccess_expired": "Vypršela",
@@ -617,5 +617,9 @@
   "savedViewsError_storage": "Pohledy v tomto prohlížeči nelze uložit nebo načíst.",
   "savedViewsError_invalid": "Uložené pohledy nelze načíst. Změny nebyly uloženy.",
   "savedViewsError_limit": "Překročen limit (20 pohledů, 16 KiB na pohled, 128 KiB na seznam). Změny nebyly uloženy.",
-  "savedViewsError_name": "Zadejte název pohledu o délce 1–80 znaků."
+  "savedViewsError_name": "Zadejte název pohledu o délce 1–80 znaků.",
+  "memberPendingLink": "Čeká na propojení",
+  "rowFindRequired": "Vyberte člena nebo zadejte platnou e-mailovou adresu.",
+  "rowAccountNotLinkable": "Tento účet nelze propojit s tímto záznamem.",
+  "rowAccessActions": "Akce přístupu do aplikace"
 }
