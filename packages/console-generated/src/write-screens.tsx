@@ -14,7 +14,8 @@ import { useNavigate } from '@tanstack/react-router'
 import { useTranslation } from 'react-i18next'
 import { useEntityTranslation } from './entity-translation'
 import { SchemaFormDialog, DeleteActionDialog, Button, EntityPicker, RegistryForm, formValidator, FormFieldWrapper, useMutationForm, MutationLabelsProvider, useMutationLabels, MutationSubmitButton, MutationErrorAlert, RowActions, useMutationSubmit, type RegistrySchema } from '@workbasehq/ui'
-import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '@workbasehq/ui/components/ui/dropdown-menu'
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator } from '@workbasehq/ui/components/ui/dropdown-menu'
+import { TooltipProvider, Tooltip, TooltipTrigger, TooltipContent } from '@workbasehq/ui/components/ui/tooltip'
 import { recordLabel, formatFieldValue, readQuery, visibleEntities, type Capabilities, type Model, type ReadQuery, type Result } from './read'
 import { commandError, commandLabel, commandFormSchema, writeCodes as codes, commandDefinitions, commandRowField, listCommandActions, writableFields, writeSchema, inlineEditableField } from './write'
 import { usePickerSearch } from './use-picker-search'
@@ -99,7 +100,8 @@ export function GeneratedRowActions(props: Context & { row: Record<string, any>;
     ...commands.map(command => ({ id: command.name, label: commandLabel(command, i18n.language, t) })),
     ...(operations.includes('delete') ? [{ id: 'delete', label: t('delete'), destructive: true }] : []),
   ]
-  return <><RowActions label={t('rowActions', { name: recordLabel(model, entity, row, caps, i18n.language, t) })} items={items} disabled={props.disabled}>{(action, close, restoreFocus) => {
+  const accessControl = (model.entities[entity].accountLink || model.entities[entity].rowInvitations) && canReadApplicationAccess(caps)
+  return <><RowActions triggerLabel={accessControl ? t('rowRecord') : undefined} label={t(accessControl ? 'rowRecordActions' : 'rowActions', { name: recordLabel(model, entity, row, caps, i18n.language, t) })} items={items} disabled={props.disabled}>{(action, close, restoreFocus) => {
     const common = { open: true, onOpenChange: (open: boolean) => { if (!open) close() }, onCloseAutoFocus: restoreFocus, cancelLabel: t('cancel') }
     if (action.id === 'edit') return <ResourceFormDialog entity={entity} outcome={row ? 'updated' : 'created'} schema={writeSchema(model, entity, caps, 'edit')} {...common} title={t('editEntity', { entity: t(`entitySingular_${entity}`) })} description={t('editEntityDescription', { entity: t(`entitySingular_${entity}`) })}>{controls => <EntityMutation {...props} row={row} controls={controls} />}</ResourceFormDialog>
     if (action.id === 'delete') return <ResourceDeleteDialog entity={entity} {...common} title={t('deleteRecord')} description={t('deleteDescription')} entityType={t(`entity_${entity}`)} entityName={recordLabel(model, entity, row, caps, i18n.language, t)} targetDescription={t('deleteTarget')} warningMessage={t('deleteDescription')} confirmText={t('delete')}>{controls => <DeleteMutation {...props} row={row} close={controls.close} />}</ResourceDeleteDialog>
@@ -447,8 +449,14 @@ function ApplicationAccess(props: AccessContext & { rowMenu?: boolean }) {
   const overflow = props.rowMenu ? visibleActions : visibleActions.filter(action => action === 'cancel')
   const label = (action: string) => t(action === 'find' ? 'rowFindMember' : `rowInvite_${action}`)
   const open = (action: string, button: HTMLButtonElement) => { trigger.current = button; setSelected(action) }
-  return <div className="flex flex-wrap items-center gap-2 [&_button]:min-h-11 [&_button]:min-w-11" aria-label={t('rowAccess')}>
-    {message ? <span role={status.error || data ? 'alert' : 'status'}>{t(message)}</span> : <>
+  const stateLabel = t(message ?? `rowAccess_${data?.state}`)
+  // A policy-hidden identity never falls back to a raw account field.
+  const identity = data?.linked_accounts?.[0]?.label ?? data?.linked_accounts?.[0]?.id ?? data?.invitation?.email
+  const triggerText = identity ?? t(message ?? (data?.state === 'no_account' ? 'rowAccess_no_account' : 'rowAccess'))
+  const rowControl = props.rowMenu && (!message || !!overflow.length)
+  const dotClass = data?.state === 'signed_in' ? 'bg-green-600' : data?.state === 'invited' ? 'bg-amber-500' : data?.state === 'expired' ? 'bg-red-600' : 'bg-slate-400'
+  return <div className="flex flex-wrap items-center gap-2" aria-label={t('rowAccess')}>
+    {message ? !rowControl && <span role={status.error || data ? 'alert' : 'status'}>{t(message)}</span> : !props.rowMenu && <>
       <Badge role="status" variant="secondary" className={data!.state === 'expired' ? 'bg-red-100 text-red-800' : data!.state === 'invited' ? 'bg-amber-100 text-amber-800' : data!.state === 'signed_in' ? 'bg-green-100 text-green-800' : undefined}>{t(`rowAccess_${data!.state}`)}</Badge>
       {data!.linked_accounts?.[0] && <span className="min-w-0 max-w-full whitespace-normal text-sm [overflow-wrap:anywhere]">{data!.linked_accounts[0].label ?? data!.linked_accounts[0].id}</span>}
       {data!.invitation && <span className="min-w-0 max-w-full whitespace-normal text-sm [overflow-wrap:anywhere]">{data!.invitation.email}</span>}
@@ -458,9 +466,19 @@ function ApplicationAccess(props: AccessContext & { rowMenu?: boolean }) {
     {status.isFetching && data && !multiple && <span role="status">{t('rowAccessRefreshing')}</span>}
     {visibleActions.filter(action => !overflow.includes(action)).map(action =>
       <Button key={action} type="button" variant="outline" disabled={blocked} onClick={event => open(action, event.currentTarget)}>{label(action)}</Button>)}
-    {!!overflow.length && <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}><DropdownMenuTrigger asChild><Button type="button" variant="outline" disabled={blocked} aria-label={t(props.rowMenu ? 'rowAccessActions' : 'rowInvitationActions')} onFocus={event => { trigger.current = event.currentTarget }} onClick={event => { trigger.current = event.currentTarget }}>⋯</Button></DropdownMenuTrigger>
+    {(props.rowMenu ? rowControl : !!overflow.length) && <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
+      {props.rowMenu ? <TooltipProvider><Tooltip><TooltipTrigger asChild><DropdownMenuTrigger asChild>
+        <Button type="button" variant="ghost" size="sm" className="max-w-full pointer-coarse:min-h-11 pointer-coarse:min-w-11" disabled={blocked}
+          aria-label={`${triggerText} – ${stateLabel}, ${t('rowAccessActions')}`} onFocus={event => { trigger.current = event.currentTarget }} onClick={event => { trigger.current = event.currentTarget }}>
+          <span aria-hidden="true" className={`size-2 shrink-0 rounded-full ${dotClass}`} />
+          <span className="min-w-0 whitespace-normal text-left [overflow-wrap:anywhere]">{triggerText}</span>
+          <svg aria-hidden="true" className="size-3 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6" /></svg>
+        </Button>
+      </DropdownMenuTrigger></TooltipTrigger><TooltipContent>{stateLabel}</TooltipContent></Tooltip></TooltipProvider>
+        : <DropdownMenuTrigger asChild><Button type="button" variant="outline" size="sm" className="pointer-coarse:min-h-11 pointer-coarse:min-w-11" disabled={blocked} aria-label={t('rowInvitationActions')} onFocus={event => { trigger.current = event.currentTarget }} onClick={event => { trigger.current = event.currentTarget }}>⋯</Button></DropdownMenuTrigger>}
       <DropdownMenuContent align="end" onCloseAutoFocus={event => { if (requested.current) { event.preventDefault(); setSelected(requested.current); requested.current = undefined } }}>
-        {overflow.map(action => <DropdownMenuItem className="min-h-11" key={action} onSelect={() => { requested.current = action }}>{label(action)}</DropdownMenuItem>)}
+        {props.rowMenu && <><DropdownMenuLabel><span className="block">{stateLabel}</span><span className="block text-xs font-normal">{t(`rowAccessDot_${message ? 'unavailable' : data!.state}`)}</span></DropdownMenuLabel>{!!overflow.length && <DropdownMenuSeparator />}</>}
+        {overflow.map(action => <DropdownMenuItem className="pointer-coarse:min-h-11" key={action} onSelect={() => { requested.current = action }}>{label(action)}</DropdownMenuItem>)}
       </DropdownMenuContent>
     </DropdownMenu>}
     {selected && <ResourceFormDialog entity={props.entity} key={selected} open onOpenChange={open => { if (!open) setSelected(undefined) }}

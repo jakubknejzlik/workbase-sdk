@@ -624,5 +624,12 @@
   "memberPendingLink": "Čeká na propojení",
   "rowFindRequired": "Vyberte člena nebo zadejte platnou e-mailovou adresu.",
   "rowAccountNotLinkable": "Tento účet nelze propojit s tímto záznamem.",
-  "rowAccessActions": "Akce přístupu do aplikace"
+  "rowAccessActions": "Akce přístupu do aplikace",
+  "rowRecord": "Záznam",
+  "rowRecordActions": "Akce záznamu {{name}}",
+  "rowAccessDot_signed_in": "Zelená tečka: účet je přihlášen.",
+  "rowAccessDot_invited": "Oranžová tečka: čeká se na přijetí pozvánky.",
+  "rowAccessDot_expired": "Červená tečka: platnost pozvánky vypršela.",
+  "rowAccessDot_no_account": "Šedá tečka: žádný účet nemá přístup.",
+  "rowAccessDot_unavailable": "Šedá tečka: stav přístupu není dostupný."
 }

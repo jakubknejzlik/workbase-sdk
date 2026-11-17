@@ -604,5 +604,12 @@
   "memberPendingLink": "Pending link",
   "rowFindRequired": "Select a member or enter a valid email address.",
   "rowAccountNotLinkable": "This account cannot be linked to this row.",
-  "rowAccessActions": "Application access actions"
+  "rowAccessActions": "Application access actions",
+  "rowRecord": "Record",
+  "rowRecordActions": "Record actions for {{name}}",
+  "rowAccessDot_signed_in": "Green dot: the account is signed in.",
+  "rowAccessDot_invited": "Amber dot: an invitation is pending.",
+  "rowAccessDot_expired": "Red dot: the invitation has expired.",
+  "rowAccessDot_no_account": "Grey dot: no account has access.",
+  "rowAccessDot_unavailable": "Grey dot: access status is unavailable."
 }

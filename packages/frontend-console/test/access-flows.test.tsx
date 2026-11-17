@@ -56,12 +56,12 @@ it.each(['detail', 'menu'] as const)('review5 V3 %s removes every generic accoun
   const { user, write } = await mount(surface)
   await screen.findByText('No access')
   expect(screen.queryByRole('button', { name: 'Access invite' })).toBeNull()
-  if (surface === 'menu') { await user.click(screen.getByRole('button', { name: /Actions for/ })); expect(screen.queryByRole('menuitem', { name: /account|access|invite/i })).toBeNull() }
+  if (surface === 'menu') { await user.click(screen.getByRole('button', { name: /Record actions for/ })); expect(screen.queryByRole('menuitem', { name: /account|access|invite/i })).toBeNull() }
   expect(write.mock.calls.every(([path]) => !path.startsWith('/commands/'))).toBe(true)
 })
 it.each(['explicit', 'array'] as const)('review5 menu suppresses legacy mutations for %s inconsistency', async source => {
   const { user } = await mount('menu', { v3: false, state: 'signed_in', inconsistency: source === 'explicit' ? 'multiple_linked_accounts' : null, accounts: source === 'array' ? [{ id: 'a' }, { id: 'b' }] : [] })
-  await screen.findByRole('alert'); await user.click(screen.getByRole('button', { name: /Actions for/ }))
+  await screen.findByRole('alert'); await user.click(screen.getByRole('button', { name: /Record actions for/ }))
   expect(screen.queryByRole('menuitem', { name: 'Link account' })).toBeNull()
 })
 it('review5 create offers opt-in Invite now with live contact prefill', async () => {
@@ -199,7 +199,7 @@ for (const v3 of [true, false]) for (const surface of ['detail', 'menu', 'edit',
     else if (state === 'explicit' || state === 'array') await screen.findByText(en.rowAccessMultiple)
     else await screen.findAllByRole('alert')
     expectNoEnabledAccess()
-    if (surface === 'menu') { await user.click(screen.getByRole('button', { name: /Actions for/ })); expect(screen.queryByRole('menuitem', { name: /account|access|invite/i })).toBeNull() }
+    if (surface === 'menu') { await user.click(screen.getByRole('button', { name: /Record actions for/ })); expect(screen.queryByRole('menuitem', { name: /account|access|invite/i })).toBeNull() }
     expect(write.mock.calls.some(([path, method]) => method !== 'GET' && path !== '/api/entries')).toBe(false)
   })
   it(`${v3 ? 'V3' : 'legacy'} ${surface} blocks during cached refetch after a change`, async () => {

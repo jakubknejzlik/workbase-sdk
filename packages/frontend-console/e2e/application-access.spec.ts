@@ -1,19 +1,25 @@
 import { test, expect } from '@playwright/test'
+import AxeBuilder from '@axe-core/playwright'
 import { mkdirSync } from 'node:fs'
 import setup, { origin } from './runtime/setup'
 import en from '../src/locales/en.json' with { type: 'json' }
 import cs from '../src/locales/cs.json' with { type: 'json' }
 let stop: (() => Promise<void>) | undefined
-const evidence = process.env.WB178_SCREENSHOTS ?? '/Users/jarvis/.sitebrew-work/evidence/wb-178'
+const evidence = process.env.WB178_SCREENSHOTS ?? '/Users/jarvis/.sitebrew-work/evidence/wb-209'
 test.beforeAll(async () => { stop = await setup({ worker: 'application-access-worker.ts', seed: 'application-access-seed.ts' }); mkdirSync(evidence, { recursive: true }) })
 test.afterAll(async () => { await stop?.() })
 for (const language of ['en', 'cs'] as const) for (const width of [1440, 390]) test(`${language} ${width}: Owner and Staff, list/detail, unified picker and pending link`, async ({ browser }) => {
+  test.setTimeout(90_000)
   const t = language === 'cs' ? cs : en
-  const owner = await browser.newContext({ baseURL: origin, viewport: { width, height: 900 }, extraHTTPHeaders: { Authorization: 'Bearer access-admin-session' } })
-  const staff = await browser.newContext({ baseURL: origin, viewport: { width, height: 900 }, extraHTTPHeaders: { Authorization: 'Bearer access-staff-session' } })
+  const owner = await browser.newContext({ baseURL: origin, viewport: { width, height: 900 }, hasTouch: width === 390, isMobile: width === 390, extraHTTPHeaders: { Authorization: 'Bearer access-admin-session' } })
+  const staff = await browser.newContext({ baseURL: origin, viewport: { width, height: 900 }, hasTouch: width === 390, isMobile: width === 390, extraHTTPHeaders: { Authorization: 'Bearer access-staff-session' } })
   for (const context of [owner, staff]) await context.addInitScript(lang => localStorage.setItem('console-language', lang), language)
   const page = await owner.newPage()
-  const shot = (name: string) => page.screenshot({ path: `${evidence}/${language}-${width}-${name}.png`, fullPage: true })
+  const settled = async (target = page) => {
+    await expect(target.getByText(t.loading, { exact: true })).toHaveCount(0)
+    await expect(target.getByText(t.rowAccessRefreshing, { exact: true })).toHaveCount(0)
+  }
+  const shot = async (name: string) => { await settled(); await page.screenshot({ path: `${evidence}/${language}-${width}-${name}.png`, fullPage: false, animations: 'disabled' }) }
   try {
     await page.goto('/o/org-a/e/worker')
     await expect(page.getByRole('columnheader', { name: t.rowAccess, exact: true })).toBeVisible()
@@ -21,8 +27,72 @@ for (const language of ['en', 'cs'] as const) for (const width of [1440, 390]) t
     await expect(pending.getByText('free@example.test')).toBeVisible()
     await expect(pending.locator('[data-application-access]')).toHaveCount(0)
     await expect(pending.getByRole('button', { name: t.rowInvite_resend })).toHaveCount(0)
+    // Check every touch target before keyboard/mouse interactions change Chromium's primary pointer.
+    await expect.poll(() => page.evaluate(() => matchMedia('(pointer: coarse)').matches)).toBe(width === 390)
+    const accessTriggers = page.getByRole('button', { name: new RegExp(t.rowAccessActions) })
+    await expect(accessTriggers).toHaveCount(4)
+    for (const accessTrigger of await accessTriggers.all()) await expect(accessTrigger).toHaveCSS('height', width === 390 ? '44px' : '32px')
+    for (const [record, state] of [['No account', 'no_account'], ['Pending record', 'invited'], ['Linked record', 'signed_in']] as const) {
+      const row = page.getByRole('row').filter({ has: page.getByRole('link', { name: record, exact: true }) })
+      const trigger = row.getByRole('button', { name: new RegExp(t.rowAccessActions) })
+      await expect(trigger).toHaveAccessibleName(new RegExp(t[`rowAccess_${state}`]))
+      await expect(row.getByRole('button', { name: t.rowRecordActions.replace('{{name}}', record) })).toHaveText(t.rowRecord)
+      if (state !== 'no_account') await expect(trigger).not.toHaveText(new RegExp(t[`rowAccess_${state}`]))
+      const coarse = await page.evaluate(() => matchMedia('(pointer: coarse)').matches)
+      await expect(trigger).toHaveCSS('height', coarse ? '44px' : '32px')
+      await trigger.evaluate(node => node.scrollIntoView({ block: 'center', inline: 'nearest' }))
+      await page.evaluate(() => (document.activeElement as HTMLElement)?.blur())
+      await expect(page.getByRole('tooltip')).toHaveCount(0)
+      await shot(`owner-${state}-closed`)
+      // Tab into the control so Radix opens the tooltip through keyboard focus.
+      await page.evaluate(() => (document.activeElement as HTMLElement)?.blur())
+      await trigger.focus(); await page.keyboard.press('Shift+Tab'); await page.keyboard.press('Tab')
+      await expect(trigger).toBeFocused()
+      await expect(page.getByRole('tooltip')).toHaveText(t[`rowAccess_${state}`])
+      await shot(`owner-${state}-keyboard-tooltip`)
+      await page.keyboard.press('Escape')
+      await page.keyboard.press('Enter')
+      await expect(page.getByRole('menu')).toContainText(t[`rowAccess_${state}`])
+      await expect(page.getByRole('menu')).toContainText(t[`rowAccessDot_${state}`])
+      await expect(page.getByRole('menuitem').last()).toBeInViewport({ ratio: 1 })
+      await shot(`owner-${state}-open`)
+      await page.keyboard.press('Escape')
+      await expect(trigger).toBeFocused()
+    }
+    await page.evaluate(() => (document.activeElement as HTMLElement)?.blur())
+    await expect(page.getByRole('tooltip')).toHaveCount(0)
+    for (const [record, state] of [['No account', 'no_account'], ['Pending record', 'invited'], ['Linked record', 'signed_in']] as const) {
+      const trigger = page.getByRole('row').filter({ has: page.getByRole('link', { name: record, exact: true }) }).getByRole('button', { name: new RegExp(t.rowAccessActions) })
+      await page.evaluate(() => (document.activeElement as HTMLElement)?.blur())
+      await expect(page.getByRole('tooltip')).toHaveCount(0)
+      await page.mouse.move(0, 0)
+      await trigger.hover({ timeout: 5000 })
+      await expect(page.getByRole('tooltip')).toHaveText(t[`rowAccess_${state}`])
+      await page.keyboard.press('Escape')
+      await trigger.click()
+      await page.getByRole('menu').evaluate(node => Promise.all(node.getAnimations({ subtree: true }).map(animation => animation.finished.catch(() => {}))))
+      const accessibility = await new AxeBuilder({ page }).include('[role="menu"]').withTags(['wcag2a', 'wcag2aa']).analyze()
+      expect(accessibility.violations).toEqual([])
+      await page.keyboard.press('Escape')
+      await expect(trigger).toBeFocused()
+      await page.keyboard.press('Escape')
+      await page.evaluate(() => (document.activeElement as HTMLElement)?.blur())
+      await page.mouse.move(0, 0)
+      await expect(page.getByRole('tooltip')).toHaveCount(0)
+    }
+    await page.evaluate(() => (document.activeElement as HTMLElement)?.blur())
+    await page.mouse.move(0, 0)
+    await expect(page.getByRole('tooltip')).toHaveCount(0)
+    const noAccountTrigger = page.getByRole('row').filter({ has: page.getByRole('link', { name: 'No account', exact: true }) }).getByRole('button', { name: new RegExp(t.rowAccessActions) })
+    await noAccountTrigger.click()
+    await page.getByRole('menuitem', { name: t.rowFindMember }).click()
+    await expect(page.getByRole('dialog')).toBeVisible()
+    await page.getByRole('dialog').getByRole('button', { name: t.cancel, exact: true }).click()
+    await expect(noAccountTrigger).toBeFocused()
+    const triggersA11y = await new AxeBuilder({ page }).include('table').withRules(['button-name']).analyze()
+    expect(triggersA11y.violations).toEqual([])
     await shot('owner-list')
-    await pending.getByRole('button', { name: t.rowAccessActions }).click()
+    await pending.getByRole('button', { name: new RegExp(t.rowAccessActions) }).click()
     await expect(page.getByRole('menuitem')).toHaveText([t.rowInvite_resend, t.rowInvite_copy, t.rowInvite_cancel, t.rowFindMember])
     await shot('owner-list-menu')
     await page.keyboard.press('Escape')
@@ -83,17 +153,22 @@ for (const language of ['en', 'cs'] as const) for (const width of [1440, 390]) t
     await staffPage.goto('/o/org-a/e/worker')
     await expect(staffPage.getByRole('link', { name: 'Staff record', exact: true })).toBeVisible()
     await expect(staffPage.getByRole('columnheader', { name: t.rowAccess, exact: true })).toHaveCount(0)
-    await staffPage.screenshot({ path: `${evidence}/${language}-${width}-staff-list.png`, fullPage: true })
+    for (const record of ['No account', 'Pending record', 'Linked record']) await expect(staffPage.getByRole('link', { name: record, exact: true })).toBeVisible()
+    await expect(staffPage.getByRole('button', { name: new RegExp(t.rowAccessActions) })).toHaveCount(0)
+    await settled(staffPage)
+    await staffPage.screenshot({ path: `${evidence}/${language}-${width}-staff-list.png`, fullPage: true, animations: 'disabled' })
     await staffPage.goto('/o/org-a/e/worker/four')
     await expect(staffPage.getByRole('heading', { name: 'Staff record', exact: true })).toBeVisible()
     await expect(staffPage.getByText(t.rowAccess, { exact: true })).toHaveCount(0)
     await expect(staffPage.getByText(t.rowAccessUnavailable, { exact: true })).toHaveCount(0)
-    await staffPage.screenshot({ path: `${evidence}/${language}-${width}-staff-detail.png`, fullPage: true })
+    await settled(staffPage)
+    await staffPage.screenshot({ path: `${evidence}/${language}-${width}-staff-detail.png`, fullPage: true, animations: 'disabled' })
     expect(hiddenAccessRequests).toEqual([])
     await staffPage.goto('/o/org-a/settings')
     await expect(staffPage.getByRole('link', { name: t.profileSettings, exact: true })).toBeVisible()
     await expect(staffPage.getByRole('link', { name: t.members, exact: true })).toHaveCount(0)
-    await staffPage.screenshot({ path: `${evidence}/${language}-${width}-staff-settings.png`, fullPage: true })
+    await settled(staffPage)
+    await staffPage.screenshot({ path: `${evidence}/${language}-${width}-staff-settings.png`, fullPage: true, animations: 'disabled' })
     await page.route('**/api/worker/one', route => route.fulfill({ status: 500, contentType: 'application/json', body: '{"error":"synthetic_failure"}' }))
     await page.goto('/o/org-a/e/worker/one')
     await expect(page.getByText(t.requestFailed, { exact: true })).toBeVisible()
@@ -102,5 +177,5 @@ for (const language of ['en', 'cs'] as const) for (const width of [1440, 390]) t
     const failedRow = page.getByRole('row').filter({ has: page.getByRole('link', { name: 'No account', exact: true }) })
     await expect(failedRow.getByRole('alert')).toHaveText(t.requestFailed)
     await shot('owner-list-load-failure')
-  } finally { await owner.close(); await staff.close() }
+  } finally { await Promise.allSettled([owner.close(), staff.close()]) }
 })
