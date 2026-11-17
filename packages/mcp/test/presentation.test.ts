@@ -64,7 +64,7 @@ async function validate(call: Awaited<ReturnType<typeof stdio>>['call'], args: R
   expect(result, JSON.stringify(result)).toMatchObject({ ok: true, errors: [] })
 }
 
-it('publishes explicit EN/CS catalogs through stdio, consumes persisted proofs, and preserves source/history', async () => {
+it('publishes displayName and explicit EN/CS catalogs through stdio, consumes persisted proofs, and preserves source/history', async () => {
   const root = await fixture()
   let session = await stdio(root)
   try {
@@ -73,7 +73,7 @@ it('publishes explicit EN/CS catalogs through stdio, consumes persisted proofs, 
     expect(inspection.dictionaries.requiredKeys).toContainEqual({ key: 'domain:entity.worker', plural: true, sources: expect.arrayContaining([expect.objectContaining({ file: join(root, 'schema/worker.ts'), line: expect.any(Number) })]) })
     const paths = ['config.ts', 'runtime.ts', 'access.ts', 'schema/worker.ts', 'schema.lock.json', ...(await fs.readdir(join(root, 'migrations'))).map(name => `migrations/${name}`)]
     const before = await Promise.all(paths.map(path => fs.readFile(join(root, path))))
-    const args = await propose(session.call, [...bilingual, catalog({ 'field.worker.name': 'Full name' })])
+    const args = await propose(session.call, [{ kind: 'set_instance_display_name', displayName: '  Úklid 東京  ' }, ...bilingual, catalog({ 'field.worker.name': 'Full name' })])
     await validate(session.call, args)
     const preview = await session.call('preview_migration', args)
     expect(preview).toMatchObject({ ok: true, revision: 1, sql: '' })
@@ -83,7 +83,7 @@ it('publishes explicit EN/CS catalogs through stdio, consumes persisted proofs, 
     await session.close(); session = await stdio(root)
     expect(await session.call('promote', { ...args, expectedRevision: 1 })).toMatchObject({ ok: true, status: 'promoted', revision: 1 })
     await session.close(); session = await stdio(root)
-    expect(await session.call('inspect_schema', { instance: 'demo' })).toMatchObject({ revision: 1, languages: ['en', 'cs'], dictionaries: { catalogs: { cs: { domain: csDomain, ui: csUi }, en: { domain: { 'field.worker.name': 'Full name', 'field.worker.user': 'Application access' } } } } })
+    expect(await session.call('inspect_schema', { instance: 'demo' })).toMatchObject({ revision: 1, displayName: 'Úklid 東京', languages: ['en', 'cs'], dictionaries: { catalogs: { cs: { domain: csDomain, ui: csUi }, en: { domain: { 'field.worker.name': 'Full name', 'field.worker.user': 'Application access' } } } } })
     const after = await Promise.all(paths.map(path => fs.readFile(join(root, path))))
     expect(after.slice(1)).toEqual(before.slice(1))
     for (const command of ['check:ui', 'typecheck', 'check:schema', 'check:access', 'check:openapi']) {
