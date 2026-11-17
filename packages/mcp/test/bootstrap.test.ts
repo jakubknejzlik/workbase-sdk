@@ -396,7 +396,7 @@ it.each([
     { kind: 'set_account_link', entity: 'worker', invitationRole: 'staff' },
     ...(path === 'docs/sdk/mcp-composition.md' ? [
       { kind: 'set_locale', languages: ['en', 'cs'] },
-      { kind: 'set_instance_display_name', displayName: 'Cleaning' },
+      { kind: 'set_instance_display_name', displayName: 'Field Ops' },
       { kind: 'set_roles', roles: ['owner', 'viewer'], organizationOwnerRole: 'owner' },
     ] : []),
   ]
