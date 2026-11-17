@@ -54,6 +54,9 @@ const setLocale = z.strictObject({
   languages: z.array(consoleLocaleSchema).min(1).max(2).refine(values => new Set(values).size === values.length, 'Duplicate languages').optional(),
 }).refine(change => change.locale !== undefined || change.defaultLanguage !== undefined || change.languages !== undefined, 'Provide locale, defaultLanguage and/or languages')
 export type LocaleChange = z.infer<typeof setLocale>
+const instanceDisplayName = z.string().trim().min(1).max(1000)
+const setInstanceDisplayName = z.strictObject({ kind: z.literal('set_instance_display_name'), displayName: instanceDisplayName })
+export type PresentationChange = LocaleChange | z.infer<typeof setInstanceDisplayName>
 // Composition inputs remain separate from legacy config proposal records.
 export const identityOptionsSchema = z.strictObject({
   trustedIssuers: z.record(z.string().url(), z.array(z.string().min(1))).optional(),
@@ -84,8 +87,16 @@ export const accessChangeSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('set_account_link'), entity: identifier, invitationRole: identifier }),
 ])
 export type AccessChange = z.infer<typeof accessChangeSchema>
-export const compositionChangeSchema = z.union([runtimeChangeSchema, accessChangeSchema, setLocale])
+export const setRolesSchema = z.strictObject({
+  kind: z.literal('set_roles'),
+  roles: z.array(identifier).min(1).refine(roles => new Set(roles).size === roles.length, 'Duplicate roles'),
+  organizationOwnerRole: identifier,
+}).refine(change => change.roles.includes(change.organizationOwnerRole), 'organizationOwnerRole must be in roles')
+export type RolesChange = z.infer<typeof setRolesSchema>
+export const compositionChangeSchema = z.union([runtimeChangeSchema, accessChangeSchema, setRolesSchema, setLocale, setInstanceDisplayName])
 export type CompositionChange = z.infer<typeof compositionChangeSchema>
+export const isPresentationChange = (change: { kind: string }): change is PresentationChange =>
+  change.kind === 'set_locale' || change.kind === 'set_instance_display_name'
 
 export const changeSchema = z.discriminatedUnion('kind', [
   setLabel,
@@ -112,7 +123,7 @@ export const changeSchema = z.discriminatedUnion('kind', [
 export const schemas = {
   initialize_instance: z.strictObject({ instance, mode: z.enum(['preview', 'apply']).default('preview'), planHash: z.string().regex(/^[a-f0-9]{64}$/).optional() })
     .refine(input => input.mode !== 'apply' || input.planHash !== undefined, 'Apply requires the preview planHash'),
-  bootstrap_instance: z.strictObject({ root: z.string().min(1).optional(), id: z.string(), target: z.literal('cloudflare-github').describe('Standalone registry SDK packages, packaged console and SST Cloudflare deployment with GitHub workflows') }),
+  bootstrap_instance: z.strictObject({ root: z.string().min(1).optional(), id: z.string(), displayName: instanceDisplayName.optional(), target: z.literal('cloudflare-github').describe('Standalone registry SDK packages, packaged console and SST Cloudflare deployment with GitHub workflows') }),
   list_versions: z.strictObject({ instance }),
   rollback: z.strictObject({ instance, to: z.string().regex(/^v[1-9][0-9]*$/), expectedRevision: revision, allowDestructive: z.boolean().optional(), preview: z.boolean().optional() }),
   inspect_schema: z.strictObject({ instance }),

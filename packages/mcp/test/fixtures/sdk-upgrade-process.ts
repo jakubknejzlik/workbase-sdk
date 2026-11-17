@@ -1,5 +1,5 @@
 import { registerTempDir, cleanupTempDir } from '../../../../scripts/lib/test-temp-dir.mjs'
-import { createServer, type Socket } from 'node:net'
+import { createServer, type AddressInfo, type Socket } from 'node:net'
 import { mkdtemp } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -11,8 +11,7 @@ import { targetProof } from './sdk-upgrade-evidence.ts'
 // process-group runner are real. D2's install/bridge contract has its own tests.
 export { captureSdkInputs }
 export async function runSdkTarget(options: TargetOptions) {
-  const workDir = registerTempDir(await mkdtemp(join(tmpdir(), 'i')))
-  let scratch: string | undefined
+  const scratch = registerTempDir(await mkdtemp(join(tmpdir(), 'wb-sdk-ipc-')))
   const sockets = new Set<Socket>()
   const server = createServer(socket => {
     sockets.add(socket); socket.on('close', () => sockets.delete(socket))
@@ -28,21 +27,19 @@ export async function runSdkTarget(options: TargetOptions) {
   const command = (message: unknown) => {
     for (const socket of sockets) socket.write(JSON.stringify(message) + '\n')
   }
+  process.on('message', command)
+  // Long operator-owned scratch roots exceed macOS's Unix socket path limit.
+  // Keep all files in scratch and use an ephemeral loopback port for the barrier.
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject)
+    server.listen(0, '127.0.0.1', resolve)
+  })
+  const address = { host: '127.0.0.1', port: (server.address() as AddressInfo).port }
   try {
-    // Darwin's Unix socket limit includes the whole path, independently of TMPDIR.
-    scratch = registerTempDir(await mkdtemp('/tmp/wbs-'))
-    const socketPath = join(scratch, 'barrier.sock')
-    const socketBytes = Buffer.byteLength(socketPath)
-    if (socketBytes > 100) throw new Error(`Test IPC socket path exceeds 100 bytes (${socketBytes} bytes)`)
-    process.on('message', command)
-    await new Promise<void>((resolve, reject) => {
-      server.once('error', reject)
-      server.listen(socketPath, () => { server.removeListener('error', reject); resolve() })
-    })
     for (const phase of ['install', 'verify']) {
       const descendant = `
         const net = require('node:net');
-        const socket = net.connect(${JSON.stringify(socketPath)});
+        const socket = net.connect(${JSON.stringify(address)});
         socket.on('connect', () => socket.write(JSON.stringify({event:${JSON.stringify(phase)},descendant:process.pid})+'\\n'));
         process.on('SIGTERM', () => socket.write(JSON.stringify({event:'cleanup',descendant:process.pid})+'\\n'));
         socket.on('data', bytes => { if (bytes.toString().includes('continue')) process.exit(0) });
@@ -52,7 +49,7 @@ export async function runSdkTarget(options: TargetOptions) {
         const child = require('node:child_process').spawn(process.execPath,['-e',${JSON.stringify(descendant)}],{stdio:'ignore'});
         child.on('exit',()=>process.exit(0));
       `
-      const result = await execute([process.execPath, '-e', launcher], workDir, { signal: options.signal, timeoutMs: 30000, killGraceMs: 30000 })
+      const result = await execute([process.execPath, '-e', launcher], scratch, { signal: options.signal, timeoutMs: 30000, killGraceMs: 30000 })
       options.signal?.throwIfAborted()
       if (result.rc !== 0) throw new Error('Controlled target failed')
     }
@@ -61,8 +58,7 @@ export async function runSdkTarget(options: TargetOptions) {
     process.removeListener('message', command)
     for (const socket of sockets) socket.destroy()
     await new Promise<void>(resolve => server.close(() => resolve()))
-    if (scratch) cleanupTempDir(scratch)
-    cleanupTempDir(workDir)
+    cleanupTempDir(scratch)
     process.send?.({ event: 'cleaned', scratch })
   }
 }
