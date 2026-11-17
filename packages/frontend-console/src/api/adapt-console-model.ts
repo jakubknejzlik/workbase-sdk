@@ -6,13 +6,16 @@ import { membersConsoleContribution } from '../../../plugins/members/src/console
 export interface RuntimeConsole extends Omit<ConsoleModelContract, 'model' | 'console'> { model: Model & ConsoleModelContract['model']; console: ConsoleRegistry }
 
 function fallbackRegistry({ model, capabilities }: ConsoleModelContract): ConsoleRegistry {
+  const role = capabilities.organization.role
   const permits = (grant?: ConsoleGrant) => !grant || (typeof grant === 'string' ? capabilities.resources[grant] === true : capabilities.entities[grant.entity]?.operations.includes(grant.operation ?? 'read'))
   // Keep the packaged built-ins eligible through the same grants as their links.
   const pages = [...coreConsoleContribution.pages!.filter(page => page.id === 'core.overview'), ...membersConsoleContribution.pages!].filter(page => permits(page.grant))
   const navigation = [...coreConsoleContribution.navigation!.filter(item => item.page === 'core.overview'), ...membersConsoleContribution.navigation!].filter(item =>
     // Mirror the server registry's intentional member navigation exclusion.
-    (capabilities.organization.role !== 'member' || item.placement === 'sidebar' && !!item.entity)
-    && permits(item.grant) && (!item.roles || item.roles.includes(capabilities.organization.role)) && pages.some(page => page.id === item.page))
+    (role !== 'member' || item.placement === 'sidebar' && !!item.entity)
+    // Members navigation also requires an established, non-empty role string.
+    && (item.page !== 'members.list' || typeof role === 'string' && role.trim().length > 0)
+    && permits(item.grant) && (!item.roles || item.roles.includes(role)) && pages.some(page => page.id === item.page))
   return {
     navigation: [...navigation, ...Object.keys(model.entities).filter(entity => capabilities.entities[entity]?.operations.includes('read') && capabilities.entities[entity].readable.includes('id')).map(entity => ({ id: `entity.${entity}`, entity, label: `entity_${entity}`, placement: 'sidebar' as const }))],
     pages, entities: {}, modelUi: model.ui,
