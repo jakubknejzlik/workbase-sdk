@@ -48,6 +48,14 @@ Supported kinds, as defined in [schemas.ts](../../packages/mcp/src/schemas.ts):
   Omitting options resets the selected plugin to defaults. Permissions-provider
   options derive from the current config and are not directly settable.
 - `set_interactive` takes `interactive: boolean`; enabling login requires a provider.
+- `set_roles` takes an ordered, nonempty, unique `roles` identifier array and
+  `organizationOwnerRole`, which must be in that array. V3 has no implicit roles:
+  include `member` explicitly if wanted. Combine it with system/entity grants and
+  account-link changes in one proposal. The complete final graph is compiled
+  together, regardless of operation order. Retained identifiers keep their grants;
+  new identifiers start with explicit denial on every system action and entity.
+  Owner authority requires explicit grants; role names never copy authority.
+  Only one `set_roles` is allowed per proposal.
 - `set_system_access` takes `role` and `grants`, replacing that role's system
   grants with action names mapped to `"allow"` or `"deny"`.
 - `set_entity_access` takes `entity`, `role` and `access`. Access is `"deny"` or
@@ -62,6 +70,27 @@ Supported kinds, as defined in [schemas.ts](../../packages/mcp/src/schemas.ts):
 The access compiler checks roles, actions and entity matrices. Composition and
 access kinds can share a proposal; `propose_change` also accepts these V3 kinds.
 Mixing them with legacy kinds is rejected with `mixed_change_kinds`.
+
+For example, replace a fresh scaffold's roles with
+`{ "kind": "set_roles", "roles": ["owner", "dispatcher", "viewer", "member"],
+"organizationOwnerRole": "owner" }`, together with explicit owner and restricted
+role grants and `set_account_link` for each affected invitation mapping. Unresolved
+account invitation mappings or navigation roles return actionable diagnostics;
+no strings or stored records are automatically reassigned. Navigation declarations
+require an explicit reviewed source edit when their referenced roles change.
+
+At disposable verification and again immediately before promotion, removed roles
+(old set minus final set) must be unused in the **target** database's memberships,
+invitations and access tokens, including revoked, expired and historical rows.
+An owner-role change additionally requires no target organizations or memberships.
+The operator supplies `WORKBASE_MCP_ROLE_DATABASES`, a JSON object mapping the
+instance selector to the absolute local target SQLite path. Missing/inaccessible
+or incomplete evidence fails closed with `role_usage_unverified`; a populated
+owner transition returns `owner_change_requires_fresh_target`. Neither the empty
+verification disposable nor a caller's freshness assertion establishes target
+safety. Populated owner transitions need a separately designed data migration.
+Every organization counts, including a generated `instance` placeholder. Configure
+roles before organization provisioning; this operation never deletes target rows.
 
 For enabled console languages, call `propose_change` (or `propose_composition`)
 with a separate proposal, for example:
@@ -90,6 +119,8 @@ Continue through these tools in order:
 2. `preview_migration` with `{proposalId}` returns exact proposed file bytes,
    regenerated access locks, plugin migration statuses and plugin SQL. Domain
    `sql` is empty. Review the file and access-lock changes before verification.
+   Role proposals also return `roleDiff`, with ordered before/after roles and owner
+   metadata and every removed role-indexed source row as an explicit removal.
 3. `apply_to_disposable` with `{proposalId}` verifies SDK/plugin migrations and
    committed domain history on fresh local D1. Require successful verification.
 4. `promote` with `{proposalId, expectedRevision: 1}` publishes the verified files
@@ -102,8 +133,13 @@ close an unpromoted proposal.
 Promotion writes changed `runtime.ts`, access declarations in `access.ts` or
 `schema/<entity>.ts`, regenerated `access.lock.json`/`access.lock.md`, and proposal
 metadata. Access and language edits regenerate `openapi.json` only if it already exists.
-Language proposals also write `config.ts`. The domain revision, schema lock and
-domain migrations stay unchanged. Review and commit promoted files through the
+Language and role proposals also write `config.ts`. Role proposals derive runtime
+permissions options and the SDK account-role enum from the final config, preserving
+the requested order. `inspect_schema` exposes `organizationOwnerRole` alongside
+`roles`. The domain revision, schema lock and
+domain migrations stay unchanged. Role authoring verifies the physical schema
+against the existing lock and replays committed history; a stale physical lock
+returns `schema_lock_mismatch`. Review and commit promoted files through the
 approved PR process.
 Promotion returns `appliesToDatabase: false`; plugin migrations run through the
 normal SDK migration engine at deploy. Promotion does not install dependencies,
@@ -111,6 +147,6 @@ configure infrastructure, send mail or apply a live database migration.
 
 V3 domain-change promotion is unsupported and returns `v3_promote_unsupported`.
 Physical schema changes require reviewed source edits and migration generation.
-Custom plugins/commands, plugin removal and role definitions also require reviewed
+Custom plugins/commands and plugin removal require reviewed
 source changes. Runtime authoring accepts only the canonical built-in composition
 shape; noncanonical sources fail closed with `runtime_not_canonical`.

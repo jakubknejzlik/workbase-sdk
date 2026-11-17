@@ -173,7 +173,7 @@ export class Workflow {
           }
           const diagnostics = await diagnose()
           return { ok: true, instance: targetInstance, revision: bundle.config.revision, instance_meta: diagnostics.meta, validation: diagnostics.validation,
-            entities: bundle.config.entities, roles: bundle.config.roles, permissions: bundle.config.permissions,
+            entities: bundle.config.entities, roles: bundle.config.roles, organizationOwnerRole: bundle.config.organizationOwnerRole, permissions: bundle.config.permissions,
             languages: bundle.config.languages, locale: bundle.config.locale, ui: bundle.config.ui, enumLabels: bundle.config.enumLabels,
             policies: effectivePolicies(bundle.config), organizationPermissions: bundle.config.organizationPermissions,
             indexes: bundle.indexes, pendingProposals: pending }

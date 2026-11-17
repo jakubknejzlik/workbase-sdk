@@ -6,8 +6,8 @@ const replacements: Partial<Record<Change['kind'], string>> = {
   set_policy: 'set_entity_access',
   set_organization_permissions: 'set_system_access',
   add_user_link: 'set_account_link',
-  add_role: 'a reviewed role change (V3 role authoring is not supported)',
-  remove_role: 'a reviewed role change (V3 role authoring is not supported)',
+  add_role: 'set_roles with explicit access and account-link operations in one proposal',
+  remove_role: 'set_roles with explicit access and account-link operations in one proposal',
 }
 
 /** Legacy publication serializes defineInstance and would destroy V3 authored sources. */
