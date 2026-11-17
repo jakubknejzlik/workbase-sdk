@@ -1,21 +1,33 @@
 import type { ReactNode } from 'react'
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { afterEach, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { I18nextProvider, initReactI18next } from 'react-i18next'
 import i18next from 'i18next'
 import type { ConsoleModelContract } from '@workbasehq/core/console-contract'
 import { getMutationSafetySnapshot } from '@workbasehq/ui'
+import { changeSavedViews } from '@workbasehq/console-generated/saved-views'
 import en from '../src/locales/en.json'
 import { ReadPage } from '../src/read'
 import { adaptConsoleModel, refreshRuntimeModel } from '../src/api/runtime-model'
 import { fetchCapabilities } from '../src/api/queries'
 import { buildReload } from '../src/build-reload'
+const navigate = vi.hoisted(() => vi.fn())
 vi.mock('@tanstack/react-router', () => ({
-  useLocation: () => ({ search: {}, state: {}, pathname: '/o/org/e/entries', searchStr: '' }), useNavigate: () => vi.fn(),
+  useLocation: () => ({ search: {}, state: {}, pathname: '/o/org/e/entries', searchStr: '' }), useNavigate: () => navigate,
   Link: ({ children, to }: { children: ReactNode; to: string }) => <a href={to}>{children}</a>,
 }))
-afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals() })
+beforeEach(() => {
+  const entries = new Map<string, string>()
+  vi.stubGlobal('localStorage', {
+    getItem: (key: string) => entries.get(key) ?? null,
+    setItem: (key: string, value: string) => { entries.set(key, value) },
+    removeItem: (key: string) => { entries.delete(key) },
+    key: (index: number) => [...entries.keys()][index] ?? null,
+    get length() { return entries.size },
+  })
+})
+afterEach(() => { navigate.mockReset(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 function document(revision = 1): ConsoleModelContract {
   return {
     contractVersion: 1, console: { entities: {}, navigation: [], pages: [] },
@@ -25,12 +37,13 @@ function document(revision = 1): ConsoleModelContract {
     capabilities: { revision, organization: { role: 'admin' }, entities: { entries: { operations: ['read', 'create', 'update'], readable: ['id', 'version', 'name'], writable: ['name'] } }, commands: [], resources: {}, workflows: {} },
   } as unknown as ConsoleModelContract
 }
-async function setup(id?: string) {
+async function setup(id?: string, beforeDraft?: () => void) {
   let next = document(), status = 200
   let releaseQueries: (() => void) | undefined
   let queryGate: Promise<void> | undefined
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } })
   client.setQueryData(['console-model', 'org'], adaptConsoleModel(next)); client.setQueryData(['capabilities', 'org'], next.capabilities)
+  client.setQueryData(['me'], { user: { id: 'verified' }, memberships: [{ organization_id: 'org' }] })
   const fetcher = vi.fn(async (path: string) => {
     if (path.endsWith('/capabilities')) return Response.json(next.capabilities)
     if (path.endsWith('/console-model')) return Response.json(status === 200 ? next : { error: 'permission_denied' }, { status })
@@ -41,6 +54,7 @@ async function setup(id?: string) {
   const i18n = i18next.createInstance(); await i18n.use(initReactI18next).init({ lng: 'en', resources: { en: { translation: { ...en, field_name: 'Name', entity_entries: 'Entries', entitySingular_entries: 'Entry' } } } })
   const view = render(<I18nextProvider i18n={i18n}><QueryClientProvider client={client}><ReadPage orgId="org" entity="entries" id={id} /></QueryClientProvider></I18nextProvider>)
   await screen.findByRole('heading', { name: id ? 'Ada' : 'Entries' })
+  beforeDraft?.()
   fireEvent.click(screen.getByRole('button', { name: id ? 'Edit' : 'Add Entry' }))
   const input = await screen.findByRole('textbox', { name: 'Name' }); fireEvent.change(input, { target: { value: 'Grace' } })
   expect(getMutationSafetySnapshot().dirty).toBe(true)
@@ -53,6 +67,27 @@ it('revision-only runtime refresh retains a real registered create draft and req
   expect(test.refreshBuild).toHaveBeenCalledTimes(1)
   expect(screen.getByRole('textbox', { name: 'Name' })).toBe(test.input); expect(test.input).toHaveProperty('value', 'Grace'); expect(getMutationSafetySnapshot().dirty).toBe(true)
   test.cleanup()
+})
+it('revision refresh preserves the verified saved-view selection alongside a dirty create draft without auto-applying it', async () => {
+  const saved = changeSavedViews({ instance: 'drafts', userId: 'verified', orgId: 'org' }, 'entries', {
+    kind: 'save', name: 'Personal', state: { search: '', sort: { key: 'name', direction: 'desc' }, userFilters: [], presetFilters: [], limit: 30 },
+  }).entries[0]
+  let select!: HTMLSelectElement
+  const test = await setup(undefined, () => {
+    select = screen.getByRole('combobox', { name: en.savedViews }) as HTMLSelectElement
+    fireEvent.change(select, { target: { value: saved.id } })
+  })
+  test.next(document(2))
+  try {
+    await act(async () => { await fetchCapabilities(test.client, 'org') })
+    await waitFor(() => expect(test.client.getQueryData<ReturnType<typeof adaptConsoleModel>>(['console-model', 'org'])?.capabilities.revision).toBe(2))
+    expect(screen.getByLabelText(en.savedViews, { selector: 'select' })).toBe(select)
+    expect(select.value).toBe(saved.id)
+    expect(navigate).not.toHaveBeenCalled()
+    expect(screen.getByRole('textbox', { name: 'Name' })).toBe(test.input)
+    expect(test.input).toHaveProperty('value', 'Grace'); expect(getMutationSafetySnapshot().dirty).toBe(true)
+    expect(test.refreshBuild).toHaveBeenCalledTimes(1)
+  } finally { test.cleanup() }
 })
 it('live create revocation is applied immediately despite a dirty draft', async () => {
   const test = await setup(); const next = document(2); next.capabilities.entities.entries.operations = ['read']; test.next(next)

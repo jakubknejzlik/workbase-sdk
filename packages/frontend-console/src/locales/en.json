@@ -582,5 +582,20 @@
   "rowFindClear": "Clear selected member",
   "rowInvitationActions": "Invitation actions",
   "rowLinkSupersedes": "Linking this member will cancel the pending invitation to {{email}}. Its old link will stop working.",
-  "rowFindDescription": "Search organization members by name or email. Select a member to link their account."
+  "rowFindDescription": "Search organization members by name or email. Select a member to link their account.",
+  "savedViews": "Personal saved views",
+  "savedViewsBrowserOnly": "Saved in this browser only. Removed when you sign out.",
+  "savedViewsChoose": "Choose a saved view",
+  "savedViewsSave": "Save current view",
+  "savedViewsApply": "Apply saved view",
+  "savedViewsRename": "Rename saved view",
+  "savedViewsUpdate": "Update saved view",
+  "savedViewsDelete": "Delete saved view",
+  "savedViewsName": "View name",
+  "savedViewsConfirm": "Save view",
+  "savedViewsChanged": "Saved views updated.",
+  "savedViewsError_storage": "Could not save or read views in this browser.",
+  "savedViewsError_invalid": "Saved views could not be read. No changes were saved.",
+  "savedViewsError_limit": "View limit exceeded (20 views, 16 KiB per view, 128 KiB per list). No changes were saved.",
+  "savedViewsError_name": "Enter a view name of 1–80 characters."
 }

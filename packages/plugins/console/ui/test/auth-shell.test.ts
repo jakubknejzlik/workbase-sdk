@@ -114,8 +114,10 @@ test('language choice persists through a fresh runtime before sign-in', async ()
 test.each([204, 401])('sign-out %s is JSON POST, clears org, replaces location', async status => {
   vi.stubGlobal('location', { get pathname() { return originalLocation.pathname }, get search() { return originalLocation.search }, replace })
   history.replaceState(null, '', '/sign-in'); localStorage.setItem('workbase:org', 'one')
+  localStorage.setItem('workbase:saved-views:v1:instance:A:one:workers', '{}'); localStorage.setItem('console-language', 'cs')
   const fetch = vi.fn(async (_path: string, _init: ClientRequestInit) => status === 204 ? new Response(null, { status }) : json({ error: 'unauthenticated' }, status)); render(view(fetch).element)
   fireEvent.click(screen.getByRole('button', { name: 'Sign out' })); await waitFor(() => expect(replace).toHaveBeenCalledWith('/sign-in'))
+  expect(localStorage.getItem('workbase:saved-views:v1:instance:A:one:workers')).toBeNull(); expect(localStorage.getItem('console-language')).toBe('cs')
   expect(localStorage.getItem('workbase:org')).toBeNull(); const [path, init] = fetch.mock.calls[0]; expect(path).toBe('/auth/logout'); expect(init.method).toBe('POST'); expect(init.body).toBe('{}'); expect(new Headers(init.headers).get('Content-Type')).toBe('application/json')
 })
 test('Session optional onState observes existing states', async () => {

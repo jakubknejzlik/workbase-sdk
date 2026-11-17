@@ -309,3 +309,29 @@ requires the private vocabulary input; a missing secret prevents a release
 archive from being certified. The built HTML probe rejects inline script/style
 and verifies the no-referrer meta tag. Browser acceptance records every flow and
 fails if it requests console-model, console-info, `/schema` or retired metadata routes.
+
+Personal saved views in the generated console are browser-local, scoped by verified
+instance, user, organization and entity, and never restored automatically. They
+store filters, sort/direction, configured preset ID and row-access selection only.
+English/Czech controls explain: “Saved in this browser only. Removed when you sign out.”
+
+The shared browser storage protocol is exported from
+`@workbasehq/plugins/console/ui/saved-views` (`savedViewsKey`, `loadSavedViews`,
+`changeSavedViews`, `clearSavedViews`, and limits/types). Hosts must supply a scope
+only after successful `/me` verification and organization authorization; never
+obtain identity from storage. Hosts must call `clearSavedViews({ instance, userId })`
+on explicit sign-out, before navigation, to remove that account’s saved views
+across all organizations/entities. If the verified account/instance is unavailable,
+call `clearSavedViews()` to remove only this feature’s keys. Storage failures do
+not block logout. Ordinary 401/expiry redirects must not invoke cleanup. The
+existing `AuthShell` uses the unknown-scope fallback on explicit sign-out.
+
+The generated list adapter lives beside `list-model.ts` and uses
+`searchFromState`, `validateListSearch` and `stateFromSearch` with current
+capabilities. Its host passes `savedViewsScope` to `GeneratedReadPage`; absent scope
+hides the feature, and embedded lists never display it. Apply navigates with
+canonical search, resets cursor history and retains `listStateDropped`.
+The V3 `ListView` in this package has a separate binding/client model and does not
+reuse that generated list. Its saved-view controls and an adapter to the shared
+validated `ListSearch` pipeline remain an open integration point; this change
+exports the storage protocol and wires cleanup, without changing V3 list routing.

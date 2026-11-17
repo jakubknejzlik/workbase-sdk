@@ -24,6 +24,7 @@ test('producer staging and the resulting tarball retain React/Vite exports and a
     const member = (name: string) => { const result = spawnSync('tar', ['-xOf', archive, 'package/' + name], { encoding: 'utf8' }); expect(result.status, result.stderr).toBe(0); return result.stdout }
     const installed = JSON.parse(member('package.json'))
     const react = installed.exports['./console/ui/react'].replace(/^\.\//, ''), vite = installed.exports['./console/ui/vite'].replace(/^\.\//, '')
+    expect(member(installed.exports['./console/ui/saved-views'].replace(/^\.\//, ''))).toContain('export function clearSavedViews')
     expect(member(react)).toContain('AuthShell'); expect(member(react)).toContain('useAuthDirty'); expect(member(vite)).toContain('resolveBuildSHA')
     for (const name of ['auth-shell', 'auth-dirty']) expect(member('console/ui/src/react/' + name + '.ts')).toBeTruthy()
     for (const name of ['build-reload', 'auth-storage']) expect(member('console/ui/src/' + name + '.ts')).toBeTruthy()

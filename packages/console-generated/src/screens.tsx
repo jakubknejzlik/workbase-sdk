@@ -15,6 +15,8 @@ import { useGeneratedList, useRelationLabels } from './useGeneratedList'
 import { filterKind, filterMapping } from './filter-kinds'
 import { HeaderFilter } from './header-filter'
 import { readableWhere, sortableFields } from './list-model'
+import { SavedViewsControls } from './saved-views-controls'
+import type { SavedViewsScope } from './saved-views'
 import { hasRowActions } from './write'
 import { breadcrumbRecordLabel, usePublishRecordBreadcrumb } from './breadcrumbs'
 import { DetailCards } from './detail-layout'
@@ -33,7 +35,7 @@ export function signedValue(row: Record<string, any>, field: Field, value: React
   const delta = row[field.ui.signedBy.field] === field.ui.signedBy.negativeValue ? -Math.abs(amount) : amount
   return <span className={delta < 0 ? 'text-red-700 tabular-nums font-medium' : 'text-green-700 tabular-nums font-medium'}>{new Intl.NumberFormat(locale, { signDisplay: 'always' }).format(delta)}</span>
 }
-interface ReadPageProps { calendarCreate?: (values: Record<string, string>) => void; write?: WriteRequest; onDenied?: () => void; contextList?: ReadQuery['contextList']; title?: string; embeddedCreate?: (entity: string, values: Record<string, string>) => ReactNode; model: Model; caps: Capabilities; orgId: string; entity: string; id?: string; request: (input: ReadQuery) => Promise<Result>; primaryAction?: { label: string; onAction: () => void }; actions?: (row?: Record<string, any>) => ReactNode; rowActions?: (row: Record<string, any>, disabled: boolean) => ReactNode }
+interface ReadPageProps { savedViewsScope?: SavedViewsScope; calendarCreate?: (values: Record<string, string>) => void; write?: WriteRequest; onDenied?: () => void; contextList?: ReadQuery['contextList']; title?: string; embeddedCreate?: (entity: string, values: Record<string, string>) => ReactNode; model: Model; caps: Capabilities; orgId: string; entity: string; id?: string; request: (input: ReadQuery) => Promise<Result>; primaryAction?: { label: string; onAction: () => void }; actions?: (row?: Record<string, any>) => ReactNode; rowActions?: (row: Record<string, any>, disabled: boolean) => ReactNode }
 export function GeneratedReadPage(props: ReadPageProps) { return props.id ? <GeneratedDetailPage {...props} /> : <GeneratedListPage {...props} /> }
 function GeneratedDetailPage({ model, caps, orgId, entity, id, request, actions, embeddedCreate, write, onDenied }: ReadPageProps) {
   const home = useScopeHome()
@@ -103,7 +105,7 @@ function GeneratedDetailPage({ model, caps, orgId, entity, id, request, actions,
   return notFound()
 }
 
-function GeneratedListPage({ model, caps, orgId, entity, request, actions, rowActions, primaryAction, contextList, title, calendarCreate, write, onDenied }: ReadPageProps) {
+function GeneratedListPage({ savedViewsScope, model, caps, orgId, entity, request, actions, rowActions, primaryAction, contextList, title, calendarCreate, write, onDenied }: ReadPageProps) {
   const { t, i18n } = useEntityTranslation(entity); const navigate = useNavigate()
   const definition = model.entities[entity]
   const [searchPending, setSearchPending] = useState(false)
@@ -153,6 +155,7 @@ function GeneratedListPage({ model, caps, orgId, entity, request, actions, rowAc
     {listSearchableFields(model, entity, caps, list.state.presentation).join() === 'id' && <p className="text-sm text-muted-foreground">{t('searchById')}</p>}
     {list.notice && <p role="status" className="my-2 text-sm">{t(list.notice)}</p>}
     {error?.code === 'query_too_expensive' && list.undo && <PrimitiveButton variant="outline" onClick={list.undo}>{t('undoLastChange')}</PrimitiveButton>}
+    {!contextList && savedViewsScope && savedViewsScope.instance === model.instance && savedViewsScope.orgId === orgId && <SavedViewsControls scope={savedViewsScope} entity={entity} state={list.state} onApply={list.applySavedView} />}
     {views.length > 0 && <div role="group" aria-label={t('listViews')} className="flex flex-wrap gap-2 py-2">{[{ id: 'all', label: 'viewAll' }, ...views].map(view => <PrimitiveButton key={view.id} className="border border-transparent aria-pressed:border-foreground aria-pressed:font-semibold" variant={(list.state.view ?? 'all') === view.id ? 'secondary' : 'ghost'} aria-pressed={(list.state.view ?? 'all') === view.id} onClick={() => list.onStateChange({ ...list.state, view: view.id }, 'view')}>{t(view.label)}</PrimitiveButton>)}</div>}
     {availableCalendar(model, entity, caps) && <div role="group" aria-label={t('listPresentation')} className="flex flex-wrap gap-2 py-2">{(['table', 'calendar'] as const).map(presentation => <PrimitiveButton key={presentation} variant={list.state.presentation === presentation ? 'secondary' : 'ghost'} aria-pressed={list.state.presentation === presentation} onClick={() => list.onStateChange({ ...list.state, presentation }, 'view')}>{t(`${presentation}View`)}</PrimitiveButton>)}</div>}
     <DataTableActiveFilters filters={chips} label={t('activeFilters')} clearLabel={t('clearAllFilters')} onClear={() => list.onStateChange({ ...list.state, userFilters: [] }, 'filter')} />
