@@ -602,5 +602,20 @@
   "rowFindClear": "Zrušit výběr člena",
   "rowInvitationActions": "Akce pozvánky",
   "rowLinkSupersedes": "Propojení tohoto člena zruší čekající pozvánku pro {{email}}. Její původní odkaz přestane fungovat.",
-  "rowFindDescription": "Hledejte členy organizace podle jména nebo e-mailu. Vyberte člena, jehož účet chcete propojit."
+  "rowFindDescription": "Hledejte členy organizace podle jména nebo e-mailu. Vyberte člena, jehož účet chcete propojit.",
+  "savedViews": "Osobní uložené pohledy",
+  "savedViewsBrowserOnly": "Uloženo pouze v tomto prohlížeči. Při odhlášení se odstraní.",
+  "savedViewsChoose": "Vyberte uložený pohled",
+  "savedViewsSave": "Uložit aktuální pohled",
+  "savedViewsApply": "Použít uložený pohled",
+  "savedViewsRename": "Přejmenovat uložený pohled",
+  "savedViewsUpdate": "Aktualizovat uložený pohled",
+  "savedViewsDelete": "Smazat uložený pohled",
+  "savedViewsName": "Název pohledu",
+  "savedViewsConfirm": "Uložit pohled",
+  "savedViewsChanged": "Uložené pohledy byly aktualizovány.",
+  "savedViewsError_storage": "Pohledy v tomto prohlížeči nelze uložit nebo načíst.",
+  "savedViewsError_invalid": "Uložené pohledy nelze načíst. Změny nebyly uloženy.",
+  "savedViewsError_limit": "Překročen limit (20 pohledů, 16 KiB na pohled, 128 KiB na seznam). Změny nebyly uloženy.",
+  "savedViewsError_name": "Zadejte název pohledu o délce 1–80 znaků."
 }

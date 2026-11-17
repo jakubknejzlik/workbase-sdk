@@ -1,3 +1,5 @@
+import { clearSavedViews } from '@workbasehq/console-generated/saved-views'
+import type { Me } from './queries'
 import type { QueryClient } from '@tanstack/react-query'
 
 export class ApiError extends Error {
@@ -21,6 +23,9 @@ export function signInLocation(returnTo = window.location.pathname + window.loca
 let loggingOut = false
 export async function logoutSession(client: QueryClient): Promise<void> {
   loggingOut = true
+  // Capture only verified in-memory projections, before cancellation/cache teardown.
+  const userId = client.getQueryData<Me>(['me'])?.user?.id
+  const instance = client.getQueryData<{ instance: string }>(['instance'])?.instance
   try {
     await client.cancelQueries()
     try {
@@ -29,6 +34,7 @@ export async function logoutSession(client: QueryClient): Promise<void> {
       // An expired session is already signed out; finish the same cache/navigation cleanup.
       if (!(error instanceof ApiError && error.status === 401)) throw error
     }
+    clearSavedViews(userId && instance ? { instance, userId } : undefined)
     window.location.assign('/sign-in')
     client.clear()
   } catch (error) {

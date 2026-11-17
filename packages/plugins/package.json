@@ -28,6 +28,7 @@
     "./console/ui": "./console/ui/src/index.ts",
     "./console/ui/check": "./console/ui/src/check.ts",
     "./console/ui/vite": "./console/ui/src/vite.ts",
+    "./console/ui/saved-views": "./console/ui/src/saved-views-storage.ts",
     "./console/ui/client": "./console/ui/src/client.ts",
     "./console/ui/react": "./console/ui/src/react/index.ts",
     "./console/ui/i18n": "./console/ui/src/i18n.ts"

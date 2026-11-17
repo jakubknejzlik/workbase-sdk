@@ -1,3 +1,4 @@
+import { clearSavedViews } from '../saved-views-storage'
 declare const location: { pathname: string; search: string; replace(path: string): void }
 declare const history: { replaceState(state: unknown, unused: string, url: string): void }
 declare const window: { addEventListener(event: string, listener: (event: { persisted: boolean }) => void): void; removeEventListener(event: string, listener: (event: { persisted: boolean }) => void): void }
@@ -175,7 +176,7 @@ export function AuthShell({ manifest, i18n, children, fetch: transport = globalT
     logoutBusy.current = true
     try { await request('/auth/logout', {}) }
     catch (error) { if (!(error instanceof ApiFailure && error.status === 401)) { setFailed(true); logoutBusy.current = false; return } }
-    dropPrivateView(); authStorage.org.write(); authStorage.returnTo.write(); location.replace('/sign-in')
+    clearSavedViews(); dropPrivateView(); authStorage.org.write(); authStorage.returnTo.write(); location.replace('/sign-in')
   }
   const auth = { request, i18n, signOut }
   const sessionState = useCallback((kind: SessionState['kind']) => {

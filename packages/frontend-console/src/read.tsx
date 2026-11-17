@@ -9,6 +9,7 @@ import { GeneratedReadPage } from '@workbasehq/console-generated/screens'
 import { GeneratedActions, GeneratedRowActions, GeneratedCreateDialog, HeaderCommands, resourceCreateLabel } from '@workbasehq/console-generated/writes'
 import { ContextCreateAction } from '../../console-generated/src/write-screens'
 import { listCommandActions } from '../../console-generated/src/write'
+import { useMe } from './api/queries'
 import { api } from './api/client'
 import { useRuntimeModel, refreshRuntimeModel } from './api/runtime-model'
 import { Failure, Loading, QueryError } from './screens'
@@ -25,6 +26,7 @@ export function ReadPage({ orgId, entity, id }: { orgId: string; entity: string;
   const deniedKey = ['resource-denied', orgId, entity, id ?? '']
   const denied = useQuery({ queryKey: deniedKey, queryFn: () => false, initialData: false, enabled: false, gcTime: Infinity }).data
   const runtime = useRuntimeModel(orgId)
+  const me = useMe()
   if (denied) return <ResourcePage title={t('forbidden')}><p>{t('resourceForbidden', { resource: t(`entity_${entity}`).toLocaleLowerCase(i18n.language) })}</p></ResourcePage>
   if (runtime.error) return <QueryError error={runtime.error} />
   if (!runtime.data) return <Loading />
@@ -32,7 +34,7 @@ export function ReadPage({ orgId, entity, id }: { orgId: string; entity: string;
   if (!Object.hasOwn(model.entities, entity)) return <Failure kind="notFound" />
   const request = (query: import('@workbasehq/console-generated/read').ReadQuery) => api<Result>('/query', { method: 'POST', body: query, orgId })
   const mutation = { onDenied: () => { client.setQueryData(deniedKey, true); void refreshRuntimeModel(client, orgId) }, model, caps, orgId, entity, request, write: (path: string, method: string, body?: unknown, key?: string) => api(path, { method, body, orgId, idempotencyKey: key }) }
-  return <><GeneratedReadPage key={`${orgId}/${entity}/${id ?? ''}/${JSON.stringify(caps)}`} {...mutation} id={id} title={t(entityNavigationLabel(registry.modelUi?.navigation, entity, (location.search as { view?: string }).view))}
+  return <><GeneratedReadPage key={`${orgId}/${entity}/${id ?? ''}/${JSON.stringify(caps)}`} {...mutation} savedViewsScope={me.isSuccess && me.data.user && me.data.memberships.some(membership => membership.organization_id === orgId) ? { instance: model.instance, userId: me.data.user.id, orgId } : undefined} id={id} title={t(entityNavigationLabel(registry.modelUi?.navigation, entity, (location.search as { view?: string }).view))}
     primaryAction={!id && (caps.entities[entity]?.operations.includes('create') || listCommandActions(model, entity, caps).create) ? { label: resourceCreateLabel(model, entity, i18n.language, t, caps), onAction: () => { createTrigger.current = document.activeElement as HTMLElement; setCreateValues({}); setCreateOpen(true) } } : undefined}
     calendarCreate={values => { createTrigger.current = document.activeElement as HTMLElement; setCreateValues(values); setCreateOpen(true) }}
     embeddedCreate={(target, lockedValues) => <ContextCreateAction key={`${target}/${JSON.stringify(lockedValues)}`} {...mutation} entity={target} lockedValues={lockedValues} />}
