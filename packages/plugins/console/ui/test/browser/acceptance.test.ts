@@ -133,11 +133,11 @@ test('auth shell: wrong accounts cannot bind; sign-out, inline magic link, profi
     const page = await b.newPage(), calls: { url: string; body: string | null; referer: string | undefined }[] = [], output: string[] = []
     page.on('console', message => output.push(message.text()))
     page.on('request', request => { calls.push({ url: request.url(), body: request.postData(), referer: request.headers().referer }) })
-    await page.goto('/invitation?token=' + token); await page.getByRole('button', { name: 'Continue', exact: true }).waitFor()
+    await page.goto('/invitation?token=' + token); await page.getByRole('button', { name: 'Sign in to accept', exact: true }).waitFor()
     expect(new URL(page.url()).search).toBe('')
     // An initial document link necessarily contains the token; all subsequent traffic is clean.
     expect(calls.filter(call => call.url.includes(token))).toHaveLength(1)
-    await page.getByRole('button', { name: 'Continue', exact: true }).click(); await page.getByLabel('Email', { exact: true }).fill(email)
+    await page.getByRole('button', { name: 'Sign in to accept', exact: true }).click(); await page.getByLabel('Email', { exact: true }).fill(email)
     await page.getByRole('button', { name: 'Sign in', exact: true }).click(); await page.getByText('Check your mail', { exact: true }).waitFor()
     expect(await page.evaluate(() => JSON.stringify({ local: { ...localStorage }, session: { ...sessionStorage } }))).not.toContain(token)
     expect(output.join('\n')).not.toContain(token); expect(calls.every(call => !call.referer?.includes(token))).toBe(true)
@@ -169,10 +169,36 @@ test('expired/revoked invitation terminal screens on real D1', async () => {
       const page = await admin.newPage(); await page.goto('/invitation?token=' + new URL(invited.accept_url).searchParams.get('token'))
       // Mismatch wins over metadata for an authenticated different account.
       await page.getByText('This invitation belongs to another account', { exact: true }).waitFor(); await page.close()
-      const anonymous = await newContext({ baseURL: origin }), tab = await anonymous.newPage()
-      await tab.goto('/invitation?token=' + new URL(invited.accept_url).searchParams.get('token'))
-      await tab.getByText(state === 'expired' ? 'Invitation expired' : 'Invitation revoked', { exact: true }).waitFor(); expect(await tab.getByRole('button', { name: 'Continue' }).count()).toBe(0)
-      await anonymous.close()
+      const token = new URL(invited.accept_url).searchParams.get('token')!
+      expect(token).toMatch(/^[a-f0-9]{64}$/) // accept_url is a copied selector, with no mailbox proof.
+      const anonymous = await newContext({ baseURL: origin })
+      try {
+        const tab = await anonymous.newPage(), calls: string[] = []
+        tab.on('request', request => calls.push(new URL(request.url()).pathname))
+        const preflight = tab.waitForResponse(response => new URL(response.url()).pathname === '/invitations/preflight')
+        await tab.goto('/invitation?token=' + token)
+        expect(await (await preflight).json()).toEqual({ id: invited.invitation_id, account_match: null })
+        await tab.getByRole('heading', { name: 'Invitation to Workbase', exact: true }).waitFor()
+        await tab.getByText('Sign in with the invited email address to accept this invitation.', { exact: true }).waitFor()
+        await tab.getByRole('button', { name: 'Sign in to accept', exact: true }).waitFor()
+        expect(await tab.getByText(/Invitation expired|Invitation revoked|Invitation unavailable|Invitation used|Invitation declined/).count()).toBe(0)
+        expect(await tab.getByRole('button', { name: 'Continue', exact: true }).count()).toBe(0)
+        expect(await tab.getByRole('button', { name: 'Accept invitation', exact: true }).count()).toBe(0)
+        for (const value of [invited.invitation_id, invited.workerId, state + '-auth@example.test', 'org-a']) expect(await tab.locator('body').innerText()).not.toContain(value)
+        await tab.getByRole('button', { name: 'Sign in to accept', exact: true }).click()
+        await tab.getByLabel('Email', { exact: true }).waitFor()
+        expect(calls.some(path => /\/invitations\/(resolve|[^/]+\/accept)$/.test(path))).toBe(false)
+      } finally { await anonymous.close() }
+      const recipient = await session(state + '-auth')
+      try {
+        const tab = await recipient.newPage()
+        await tab.goto('/invitation?token=' + token)
+        await tab.getByText(state === 'expired' ? 'Invitation expired' : 'Invitation revoked', { exact: true }).waitFor()
+        expect(await tab.getByRole('button', { name: 'Continue', exact: true }).count()).toBe(0)
+        expect(await tab.getByRole('button', { name: 'Accept invitation', exact: true }).count()).toBe(0)
+        const unchanged = await admin.request.get('/__test/invitation?id=' + invited.invitation_id, { headers: control })
+        expect(await unchanged.json()).toMatchObject({ bound_user_id: null, accepted_at: null, members: 0 })
+      } finally { await recipient.close() }
     }
   } finally { await admin.close() }
 }, 60000)

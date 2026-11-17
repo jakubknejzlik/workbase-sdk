@@ -1,5 +1,6 @@
 declare const history: { state: unknown; pushState(state: unknown, unused: string, url: string): void; replaceState(state: unknown, unused: string, url: string): void }
 declare const location: { pathname: string; search: string }
+declare const document: { body: { textContent: string | null } }
 declare const window: { location: typeof location; localStorage: Storage; sessionStorage: Storage; dispatchEvent(event: Event): void }
 // @vitest-environment jsdom
 import { createElement as h, StrictMode, type ReactNode } from 'react'
@@ -20,7 +21,7 @@ const replace = vi.fn()
 function view(fetch: (path: string, init: ClientRequestInit) => Promise<Response>, strict = false, children: ReactNode = h('p', null, 'APP')) {
   const i18n = createAuthI18n({ languages: ['en', 'cs'], catalogs: {} })
   const transport = (path: string, init: ClientRequestInit) => path === '/build.json' ? Promise.resolve(json({ sha: 'unbuilt' })) : fetch(path, init)
-  const content = h(AuthShell, { manifest, i18n, fetch: transport, navigate }, children)
+  const content = h(AuthShell, { manifest, i18n, displayName: 'Public instance', fetch: transport, navigate }, children)
   return { i18n, element: strict ? h(StrictMode, null, content) : content }
 }
 function storage() { const values = new Map<string, string>(); return { getItem: (key: string) => values.get(key) ?? null, setItem: vi.fn((key: string, value: string) => { values.set(key, value) }), removeItem: (key: string) => { values.delete(key) }, clear: () => values.clear(), key: (index: number) => [...values.keys()][index] ?? null, get length() { return values.size } } }
@@ -42,7 +43,7 @@ test.each([200, 400, 429, 500, 0])('sign-in outcome %s has identical copy and fi
 })
 test.each(['//evil', '/workers', '/invitation?id=invite-A'])('callback consumes and validates returnTo %s', async target => {
   history.replaceState(null, '', '/auth/complete'); sessionStorage.setItem('workbase.returnTo', target)
-  const fetch = vi.fn(async () => json(me)); render(view(fetch).element)
+  const fetch = vi.fn(async (path: string) => json(path === '/me/profile' ? complete : path.endsWith('/resolve') ? { ...invitation, account_match: true } : me)); render(view(fetch).element)
   await waitFor(() => expect(navigate).toHaveBeenCalledWith(target === '//evil' ? '/' : target))
   expect(sessionStorage.getItem('workbase.returnTo')).toBeNull()
 })
@@ -52,19 +53,50 @@ test('callback without memberships uses the invitation inbox', async () => {
   render(view(fetch).element); await waitFor(() => expect(navigate).toHaveBeenCalledWith('/invitation?id=invite-A'))
   expect(fetch.mock.calls.slice(0, 2).map(([path]) => path)).toEqual(['/me', '/me/invitations'])
 })
-test('token is scrubbed synchronously; only POST bodies carry it; anonymous resolution requires a click', async () => {
+test('token is scrubbed synchronously; only POST bodies carry it; copied links sign in without resolution', async () => {
   const token = 'sensitive-invitation-token'; history.replaceState({ oldURL: token }, '', '/invitation?token=' + token)
   const consoleError = vi.spyOn(console, 'error'), consoleLog = vi.spyOn(console, 'log')
   const fetch = vi.fn(async (path: string, _init: ClientRequestInit) => json(path === '/invitations/preflight' ? { id: invitation.id, account_match: null } : { error: 'unauthenticated' }, path === '/invitations/preflight' ? 200 : 401))
   render(view(fetch, true).element)
   expect(location.pathname + location.search).toBe('/invitation'); expect(history.state).toBeNull()
-  await screen.findByText('Continue'); expect(fetch.mock.calls.every(([path]) => path === '/invitations/preflight')).toBe(true)
-  fireEvent.click(screen.getByText('Continue')); await screen.findByLabelText('Email')
+  await screen.findByText('Sign in to accept'); expect(fetch.mock.calls.every(([path]) => path === '/invitations/preflight')).toBe(true)
+  expect(screen.queryByText('Continue')).toBeNull()
+  fireEvent.click(screen.getByText('Sign in to accept')); await screen.findByLabelText('Email')
   for (const [path, init] of fetch.mock.calls) { expect(path).not.toContain(token); expect(init.method).toBe('POST'); expect((init as ClientRequestInit & { referrerPolicy: string }).referrerPolicy).toBe('no-referrer'); expect(JSON.parse(String(init.body))).toEqual({ token }) }
   expect(JSON.stringify({ ...localStorage, ...sessionStorage })).not.toContain(token)
   expect(JSON.stringify([...consoleError.mock.calls, ...consoleLog.mock.calls])).not.toContain(token)
   fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'a@example.test' } }); fireEvent.click(screen.getByRole('button', { name: 'Sign in' }))
   await screen.findByText('Check your mail'); expect(sessionStorage.getItem('workbase.returnTo')).toBe('/invitation?id=invite-A')
+})
+test.each(['en', 'cs'])('%s copied links and rejected mailbox proofs show only the public sign-in screen', async language => {
+  for (const token of ['a'.repeat(64), 'a'.repeat(64) + '.' + 'b'.repeat(64)]) {
+    history.replaceState(null, '', '/invitation?token=' + token)
+    const fetch = vi.fn(async (_path: string) => json({ id: invitation.id, account_match: null }))
+    const { element, i18n } = view(fetch)
+    await i18n.changeLanguage(language)
+    const mounted = render(element)
+    await screen.findByRole('heading', { name: language === 'en' ? 'Invitation to Public instance' : 'Pozvánka do Public instance' })
+    expect(screen.getByText(language === 'en' ? 'Sign in with the invited email address to accept this invitation.' : 'Pro přijetí této pozvánky se přihlaste pomocí pozvané e-mailové adresy.')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: language === 'en' ? 'Sign in to accept' : 'Přihlásit se k přijetí' }))
+    await screen.findByLabelText(language === 'en' ? 'Email' : 'E-mail')
+    expect(fetch.mock.calls.every(([path]) => path === '/invitations/preflight')).toBe(true)
+    expect(screen.queryByText(/Invitation expired|Invitation revoked|Invitation unavailable|Continue|Accept invitation/)).toBeNull()
+    expect(document.body.textContent).not.toContain(invitation.id)
+    mounted.unmount()
+  }
+})
+test('server-authorized delivered preview retains metadata and explicit resolution', async () => {
+  history.replaceState(null, '', '/invitation?token=' + 'a'.repeat(64) + '.' + 'b'.repeat(64))
+  const metadata = { ...invitation, organization: { name: 'Synthetic workspace' }, inviter: { display_name: 'Synthetic inviter' }, role: 'staff', target: { entity: 'workers', row: 'private-worker-id' } }
+  const fetch = vi.fn(async (path: string) => json(path === '/invitations/preflight' ? metadata : path === '/invitations/resolve' ? { ...metadata, account_match: true } : complete))
+  render(view(fetch).element)
+  await screen.findByText('Synthetic workspace'); expect(screen.getByText('Synthetic inviter')).toBeTruthy(); expect(screen.getByText('staff')).toBeTruthy()
+  expect(screen.getByText('Invitation for workers')).toBeTruthy(); expect(document.body.textContent).not.toContain('private-worker-id')
+  expect(screen.queryByText('Sign in to accept')).toBeNull()
+  expect(fetch.mock.calls.map(([path]) => path)).toEqual(['/invitations/preflight'])
+  fireEvent.click(screen.getByText('Continue')); await screen.findByText('Accept invitation')
+  expect(fetch.mock.calls.filter(([path]) => path === '/invitations/resolve')).toHaveLength(1)
+  expect(fetch.mock.calls.some(([path]) => path.endsWith('/accept'))).toBe(false)
 })
 test('mismatch hides email and offers sign-out', async () => {
   history.replaceState(null, '', '/invitation?token=secret')
