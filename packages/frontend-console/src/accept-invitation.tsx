@@ -1,5 +1,7 @@
+import { useAuthorityAction } from './api/authority'
+import { useActionMutation } from './api/action-mutation'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { AlertTriangle, CheckCircle, Clock, Users, XCircle } from 'lucide-react'
 import { Button } from '@workbasehq/ui'
@@ -20,7 +22,7 @@ const terminalErrors: Record<string, string> = {
 
 /** Source AcceptInvitationPage Card composition; P8 owns eligibility and every mutation. */
 export function AcceptInvitation() {
-  const home = useScopeHome()
+  const home = useScopeHome(); const authorize = useAuthorityAction()
   const { t } = useTranslation(); const client = useQueryClient()
   const [selector, setSelector] = useState<InvitationSelector | null>(() => {
     const params = new URLSearchParams(window.location.search)
@@ -46,25 +48,27 @@ export function AcceptInvitation() {
       .finally(() => { if (active) setLoading(false) })
     return () => { active = false }
   }, [selector, reload])
-  const action = useMutation({ gcTime: 0, retry: false, mutationFn: async (kind: 'accept' | 'decline') => {
+  const action = useActionMutation(undefined, { gcTime: 0, retry: false, mutationFn: async (ctx, kind: 'accept' | 'decline') => {
     if (!selector) throw new ApiError(404, 'invitation_not_found')
-    if (kind === 'decline' && summary?.account_match === null) await invitationClient.resolve(selector)
-    return kind === 'accept' ? invitationClient.accept(selector) : invitationClient.decline(selector)
-  }, onSuccess: async result => {
+    if (kind === 'decline' && summary?.account_match === null) await ctx.run(() => invitationClient.resolve(selector, ctx.signal))
+    return ctx.run(() => kind === 'accept' ? invitationClient.accept(selector, ctx.signal) : invitationClient.decline(selector, ctx.signal))
+  }, onSuccess: async (ctx, result) => {
     if ('organization_id' in result) {
-      setAccepted(result); setSelector(null); client.clear()
+      ctx.run(() => { setAccepted(result); setSelector(null); client.clear() })
     } else if (result.state === 'declined') {
-      setDeclined(true); setSelector(null); await client.invalidateQueries({ queryKey: ['me'] })
+      ctx.run(() => { setDeclined(true); setSelector(null) }); await ctx.run(() => client.invalidateQueries({ queryKey: ['me'] }))
     } else if ('organization' in result) {
-      setSummary(result); setConfirmed(true)
-      await client.invalidateQueries({ queryKey: profileOptions.queryKey })
+      ctx.run(() => { setSummary(result); setConfirmed(true) })
+      await ctx.run(() => client.invalidateQueries({ queryKey: profileOptions.queryKey }))
     }
+  }, onError: (ctx, error) => {
+    if (error instanceof ApiError && error.status === 401 && summary) ctx.run(() => window.location.assign(signInLocation(`/invitation?id=${summary.id}`)))
   } })
   const run = async (kind: 'accept' | 'decline') => {
     if (latch.current) return
     latch.current = true
-    try { await action.mutateAsync(kind) } catch (error) {
-      if (error instanceof ApiError && error.status === 401 && summary) window.location.assign(signInLocation(`/invitation?id=${summary.id}`))
+    try { await action.mutateAsync(kind) } catch {
+      // Recovery side effects belong to the guarded error handler.
       // Other failures use the inline recovery below.
     }
     finally { latch.current = false }
@@ -75,19 +79,19 @@ export function AcceptInvitation() {
       setConfirmed(false); void run('accept')
     }
   }, [confirmed, action.isPending, profile.isFetching, profile.data])
-  const logout = useMutation({ gcTime: 0, mutationFn: () => api('/auth/logout', { method: 'POST', redirect401: false }), onSuccess: async () => {
-    client.clear(); action.reset(); setSummary(null); setConfirmed(false); setReload(value => value + 1)
-    await client.invalidateQueries({ queryKey: profileOptions.queryKey })
+  const logout = useActionMutation(undefined, { gcTime: 0, mutationFn: ctx => ctx.run(() => api('/auth/logout', { method: 'POST', redirect401: false, signal: ctx.signal })), onSuccess: async ctx => {
+    ctx.run(() => { client.clear(); action.reset(); setSummary(null); setConfirmed(false); setReload(value => value + 1) })
+    await ctx.run(() => client.invalidateQueries({ queryKey: profileOptions.queryKey }))
   } })
   const busy = action.isPending || logout.isPending
   const error = action.error ?? loadError
   const code = error instanceof ApiError ? error.code : null
   const terminal = code && terminalErrors[code] || error instanceof ApiError && [400, 404, 410].includes(error.status) && 'invitationInvalid'
   const wrongAccount = summary?.account_match === false || code === 'invitation_not_for_this_account'
-  const recover = <Button className="w-full" variant="outline" onClick={async () => {
-    const me = await client.fetchQuery({ ...meOptions, queryFn: () => api<Me>('/me', { redirect401: false }) }).catch(() => undefined)
-    window.location.replace(me ? scopeHomeDestination(me) : '/')
-  }}>{t('p10GoHome')}</Button>
+  const recover = <Button className="w-full" variant="outline" onClick={() => void authorize(async ctx => {
+    const me = await ctx.run(() => client.fetchQuery({ ...meOptions, queryFn: () => api<Me>('/me', { redirect401: false, signal: ctx.signal }) }).catch(() => undefined))
+    ctx.run(() => window.location.replace(me ? scopeHomeDestination(me) : '/'))
+  }).catch(() => {})}>{t('p10GoHome')}</Button>
   const shell = (title: string, icon: ReactNode, content: ReactNode, footer: ReactNode) => <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background to-muted p-4">
     <Card className="w-full max-w-md">
       <CardHeader className="text-center"><div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-primary/10" aria-hidden="true">{icon}</div><h1 tabIndex={-1} className="text-2xl font-semibold">{title}</h1></CardHeader>
@@ -105,7 +109,7 @@ export function AcceptInvitation() {
   if (loading || profile.isPending) return <div role="status" aria-label={t('p10LoadingInvitation')} className="min-h-screen flex items-center justify-center p-4"><Card className="w-full max-w-md"><CardHeader><Skeleton className="mx-auto h-8 w-3/4" /><Skeleton className="h-4 w-full" /></CardHeader><CardContent><Skeleton className="h-20 w-full" /></CardContent></Card></div>
   const stateError = summary && summary.state !== 'pending' ? ({ expired: 'invitationExpired', revoked: 'invitationRevoked', accepted: 'invitationUsed' } as Record<string, string>)[summary.state] : null
   if (!selector || terminal || stateError) return shell(t('p10UnavailableTitle'), summary?.state === 'expired' ? <Clock className="h-6 w-6" /> : <XCircle className="h-6 w-6 text-destructive" />, <p role="alert" className="text-sm text-muted-foreground">{t(terminal || stateError || 'invitationInvalid')}</p>, recover)
-  if (!summary || (profile.error && !(profile.error instanceof ApiError && profile.error.status === 401))) return shell(t('p10UnavailableTitle'), <AlertTriangle className="h-6 w-6" />, <p role="alert">{t('requestFailed')}</p>, <Button className="w-full" onClick={() => { void profile.refetch(); setReload(value => value + 1) }}>{t('p10Retry')}</Button>)
+  if (!summary || (profile.error && !(profile.error instanceof ApiError && profile.error.status === 401))) return shell(t('p10UnavailableTitle'), <AlertTriangle className="h-6 w-6" />, <p role="alert">{t('requestFailed')}</p>, <Button className="w-full" onClick={() => void authorize(async ctx => { ctx.run(() => setReload(value => value + 1)); await ctx.run(() => profile.refetch()) }).catch(() => {})}>{t('p10Retry')}</Button>)
   if (!wrongAccount && profile.data && !profile.data.completeness.complete) return <ProfileEditor profile={profile.data} setup />
   return shell(t('acceptInvitation'), <Users className="h-6 w-6 text-foreground" />, <>
     <CardDescription className="text-center">{t('p10PreviewDescription')}</CardDescription>

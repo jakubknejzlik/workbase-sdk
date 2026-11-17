@@ -1,3 +1,4 @@
+import { useGeneratedAction, useGeneratedMutation, type ActionContext } from './action-context'
 import { hasRecordAccess } from './account-link'
 import type { RowAccessStatus } from '../../core/src/row-access'
 import { Card, CardHeader, CardTitle, CardContent } from '@workbasehq/ui/components/ui/card'
@@ -9,7 +10,7 @@ import { ManyRelationField } from './many-relation-field'
 import type { ComponentProps, ReactNode } from 'react'
 import { createDataTableQueryKey } from '@workbasehq/ui'
 import { useEffect, useRef, useState } from 'react'
-import { useIsMutating, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useIsMutating, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
 import { useTranslation } from 'react-i18next'
 import { useEntityTranslation } from './entity-translation'
@@ -168,57 +169,58 @@ function EntityMutation(props: Context & { row?: Record<string, any>; controls: 
   const initial = useQuery({ queryKey: ['read', model.instance, orgId, caps, entity, row?.id, 'form-memberships', generation], enabled: !!row && !!relations.length, queryFn: async () => Object.fromEntries(await Promise.all(relations.map(async ([name, relation]) => [name, row ? [...new Set((await memberships(model, relation, row.id, request)).map(item => item[relation.through!.field]))] : []]))) })
   const saved = useRef<{ row?: Record<string, any>; fields?: string }>({ row })
   const accessVersion = useRef(false)
-  const reconcileVersion = async () => {
+  const runAction = useGeneratedAction()
+  const reconcileVersion = async (ctx: ActionContext) => {
     try {
-      const result = await request(readQuery(model, entity, caps, { id: saved.current.row!.id, purpose: 'edit' }))
+      const result = await ctx.run(() => request(readQuery(model, entity, caps, { id: saved.current.row!.id, purpose: 'edit' })))
       if (!result.data[0] || result.data[0].version == null) throw { code: 'version_conflict' }
-      saved.current.row = { ...(saved.current.row ?? row), version: result.data[0].version }
-      accessVersion.current = true
-      setVersionError(undefined)
-    } catch (error) { setVersionError(error); throw error }
+      ctx.run(() => { saved.current.row = { ...(saved.current.row ?? row), version: result.data[0].version }; accessVersion.current = true; setVersionError(undefined) })
+    } catch (error) { ctx.run(() => setVersionError(error)); throw error }
   }
-  const mutation = useMutation({ mutationKey: accountForm ? ['account-access', orgId, entity] : undefined, mutationFn: async (data: Record<string, any>) => {
+  const mutation = useGeneratedMutation({ mutationKey: accountForm ? ['account-access', orgId, entity] : undefined, mutationFn: async (ctx, data: Record<string, any>) => {
+    const write: WriteRequest = (...args) => ctx.run(() => props.write(...args))
+    const request: Context['request'] = query => ctx.run(() => props.request(query))
     if (versionError) throw versionError
     if (savedRow && createAccess.blocked) throw { code: 'action_unavailable' }
     const fields = Object.fromEntries(Object.entries({ ...data, ...props.lockedValues }).filter(([name]) => !relations.some(([key]) => key === name)))
     const fingerprint = JSON.stringify(fields)
     if (!saved.current.row || Object.keys(fields).length && saved.current.fields !== fingerprint) {
       const parent = saved.current.fields || accessVersion.current ? saved.current.row : editingRow ?? saved.current.row
-      saved.current.row = await write(`/api/${entity}${parent ? `/${encodeURIComponent(parent.id)}` : ''}`, parent ? 'PATCH' : 'POST', { ...fields, ...(parent ? { version: parent.version } : {}) }, parent ? undefined : controls.submissionKey)
-      saved.current.fields = fingerprint
+      const result = await write(`/api/${entity}${parent ? `/${encodeURIComponent(parent.id)}` : ''}`, parent ? 'PATCH' : 'POST', { ...fields, ...(parent ? { version: parent.version } : {}) }, parent ? undefined : controls.submissionKey)
+      ctx.run(() => { saved.current.row = result; saved.current.fields = fingerprint })
     }
     try {
-      for (const [name, relation] of relations) if (Object.hasOwn(data, name)) await syncMemberships(model, relation, saved.current.row!.id, data[name] ?? [], request, write)
+      for (const [name, relation] of relations) if (Object.hasOwn(data, name)) await ctx.run(() => syncMemberships(model, relation, saved.current.row!.id, data[name] ?? [], request, write))
     } catch (cause) {
       // Expose the partial save immediately; slow cache reads cannot hold the error or retry hostage.
-      void refresh()
+      void ctx.run(() => refresh()).catch(() => {})
       throw Object.assign(new Error('relation_save_failed', { cause }), { code: 'relation_save_failed' })
     }
     if (canInviteAtCreate && inviteNow) {
-      const accessProps = { ...props, row: saved.current.row! }
-      setSavedRow(saved.current.row)
+      const accessProps = { ...props, write, request, row: saved.current.row! }
+      ctx.run(() => setSavedRow(saved.current.row))
       try {
         // Always establish live status after saving, including before a retry.
-        const status = await client.fetchQuery({ ...accessQuery(accessProps), staleTime: 0 })
+        const status = await ctx.run(() => client.fetchQuery({ ...accessQuery(accessProps), staleTime: 0 }))
         if (!accessGuard(status).valid) throw { code: 'action_unavailable' }
         // An uncertain prior response may already have created the invitation.
         if (status.state !== 'invited') {
           if (!status.can_invite) throw { code: 'action_unavailable' }
-          await inviteRecord(accessProps, email)
+          await ctx.run(() => inviteRecord(accessProps, email))
         }
-        setInviteFailed(false)
+        ctx.run(() => setInviteFailed(false))
       } catch (error) {
-        setInviteFailed(true)
-        void refresh()
+        ctx.run(() => setInviteFailed(true))
+        void ctx.run(() => refresh()).catch(() => {})
         throw error
       }
     }
-  }, onSuccess: async () => { await refresh(); controls.close() }, onError: async (error: WriteFailure) => {
-    if (error.status === 403 && !codes.includes(error.code ?? '')) props.onDenied?.()
+  }, onSuccess: async ctx => { await ctx.run(() => refresh()); ctx.run(controls.close) }, onError: async (ctx, error: WriteFailure) => {
+    if (error.status === 403 && !codes.includes(error.code ?? '')) ctx.run(() => props.onDenied?.())
     // Keep the refused draft frozen, but immediately show the current detail value.
-    if (inline && error.code === 'version_conflict') await inline.refresh().catch(() => {})
+    if (inline && error.code === 'version_conflict') await ctx.run(() => inline.refresh().catch(() => {}))
   } })
-  const reload = useMutation({ mutationFn: () => inline ? inline.refresh() : request(readQuery(model, entity, caps, { id: (current ?? saved.current.row)!.id, purpose: 'edit' })), onSuccess: result => { if (!result.data[0]) return; setCurrent(result.data[0]); setContactEmail(undefined); contactSeed.current = undefined; saved.current = { row: result.data[0] }; setGeneration(value => value + 1); mutation.reset() } })
+  const reload = useGeneratedMutation({ mutationFn: ctx => ctx.run(() => inline ? inline.refresh() : request(readQuery(model, entity, caps, { id: (current ?? saved.current.row)!.id, purpose: 'edit' }))), onSuccess: (ctx, result) => ctx.run(() => { if (!result.data[0]) return; setCurrent(result.data[0]); setContactEmail(undefined); contactSeed.current = undefined; saved.current = { row: result.data[0] }; setGeneration(value => value + 1); mutation.reset() }) })
   const breadcrumbDenied = !visibleEntities(model, caps).includes(entity) || [403, 404].includes((mutation.error as WriteFailure | null)?.status ?? 0) || !!reload.error
   usePublishRecordBreadcrumb(!inline && row && current ? { orgId, entity, id: String(current.id), status: breadcrumbDenied ? 'unavailable' : 'ready', label: breadcrumbDenied ? undefined : breadcrumbRecordLabel(model, entity, current, caps, i18n.language, t) } : undefined, 'edit')
   const conflict = (mutation.error as { code?: string } | null)?.code === 'version_conflict'
@@ -227,7 +229,7 @@ function EntityMutation(props: Context & { row?: Record<string, any>; controls: 
   if (needsEditRead && (editRecord.error && !editRecord.data || !editingRow)) return <><WriteError error={editRecord.error ?? { code: 'entity_not_found' }} /><Button onClick={() => { void editRecord.refetch() }}>{t('reloadRetry')}</Button></>
   if (initial.error && !initial.data) return <><WriteError error={initial.error} /><Button onClick={() => { void initial.refetch() }}>{t('reloadRetry')}</Button></>
   return <><WriteError error={mutation.error ?? reload.error ?? versionError ?? editRecord.error ?? initial.error} schema={schema} />
-    {versionError != null && <Button type="button" onClick={() => { void reconcileVersion().catch(() => {}) }}>{t('reloadRetry')}</Button>}
+    {versionError != null && <Button type="button" onClick={() => { void runAction(reconcileVersion).catch(() => {}) }}>{t('reloadRetry')}</Button>}
     {canInviteAtCreate && <fieldset disabled={mutation.isPending || !!savedRow && createAccess.blocked} className="mb-4 space-y-4">
       <label className="flex items-center gap-2 text-sm font-medium"><input type="checkbox" checked={inviteNow} onChange={event => { setInviteNow(event.target.checked); invitationForm.clearErrors('email') }} /> {t('rowInviteNow')}</label>
       {inviteNow && <FormProvider {...invitationForm}><FormFieldWrapper name="email" label={t('rowInviteEmail')}>{field => <Input {...field} type="email" value={email} onChange={event => { field.onChange(event); invitationForm.clearErrors('email') }} />}</FormFieldWrapper></FormProvider>}
@@ -279,7 +281,7 @@ export function GeneratedInlineEdit(props: Context & InlineField & { row: Record
 }
 function DeleteMutation({ row, close, ...props }: Context & { row: Record<string, any>; close: () => void }) {
   const { t } = useEntityTranslation(props.entity); const refresh = useRefresh(); const navigate = useNavigate(); const submit = useMutationSubmit()
-  const mutation = useMutation({ mutationFn: () => props.write(`/api/${props.entity}/${encodeURIComponent(row.id)}`, 'DELETE'), onSuccess: async () => { close(); await navigate({ to: '/o/$orgId/e/$entity', params: { orgId: props.orgId, entity: props.entity } }); await refresh() } })
+  const mutation = useGeneratedMutation({ mutationFn: ctx => ctx.run(() => props.write(`/api/${props.entity}/${encodeURIComponent(row.id)}`, 'DELETE')), onSuccess: async ctx => { ctx.run(close); await ctx.run(() => navigate({ to: '/o/$orgId/e/$entity', params: { orgId: props.orgId, entity: props.entity } })); await ctx.run(() => refresh()) } })
   return <form onSubmit={event => { event.preventDefault(); void submit(() => mutation.mutateAsync()) }}><WriteError error={mutation.error} /><MutationSubmitButton type="submit" variant="destructive" pending={mutation.isPending}>{t('delete')}</MutationSubmitButton></form>
 }
 function CommandMutation({ schema, name, values, controls, row, ...props }: Context & { row?: Record<string, any>; schema: Record<string, any>; name: string; values?: Record<string, any>; controls: { close: () => void; submissionKey: string } }) {
@@ -300,7 +302,7 @@ function CommandMutation({ schema, name, values, controls, row, ...props }: Cont
 /** Instance command forms share writes and refreshes. */
 export function useCommandMutation(props: Pick<Context, 'write' | 'onDenied'>, name: string, controls: { close: () => void; submissionKey: string }) {
   const refresh = useRefresh()
-  return useMutation({ mutationFn: (data: Record<string, any>) => props.write(`/commands/${name}`, 'POST', { ...data, idempotencyKey: controls.submissionKey }), onSuccess: async () => { await refresh(); controls.close() }, onError: (error: WriteFailure) => { if (commandError(error).denied) props.onDenied?.() } })
+  return useGeneratedMutation({ mutationFn: (ctx, data: Record<string, any>) => ctx.run(() => props.write(`/commands/${name}`, 'POST', { ...data, idempotencyKey: controls.submissionKey })), onSuccess: async ctx => { await ctx.run(() => refresh()); ctx.run(controls.close) }, onError: (ctx, error: WriteFailure) => { if (commandError(error).denied) ctx.run(() => props.onDenied?.()) } })
 }
 export function RelationPicker(props: Context & { allowCreate?: boolean; target: string; field: string; label?: string; value: string; selectedRow?: Record<string, any>; onChange: (value: string) => void; error?: string }) {
   const { t, i18n } = useEntityTranslation(props.entity); const { model, caps, orgId, target, field, value, onChange, request } = props
@@ -317,7 +319,7 @@ export function RelationPicker(props: Context & { allowCreate?: boolean; target:
     return recordLabel(model, target, row, caps, i18n.language, t)
   }
   const refresh = useRefresh()
-  const create = useMutation({ mutationFn: (data: Record<string, any>) => props.write(`/api/${target}`, 'POST', data, wizardKey), onSuccess: async row => { await refresh(); setCreated(row); onChange(row.id); setWizard(false); choices.close() } })
+  const create = useGeneratedMutation({ mutationFn: (ctx, data: Record<string, any>) => ctx.run(() => props.write(`/api/${target}`, 'POST', data, wizardKey)), onSuccess: async (ctx, row) => { await ctx.run(() => refresh()); ctx.run(() => { setCreated(row); onChange(row.id); setWizard(false); choices.close() }) } })
   const [wizardKey, setWizardKey] = useState('')
   const schema = writeSchema(model, target, caps)
   const wizardAllowed = props.allowCreate !== false && hints?.wizard && caps.entities[target]?.operations.includes('create')
@@ -353,7 +355,7 @@ export function ContextCreateAction(props: Context & { lockedValues: Record<stri
   return <><Button onClick={() => setOpen(true)}>{resourceCreateLabel(props.model, props.entity, i18n.language, t, props.caps)}</Button><GeneratedCreateDialog {...props} open={open} onOpenChange={setOpen} /></>
 }
 
-type AccessContext = Omit<Context, 'write'> & { write?: WriteRequest; row: Record<string, any>; disabled?: boolean; email?: string; onChanged?: () => Promise<void> }
+type AccessContext = Omit<Context, 'write'> & { write?: WriteRequest; row: Record<string, any>; disabled?: boolean; email?: string; onChanged?: (ctx: ActionContext) => Promise<void> }
 type AccessStatus = RowAccessStatus & { recordActions?: Record<string, { enabled: boolean }>; invitationUnavailable?: boolean }
 function accessQuery(props: Omit<AccessContext, 'row'> & { row?: Record<string, any> }) {
   return { queryKey: ['row-access', props.orgId, props.entity, props.row?.id, props.caps], retry: false as const,
@@ -484,43 +486,45 @@ async function inviteRecord(props: AccessContext & { write: WriteRequest }, emai
 type InvitationMutationProps = Context & AccessContext & { action: string; controls: { close: () => void; submissionKey: string }; onLinkConflict?: (id: string) => Promise<void> }
 function useInvitationMutation(props: InvitationMutationProps, access: ReturnType<typeof useApplicationAccess>) {
   const refresh = useRefresh(); const client = useQueryClient()
-  const mutation = useMutation({ mutationKey: ['account-access', props.orgId, props.entity], gcTime: 0, retry: false, mutationFn: async (values: Record<string, any>) => {
+  const mutation = useGeneratedMutation({ mutationKey: ['account-access', props.orgId, props.entity], gcTime: 0, retry: false, mutationFn: async (ctx, values: Record<string, any>) => {
+    const write: WriteRequest = (...args) => ctx.run(() => props.write(...args))
+    const bound = { ...props, write }
     const base = `/orgs/${encodeURIComponent(props.orgId)}/invitations`
     const record = `/api/${encodeURIComponent(props.entity)}/${encodeURIComponent(props.row.id)}/actions`
     const v3 = hasRecordAccess(props.model, props.entity)
-    const cancel = async () => { if (v3) await props.write(`${record}/cancel_invite`, 'POST', {}); else await props.write(`${base}/${encodeURIComponent(access.status.data!.invitation!.id)}`, 'DELETE') }
-    const remove = async () => { if (v3) await props.write(`${record}/unlink_account`, 'POST', {}); else await props.write(`/commands/${props.entity}/remove_access`, 'POST', { rowId: props.row.id, idempotencyKey: props.controls.submissionKey }) }
+    const cancel = async () => { if (v3) await write(`${record}/cancel_invite`, 'POST', {}); else await write(`${base}/${encodeURIComponent(access.status.data!.invitation!.id)}`, 'DELETE') }
+    const remove = async () => { if (v3) await write(`${record}/unlink_account`, 'POST', {}); else await write(`/commands/${props.entity}/remove_access`, 'POST', { rowId: props.row.id, idempotencyKey: props.controls.submissionKey }) }
     let failure: unknown
     try {
-      if (props.action === 'invite') await inviteRecord(props, values.email)
+      if (props.action === 'invite') await ctx.run(() => inviteRecord(bound, values.email))
       else if (props.action === 'link') {
-        if (v3) await props.write(`${record}/link_account`, 'POST', { user_id: values.user_id })
-        else await props.write(`/commands/${props.entity}/link_account`, 'POST', { rowId: props.row.id, userId: values.user_id, idempotencyKey: props.controls.submissionKey })
+        if (v3) await write(`${record}/link_account`, 'POST', { user_id: values.user_id })
+        else await write(`/commands/${props.entity}/link_account`, 'POST', { rowId: props.row.id, userId: values.user_id, idempotencyKey: props.controls.submissionKey })
       } else if (props.action === 'change') {
         if (access.status.data?.state === 'signed_in') await remove(); else if (access.status.data?.state !== 'expired') await cancel()
-        const data = await client.fetchQuery({ ...accessQuery(props), staleTime: 0 })
+        const data = await ctx.run(() => client.fetchQuery({ ...accessQuery(bound), staleTime: 0 }))
         if (!accessGuard(data).valid || !data.can_invite) throw { code: 'action_unavailable' }
-        await inviteRecord(props, values.email)
+        await ctx.run(() => inviteRecord(bound, values.email))
       } else if (props.action === 'copy') {
-        const result = await props.write(`${base}/${encodeURIComponent(access.status.data!.invitation!.id)}/copy-link`, 'POST', {})
-        await navigator.clipboard.writeText(result.accept_url)
-      } else if (props.action === 'resend') await props.write(`${base}/${encodeURIComponent(access.status.data!.invitation!.id)}/resend`, 'POST', {})
+        const result = await write(`${base}/${encodeURIComponent(access.status.data!.invitation!.id)}/copy-link`, 'POST', {})
+        await ctx.run(() => navigator.clipboard.writeText(result.accept_url))
+      } else if (props.action === 'resend') await write(`${base}/${encodeURIComponent(access.status.data!.invitation!.id)}/resend`, 'POST', {})
       else if (props.action === 'cancel') await cancel()
       else await remove()
     } catch (error) {
       failure = error
       const conflict = error as WriteFailure
       if (props.action === 'link' && conflict.status === 409 && conflict.code === 'account_already_linked') {
-        await props.onLinkConflict?.(values.user_id)
+        await ctx.run(() => props.onLinkConflict?.(values.user_id))
       }
     } finally {
       // Reconcile even an uncertain/partially successful response before retry,
       // retaining the original denial if a reconciliation read also fails.
-      try { await refresh(); await props.onChanged?.() } catch (error) { failure ??= error }
+      try { await ctx.run(() => refresh()); await ctx.run(() => props.onChanged?.(ctx)) } catch (error) { failure ??= error }
     }
     if (failure) throw failure
     // Credentials are never returned to the mutation cache.
-  }, onSuccess: () => props.controls.close(), onError: (error: WriteFailure) => { if (error.status === 403) props.onDenied?.() } })
+  }, onSuccess: ctx => ctx.run(props.controls.close), onError: (ctx, error: WriteFailure) => { if (error.status === 403) ctx.run(() => props.onDenied?.()) } })
   return mutation
 }
 function RowInvitationMutation(props: InvitationMutationProps) {

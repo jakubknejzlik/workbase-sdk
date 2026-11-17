@@ -1,3 +1,4 @@
+import { runAuthorityAction } from './authority'
 import type { QueryClient } from '@tanstack/react-query'
 
 export class ApiError extends Error {
@@ -18,23 +19,24 @@ export function signInLocation(returnTo = window.location.pathname + window.loca
   return '/sign-in?returnTo=' + encodeURIComponent(safeReturnTo(returnTo))
 }
 // Keep this set until the document unloads: late reads can finish after assign().
-let loggingOut = false
+let loggingOut: AbortSignal | undefined
 export async function logoutSession(client: QueryClient): Promise<void> {
-  loggingOut = true
-  try {
-    await client.cancelQueries()
+  return runAuthorityAction(client, undefined, async ctx => {
+    ctx.run(() => { loggingOut = ctx.signal })
     try {
-      await api('/auth/logout', { method: 'POST' })
+      await ctx.run(() => client.cancelQueries())
+      try {
+        await ctx.run(() => api('/auth/logout', { method: 'POST', signal: ctx.signal }))
+      } catch (error) {
+        // An expired session is already signed out; finish the same cache/navigation cleanup.
+        if (!(error instanceof ApiError && error.status === 401)) throw error
+      }
+      ctx.run(() => { window.location.assign('/sign-in'); client.clear() })
     } catch (error) {
-      // An expired session is already signed out; finish the same cache/navigation cleanup.
-      if (!(error instanceof ApiError && error.status === 401)) throw error
+      ctx.run(() => { loggingOut = undefined })
+      throw error
     }
-    window.location.assign('/sign-in')
-    client.clear()
-  } catch (error) {
-    loggingOut = false
-    throw error
-  }
+  })
 }
 const scopes = new Map<string, AbortController>()
 export function discardTransportScope(org: string) {
@@ -58,7 +60,7 @@ export async function api<T>(path: string, options: { method?: string; body?: un
   if (!response.ok) {
     const data = await response.json().catch(() => ({})) as { error?: string; code?: string }
     signal.throwIfAborted()
-    if (response.status === 401 && options.redirect401 !== false && !loggingOut) window.location.assign(signInLocation())
+    if (response.status === 401 && options.redirect401 !== false && (!loggingOut || loggingOut.aborted)) window.location.assign(signInLocation())
     throw new ApiError(response.status, data.error ?? data.code ?? 'request_failed', data)
   }
   const value = response.status === 204 ? undefined as T : await response.json() as T

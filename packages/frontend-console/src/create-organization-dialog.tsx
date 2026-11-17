@@ -1,6 +1,7 @@
+import { useActionMutation } from './api/action-mutation'
 import { useRef, useState, type ReactNode } from 'react'
 import { useNavigate } from '@tanstack/react-router'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { Button, CreateWorkspaceModal, Form, FormFieldInput, MutationSession, MutationSubmitButton, MutationErrorAlert, useMutationLabels, useMutationSession, useMutationForm, useMutationSubmit } from '@workbasehq/ui'
 import { api, ApiError } from './api/client'
@@ -28,15 +29,15 @@ export function CreateOrganizationForm({ retainActive = false, setup = false, re
   const { t } = useTranslation(); const navigate = useNavigate(); const client = useQueryClient()
   const submit = useMutationSubmit(); const session = useMutationSession()!
   const form = useMutationForm({ defaultValues: { name: '' } })
-  const create = useMutation({ mutationFn: (name: string) => api<{ id: string }>('/orgs', { method: 'POST', body: { name } }), onSuccess: async org => {
+  const create = useActionMutation(undefined, { mutationFn: (ctx, name: string) => ctx.run(() => api<{ id: string }>('/orgs', { method: 'POST', body: { name }, signal: ctx.signal })), onSuccess: async (ctx, org) => {
     // Bootstrap also seeds Me, so discard its pre-creation membership snapshots.
-    client.removeQueries({ queryKey: ['bootstrap'], type: 'inactive' })
-    await Promise.all([client.invalidateQueries({ queryKey: ['me'] }), client.invalidateQueries({ queryKey: ['bootstrap'], refetchType: 'none' }), client.invalidateQueries({ queryKey: ['invitation-inbox'] })])
-    form.reset(); session.complete()
-    if (!retainActive) await navigate({ to: '/o/$orgId', params: { orgId: org.id } })
-  }, onError: error => {
+    ctx.run(() => client.removeQueries({ queryKey: ['bootstrap'], type: 'inactive' }))
+    await ctx.run(() => Promise.all([client.invalidateQueries({ queryKey: ['me'] }), client.invalidateQueries({ queryKey: ['bootstrap'], refetchType: 'none' }), client.invalidateQueries({ queryKey: ['invitation-inbox'] })]))
+    ctx.run(() => { form.reset(); session.complete() })
+    if (!retainActive) await ctx.run(() => navigate({ to: '/o/$orgId', params: { orgId: org.id } }))
+  }, onError: (ctx, error) => {
     const reason = organizationNameServerReason(error)
-    if (reason) form.setError('name', { type: reason, message: t(`organizationName_${reason}`) })
+    if (reason) ctx.run(() => form.setError('name', { type: reason, message: t(`organizationName_${reason}`) }))
   } })
   const busy = create.isPending || session.pending
   const errorKey = create.error instanceof ApiError && create.error.code === 'account_already_assigned' ? 'accountAlreadyAssigned' : create.error instanceof ApiError && create.error.status === 400 ? 'invalidName' : create.error instanceof ApiError && create.error.status === 403 ? 'forbidden' : 'createFailed'

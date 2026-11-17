@@ -39,7 +39,7 @@ export function WorkflowList({ orgId, filter }: { orgId: string; filter: Workflo
 }
 function RunAction({ orgId, run, action, submissionKey, close }: { orgId: string; run: WorkflowRun; action: 'resume' | 'cancel'; submissionKey: string; close: () => void }) {
   const submit = useMutationSubmit(); const { t } = useTranslation(); const authorize = useWorkflowAction(orgId, run.definition_name, action); const client = useQueryClient()
-  const mutation = useMutation({ mutationFn: () => authorize(() => workflowClient.action(orgId, run.id, action, submissionKey)), onSuccess: async () => { await client.invalidateQueries({ queryKey: ['workflow-runs', orgId] }); close() } })
+  const mutation = useMutation({ mutationFn: () => authorize(async ctx => { await ctx.run(() => workflowClient.action(orgId, run.id, action, submissionKey)); await ctx.run(() => client.invalidateQueries({ queryKey: ['workflow-runs', orgId] })); ctx.run(close) }) })
   return <form onSubmit={event => { event.preventDefault(); void submit(() => mutation.mutateAsync()) }}><ActionError error={mutation.error} /><MutationSubmitButton type="submit" pending={mutation.isPending}>{t(action === 'resume' ? 'workflowResume' : 'workflowCancel')}</MutationSubmitButton></form>
 }
 export function WorkflowDetail({ orgId, id }: { orgId: string; id: string }) {
@@ -72,7 +72,7 @@ export function WorkflowDetail({ orgId, id }: { orgId: string; id: string }) {
 function SafeResult({ result }: { result: unknown }) { const { t } = useTranslation(); return result == null ? <p>{t('nullValue')}</p> : <pre>{JSON.stringify(redactWorkflowResult(result, t('redactedValue')), null, 2)}</pre> }
 function StartForm({ orgId, definition, submissionKey }: { orgId: string; definition: WorkflowDefinition; submissionKey: string }) {
   const { t } = useTranslation(); const navigate = useNavigate(); const authorize = useWorkflowAction(orgId, definition.name, 'start'); const client = useQueryClient()
-  const mutation = useMutation({ mutationFn: (body: Record<string, unknown>) => authorize(() => workflowClient.start(orgId, definition.name, body, submissionKey)), onSuccess: async result => { await client.invalidateQueries({ queryKey: ['workflow-runs', orgId] }); await navigate({ to: '/o/$orgId/settings/workflows/$id', params: { orgId, id: result.id } }) } })
+  const mutation = useMutation({ mutationFn: (body: Record<string, unknown>) => authorize(async ctx => { const result = await ctx.run(() => workflowClient.start(orgId, definition.name, body, submissionKey)); await ctx.run(() => client.invalidateQueries({ queryKey: ['workflow-runs', orgId] })); await ctx.run(() => navigate({ to: '/o/$orgId/settings/workflows/$id', params: { orgId, id: result.id } })) }) })
   return <><ActionError error={mutation.error} /><RegistryForm optionLabel={value => t(`value_${value}`, { defaultValue: value })} schema={definition.inputSchema} label={name => t(`workflowField_${name}`, { defaultValue: t(`command_${name}`, { defaultValue: name }) })} submitLabel={t('workflowStart')} invalidLabel={t('invalidField')} pending={mutation.isPending} serverInvalid={mutation.error instanceof ApiError && [400, 422].includes(mutation.error.status)} onSubmit={body => mutation.mutateAsync(body)} /></>
 }
 function SelectedWorkflow({ orgId, definition }: { orgId: string; definition: WorkflowDefinition }) {

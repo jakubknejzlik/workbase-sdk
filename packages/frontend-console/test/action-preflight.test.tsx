@@ -42,9 +42,9 @@ it('unchanged authority allows a token action and its one-time result', async ()
     wrapper: ({ children }: { children: ReactNode }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>,
   })
   const receive = vi.fn()
-  await result.current('tokens.create', async assertCurrent => {
+  await result.current('tokens.create', async ctx => {
     const response = await tokenClient.create('A', { name: 'Fresh draft', role: 'viewer' })
-    assertCurrent(); receive(response.token)
+    ctx.run(() => receive(response.token))
   })
   expect(receive).toHaveBeenCalledWith('synthetic')
   expect(fetch.mock.calls.map(([path]) => path)).toEqual(['/o/A/capabilities', '/orgs/A/tokens'])

@@ -1,3 +1,4 @@
+import { useAuthorityAction } from './api/authority'
 import { useEffect, useRef, useState, type ComponentProps } from 'react'
 import { useRouterState } from '@tanstack/react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -25,7 +26,7 @@ export function TokensSettings({ orgId }: { orgId: string }) {
   const refresh = () => client.invalidateQueries({ queryKey: tokenKey(orgId) })
   useEffect(() => { setCreated(null) }, [location, orgId])
   useEffect(() => { if (!access.allowed) { setCreated(null); setCreating(false) } }, [access.allowed])
-  const revoke = useMutation({ gcTime: 0, mutationFn: async () => { if (target) await authorize('tokens.revoke', () => tokenClient.revoke(orgId, target.id)) }, onSuccess: async () => { setTarget(null); await refresh() } })
+  const revoke = useMutation({ gcTime: 0, mutationFn: async () => { if (target) await authorize('tokens.revoke', async ctx => { await ctx.run(() => tokenClient.revoke(orgId, target.id)); ctx.run(() => setTarget(null)); await ctx.run(refresh) }) } })
   if (access.capabilities.isPending) return <Loading />
   if (access.capabilities.error) return <QueryError error={access.capabilities.error} />
   if (!access.allowed) return <div className="space-y-2"><h1 tabIndex={-1} className="text-lg font-medium">{t('tokens')}</h1><p role="alert">{t('tokenDenied')}</p></div>
@@ -62,7 +63,7 @@ export function TokensSettings({ orgId }: { orgId: string }) {
         grants['tokens.revoke'] && <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive" aria-label={t('tokenRevokeNamed', { name: row.name })} disabled={!!row.revoked_at} onClick={event => { revokeTrigger.current = event.currentTarget; revoke.reset(); setTarget(row) }}><Trash2 className="size-4" aria-hidden="true" /></Button>,
       ] }))} />
     {creating && <ActionDialog open onOpenChange={setCreating} title={t('createToken')} description={t('createTokenDescription')} cancelLabel={t('cancel')} onCloseAutoFocus={event => { event.preventDefault(); if (!handoff.current) trigger.current?.focus() }}>{({ close }) => <TokenCreate orgId={orgId} roles={schema.data?.roles ?? []} onCreated={(name, secret) => { handoff.current = true; setCreated({ name, secret }); close() }} />}</ActionDialog>}
-    {created && <TokenCreated name={created.name} secret={created.secret} close={() => setCreated(null)} restoreFocus={event => { event.preventDefault(); trigger.current?.focus() }} />}
+    {created && <TokenCreated orgId={orgId} name={created.name} secret={created.secret} close={() => setCreated(null)} restoreFocus={event => { event.preventDefault(); trigger.current?.focus() }} />}
     {target && <MutationSession close={() => setTarget(null)} cancelLabel={t('cancel')} confirming>{session => <ConfirmDialog open onOpenChange={open => { if (!open) setTarget(null) }} title={t('revokeToken')} description={t('tokenRevokeDescription', { name: target?.name })} confirmText={t('revokeToken')} cancelText={t('cancel')} confirmVariant="destructive" isConfirming={session.pending || revoke.isPending} pendingText={t('tokenRevoking')} onConfirm={() => session.run(() => revoke.mutateAsync())} onCloseAutoFocus={event => { event.preventDefault(); revokeTrigger.current?.focus() }}>
       <MutationErrorAlert isError={revoke.isError} error={revoke.error} fallbackMessage={t(tokenError(revoke.error))} />
     </ConfirmDialog>}</MutationSession>}
@@ -75,11 +76,10 @@ function TokenCreate({ orgId, roles, onCreated }: { orgId: string; roles: string
   const form = useMutationForm<CreateFields>({ defaultValues: { name: '', role: '', expiry: '', restricted: false, operations: '' } })
   // Return void and collect immediately. Only mounted local state receives the secret.
   const create = useMutation({ gcTime: 0, mutationFn: async (data: CreateFields) => {
-    await authorize('tokens.create', async assertCurrent => {
-      const result = await tokenClient.create(orgId, { name: data.name.trim(), role: data.role, ...(data.expiry ? { expires_at: new Date(data.expiry).toISOString() } : {}), ...(data.restricted ? { operations: data.operations.split(/[\s,]+/).filter(Boolean) } : {}) })
-      assertCurrent()
-      if (alive.current) onCreated(data.name.trim(), result.token)
-      void client.invalidateQueries({ queryKey: tokenKey(orgId) })
+    await authorize('tokens.create', async ctx => {
+      const result = await ctx.run(() => tokenClient.create(orgId, { name: data.name.trim(), role: data.role, ...(data.expiry ? { expires_at: new Date(data.expiry).toISOString() } : {}), ...(data.restricted ? { operations: data.operations.split(/[\s,]+/).filter(Boolean) } : {}) }))
+      ctx.run(() => { if (alive.current) onCreated(data.name.trim(), result.token) })
+      await ctx.run(() => client.invalidateQueries({ queryKey: tokenKey(orgId) }))
     })
   } })
   const busy = session.pending || create.isPending
@@ -97,12 +97,12 @@ function TokenRoleSelect({ roles, value, onValueChange, ...control }: ComponentP
   const { t } = useTranslation()
   return <Select value={value} onValueChange={onValueChange} disabled={control.disabled}><SelectTrigger {...control} className="w-full"><SelectValue placeholder={t('chooseRole')} /></SelectTrigger><SelectContent>{roles.map(role => <SelectItem key={role} value={role}>{t(`role_${role}`, { defaultValue: role })}</SelectItem>)}</SelectContent></Select>
 }
-function TokenCreated({ name, secret, close, restoreFocus }: { name: string; secret: string; close: () => void; restoreFocus: (event: Event) => void }) {
-  const { t } = useTranslation(); const [copied, setCopied] = useState(false); const [copyFailed, setCopyFailed] = useState(false); const copy = useRef<HTMLButtonElement>(null)
+function TokenCreated({ orgId, name, secret, close, restoreFocus }: { orgId: string; name: string; secret: string; close: () => void; restoreFocus: (event: Event) => void }) {
+  const { t } = useTranslation(); const [copied, setCopied] = useState(false); const [copyFailed, setCopyFailed] = useState(false); const copy = useRef<HTMLButtonElement>(null); const authorize = useAuthorityAction(orgId)
   return <Dialog open onOpenChange={open => { if (!open) close() }}><DialogContent closeLabel={t('close')} onCloseAutoFocus={restoreFocus} onOpenAutoFocus={event => { event.preventDefault(); copy.current?.focus() }}>
     <DialogHeader><DialogTitle>{t('tokenCreatedTitle')}</DialogTitle><DialogDescription>{t('tokenOnce')}</DialogDescription></DialogHeader>
     <p className="break-words font-medium">{name}</p><pre className="whitespace-pre-wrap break-all rounded-md bg-muted p-3 text-sm" aria-label={t('rawToken')}>{secret}</pre>
-    <Button ref={copy} className="w-full" onClick={async () => { try { await navigator.clipboard.writeText(secret); setCopied(true); setCopyFailed(false) } catch { setCopied(false); setCopyFailed(true) } }}><Copy className="mr-2 size-4" aria-hidden="true" />{t('copyToken')}</Button>
+    <Button ref={copy} className="w-full" onClick={() => void authorize(async ctx => { try { await ctx.run(() => navigator.clipboard.writeText(secret)); ctx.run(() => { setCopied(true); setCopyFailed(false) }) } catch { ctx.run(() => { setCopied(false); setCopyFailed(true) }) } }).catch(() => {})}><Copy className="mr-2 size-4" aria-hidden="true" />{t('copyToken')}</Button>
     {copied && <p role="status">{t('tokenCopied')}</p>}{copyFailed && <p role="alert" className="text-sm text-destructive">{t('copyFailed')}</p>}
     <DialogFooter><Button variant="secondary" onClick={close}>{t('tokenDone')}</Button></DialogFooter>
   </DialogContent></Dialog>

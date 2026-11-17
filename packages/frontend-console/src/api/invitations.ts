@@ -25,9 +25,9 @@ const endpoint = (selector: InvitationSelector, action: string) => 'token' in se
 const body = (selector: InvitationSelector) => 'token' in selector ? { token: selector.token } : {}
 export const invitationClient = {
   preview: (selector: InvitationSelector) => api<InvitationSummary>(endpoint(selector, 'token' in selector ? 'preflight' : 'preview'), { method: 'token' in selector ? 'POST' : 'GET', body: body(selector), redirect401: false }),
-  resolve: (selector: InvitationSelector) => api<InvitationPreview>(endpoint(selector, 'resolve'), { method: 'POST', body: body(selector), redirect401: false }),
+  resolve: (selector: InvitationSelector, signal?: AbortSignal) => api<InvitationPreview>(endpoint(selector, 'resolve'), { method: 'POST', body: body(selector), redirect401: false, signal }),
   // Anonymous acceptance establishes a session and returns a preview, without membership.
-  accept: (selector: InvitationSelector) => api<InvitationPreview | AcceptedInvitation>(endpoint(selector, 'accept'), { method: 'POST', body: body(selector), redirect401: false }),
-  decline: (selector: InvitationSelector) => api<DeclinedInvitation>(endpoint(selector, 'decline'), { method: 'POST', body: body(selector), redirect401: false }),
+  accept: (selector: InvitationSelector, signal?: AbortSignal) => api<InvitationPreview | AcceptedInvitation>(endpoint(selector, 'accept'), { method: 'POST', body: body(selector), redirect401: false, signal }),
+  decline: (selector: InvitationSelector, signal?: AbortSignal) => api<DeclinedInvitation>(endpoint(selector, 'decline'), { method: 'POST', body: body(selector), redirect401: false, signal }),
   inbox: () => api<{ data: (InvitationSummary & { navigation_target: string })[]; next: string }>('/me/invitations', { redirect401: false }),
 }

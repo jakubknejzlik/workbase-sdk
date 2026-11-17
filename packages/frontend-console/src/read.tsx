@@ -1,3 +1,4 @@
+import { GeneratedActionProvider } from '../../console-generated/src/action-context'
 import { useLocation } from '@tanstack/react-router'
 import { entityNavigationLabel } from './navigation'
 import { useTranslation } from 'react-i18next'
@@ -12,11 +13,12 @@ import { listCommandActions } from '../../console-generated/src/write'
 import { api } from './api/client'
 import { useRuntimeModel, refreshRuntimeModel } from './api/runtime-model'
 import { consolePage } from '@workbasehq/core/console-page'
-import { useAuthorityGeneration } from './api/authority'
+import { useAuthorityAction, useAuthorityGeneration } from './api/authority'
 import { Failure, Loading, QueryError } from './screens'
 export function ReadPage(props: { orgId: string; entity: string; id?: string }) {
+  const run = useAuthorityAction(props.orgId)
   const client = useQueryClient(), generation = useAuthorityGeneration(client, props.orgId)
-  return <ReadPageContent key={`${props.orgId}/${generation}`} {...props} />
+  return <GeneratedActionProvider run={run}><ReadPageContent key={`${props.orgId}/${generation}`} {...props} /></GeneratedActionProvider>
 }
 function ReadPageContent({ orgId, entity, id }: { orgId: string; entity: string; id?: string }) {
   const { t, i18n } = useTranslation()

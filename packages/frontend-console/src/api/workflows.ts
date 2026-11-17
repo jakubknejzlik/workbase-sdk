@@ -1,4 +1,4 @@
-import { authorityGuard } from './authority'
+import { runAuthorityAction, type ActionContext } from './authority'
 import { useEffect, useRef } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { runtimeModelOptions } from './runtime-model'
@@ -50,27 +50,29 @@ export function useWorkflowAccess(orgId: string) {
  * before sending. 403 invalidates the whole workflow surface until a reload. */
 export function useWorkflowAction(orgId: string, definition: string, action: 'start' | 'resume' | 'cancel') {
   const client = useQueryClient()
-  return async <T,>(send: () => Promise<T>) => {
-    const assertCurrent = authorityGuard(client, orgId)
-    try {
-      const scope = await client.fetchQuery({ ...organizationOptions(orgId), staleTime: 0 })
-      assertCurrent()
-      const previous = client.getQueryData<{ revision: number }>(['capabilities', orgId])
-      const caps = await client.fetchQuery({ queryKey: ['capabilities', orgId], queryFn: () => fetchCapabilities(client, orgId), staleTime: 0 })
-      assertCurrent()
-      if (previous && previous.revision !== caps.revision) throw new ApiError(409, 'schema_revision_mismatch')
-      if (!caps.workflows?.[definition]?.includes(action) || (action !== 'start' && scope.operations && !scope.operations.includes(`workflows.${action}`))) throw new ApiError(403, 'permission_denied')
-      const result = await send()
-      assertCurrent()
-      return result
-    } catch (error) {
-      assertCurrent()
-      if (error instanceof ApiError && error.status === 403) {
-        client.setQueryData(deniedKey(orgId), true)
-        void Promise.all([client.invalidateQueries({ queryKey: ['me'] }), client.invalidateQueries({ queryKey: ['organization', orgId] }), client.invalidateQueries({ queryKey: ['capabilities', orgId] })])
+  return async <T,>(send: (ctx: ActionContext) => Promise<T>) => {
+    return runAuthorityAction(client, orgId, async ctx => {
+      const { assertCurrent } = ctx
+      try {
+        const scope = await ctx.run(() => client.fetchQuery({ ...organizationOptions(orgId), staleTime: 0 }))
+        assertCurrent()
+        const previous = client.getQueryData<{ revision: number }>(['capabilities', orgId])
+        const caps = await ctx.run(() => client.fetchQuery({ queryKey: ['capabilities', orgId], queryFn: () => fetchCapabilities(client, orgId), staleTime: 0 }))
+        assertCurrent()
+        if (previous && previous.revision !== caps.revision) throw new ApiError(409, 'schema_revision_mismatch')
+        if (!caps.workflows?.[definition]?.includes(action) || (action !== 'start' && scope.operations && !scope.operations.includes(`workflows.${action}`))) throw new ApiError(403, 'permission_denied')
+        const result = await ctx.run(() => send(ctx))
+        assertCurrent()
+        return result
+      } catch (error) {
+        assertCurrent()
+        if (error instanceof ApiError && error.status === 403) {
+          ctx.run(() => client.setQueryData(deniedKey(orgId), true))
+          await ctx.run(() => Promise.all([client.invalidateQueries({ queryKey: ['me'] }), client.invalidateQueries({ queryKey: ['organization', orgId] }), client.invalidateQueries({ queryKey: ['capabilities', orgId] })]))
+        }
+        throw error
       }
-      throw error
-    }
+    })
   }
 }
 /** Effect lifecycle extracted for deterministic timer/visibility tests. */

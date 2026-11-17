@@ -1,4 +1,4 @@
-import { authorityGuard } from './authority'
+import { runAuthorityAction, type ActionContext } from './authority'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, ApiError } from './client'
 import { fetchCapabilities, useCapabilities } from './queries'
@@ -25,18 +25,20 @@ export function useTokens(orgId: string) {
 /** Fresh grants are a UX preflight; the endpoint enforces live authority again. */
 export function useTokenAction(orgId: string) {
   const client = useQueryClient()
-  return async (grant: 'tokens.create' | 'tokens.revoke', action: (assertCurrent: () => void) => Promise<void>) => {
-    const assertCurrent = authorityGuard(client, orgId)
-    try {
-      const caps = await client.fetchQuery({ queryKey: ['capabilities', orgId], queryFn: () => fetchCapabilities(client, orgId), staleTime: 0 })
-      assertCurrent()
-      if (!caps.resources?.[grant]) throw new ApiError(403, 'permission_denied')
-      await action(assertCurrent)
-      assertCurrent()
-    } catch (error) {
-      assertCurrent()
-      if (error instanceof ApiError && error.status === 403) void client.invalidateQueries({ queryKey: ['capabilities', orgId] })
-      throw error
-    }
+  return async (grant: 'tokens.create' | 'tokens.revoke', action: (ctx: ActionContext) => Promise<void>) => {
+    return runAuthorityAction(client, orgId, async ctx => {
+      const { assertCurrent } = ctx
+      try {
+        const caps = await ctx.run(() => client.fetchQuery({ queryKey: ['capabilities', orgId], queryFn: () => fetchCapabilities(client, orgId), staleTime: 0 }))
+        assertCurrent()
+        if (!caps.resources?.[grant]) throw new ApiError(403, 'permission_denied')
+        await ctx.run(() => action(ctx))
+        assertCurrent()
+      } catch (error) {
+        assertCurrent()
+        if (error instanceof ApiError && error.status === 403) await ctx.run(() => client.invalidateQueries({ queryKey: ['capabilities', orgId] }))
+        throw error
+      }
+    })
   }
 }

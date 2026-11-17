@@ -1,3 +1,4 @@
+import { useAuthorityAction } from './api/authority'
 import { useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
@@ -10,28 +11,31 @@ import { Page } from './screens'
 import { ConfigDiff } from './versions'
 
 export function ChangesPage({ orgId }: { orgId: string }) {
-  const { t } = useTranslation(); const client = useQueryClient()
+  const { t } = useTranslation(); const client = useQueryClient(); const authorize = useAuthorityAction(orgId)
   const [prompt, setPrompt] = useState('')
   const [proposal, setProposal] = useState<ConfigProposal>()
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string>()
   const [applied, setApplied] = useState<number>()
-  const submit = async (action: 'propose' | 'apply') => {
-    setPending(true); setError(undefined)
+  const submit = (action: 'propose' | 'apply') => authorize(async ctx => {
+    ctx.run(() => { setPending(true); setError(undefined) })
     try {
       const path = `/o/${encodeURIComponent(orgId)}/config-changes/${action}`
-      if (action === 'propose') { setProposal(undefined); setApplied(undefined); setProposal(await api<ConfigProposal>(path, { method: 'POST', body: { prompt } })) }
+      if (action === 'propose') {
+        ctx.run(() => { setProposal(undefined); setApplied(undefined) })
+        const result = await ctx.run(() => api<ConfigProposal>(path, { method: 'POST', body: { prompt }, signal: ctx.signal }))
+        ctx.run(() => setProposal(result))
+      }
       else {
-        const result = await api<{ revision: number }>(path, { method: 'POST', body: { proposalId: proposal!.proposalId } })
-        setApplied(result.revision)
-        await client.invalidateQueries({ queryKey: ['config-versions', orgId] })
+        const result = await ctx.run(() => api<{ revision: number }>(path, { method: 'POST', body: { proposalId: proposal!.proposalId }, signal: ctx.signal }))
+        ctx.run(() => setApplied(result.revision))
+        await ctx.run(() => client.invalidateQueries({ queryKey: ['config-versions', orgId] }))
       }
     } catch (cause) {
       const code = cause instanceof ApiError ? cause.code : 'request_failed'
-      setError(t(`configChangeError_${code}`, { defaultValue: t('configChangeError') }))
-      if (code === 'stale_revision') setProposal(undefined)
-    } finally { setPending(false) }
-  }
+      ctx.run(() => { setError(t(`configChangeError_${code}`, { defaultValue: t('configChangeError') })); if (code === 'stale_revision') setProposal(undefined) })
+    } finally { ctx.run(() => setPending(false)) }
+  }).catch(() => {})
   return <Page title={t('configChanges')}><div className="min-w-0 space-y-6">
     <p className="text-muted-foreground">{t('configChangesHelp')}</p>
     <form className="space-y-3" onSubmit={event => { event.preventDefault(); void submit('propose') }}>

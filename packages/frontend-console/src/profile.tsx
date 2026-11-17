@@ -1,6 +1,8 @@
+import { useAuthorityAction } from './api/authority'
+import { useActionMutation } from './api/action-mutation'
 import { Languages } from 'lucide-react'
 import { useEffect, useState, type ReactNode } from 'react'
-import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { Form, FormFieldInput, UserSettings, UserOnboarding, MutationSession, MutationSubmitButton, MutationErrorAlert, ConfirmDialog, useMutationForm, useMutationSubmit, useMutationSession, useMutationLabels, Button } from '@workbasehq/ui'
 import { profileClient, profileOptions, validProfileName, settingsError, type SelfProfile } from './api/profile'
@@ -35,26 +37,26 @@ export function ProfileEditor({ profile, setup = false }: { profile: SelfProfile
   return <SettingsMutation key={`${profile.id}-${setup}`}><ProfileForm profile={profile} setup={setup} /></SettingsMutation>
 }
 function ProfileForm({ profile, setup }: { profile: SelfProfile; setup: boolean }) {
-  const { t, i18n } = useTranslation(); const client = useQueryClient(); const session = useMutationSession()!; const submit = useMutationSubmit()
-  const logout = useMutation({ mutationFn: () => api('/auth/logout', { method: 'POST' }), onSuccess: () => { client.clear(); window.location.assign('/sign-in') } })
+  const { t, i18n } = useTranslation(); const client = useQueryClient(); const session = useMutationSession()!; const submit = useMutationSubmit(); const authorize = useAuthorityAction()
+  const logout = useActionMutation(undefined, { mutationFn: ctx => ctx.run(() => api('/auth/logout', { method: 'POST', signal: ctx.signal })), onSuccess: ctx => ctx.run(() => { client.clear(); window.location.assign('/sign-in') }) })
   useEffect(() => { document.querySelector<HTMLElement>('h1')?.focus() }, [])
   const form = useMutationForm({ defaultValues: { firstName: profile.firstName ?? '', lastName: profile.lastName ?? '', email: profile.email } })
   const editable = profile.authority.kind === 'local' && profile.capabilities.canEditNames
   useEffect(() => {
     if (!editable) form.reset({ firstName: profile.firstName ?? '', lastName: profile.lastName ?? '', email: profile.email })
   }, [profile.firstName, profile.lastName, profile.email, editable])
-  const save = useMutation({ mutationFn: async (names: { firstName: string; lastName: string }) => {
-    const result = await profileClient.update(names)
-    form.reset({ firstName: result.firstName ?? '', lastName: result.lastName ?? '', email: result.email })
-    if (setup && result.completeness.complete) session.complete()
-    client.setQueryData(profileOptions.queryKey, result)
-    if (setup && result.completeness.complete) await client.invalidateQueries({ queryKey: ['bootstrap'] })
-    await client.invalidateQueries({ queryKey: ['me'] })
+  const save = useActionMutation(undefined, { mutationFn: async (ctx, names: { firstName: string; lastName: string }) => {
+    const result = await ctx.run(() => profileClient.update(names, ctx.signal))
+    ctx.run(() => form.reset({ firstName: result.firstName ?? '', lastName: result.lastName ?? '', email: result.email }))
+    if (setup && result.completeness.complete) ctx.run(() => session.complete())
+    ctx.run(() => client.setQueryData(profileOptions.queryKey, result))
+    if (setup && result.completeness.complete) await ctx.run(() => client.invalidateQueries({ queryKey: ['bootstrap'] }))
+    await ctx.run(() => client.invalidateQueries({ queryKey: ['me'] }))
   } })
   const busy = session.pending || save.isPending || logout.isPending
   const field = (name: 'firstName' | 'lastName') => <FormFieldInput name={name} label={t(name)} autoComplete={name === 'firstName' ? 'given-name' : 'family-name'} required disabled={!editable || busy} rules={{ validate: value => validProfileName(String(value)) || t('invalidName') }} />
   const email = <FormFieldInput name="email" label={t('email')} type="email" autoComplete="email" disabled />
-  const notice = !editable && <div className="space-y-2"><p role="status" className="text-sm text-muted-foreground">{t('profileManaged')}</p>{setup && <><p className="text-sm">{t('profileManagedIncomplete')}</p><Button type="button" variant="outline" disabled={busy} onClick={() => void client.invalidateQueries({ queryKey: profileOptions.queryKey })}>{t('profileRefresh')}</Button></>}</div>
+  const notice = !editable && <div className="space-y-2"><p role="status" className="text-sm text-muted-foreground">{t('profileManaged')}</p>{setup && <><p className="text-sm">{t('profileManagedIncomplete')}</p><Button type="button" variant="outline" disabled={busy} onClick={() => void authorize(async ctx => { await ctx.run(() => client.invalidateQueries({ queryKey: profileOptions.queryKey })) }).catch(() => {})}>{t('profileRefresh')}</Button></>}</div>
   const error = <MutationErrorAlert isError={save.isError} error={save.error} fallbackMessage={t(settingsError(save.error))} />
   const footer = editable && <MutationSubmitButton footer={false} type="submit" pending={busy} disabled={!form.formState.isDirty} className={setup ? 'w-full' : undefined}>{t(setup ? 'profileContinue' : 'saveChanges')}</MutationSubmitButton>
   const content = setup ? <div className="flex flex-col gap-4">{notice}{error}{email}{field('firstName')}{field('lastName')}{footer}</div> : <UserSettings title={t('profileSettings')} description={t('profileDescription')} email={email} firstName={field('firstName')} lastName={field('lastName')} notice={notice} error={error} footer={footer} />
