@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+## 0.3.0 — 2026-11-17
+
+V3 integration release (PR #30): V3 manifest/layouts and
+dictionaries, registered record actions, Application access card, instance auth
+shell with SHA reload, committed OpenAPI 3.1 spec, V3 standalone template with
+instance-owned Vite console, MCP composition/initialization of fresh V3
+instances (role sets, owner roles, display names), versioned schema locks,
+operator-provisioned organizations, dev mailbox sidecar and `workbase ops` MCP
+server, and personal saved list views.
+
+- Members appears in Settings navigation for roles authorized to read members
+  when the console falls back to the default registry; member-role denial and
+  malformed roles stay denied. (#171, PR #174)
+- Copied invitation links require sign-in before acceptance: anonymous visitors
+  see only a minimal invitation screen with "Sign in to accept", recipient-only
+  metadata is returned after verification, and delivered e-mail links with a
+  valid proof keep the full preview. (#176, PR #177, #204)
+- Application access uses a row actions menu, unified find-or-invite, visible
+  disabled confirmation, hides status without read capability, and rejects
+  row-targeted invitations for accounts already linked to another row. (#178, PR #180)
+
+### Earlier V3 integration notes
+
 - Remove the unused bootstrap and standalone console-registry HTTP handlers.
   Their former paths follow normal SPA handling. The internal registry provider
   and supported metadata endpoints remain available. (#153)

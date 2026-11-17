@@ -28,14 +28,14 @@ template dependencies. For the current coordinated version:
 ```json
 {
   "dependencies": {
-    "@workbasehq/core": "file:vendor/sdk/workbasehq-core-0.2.15.tgz",
-    "@workbasehq/plugins": "file:vendor/sdk/workbasehq-plugins-0.2.15.tgz",
-    "@workbasehq/mcp": "file:vendor/sdk/workbasehq-mcp-0.2.15.tgz"
+    "@workbasehq/core": "file:vendor/sdk/workbasehq-core-0.3.0.tgz",
+    "@workbasehq/plugins": "file:vendor/sdk/workbasehq-plugins-0.3.0.tgz",
+    "@workbasehq/mcp": "file:vendor/sdk/workbasehq-mcp-0.3.0.tgz"
   },
   "overrides": {
-    "@workbasehq/core": "file:vendor/sdk/workbasehq-core-0.2.15.tgz",
-    "@workbasehq/plugins": "file:vendor/sdk/workbasehq-plugins-0.2.15.tgz",
-    "@workbasehq/mcp": "file:vendor/sdk/workbasehq-mcp-0.2.15.tgz"
+    "@workbasehq/core": "file:vendor/sdk/workbasehq-core-0.3.0.tgz",
+    "@workbasehq/plugins": "file:vendor/sdk/workbasehq-plugins-0.3.0.tgz",
+    "@workbasehq/mcp": "file:vendor/sdk/workbasehq-mcp-0.3.0.tgz"
   }
 }
 ```
