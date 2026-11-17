@@ -11,9 +11,8 @@ import { targetProof } from './sdk-upgrade-evidence.ts'
 // process-group runner are real. D2's install/bridge contract has its own tests.
 export { captureSdkInputs }
 export async function runSdkTarget(options: TargetOptions) {
-  // Leave room for caller-owned TMPDIR roots in Darwin's Unix socket path budget.
-  const scratch = registerTempDir(await mkdtemp(join(tmpdir(), 'i')))
-  const socketPath = join(scratch, 'barrier.sock')
+  const workDir = registerTempDir(await mkdtemp(join(tmpdir(), 'i')))
+  let scratch: string | undefined
   const sockets = new Set<Socket>()
   const server = createServer(socket => {
     sockets.add(socket); socket.on('close', () => sockets.delete(socket))
@@ -29,9 +28,17 @@ export async function runSdkTarget(options: TargetOptions) {
   const command = (message: unknown) => {
     for (const socket of sockets) socket.write(JSON.stringify(message) + '\n')
   }
-  process.on('message', command)
-  await new Promise<void>(resolve => server.listen(socketPath, resolve))
   try {
+    // Darwin's Unix socket limit includes the whole path, independently of TMPDIR.
+    scratch = registerTempDir(await mkdtemp('/tmp/wbs-'))
+    const socketPath = join(scratch, 'barrier.sock')
+    const socketBytes = Buffer.byteLength(socketPath)
+    if (socketBytes > 100) throw new Error(`Test IPC socket path exceeds 100 bytes (${socketBytes} bytes)`)
+    process.on('message', command)
+    await new Promise<void>((resolve, reject) => {
+      server.once('error', reject)
+      server.listen(socketPath, () => { server.removeListener('error', reject); resolve() })
+    })
     for (const phase of ['install', 'verify']) {
       const descendant = `
         const net = require('node:net');
@@ -45,7 +52,7 @@ export async function runSdkTarget(options: TargetOptions) {
         const child = require('node:child_process').spawn(process.execPath,['-e',${JSON.stringify(descendant)}],{stdio:'ignore'});
         child.on('exit',()=>process.exit(0));
       `
-      const result = await execute([process.execPath, '-e', launcher], scratch, { signal: options.signal, timeoutMs: 30000, killGraceMs: 30000 })
+      const result = await execute([process.execPath, '-e', launcher], workDir, { signal: options.signal, timeoutMs: 30000, killGraceMs: 30000 })
       options.signal?.throwIfAborted()
       if (result.rc !== 0) throw new Error('Controlled target failed')
     }
@@ -54,7 +61,8 @@ export async function runSdkTarget(options: TargetOptions) {
     process.removeListener('message', command)
     for (const socket of sockets) socket.destroy()
     await new Promise<void>(resolve => server.close(() => resolve()))
-    cleanupTempDir(scratch)
+    if (scratch) cleanupTempDir(scratch)
+    cleanupTempDir(workDir)
     process.send?.({ event: 'cleaned', scratch })
   }
 }
