@@ -7,6 +7,7 @@ import { execFileSync } from 'node:child_process'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { createServer } from '../src/server.ts'
+import { replaySources } from '../src/replay-sources.ts'
 import { csCatalogChanges, csDomain, csUi } from './presentation-fixture.ts'
 
 const roots: string[] = []
@@ -145,6 +146,31 @@ it('binds catalog bytes, absent paths, checked UI modules and same-revision pres
     expect(await session.call('apply_to_disposable', competing)).toMatchObject({ ok: true })
     expect(await session.call('promote', { ...args, expectedRevision: 1 })).toMatchObject({ ok: true })
     expect(await session.call('promote', { ...competing, expectedRevision: 1 })).toMatchObject({ ok: false, error: { code: 'stale_revision' } })
+  } finally { await session.close() }
+})
+
+it.each([
+  { publication: 'same-name', change: { kind: 'set_instance_display_name', displayName: 'demo' }, displayName: 'demo' },
+  { publication: 'renamed', change: { kind: 'set_instance_display_name', displayName: 'Renamed demo' }, displayName: 'Renamed demo' },
+  { publication: 'catalog-only', change: catalog({ 'field.worker.name': 'Name' }), displayName: 'demo' },
+])('rejects older catalog proof after a $publication publication across restart', async ({ change, displayName }) => {
+  const root = await fixture()
+  let session = await stdio(root)
+  try {
+    const older = await propose(session.call, [catalog({ 'field.worker.name': 'Older name' })])
+    await validate(session.call, older)
+    expect(await session.call('apply_to_disposable', older)).toMatchObject({ ok: true, verified: true })
+    const newer = await propose(session.call, [change])
+    await validate(session.call, newer)
+    expect(await session.call('apply_to_disposable', newer)).toMatchObject({ ok: true, verified: true })
+    expect(await session.call('promote', { ...newer, expectedRevision: 1 })).toMatchObject({ ok: true, status: 'promoted', revision: 1 })
+    const paths = ['config.ts', 'locales/en/domain.json', `proposals/${older.proposalId}.json`, `proposals/${newer.proposalId}.json`]
+    const before = await Promise.all(paths.map(path => fs.readFile(join(root, path))))
+    await session.close(); session = await stdio(root)
+    expect(await session.call('inspect_schema', { instance: 'demo' })).toMatchObject({ revision: 1, displayName })
+    expect(await session.call('promote', { ...older, expectedRevision: 1 })).toMatchObject({ ok: false, error: { code: 'stale_revision' } })
+    expect(await Promise.all(paths.map(path => fs.readFile(join(root, path))))).toEqual(before)
+    expect((await replaySources(root, { presentation: true }))[`proposals/${newer.proposalId}.json`]).toEqual(before[3])
   } finally { await session.close() }
 })
 

@@ -42,7 +42,7 @@ export async function replaySources(root: string, options: { accessLock?: boolea
     }
     await tree('ui'); await tree('locales')
     // Domain revision does not change for presentation publication. Receipts
-    // serialize even competing proposals whose resulting catalog bytes agree.
+    // serialize even name-only publications or proposals whose catalog bytes agree.
     await noLink(join(root, 'proposals'), true)
     const proposals = await readdir(join(root, 'proposals')).catch((error: NodeJS.ErrnoException) => {
       if (error.code === 'ENOENT') return []
@@ -55,7 +55,7 @@ export async function replaySources(root: string, options: { accessLock?: boolea
       try { proposal = JSON.parse(bytes.toString('utf8')) }
       catch { continue } // Unpromoted transaction metadata need not be a receipt.
       if (proposal?.kind === 'composition_change' && proposal.status === 'promoted'
-        && Array.isArray(proposal.changes) && proposal.changes.some((change: { kind?: string } | null) => change && ['set_locale', 'set_catalog_entries'].includes(change.kind ?? ''))) sources[`proposals/${name}`] = bytes
+        && Array.isArray(proposal.changes) && proposal.changes.some((change: { kind?: string } | null) => change && ['set_instance_display_name', 'set_locale', 'set_catalog_entries'].includes(change.kind ?? ''))) sources[`proposals/${name}`] = bytes
     }
   }
   return sources
