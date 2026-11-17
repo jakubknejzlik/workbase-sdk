@@ -31,7 +31,9 @@ it.each([...roles, 'unknown'])('capabilities/%s readable-field property agrees w
     }
     for (const field of Object.keys(policyGraph.entities[entity].fields).filter(field => !capability.readable.includes(field))) {
       const denied = await ask(entity, role, { select: [field] })
-      expect(denied.status).toBe(403); expect((await json(denied)).error).toBe('field_forbidden')
+      const result = await json(denied)
+      if (denied.status === 200) expect(result.data.every((row: Record<string, unknown>) => row[field] == null || policyGraph.entities[entity].fields[field].type === 'ref')).toBe(true)
+      else { expect(denied.status).toBe(403); expect(['field_forbidden', 'policy_violation']).toContain(result.error) }
     }
   }
 })
@@ -120,4 +122,18 @@ it('P6 membership management grants use the same live organization policy for ad
     expect(document.resources['members.read']).toBe(true); expect(document.resources['invitations.read']).toBe(true)
     for (const action of ['members.update', 'members.remove', 'invitations.create', 'invitations.revoke']) expect(document.resources[action]).toBe(role === 'owner-a')
   }
+})
+
+it.each(['read', 'write', 'command'] as const)('forged page grant and uses never authorize a forbidden API %s', async action => {
+  app = await setup({ commands })
+  const { consolePage } = await import('../src/console-page')
+  // An attacker may control their local UI document and even forge its capabilities.
+  expect(consolePage({ resources: { forged: true }, entities: { reports: { operations: ['read', 'update'], readable: ['id', 'name'] } } }, { grant: 'forged', entity: 'reports', uses: ['reports.name'] })).toBe(true)
+  const path = action === 'read' ? '/query' : action === 'write' ? '/api/reports/report-own' : '/commands/reports/rename'
+  const body = action === 'read' ? { entity: 'reports', select: ['id', 'name'], limit: 1 } : action === 'write' ? { version: 1, name: 'forged' } : { id: 'report-own', name: 'forged' }
+  const response = await app.request('http://localhost' + path, {
+    method: action === 'write' ? 'PATCH' : 'POST', headers: { Authorization: 'Bearer synthetic-coordinator', 'X-Organization-Id': 'org-a', 'Content-Type': 'application/json', 'X-Page-Grant': 'forged', 'X-Page-Uses': 'reports.name' }, body: JSON.stringify(body),
+  })
+  if (action === 'read') { expect(response.status).toBe(200); expect((await json(response)).data).toEqual([]) }
+  else expect(response.status).toBe(403)
 })

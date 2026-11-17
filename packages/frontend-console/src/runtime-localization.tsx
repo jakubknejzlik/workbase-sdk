@@ -26,5 +26,5 @@ export function RuntimeLocalization({ orgId, children }: { orgId: string; childr
   }, [parent, scoped])
   if (runtime.error) return <QueryError error={runtime.error} />
   if (!runtime.data) return <Loading />
-  return <I18nextProvider i18n={scoped} defaultNS="translation">{children}</I18nextProvider>
+  return <I18nextProvider key={runtime.authorityGeneration} i18n={scoped} defaultNS="translation">{children}</I18nextProvider>
 }

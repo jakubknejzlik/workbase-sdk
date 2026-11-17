@@ -103,7 +103,7 @@ export function consolePresentation(kernel: KernelRegistry, scope: Scope, author
   }
   function registry(source: ConsoleRegistry): ConsoleRegistry {
     const entities = Object.fromEntries(Object.entries(source.entities).filter(([entity]) => canRead(entity)).map(([entity, hints]) => [entity, display(entity, hints)]))
-    const pages = source.pages.filter(page => permits(page.grant)).flatMap(page => {
+    const pages = source.pages.filter(page => authority.page(page)).flatMap(page => {
       const safePage = { ...pick(page, ['id', 'label', 'path', 'renderer']), ...(page.grant ? { grant: safeGrant(page.grant) } : {}) }
       if (!page.widgets) return [safePage]
       const widgets = page.widgets.flatMap((widget): ConsoleWidget[] => {
@@ -121,12 +121,12 @@ export function consolePresentation(kernel: KernelRegistry, scope: Scope, author
         if (widget.kind === 'list' && fieldAllowed(widget.field)) return [{ ...common, kind: 'list', query: safeQuery, field: widget.field }]
         return []
       })
-      return widgets.length ? [{ ...safePage, widgets, ...(page.sections ? { sections: page.sections.map(section => ({ row: section.row.filter(id => widgets.some(widget => widget.id === id)) })).filter(section => section.row.length) } : {}) }] : []
+      return widgets.length === page.widgets.length && widgets.length ? [{ ...safePage, widgets, ...(page.sections ? { sections: page.sections.map(section => ({ row: section.row.filter(id => widgets.some(widget => widget.id === id)) })).filter(section => section.row.length) } : {}) }] : []
     })
     return {
       entities, pages,
-      navigation: source.navigation.filter(item => (scope.role !== 'member' || item.placement === 'sidebar' && !!item.entity) && !!item.page !== !!item.entity && permits(item.grant) && (!item.roles || item.roles.includes(scope.role)) && (!item.page || pages.some(page => page.id === item.page))
-        && (!item.entity || canRead(item.entity) && (!item.view || entities[item.entity]?.list?.views?.some(view => view.id === item.view)))).map(item => ({ ...pick(item, ['id', 'placement', 'label', 'icon', 'order', 'roles', 'page', 'entity', 'view']),
+      navigation: source.navigation.filter(item => (scope.role !== 'member' || item.placement === 'sidebar' && !!item.entity) && !!item.page !== !!item.entity && (!item.grant || permits(item.grant)) && (!item.roles || item.roles.includes(scope.role)) && (!item.page || pages.some(page => page.id === item.page))
+        && (!item.entity || authority.page({ grant: { entity: item.entity }, entity: item.entity, mode: 'list' }) && (!item.view || entities[item.entity]?.list?.views?.some(view => view.id === item.view)))).map(item => ({ ...pick(item, ['id', 'placement', 'label', 'icon', 'order', 'roles', 'page', 'entity', 'view']),
           ...(item.grant ? { grant: safeGrant(item.grant) } : {}),
           ...(item.group ? { group: pick(item.group, ['id', 'label', 'order', 'icon']) } : {}) })),
       ...(source.modelUi ? { modelUi: modelUI(source.modelUi) } : {}),

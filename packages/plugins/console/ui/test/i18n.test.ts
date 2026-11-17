@@ -16,8 +16,8 @@ test('missing key in DOM is a marker, never English, humanised text or a supplie
   const log = vi.spyOn(console, 'error').mockImplementation(() => {})
   const i18n = initI18n({ languages: ['cs', 'en'], catalogs: { en: { ui: { 'missing.title': 'English fallback' } } } })
   function Authored() { return h('p', null, t('missing.title', { defaultValue: 'Fallback', lng: 'en' })) }
-  const definition = customPage({ title: 'missing.title', uses: [], component: Authored })
-  render(h(ConsoleProvider, { identity: { actorId: 'a', orgId: 'o' }, t: i18n.t }, h(PageView, { definition, route: { ...definition, source: 'ui/index.ts', path: '/', links: {} }, entities: {}, params: {}, search: {}, navigate: () => {} })))
+  const definition = customPage({ grant: 'console.overview', title: 'missing.title', uses: [], component: Authored })
+  render(h(ConsoleProvider, { caps: { revision: 1, entities: {}, resources: { 'console.overview': true }, organization: { role: 'admin' }, commands: [], workflows: {} }, identity: { actorId: 'a', orgId: 'o' }, t: i18n.t }, h(PageView, { definition, route: { ...definition, source: 'ui/index.ts', path: '/', links: {} }, entities: {}, params: {}, search: {}, navigate: () => {} })))
   expect(screen.getByRole('heading', { name: '⟦ui:missing.title⟧' })).toBeTruthy()
   expect(screen.getByText('⟦ui:missing.title⟧', { selector: 'p' })).toBeTruthy()
   expect(i18n.t('missing.title', { defaultValue: 'Fallback', lng: 'en' })).toBe('⟦ui:missing.title⟧')
@@ -26,8 +26,8 @@ test('missing key in DOM is a marker, never English, humanised text or a supplie
 test('authored custom pages stay bound to their consuming Instance across SSR renders', () => {
   const options = (copy: string) => ({ languages: ['en'], catalogs: { en: { ui: { 'page.title': copy } } } })
   function Authored() { return h('p', null, t('page.title')) }
-  const definition = customPage({ title: 'page.title', uses: [], component: Authored })
-  const renderPage = (i18n: ReturnType<typeof initI18n>) => renderToStaticMarkup(h(ConsoleProvider, { identity: { actorId: 'a', orgId: 'o' }, t: i18n.t, i18n }, h(PageView, { definition, route: { ...definition, source: 'ui/index.ts', path: '/', links: {} }, entities: {}, params: {}, search: {}, navigate: () => {} })))
+  const definition = customPage({ grant: 'console.overview', title: 'page.title', uses: [], component: Authored })
+  const renderPage = (i18n: ReturnType<typeof initI18n>) => renderToStaticMarkup(h(ConsoleProvider, { caps: { revision: 1, entities: {}, resources: { 'console.overview': true }, organization: { role: 'admin' }, commands: [], workflows: {} }, identity: { actorId: 'a', orgId: 'o' }, t: i18n.t, i18n }, h(PageView, { definition, route: { ...definition, source: 'ui/index.ts', path: '/', links: {} }, entities: {}, params: {}, search: {}, navigate: () => {} })))
   const a = initI18n(options('INSTANCE A'))
   expect(renderPage(a)).toBe('<main><h1>INSTANCE A</h1><p>INSTANCE A</p></main>')
   const b = initI18n(options('INSTANCE B'))
@@ -40,8 +40,8 @@ test('authored custom pages stay bound to their consuming Instance across SSR re
 test('memoized authored copy follows a language switch', async () => {
   const i18n = initI18n({ languages: ['en', 'cs'], catalogs: { en: { ui: { 'page.title': 'English' } }, cs: { ui: { 'page.title': 'Česky' } } } })
   const Copy = memo(function Copy() { return h('p', null, t('page.title')) })
-  const definition = customPage({ title: 'page.title', uses: [], component: () => h(Copy) })
-  render(h(ConsoleProvider, { identity: { actorId: 'a', orgId: 'o' }, t: i18n.t, i18n }, h(LanguageSwitcher, { i18n }), h(PageView, { definition, route: { ...definition, source: 'ui/index.ts', path: '/', links: {} }, entities: {}, params: {}, search: {}, navigate: () => {} })))
+  const definition = customPage({ grant: 'console.overview', title: 'page.title', uses: [], component: () => h(Copy) })
+  render(h(ConsoleProvider, { caps: { revision: 1, entities: {}, resources: { 'console.overview': true }, organization: { role: 'admin' }, commands: [], workflows: {} }, identity: { actorId: 'a', orgId: 'o' }, t: i18n.t, i18n }, h(LanguageSwitcher, { i18n }), h(PageView, { definition, route: { ...definition, source: 'ui/index.ts', path: '/', links: {} }, entities: {}, params: {}, search: {}, navigate: () => {} })))
   expect(screen.getByText('English', { selector: 'p' })).toBeTruthy()
   await act(async () => { fireEvent.change(screen.getByRole('combobox'), { target: { value: 'cs' } }) })
   expect(screen.getByRole('heading', { name: 'Česky' })).toBeTruthy()
@@ -75,8 +75,8 @@ test('pure language resolver uses configured profile preference then first langu
 test('switcher only appears for multiple languages and updates mounted page copy', async () => {
   const i18n = createI18n({ languages: ['cs', 'en'], catalogs: { cs: { ui: { 'page.title': 'Česky' } }, en: { ui: { 'page.title': 'English' } } } })
   function Authored() { return h('p', null, t('page.title')) }
-  const definition = customPage({ title: 'page.title', uses: [], component: Authored })
-  render(h(ConsoleProvider, { identity: { actorId: 'a', orgId: 'o' }, t: i18n.t, i18n }, h(LanguageSwitcher, { i18n }), h(PageView, { definition, route: { ...definition, source: 'ui/index.ts', path: '/', links: {} }, entities: {}, params: {}, search: {}, navigate: () => {} })))
+  const definition = customPage({ grant: 'console.overview', title: 'page.title', uses: [], component: Authored })
+  render(h(ConsoleProvider, { caps: { revision: 1, entities: {}, resources: { 'console.overview': true }, organization: { role: 'admin' }, commands: [], workflows: {} }, identity: { actorId: 'a', orgId: 'o' }, t: i18n.t, i18n }, h(LanguageSwitcher, { i18n }), h(PageView, { definition, route: { ...definition, source: 'ui/index.ts', path: '/', links: {} }, entities: {}, params: {}, search: {}, navigate: () => {} })))
   fireEvent.change(screen.getByLabelText('Jazyk'), { target: { value: 'en' } })
   expect(await screen.findByRole('heading', { name: 'English' })).toBeTruthy()
   expect(screen.getByText('English', { selector: 'p' })).toBeTruthy()

@@ -1,9 +1,10 @@
+import { useActionMutation } from './api/action-mutation'
 import { validateOrganizationName, organizationNameSchema } from '@workbasehq/core/organization-name'
 import { organizationNameServerReason } from './api/organization-name'
 import { useConsoleRegistry } from './api/console'
 import { NavigationIconView } from './navigation-icons'
 import { Link, Outlet, useMatches } from '@tanstack/react-router'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { SettingsLayout, WorkspaceSettings, Form, FormFieldInput, MutationSubmitButton, MutationErrorAlert, useMutationForm, useMutationSubmit, useMutationSession } from '@workbasehq/ui'
 import { useCapabilities, useOrganization } from './api/queries'
@@ -53,20 +54,20 @@ export function OrganizationSettings({ orgId }: { orgId: string }) {
 function OrganizationForm({ orgId, name, canRename }: { orgId: string; name: string; canRename: boolean }) {
   const { t } = useTranslation(); const client = useQueryClient(); const session = useMutationSession()!; const submit = useMutationSubmit()
   const form = useMutationForm({ defaultValues: { name } })
-  const save = useMutation({ mutationFn: async (nextName: string) => {
+  const save = useActionMutation(orgId, { mutationFn: async (ctx, nextName: string) => {
     // The endpoint checks live membership/grants again at mutation time.
-    const result = await profileClient.rename(orgId, nextName)
-    form.reset({ name: result.name })
-    if (result.invalidates.some(key => ['me', 'memberships', 'selectedOrganization'].includes(key))) await Promise.all([
+    const result = await ctx.run(() => profileClient.rename(orgId, nextName))
+    ctx.run(() => form.reset({ name: result.name }))
+    if (result.invalidates.some(key => ['me', 'memberships', 'selectedOrganization'].includes(key))) await ctx.run(() => Promise.all([
       client.invalidateQueries({ queryKey: ['me'] }),
       client.invalidateQueries({ queryKey: ['organization', orgId] }),
       // Bootstrap seeds Me when revisiting a scope. Remove its old label snapshot.
       client.removeQueries({ queryKey: ['bootstrap'] }),
-    ])
-  }, onError: error => {
+    ]))
+  }, onError: (ctx, error) => {
     const reason = organizationNameServerReason(error)
-    if (reason) form.setError('name', { type: reason, message: t(`organizationName_${reason}`) })
-    void client.invalidateQueries({ queryKey: ['capabilities', orgId] })
+    if (reason) ctx.run(() => form.setError('name', { type: reason, message: t(`organizationName_${reason}`) }))
+    return ctx.run(() => client.invalidateQueries({ queryKey: ['capabilities', orgId] }))
   } })
   const busy = save.isPending || session.pending
   return <Form form={form} pending={busy} onSubmit={data => canRename && !busy ? submit(() => save.mutateAsync(organizationNameSchema.parse(data.name))) : Promise.resolve()}>

@@ -11,7 +11,7 @@ import { PluginPage } from '../src/console-pages'
 const document: ConsoleModelContract = {
   contractVersion: 1, console: null,
   model: { instance: 'test', revision: 1, locale: 'en', timeZone: 'UTC', limits: {}, entities: {}, commands: [], workflows: [] },
-  capabilities: { revision: 1, organization: { role: 'admin' }, entities: {}, commands: [], workflows: {}, resources: {} },
+  capabilities: { revision: 1, organization: { role: 'admin' }, entities: {}, commands: [], workflows: {}, resources: { 'console.overview': true } },
 }
 
 it.each(['/o/instance', '/o/instance/'])('%s renders the built-in overview for a Members-only admin', async path => {

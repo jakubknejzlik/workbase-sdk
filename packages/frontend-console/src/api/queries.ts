@@ -1,3 +1,4 @@
+import { authorityGeneration, authorityGuard, runAuthorityAction, authorityKey, discardAuthority, parseConsoleCapabilities } from './authority'
 import { buildReload } from '../build-reload'
 import { useQuery, useQueryClient, type QueryClient, type QueryFunctionContext } from '@tanstack/react-query'
 import { refreshRuntimeModel } from './runtime-model'
@@ -14,25 +15,26 @@ export const useMe = () => useQuery(meOptions)
 export const useOrganizations = () => useQuery({ ...meOptions, select: (me: Me) => me.memberships })
 export const organizationOptions = (orgId: string) => ({
   queryKey: ['organization', orgId], staleTime: 0,
-  queryFn: async ({ client }: QueryFunctionContext) => {
+  queryFn: ({ client }: QueryFunctionContext) => runAuthorityAction(client, orgId, async ctx => {
     try {
-      const next = await api<Me>('/me?scope=organization', { orgId })
+      const next = await ctx.run(() => api<Me>('/me?scope=organization', { orgId, signal: ctx.signal }))
       const previous = client.getQueryData<Me>(['organization', orgId])
       const caps = client.getQueryData<ConsoleCapabilities>(['capabilities', orgId])
       // Existing screen polls and action preflights signal authority changes.
       // Refresh the sidebar's projection without adding probes to the shell.
       const authorityChanged = previous && (previous.role !== next.role || JSON.stringify(previous.operations) !== JSON.stringify(next.operations))
       if (authorityChanged || caps?.organization && caps.organization.role !== next.role) {
-        await client.invalidateQueries({ queryKey: ['capabilities', orgId] })
+        await ctx.run(() => client.invalidateQueries({ queryKey: ['capabilities', orgId] }))
       }
       return next
     } catch (error) {
-      if (error instanceof ApiError && error.status === 403) await client.invalidateQueries({ queryKey: ['capabilities', orgId] })
-      const destination = await removedMembershipDestination(client, orgId, error)
-      if (destination) window.location.replace(destination)
+      if (error instanceof ApiError && error.status === 403) await ctx.run(() => client.invalidateQueries({ queryKey: ['capabilities', orgId] }))
+      ctx.assertCurrent()
+      const destination = await ctx.run(() => removedMembershipDestination(client, orgId, error))
+      if (destination) ctx.run(() => window.location.replace(destination))
       throw error
     }
-  },
+  }),
 })
 export const useOrganization = (orgId: string) => useQuery({ ...organizationOptions(orgId), enabled: !!orgId, refetchOnMount: 'always', refetchOnWindowFocus: 'always', refetchInterval: 2_000 })
 export function useBuild() {
@@ -48,15 +50,23 @@ export function useBuild() {
   })
 }
 export async function fetchCapabilities(client: QueryClient, orgId: string) {
+  const generation = authorityGeneration(client, orgId)
+  const assertCurrent = authorityGuard(client, orgId)
   let next: ConsoleCapabilities
-  try { next = await api<ConsoleCapabilities>(`/o/${encodeURIComponent(orgId)}/capabilities`) } catch (error) {
-    if (error instanceof ApiError && [401, 403].includes(error.status)) await refreshRuntimeModel(client, orgId).catch(() => {})
+  try {
+    next = parseConsoleCapabilities(await api<unknown>(`/o/${encodeURIComponent(orgId)}/capabilities`))
+  } catch (error) {
+    if (generation !== authorityGeneration(client, orgId)) throw error
+    discardAuthority(client, orgId)
+    await client.cancelQueries({ queryKey: ['console-model', orgId] })
     throw error
   }
+  assertCurrent()
   const previous = client.getQueryData<ConsoleCapabilities>(['capabilities', orgId])
   if (previous && previous.revision !== next.revision) {
     void buildReload.refresh()
   }
+  if (previous && authorityKey(previous) !== authorityKey(next)) discardAuthority(client, orgId)
   if (previous && JSON.stringify(previous) !== JSON.stringify(next)) await refreshRuntimeModel(client, orgId)
   return next
 }
@@ -70,11 +80,13 @@ export function useCapabilities(orgId?: string) {
  * Operation refusals never call this recovery. The account/profile stay intact. */
 export async function removedMembershipDestination(client: QueryClient, orgId: string, error: unknown) {
   if (!(error instanceof ApiError) || error.status !== 403) return
-  let me: Me
-  try { me = await api<Me>('/me') } catch { return }
-  client.setQueryData(['me'], me)
-  if (!me.user || me.memberships.some(item => item.organization_id === orgId)) return
-  client.removeQueries({ queryKey: ['workspace-identity', orgId] })
-  client.removeQueries({ queryKey: ['bootstrap'], type: 'inactive' })
-  return authDestination(null, me.memberships, undefined, me.organizationsEnabled)
+  return runAuthorityAction(client, orgId, async ctx => {
+    let me: Me
+    try { me = await ctx.run(() => api<Me>('/me', { signal: ctx.signal })) } catch { ctx.assertCurrent(); return }
+    ctx.run(() => client.setQueryData(['me'], me))
+    if (!me.user || me.memberships.some(item => item.organization_id === orgId)) return
+    ctx.run(() => client.removeQueries({ queryKey: ['workspace-identity', orgId] }))
+    ctx.run(() => client.removeQueries({ queryKey: ['bootstrap'], type: 'inactive' }))
+    return authDestination(null, me.memberships, undefined, me.organizationsEnabled)
+  })
 }

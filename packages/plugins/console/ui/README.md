@@ -8,6 +8,7 @@ into UI sources. For example:
 import type worker from '../../schema/worker'
 import { entityDetailPage, layout } from '@workbasehq/plugins/console/ui'
 export default entityDetailPage<typeof worker>('worker', {
+  grant: { entity: 'worker', operation: 'read' },
   title: 'worker.detail', recordParam: 'workerId',
   layout: layout<typeof worker>(['name']),
 })
@@ -28,7 +29,7 @@ This is not a sandbox. Unresolved or unclassified imports are rejected. Browser
 components live in `-` directories; only custom pages and slot registries import
 them. They are replaced with functions only in the extraction server.
 
-- No `/me`, capabilities, hiding, action registry or access card (slice 12). `action` nodes are rejected.
+- Page access and field visibility use the live server capability projection described below.
 - No `query()` grammar, MCP AST editing, `access.lock` consumption, legacy `frontend-console` changes or packaging proof (slice 18).
 
 Use `consoleUI()` from `/vite` in the Instance's Vite plugins. It loads config
@@ -108,7 +109,7 @@ must provide the required keys, plural forms and matching interpolation variable
 
 Non-goals:
 - No action nodes or reason keys (slice 10).
-- No `/me`, profile storage, capability hiding or access card (slice 12).
+- Session and profile behavior are described in the runtime sections below.
 - No MCP translation operations, `CustomTypeOptions` typing, ICU, nested keys or contexts.
 - No languages beyond cs/en, no date/number formatting helpers, no visual/axe checks.
 - No list-column completeness and no `frontend-console` changes.
@@ -158,11 +159,28 @@ retry; unauthenticated and removed membership states show a generic message.
 accessible mobile disclosure. Parameterized nav targets require its `params`.
 
 The pure `gate(caps, manifest)` is shared by routes, navigation and fields.
-Missing grants deny. `ConsoleProvider` is available for custom hosts, which must
+Each page declares `grant: 'resource.name'` or `grant: { entity: 'worker',
+operation: 'read' }` (read is the default operation). The grant must resolve in the
+server capabilities. Omitted and unknown grants deny, including custom pages.
+The grant intersects every `data` binding and `uses` dependency; `uses` never
+grants access. List/detail require read plus readable identity, create requires
+create (its inputs consume the writable projection), and edit requires read plus
+update. Declare the grant on each page;
+placement may hide an accessible destination but cannot authorize it.
+
+The server projects effective computed, reference-target and display-label field
+permissions into `readable`. Metadata, selections, search/sort operands and slot
+props consume that result; the browser does not infer derived permissions.
+
+`ConsoleProvider` is available for custom hosts, which must
 supply `caps` and handle `onAuthorizationFailure`; omitting caps grants no data
 access in the renderer. Session drops to loading on a data 403, refetches on tab
 visibility, and replaces the client, query cache and drafts whenever canonical
-`[actorId, orgId, caps]` changes. No capability data persists outside that scope.
+`[actorId, orgId, caps]` changes. Each replacement advances the authority generation,
+aborts the retired transport, clears both caches and rejects late completions,
+including mutation responses from adapters that ignore cancellation. Failed
+visibility refresh unmounts private content. No capability data persists outside
+that scope.
 Slots receive only declared authorized props and `t`. Action nodes consume only
 the owning detail's `actions` entries, and use `ui:actions.<name>` labels.
 

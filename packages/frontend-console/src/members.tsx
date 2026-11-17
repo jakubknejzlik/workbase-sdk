@@ -1,3 +1,4 @@
+import { useAuthorityAction, type ActionContext } from './api/authority'
 import { authDestination } from './api/auth-destination'
 import { meOptions } from './api/queries'
 import { useRef, useState } from 'react'
@@ -35,13 +36,14 @@ export function memberError(error: Error | null) {
 }
 function useMemberRefresh(orgId: string) {
   const client = useQueryClient()
-  return async () => {
-    client.removeQueries({ queryKey: ['bootstrap'], type: 'inactive' })
-    void client.invalidateQueries({ queryKey: ['bootstrap'], refetchType: 'none' })
-    await Promise.all([client.invalidateQueries({ queryKey: identityKey(orgId) }), client.invalidateQueries({ queryKey: ['me'] }), client.invalidateQueries({ queryKey: ['organization', orgId] }), client.invalidateQueries({ queryKey: ['capabilities', orgId] })])
+  return async (ctx: ActionContext) => {
+    ctx.run(() => client.removeQueries({ queryKey: ['bootstrap'], type: 'inactive' }))
+    await ctx.run(() => client.invalidateQueries({ queryKey: ['bootstrap'], refetchType: 'none' }))
+    await ctx.run(() => Promise.all([client.invalidateQueries({ queryKey: identityKey(orgId) }), client.invalidateQueries({ queryKey: ['me'] }), client.invalidateQueries({ queryKey: ['organization', orgId] }), client.invalidateQueries({ queryKey: ['capabilities', orgId] })]))
   }
 }
 export function MembersScreen({ orgId, history = false }: { orgId: string; history?: boolean }) {
+  const authorize = useAuthorityAction(orgId)
   const { t, i18n } = useTranslation(); const scope = useOrganization(orgId); const caps = useCapabilities(orgId)
   const grants = caps.error ? {} : caps.data?.resources ?? {}
   const enabled = !!scope.data && !scope.error && !!grants['members.read']
@@ -87,7 +89,7 @@ export function MembersScreen({ orgId, history = false }: { orgId: string; histo
   }
   return <WorkspaceMembers title={t(history ? 'inviteHistory' : 'instanceMembersTitle', { defaultValue: t('members') })} description={t(history ? 'inviteHistoryDescription' : 'memberDescription')} actions={!history && grants['invitations.create'] ? <Button disabled={members.isPending || !!members.error || !roleOptions.length || !members.data?.default_role} onClick={event => { trigger.current = event.currentTarget; open({ kind: 'invite' }) }}><UserPlus className="mr-2 h-4 w-4" />{t('inviteUser')}</Button> : undefined}>
     <WorkspaceMembersTable title={t(history ? 'inviteHistory' : 'members')} description={t(history ? 'inviteHistoryDescription' : 'memberTableDescription')} loading={loading && !failed} loadingLabel={t('loading')}>
-      {failed ? <div role="alert" className="space-y-3"><p>{t(!history || members.error && invitations.error ? 'memberFailed' : 'memberPartialError')}</p><Button variant="outline" onClick={() => { if (enabled) void members.refetch(); if (history && grants['invitations.read']) void invitations.refetch() }}>{t('memberRetry')}</Button></div> : rows.length ? <div className="min-w-0 rounded-md border"><Table aria-label={t(history ? 'inviteHistory' : 'members')} className="max-md:block">
+      {failed ? <div role="alert" className="space-y-3"><p>{t(!history || members.error && invitations.error ? 'memberFailed' : 'memberPartialError')}</p><Button variant="outline" onClick={() => void authorize(async ctx => { await ctx.run(() => Promise.all([...(enabled ? [members.refetch()] : []), ...(history && grants['invitations.read'] ? [invitations.refetch()] : [])])) }).catch(() => {})}>{t('memberRetry')}</Button></div> : rows.length ? <div className="min-w-0 rounded-md border"><Table aria-label={t(history ? 'inviteHistory' : 'members')} className="max-md:block">
         <TableHeader className="max-md:sr-only"><TableRow>{['memberUser', 'status', 'role', 'memberDetails', 'actions'].map(key => <TableHead key={key} className={key === 'actions' ? 'w-12' : undefined}>{key === 'actions' ? <span className="sr-only">{t(key)}</span> : t(key)}</TableHead>)}</TableRow></TableHeader>
         <TableBody className="max-md:block">{rows.map(row => <TableRow key={memberRow(row) ? row.user_id : row.id} className="max-md:grid max-md:grid-cols-[auto_minmax(0,1fr)_auto] max-md:gap-3 max-md:p-3">
           <TableCell className="whitespace-normal [overflow-wrap:anywhere] max-md:col-span-2 max-md:row-start-1 max-md:min-w-0 max-md:p-0"><div className="font-medium">{rowName(row)}</div>{memberRow(row) && row.display_name && row.display_name !== row.email && <div className="text-sm text-muted-foreground">{row.email}</div>}</TableCell>
@@ -109,32 +111,31 @@ function MemberAction({ orgId, action, roles, defaultRole, organization, dismiss
   const form = useMutationForm({ defaultValues: { email: '', role: initialRole } })
   const delivery = useQuery({ queryKey: [...identityKey(orgId), 'delivery', 'row' in action && 'id' in action.row ? action.row.id : ''], queryFn: () => identityClient.delivery(orgId, (action as { row: Invitation }).row.id), enabled: action.kind === 'delivery', staleTime: 0 })
   const mutation = useMutation({ gcTime: 0, mutationFn: async (data: { email: string; role: string }) => {
-    await authorize(async () => {
+    await authorize(async ctx => {
       if (action.kind === 'invite') {
-        const result = await identityClient.invite(orgId, { email: data.email.trim(), role: data.role })
+        const result = await ctx.run(() => identityClient.invite(orgId, { email: data.email.trim(), role: data.role }))
         if ('message' in result && result.message === 'already_member') throw new ApiError(409, 'already_member')
-      } else if (action.kind === 'role') await identityClient.changeRole(orgId, action.row.user_id, data.role)
-      else if (action.kind === 'remove') await identityClient.removeMember(orgId, action.row.user_id)
-      else if (action.kind === 'leave') await identityClient.leave(orgId)
-      else if (action.kind === 'cancel') await identityClient.revoke(orgId, 'invitations', action.row.id)
+      } else if (action.kind === 'role') await ctx.run(() => identityClient.changeRole(orgId, action.row.user_id, data.role))
+      else if (action.kind === 'remove') await ctx.run(() => identityClient.removeMember(orgId, action.row.user_id))
+      else if (action.kind === 'leave') await ctx.run(() => identityClient.leave(orgId))
+      else if (action.kind === 'cancel') await ctx.run(() => identityClient.revoke(orgId, 'invitations', action.row.id))
       else if (action.kind === 'resend') {
-        const result = await identityClient.resend(orgId, action.row.id)
+        const result = await ctx.run(() => identityClient.resend(orgId, action.row.id))
         if ('message' in result) throw new ApiError(409, 'already_member')
       } else if (action.kind === 'delivery') {
-        await identityClient.retryDelivery(orgId, action.row.id); await delivery.refetch()
+        await ctx.run(() => identityClient.retryDelivery(orgId, action.row.id)); await ctx.run(() => delivery.refetch())
       } else if (action.kind === 'copy') {
         // Never return a URL from mutationFn: query/mutation caches contain no credential.
-        const url = link ?? (await identityClient.copyLink(orgId, action.row.id)).accept_url
-        try { await navigator.clipboard.writeText(url); setCopied(true); setCopyDenied(false); setLink(undefined) }
-        catch { setLink(url); setCopyDenied(true); throw new ApiError(0, 'clipboard_denied') }
+        const url = link ?? (await ctx.run(() => identityClient.copyLink(orgId, action.row.id))).accept_url
+        try { await ctx.run(() => navigator.clipboard.writeText(url)); ctx.run(() => { setCopied(true); setCopyDenied(false); setLink(undefined) }) }
+        catch { ctx.run(() => { setLink(url); setCopyDenied(true) }); throw new ApiError(0, 'clipboard_denied') }
       }
+      if (action.kind === 'leave') {
+        ctx.run(() => { form.reset(); controls.reset(); complete() }); await refresh(ctx); const me = await ctx.run(() => client.fetchQuery({ ...meOptions, staleTime: 0 })); await ctx.run(() => navigate({ to: authDestination(null, me.memberships) })); return
+      }
+      await refresh(ctx)
+      if (!['copy', 'delivery'].includes(action.kind)) ctx.run(() => { form.reset(); complete() })
     }, action.kind === 'invite' || action.kind === 'copy' || action.kind === 'resend' || action.kind === 'delivery' ? 'invitations.create' : action.kind === 'cancel' ? 'invitations.revoke' : action.kind === 'role' ? 'members.update' : action.kind === 'remove' ? 'members.remove' : 'members.read')
-  }, onSuccess: async () => {
-    if (action.kind === 'leave') {
-      form.reset(); controls.reset(); complete(); await refresh(); const me = await client.fetchQuery({ ...meOptions, staleTime: 0 }); await navigate({ to: authDestination(null, me.memberships) }); return
-    }
-    await refresh()
-    if (!['copy', 'delivery'].includes(action.kind)) { form.reset(); complete() }
   } })
   const busy = session.pending || mutation.isPending
   const title = t(action.kind === 'invite' ? 'inviteUser' : action.kind === 'role' ? 'memberChangeRole' : action.kind === 'remove' ? 'memberRemove' : action.kind === 'leave' ? 'memberLeave' : action.kind === 'copy' ? 'inviteCopy' : action.kind === 'resend' ? 'inviteResend' : action.kind === 'delivery' ? 'inviteDelivery' : 'inviteCancel')

@@ -13,7 +13,7 @@ const entities = { probe: metadata }
 const admin = grants(entities)
 const staff = { ...admin, organization: { role: 'staff' }, entities: { probe: { operations: ['read'], readable: ['id', 'name', 'locked'], writable: [] } } }
 const row = { id: 'x', version: 1, name: 'Visible', secret: 'foreign bytes', locked: 'Read only', actions: {} }
-const definitions = [entityListPage('probe', { title: 'items.list', layout: ['name', 'secret'] }), entityCreatePage('probe', { title: 'items.new', layout: ['name'] }), entityDetailPage('probe', { title: 'items.detail', recordParam: 'itemId', layout: ['name', 'secret'] }), entityEditPage('probe', { title: 'items.edit', recordParam: 'itemId', layout: ['name', 'locked', 'secret'] })]
+const definitions = [entityListPage('probe', { grant: { entity: 'probe' }, title: 'items.list', layout: ['name', 'secret'] }), entityCreatePage('probe', { grant: { entity: 'probe' }, title: 'items.new', layout: ['name'] }), entityDetailPage('probe', { grant: { entity: 'probe' }, title: 'items.detail', recordParam: 'itemId', layout: ['name', 'secret'] }), entityEditPage('probe', { grant: { entity: 'probe' }, title: 'items.edit', recordParam: 'itemId', layout: ['name', 'locked', 'secret'] })]
 const routes = definitions.map((definition, index) => ({ ...definition, source: 'ui/items.ts', path: ['/items', '/items/new', '/items/$itemId', '/items/$itemId/edit'][index], links: { list: { to: '/items', bind: {} }, detail: { to: '/items/$itemId', bind: { itemId: 'record.id' } }, edit: { to: '/items/$itemId/edit', bind: { itemId: 'record.id' } } } }))
 const manifest: Manifest = { version: 3, configHash: 'test', entities, keys: {}, slots: {}, routes, nav: [{ title: 'items.list', link: { to: '/items', bind: {} } }, { title: 'items.edit', link: { to: '/items/new', bind: {} } }] }
 const document = (globalThis as unknown as { document: Document & { activeElement: unknown } }).document
@@ -223,4 +223,56 @@ test('same-role resource or revision changes replace the cache; late org-A boot 
     await screen.findAllByText('Fresh'); host.rerender(h(ConsoleProvider, { identity: { actorId: 'a', orgId: 'one' }, caps: change, t, fetch: transport }, content()))
     await waitFor(() => expect(transport).toHaveBeenCalledTimes(2)); host.unmount()
   }
+})
+
+test('visibility refresh at the same revision discards the draft, aborts old requests and rejects deferred old completions', async () => {
+  let failed = false, current = admin
+  let oldClient: ReturnType<typeof useRuntime>['client'] | undefined
+  let deferred: ((value: Response) => void) | undefined, oldSignal: AbortSignal | undefined
+  function Probe() { oldClient ??= useRuntime().client; return content('edit') }
+  const fetch = vi.fn(async (url: string, init: ClientRequestInit) => {
+    if (url === '/me') return json(me)
+    if (url.includes('capabilities')) return json(current, failed ? 500 : 200)
+    if (url.endsWith('/deferred')) { oldSignal = init.signal as AbortSignal; return new Promise<Response>(resolve => { deferred = resolve }) }
+    return json(row)
+  })
+  render(h(Session, { orgId: 'one', t, fetch }, h(Probe)))
+  fireEvent.change(await screen.findByLabelText('domain:field.probe.name'), { target: { value: 'Private draft' } })
+  const old = oldClient!
+  const pending = old.one('probe', { id: 'deferred' }, new AbortController().signal).catch(error => error)
+  current = { ...staff, entities: { probe: { ...staff.entities.probe, operations: [] } } }
+  Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' })
+  fireEvent(document, new Event('visibilitychange'))
+  await screen.findByText('sdk:forbidden')
+  expect(oldSignal?.aborted).toBe(true)
+  expect(screen.queryByDisplayValue('Private draft')).toBeNull()
+  deferred!(json({ ...row, name: 'Obsolete private bytes' }))
+  expect((await pending).name).toBe('AbortError')
+  await expect(old.one('probe', { id: 'deferred' }, new AbortController().signal)).rejects.toHaveProperty('name', 'AbortError')
+  expect(screen.queryByText('Obsolete private bytes')).toBeNull()
+  failed = true; fireEvent(document, new Event('visibilitychange'))
+  await screen.findByText('sdk:failed')
+  expect(screen.queryByRole('navigation')).toBeNull()
+})
+
+test('organization A → B → A uses fresh clients and cursor chains; old A cannot return late', async () => {
+  let oldSignal: AbortSignal | undefined, release: ((value: Response) => void) | undefined
+  const clients: ReturnType<typeof useRuntime>['client'][] = []
+  function Probe() { const runtime = useRuntime(); useEffect(() => { clients.push(runtime.client) }, [runtime.client]); return content() }
+  const fetch = vi.fn(async (_url: string, init: ClientRequestInit) => {
+    const body = JSON.parse(String(init.body))
+    if (body.cursor) { oldSignal = init.signal as AbortSignal; return new Promise<Response>(resolve => { release = resolve }) }
+    return json({ data: [{ ...row, name: init.headers && (init.headers as Record<string, string>)['X-Organization-Id'] }], next_cursor: 'old-cursor' })
+  })
+  const view = (orgId: string) => h(ConsoleProvider, { identity: { actorId: 'a', orgId }, caps: admin, t, fetch }, h(Probe))
+  const mounted = render(view('A'))
+  await screen.findAllByText('A'); fireEvent.click(screen.getByText('sdk:loadMore'))
+  await waitFor(() => expect(oldSignal).toBeDefined())
+  mounted.rerender(view('B')); await screen.findAllByText('B')
+  expect(oldSignal?.aborted).toBe(true)
+  mounted.rerender(view('A')); await screen.findAllByText('A')
+  await act(async () => { release!(json({ data: [{ ...row, name: 'Old A private row' }], next_cursor: null })) })
+  expect(screen.queryByText('Old A private row')).toBeNull()
+  expect(new Set(clients).size).toBe(3)
+  expect(fetch.mock.calls.map(([, init]) => JSON.parse(String(init.body)).cursor)).toEqual([undefined, 'old-cursor', undefined, undefined])
 })

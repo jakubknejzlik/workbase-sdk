@@ -29,7 +29,7 @@ async function mount(surface: 'create' | 'settings', language: 'en' | 'cs', serv
   const fetcher = vi.fn(async (url: string, init?: RequestInit) => {
     if (init?.method === 'POST' || init?.method === 'PATCH') return writes(url, init)
     if (url === '/me?scope=organization') return Response.json({ user: { id: 'owner' }, memberships: [{ organization_id: 'org', name: stored, role: 'owner' }] })
-    if (url === '/o/org/capabilities') return Response.json({ resources: { 'organizations.update': true } })
+    if (url === '/o/org/capabilities') return Response.json({ revision: 1, organization: { role: 'owner' }, entities: {}, commands: [], workflows: {}, resources: { 'organizations.update': true } })
     throw new Error(`Unexpected request: ${url}`)
   })
   vi.stubGlobal('fetch', fetcher)

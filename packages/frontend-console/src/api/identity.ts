@@ -1,3 +1,4 @@
+import { runAuthorityAction, type ActionContext } from './authority'
 import { useQueryClient } from '@tanstack/react-query'
 import { api, ApiError } from './client'
 import { organizationOptions, fetchCapabilities } from './queries'
@@ -38,13 +39,18 @@ export const identityKey = (orgId: string, role?: string) => role === undefined 
  * refusal stays in its dialog and never implies membership loss. */
 export function useIdentityAction(orgId: string) {
   const client = useQueryClient()
-  return async <T,>(action: () => Promise<T>, grant: string): Promise<T> => {
-    await client.fetchQuery({ ...organizationOptions(orgId), staleTime: 0 })
-    {
-      const requiredGrant = grant
-      const caps = await client.fetchQuery({ queryKey: ['capabilities', orgId], queryFn: () => fetchCapabilities(client, orgId), staleTime: 0 })
-      if (!caps.resources?.[requiredGrant]) throw new ApiError(403, 'permission_denied')
-    }
-    try { return await action() } finally { void client.invalidateQueries({ queryKey: ['capabilities', orgId] }) }
+  return async <T,>(action: (ctx: ActionContext) => Promise<T>, grant: string): Promise<T> => {
+    return runAuthorityAction(client, orgId, async ctx => {
+      const { assertCurrent } = ctx
+      await ctx.run(() => client.fetchQuery({ ...organizationOptions(orgId), staleTime: 0 }))
+      assertCurrent()
+      {
+        const requiredGrant = grant
+        const caps = await ctx.run(() => client.fetchQuery({ queryKey: ['capabilities', orgId], queryFn: () => fetchCapabilities(client, orgId), staleTime: 0 }))
+        assertCurrent()
+        if (!caps.resources?.[requiredGrant]) throw new ApiError(403, 'permission_denied')
+      }
+      try { const result = await ctx.run(() => action(ctx)); assertCurrent(); return result } finally { assertCurrent(); await ctx.run(() => client.invalidateQueries({ queryKey: ['capabilities', orgId] })) }
+    })
   }
 }

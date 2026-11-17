@@ -1,8 +1,10 @@
+import { useActionMutation } from './api/action-mutation'
+import { discardAuthority, useAuthorityAction } from './api/authority'
 import { useConsoleRegistry } from './api/console'
 import { useEffect, useRef, useState } from 'react'
 import { ConsoleLayout, LayoutNavigationItem, LayoutNavigationGroup, LayoutNavigationSubItem, SidebarMenu, LayoutUserDropdown, Dialog, ResourcePage, useMutationSubmit } from '@workbasehq/ui'
 import { Link, Outlet, useLocation, useNavigate, useMatches } from '@tanstack/react-router'
-import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { api, logoutSession } from './api/client'
 import { Skeleton } from '@workbasehq/ui/components/ui/skeleton'
@@ -42,6 +44,7 @@ export function Frame() {
   useEffect(() => () => {
     if (!orgId) return
     const scope = decodeURIComponent(orgId)
+    discardAuthority(client, scope)
     for (const key of ['console-model', 'bootstrap', 'capabilities', 'console-registry', 'workflow-schema']) client.removeQueries({ queryKey: [key, scope], exact: true })
   }, [client, orgId])
   // Profile and bootstrap are independent reads. Keep the completeness gate while
@@ -70,15 +73,15 @@ function FrameContent() {
   const [aboutOpen, setAboutOpen] = useState(false)
   const [reloaded] = useState(() => { const value = sessionStorage.getItem('console-schema-reloaded'); sessionStorage.removeItem('console-schema-reloaded'); return !!value })
   const membership = me.data?.memberships.find(org => org.organization_id === orgId)
-  const submit = useMutationSubmit()
-  const logout = useMutation({ mutationFn: () => logoutSession(client) })
+  const submit = useMutationSubmit(); const authorize = useAuthorityAction()
+  const logout = useActionMutation(undefined, { mutationFn: ctx => ctx.run(() => logoutSession(client)) })
   useEffect(() => {
     let heading: HTMLElement | null = null
     const focus = () => { const next = document.querySelector<HTMLElement>('h1'); if (next && next !== heading) { heading = next; next.focus() } }
     focus(); const observer = new MutationObserver(focus); observer.observe(document.getElementById('main')!, { childList: true, subtree: true })
     return () => observer.disconnect()
   }, [location.pathname])
-  const workspace = me.data?.organizationsEnabled === false ? <span className="px-2 py-3 font-medium">{instanceTitle(schema.data?.displayName)}</span> : <OrganizationSwitcher key={orgId} activeId={orgId} allowCreate={me.data?.organizationCreationAllowed !== false} memberships={me.data?.memberships ?? []} onSwitch={async id => { const next = await client.fetchQuery({ queryKey: ['capabilities', id], queryFn: () => fetchCapabilities(client, id), staleTime: 0 }); await navigate({ to: organizationDestination(location.pathname, id, next) }) }} />
+  const workspace = me.data?.organizationsEnabled === false ? <span className="px-2 py-3 font-medium">{instanceTitle(schema.data?.displayName)}</span> : <OrganizationSwitcher key={orgId} activeId={orgId} allowCreate={me.data?.organizationCreationAllowed !== false} memberships={me.data?.memberships ?? []} onSwitch={id => authorize(async ctx => { const next = await ctx.run(() => client.fetchQuery({ queryKey: ['capabilities', id], queryFn: () => fetchCapabilities(client, id), staleTime: 0 })); await ctx.run(() => navigate({ to: organizationDestination(location.pathname, id, next) })) })} />
   const currentView = (location.search as { view?: string }).view
   const items = registry.error ? [] : (registry.data?.navigation ?? []).filter(item => item.placement === 'sidebar')
   const activeItem = (item: typeof items[number]) => item.entity ? activeNavigationItem({ id: item.id, entity: item.entity, view: item.view }, location.pathname, orgId!, currentView, registry.data?.modelUi?.navigation) : location.pathname === `/o/${orgId}${registry.data?.pages.find(page => page.id === item.page)?.path}`

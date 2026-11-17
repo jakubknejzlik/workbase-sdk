@@ -96,3 +96,25 @@ it('filters contributed role/grant placements and unreadable entity views before
   for (const id of ['owners', 'authorized-tokens', 'entity.named_clients']) expect(viewer.navigation.some(item => item.id === id)).toBe(false)
   expect(viewer.navigation.some(item => item.group?.id === 'customers')).toBe(false)
 })
+
+it.each(['allowed', 'missing', 'unknown', 'dependency'] as const)('custom page grant intersects every dependency in route and navigation: %s', async scenario => {
+  const config: InstanceConfig = { ...sample, plugins: [...sample.plugins!, {
+    name: 'page-grant-fixture', version: '1', requires: { console: '^1' },
+    fieldMask(entity) { return scenario === 'dependency' && entity === 'clients' ? ['id'] : ['id', 'organization_id', 'version', 'created_at', 'updated_at', ...Object.keys(this.config.entities[entity].fields)] },
+    contributes: { console: {
+      pages: [{ id: 'fixture', path: '/fixture', label: 'Fixture', grant: scenario === 'missing' ? undefined : scenario === 'unknown' ? 'unknown' : 'console.overview',
+        widgets: [{ id: 'clients', label: 'Clients', kind: 'table', columns: ['name'], query: { entity: 'clients', select: ['id', 'name'], limit: 1 } }] }],
+      navigation: [{ id: 'fixture', placement: 'sidebar', label: 'Fixture', page: 'fixture' }],
+    } },
+  }] }
+  const app = createApp(config, runtime())
+  const provider = await providerRegistry(config)
+  const response = await request(app, '/o/org-a/console-model')
+  const model = await response.json() as ConsoleModelContract
+  for (const registry of [provider, model.console!]) {
+    expect(registry.pages.some(page => page.id === 'fixture')).toBe(scenario === 'allowed')
+    expect(registry.navigation.some(item => item.id === 'fixture')).toBe(scenario === 'allowed')
+  }
+  expect((await request(app, '/o/org-a/console-pages/fixture')).status).toBe(scenario === 'allowed' ? 200 : 404)
+  expect(provider.pages.some(page => page.id === 'core.overview')).toBe(true)
+})

@@ -1,3 +1,4 @@
+import { GeneratedActionProvider } from '../../console-generated/src/action-context'
 import { useLocation } from '@tanstack/react-router'
 import { entityNavigationLabel } from './navigation'
 import { useTranslation } from 'react-i18next'
@@ -11,8 +12,15 @@ import { ContextCreateAction } from '../../console-generated/src/write-screens'
 import { listCommandActions } from '../../console-generated/src/write'
 import { api } from './api/client'
 import { useRuntimeModel, refreshRuntimeModel } from './api/runtime-model'
+import { consolePage } from '@workbasehq/core/console-page'
+import { useAuthorityAction, useAuthorityGeneration } from './api/authority'
 import { Failure, Loading, QueryError } from './screens'
-export function ReadPage({ orgId, entity, id }: { orgId: string; entity: string; id?: string }) {
+export function ReadPage(props: { orgId: string; entity: string; id?: string }) {
+  const run = useAuthorityAction(props.orgId)
+  const client = useQueryClient(), generation = useAuthorityGeneration(client, props.orgId)
+  return <GeneratedActionProvider run={run}><ReadPageContent key={`${props.orgId}/${generation}`} {...props} /></GeneratedActionProvider>
+}
+function ReadPageContent({ orgId, entity, id }: { orgId: string; entity: string; id?: string }) {
   const { t, i18n } = useTranslation()
   const location = useLocation()
   const [createOpen, setCreateOpen] = useState(false)
@@ -28,6 +36,7 @@ export function ReadPage({ orgId, entity, id }: { orgId: string; entity: string;
   if (runtime.error) return <QueryError error={runtime.error} />
   if (!runtime.data) return <Loading />
   const { model, capabilities: caps, console: registry } = runtime.data
+  if (!consolePage(caps, { grant: { entity }, entity, mode: id ? 'detail' : 'list' })) return <Failure kind="forbidden" />
   if (!Object.hasOwn(model.entities, entity)) return <Failure kind="notFound" />
   const request = (query: import('@workbasehq/console-generated/read').ReadQuery) => api<Result>('/query', { method: 'POST', body: query, orgId })
   const mutation = { onDenied: () => { client.setQueryData(deniedKey, true); void refreshRuntimeModel(client, orgId) }, model, caps, orgId, entity, request, write: (path: string, method: string, body?: unknown, key?: string) => api(path, { method, body, orgId, idempotencyKey: key }) }

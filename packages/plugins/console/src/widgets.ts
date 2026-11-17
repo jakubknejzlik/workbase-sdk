@@ -1,8 +1,9 @@
+import { capabilities } from '../../../core/src/capabilities'
+import { consoleAuthorization } from '../../../core/src/console-authorization'
 import { z } from 'zod'
 import type { InstanceConfig } from '@workbasehq/core/config'
 import type { KernelRegistry } from '@workbasehq/core/kernel/registry'
 import type { Scope } from '../../../core/src/types'
-import { ApiError } from '../../../core/src/errors'
 import { querySchema, validateQuery, type QueryInput } from '@workbasehq/core/query/schema'
 import { compileAggregate, compileRoot } from '@workbasehq/core/query/compiler'
 import { projectRootRow, type Row } from '../../../core/src/query/executor'
@@ -55,11 +56,8 @@ export function validateWidgets(config: InstanceConfig, page: ConsolePage) {
 }
 /** Omit denied widgets, including unreadable filter/order/aggregate inputs. */
 export function visibleWidgets(kernel: KernelRegistry, scope: Scope, widgets: readonly ConsoleWidget[]) {
-  return widgets.filter(widget => {
-    if (!kernel.can(scope, widget.query.entity, 'read')) return false
-    try { validateQuery(kernel, scope, widgetQuery(widget)); return true }
-    catch (error) { if (error instanceof ApiError && error.status === 403) return false; throw error }
-  })
+  const authority = consoleAuthorization(kernel, scope, capabilities(kernel, scope))
+  return widgets.filter(widget => !!authority.query(widgetQuery(widget)))
 }
 export async function executeWidgets(kernel: KernelRegistry, scope: Scope, db: D1Database, page: ConsolePage): Promise<ConsolePageResult> {
   const jobs = visibleWidgets(kernel, scope, page.widgets ?? []).map(widget => {

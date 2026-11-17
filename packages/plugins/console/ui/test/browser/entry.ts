@@ -8,10 +8,10 @@ import { entityListPage, entityCreatePage, entityDetailPage, entityEditPage, p, 
 import type { Manifest } from '../../src/check'
 const fields = { name: { type: 'text', required: true, readOnly: false, computed: false, userLink: false }, user: { type: 'ref', required: false, readOnly: false, computed: false, userLink: true } }
 const slots = { accessCard: { contexts: ['record' as const], props: { account: p.field('userLink'), access: p.access() }, component: AccessCard } }
-const list = entityListPage('worker', { title: 'items.list', layout: ['name'] })
-const create = entityCreatePage('worker', { title: 'items.new', layout: ['name'], omit: ['user'] })
-const detail = entityDetailPage('worker', { title: 'items.detail', recordParam: 'workerId', layout: ['name', slot('accessCard', { account: 'user' })] })
-const edit = entityEditPage('worker', { title: 'items.edit', recordParam: 'workerId', layout: ['name'], omit: ['user'] })
+const list = entityListPage('worker', { grant: { entity: 'worker' }, title: 'items.list', layout: ['name'] })
+const create = entityCreatePage('worker', { grant: { entity: 'worker', operation: 'create' }, title: 'items.new', layout: ['name'], omit: ['user'] })
+const detail = entityDetailPage('worker', { grant: { entity: 'worker' }, title: 'items.detail', recordParam: 'workerId', layout: ['name', slot('accessCard', { account: 'user' })] })
+const edit = entityEditPage('worker', { grant: { entity: 'worker', operation: 'update' }, title: 'items.edit', recordParam: 'workerId', layout: ['name'], omit: ['user'] })
 const routes = [list, create, detail, edit].map((definition, i) => ({ ...definition, path: ['/workers', '/workers/new', '/workers/$workerId', '/workers/$workerId/edit'][i], source: 'ui/items.ts', links: { list: { to: '/workers', bind: {} }, detail: { to: '/workers/$workerId', bind: { workerId: 'record.id' } }, edit: { to: '/workers/$workerId/edit', bind: { workerId: 'record.id' } } } }))
 const manifest = { version: 3, configHash: 'browser', keys: {}, slots: {}, entities: { worker: { displayField: 'name', fields } }, routes, nav: [{ title: 'items.list', link: { to: '/workers', bind: {} } }] } as Manifest
 const lang = new URLSearchParams(location.search).get('lang') ?? 'en'

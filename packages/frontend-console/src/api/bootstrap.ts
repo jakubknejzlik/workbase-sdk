@@ -1,3 +1,4 @@
+import { authorityGeneration } from './authority'
 import { buildReload } from '../build-reload'
 import type { ConsoleRegistry } from './console'
 import type { QueryClient } from '@tanstack/react-query'
@@ -12,17 +13,24 @@ export const isBootstrappedRoute = (path: string) => path === '/' || path === '/
 /** Cached only in this session's QueryClient; logout clears it with the other projections. */
 export function bootstrapOptions(client: QueryClient, orgId?: string) {
   return { queryKey: ['bootstrap', orgId], staleTime: Infinity, gcTime: Infinity, refetchOnWindowFocus: false,
-    queryFn: async () => {
+    queryFn: async ({ signal }: { signal?: AbortSignal } = {}) => {
+      const generation = orgId ? authorityGeneration(client, orgId) : 0
+      const check = () => {
+        signal?.throwIfAborted()
+        if (orgId && generation !== authorityGeneration(client, orgId)) throw new DOMException('Superseded authority', 'AbortError')
+      }
       let data: Bootstrap
       try {
         const [schema, me, build, runtime] = await Promise.all([
-          client.ensureQueryData(instanceOptions), api<Me>('/me', { redirect401: window.location.pathname !== '/' }).then(me => {
+          client.ensureQueryData(instanceOptions), api<Me>('/me', { signal, redirect401: window.location.pathname !== '/' }).then(me => {
             // Recovery needs identity even if another bootstrap request fails.
+            check()
             client.setQueryData(['me'], me)
             return me
           }),
-          api<Build>('/build.json'), orgId ? client.fetchQuery(runtimeModelOptions(orgId)) : undefined,
+          api<Build>('/build.json', { signal }), orgId ? client.fetchQuery(runtimeModelOptions(orgId)) : undefined,
         ])
+        check()
         data = { schema, me, build, capabilities: runtime?.capabilities, console: runtime?.console }
         if (orgId && runtime) client.setQueryData(['workflow-schema', orgId], runtime.model)
       }
@@ -40,6 +48,7 @@ export function bootstrapOptions(client: QueryClient, orgId?: string) {
         if (destination) window.location.replace(destination)
         throw error
       }
+      check()
       const previousCaps = orgId ? client.getQueryData<ConsoleCapabilities>(['capabilities', orgId]) : undefined
       buildReload.observe(data.build)
       if (previousCaps && previousCaps.revision !== data.capabilities?.revision) void buildReload.refresh()

@@ -1,5 +1,6 @@
 import type { KernelRegistry } from './kernel/registry'
 import type { App, RuntimeEnv, Scope } from './types'
+import { consoleAuthorization } from './console-authorization'
 import { scopeMiddleware } from './authorization'
 import { ApiError } from './errors'
 import { writableFields } from './policies'
@@ -25,6 +26,8 @@ export function capabilities(kernel: KernelRegistry, scope: Scope) {
   // Match the read routes' complete gates, including their identity/owner checks.
   // Navigation needs grants, not whole member/token/workflow/audit collections.
   const resources = {
+    // Explicit rule for the scoped home, which has no entity-data dependencies.
+    'console.overview': true,
     'members.search_link_account': isOrganizationAdministrator(kernel.config, scope.role) && permits(() => { kernel.resourcePermission(scope, 'members.read'); organizationPermission(kernel.config, scope, 'members.read') }),
     'organizations.update': kernel.providers.has('organizations') && kernel.permissionsActive && permits(() => kernel.resourcePermission(scope, 'organizations.update')),
     ...Object.fromEntries((['members.read', 'members.update', 'members.remove', 'invitations.read', 'invitations.create', 'invitations.revoke', 'tokens.read'] as const).map(action => [action,
@@ -36,7 +39,15 @@ export function capabilities(kernel: KernelRegistry, scope: Scope) {
     'workflows.read': permits(() => kernel.resourcePermission(scope, 'workflows.read')),
     'audit.read': !!kernel.audit && hasOwnerRole(scope, kernel.config) && permits(() => kernel.resourcePermission(scope, 'audit.read')),
   }
-  return { revision: kernel.config.revision, entities, commands, workflows, resources, organization: { role: scope.role } }
+  const projected = { revision: kernel.config.revision, entities, commands, workflows, resources, organization: { role: scope.role } }
+  const authority = consoleAuthorization(kernel, scope, projected)
+  // Keep the raw masks while resolving all transitive checks; the browser receives
+  // only the resulting effective fields and never reconstructs dependencies.
+  const effective = Object.fromEntries(Object.entries(entities).map(([name, entity]) => {
+    const readable = entity.readable.filter(field => authority.read(name, field))
+    return [name, { ...entity, readable, displayField: entity.displayField && readable.includes(entity.displayField) ? entity.displayField : undefined }]
+  }))
+  return { ...projected, entities: effective }
 }
 export function capabilityRoutes(app: App, kernel: KernelRegistry, env: RuntimeEnv) {
   app.get('/o/:org/capabilities', scopeMiddleware(env, kernel.config, kernel), c => { c.header('Cache-Control', 'no-store'); return c.json(capabilities(kernel, c.get('scope'))) })

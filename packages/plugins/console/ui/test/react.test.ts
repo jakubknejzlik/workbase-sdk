@@ -11,16 +11,16 @@ const fields = Object.fromEntries(['name', 'extra', 'user', 'locked'].map(name =
 const meta = { displayField: 'name', fields }
 const links = { list: { to: '/items', bind: {} }, detail: { to: '/items/$itemId', bind: { itemId: 'record.id' } }, edit: { to: '/items/$itemId/edit', bind: { itemId: 'record.id' } } }
 function route(mode: 'list' | 'detail' | 'edit' | 'create', layout: Node[] = ['name', 'extra', 'user', 'locked']) {
-  const options = { title: 'probe.' + mode, layout, recordParam: 'itemId' }
+  const options = { grant: { entity: 'probe', operation: mode === 'create' ? 'create' as const : mode === 'edit' ? 'update' as const : 'read' as const }, title: 'probe.' + mode, layout, recordParam: 'itemId' }
   const page = mode === 'list' ? entityListPage('probe', options) : mode === 'detail' ? entityDetailPage('probe', options) : mode === 'edit' ? entityEditPage('probe', options) : entityCreatePage('probe', options)
-  return { ...page, source: 'ui/items.ts', path: mode === 'create' ? '/items/new' : mode === 'list' ? '/items' : '/items/$itemId/' + mode, links }
+  return { ...page, source: 'ui/items.ts', path: mode === 'create' ? '/items/new' : mode === 'list' ? '/items' : mode === 'detail' ? '/items/$itemId' : '/items/$itemId/' + mode, links }
 }
 const row = { id: 'x', version: 1, name: 'Server', extra: 'set', user: 'linked', locked: 'fixed' }
 const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status })
 const t = (key: string) => key
 const navigate = vi.fn()
 function view(fetch: (url: string, init: ClientRequestInit) => Promise<Response>, mode: Parameters<typeof route>[0] = 'detail', options: { orgId?: string; id?: string; layout?: Node[]; metadata?: typeof meta } = {}) {
-  return h(ConsoleProvider, { caps: grants({ probe: options.metadata ?? meta }), identity: { actorId: 'a', orgId: options.orgId ?? 'one' }, t, fetch }, h(PageView, { definition: route(mode, options.layout), route: route(mode, options.layout), entities: { probe: options.metadata ?? meta }, params: { itemId: options.id ?? 'x' }, search: {}, navigate }))
+  return h(ConsoleProvider, { caps: grants({ probe: options.metadata ?? meta }), identity: { actorId: 'a', orgId: options.orgId ?? 'one' }, t, fetch }, h(PageView, { definition: route(mode, options.layout), routes: ['list', 'detail', 'edit', 'create'].map(mode => route(mode as Parameters<typeof route>[0])), route: route(mode, options.layout), entities: { probe: options.metadata ?? meta }, params: { itemId: options.id ?? 'x' }, search: {}, navigate }))
 }
 afterEach(() => { cleanup(); vi.restoreAllMocks(); navigate.mockReset() })
 test.each([['notFound', 404], ['forbidden', 403], ['network', 500]] as const)('renders %s from HTTP status', async (state, status) => {
@@ -180,12 +180,12 @@ test('create entry and dirty edit back follow declared paths', async () => {
 })
 
 test('page primitive infers list binding and renders static layout slots without fetching', async () => {
-  const definition = page({ title: 'probe.list', data: { results: list('probe') } })
+  const definition = page({ grant: { entity: 'probe' }, title: 'probe.list', data: { results: list('probe') } })
   const listed = { ...route('list', []), ...definition }
   render(h(ConsoleProvider, { caps: grants({ probe: meta }), identity: { actorId: 'a', orgId: 'one' }, t, fetch: async () => json({ data: [row], next_cursor: null }) }, h(PageView, { definition, route: listed, entities: { probe: meta }, params: {}, search: {}, navigate })))
   expect(await screen.findByText('Server')).toBeTruthy()
   cleanup()
-  const staticPage = page({ title: 'static.title', layout: [{ kind: 'slot', id: 'static', props: {} }] }), fetch = vi.fn()
+  const staticPage = page({ grant: 'console.overview', title: 'static.title', layout: [{ kind: 'slot', id: 'static', props: {} }] }), fetch = vi.fn()
   render(h(ConsoleProvider, { caps: grants({ probe: meta }), identity: { actorId: 'a', orgId: 'one' }, t, fetch, slots: { static: { contexts: ['record'], props: {}, component: () => h('p', null, 'Static slot') } } }, h(PageView, { definition: staticPage, route: { ...route('detail'), ...staticPage }, entities: {}, params: {}, search: {}, navigate })))
   expect(screen.getByText('Static slot')).toBeTruthy(); expect(fetch).not.toHaveBeenCalled()
 })

@@ -346,7 +346,7 @@ it.each([false, true])('whole response excludes private canaries with console pr
     ...base, commands: [command.name], plugins: provider ? [...plugins, consoleUI(), {
       name: 'private-display', version: '1', requires: { console: '^1' },
       contributes: { console: {
-        pages: [{ id: 'private_dependencies', path: '/private-dependencies', label: canary,
+        pages: [{ id: 'private_dependencies', grant: { entity: 'specimens' }, path: '/private-dependencies', label: canary,
           widgets: deniedQueries.map((dependencies, index) => ({ id: `dependency_${index}`, kind: 'table' as const, label: canary,
             columns: ['name'], query: { entity: 'specimens', select: ['id', 'name'], limit: 1, ...dependencies } })) }],
         entities: { specimens: {
@@ -507,12 +507,12 @@ it('core sanitizes raw provider pages, widget predicates and role/grant navigati
         } },
         modelUi: { ...registry.modelUi, unknownAnnotation: canary },
         pages: [...registry.pages,
-          { id: 'private_widgets', path: '/private', label: canary, widgets: [
+          { id: 'private_widgets', grant: { entity: 'specimens' }, path: '/private', label: canary, widgets: [
             { id: 'private_filter', kind: 'table', label: canary, columns: ['name'], query: { entity: 'specimens', select: ['id', 'name'], limit: 1, where: { secret: { eq: canary } } } },
             { id: 'private_sum', kind: 'stat', label: canary, query: { entity: 'specimens' }, aggregate: { fn: 'sum', field: 'count' } },
           ] },
           { id: 'denied_page', path: '/denied', label: canary, renderer: 'private', grant: 'organizations.update' },
-          { id: 'raw_label_dependencies', path: '/raw-labels', label: 'Raw labels', widgets: [
+          { id: 'raw_label_dependencies', grant: { entity: 'specimens' }, path: '/raw-labels', label: 'Raw labels', widgets: [
             { id: 'raw_label_where', kind: 'table', label: 'Raw label filter', columns: ['name'], query: { entity: 'specimens', select: ['id', 'name'], limit: 1, labelWhere: { parent_id: { contains: canary } } } },
             { id: 'raw_label_search', kind: 'table', label: 'Raw search', columns: ['name'], query: { entity: 'specimens', select: ['id', 'name'], limit: 1, search: { text: canary, fields: ['parent_id'] } } },
             { id: 'raw_label_order', kind: 'table', label: canary, columns: ['name'], query: { entity: 'specimens', select: ['id', 'name'], limit: 1, orderBy: [{ field: 'parent_id', dir: 'asc', label: true }] } },
@@ -603,7 +603,7 @@ it.each([false, true])('readable sensitive presentation literals fail closed for
       name: 'sensitive-presentation', version: '1', requires: { console: '^1' as const },
       contributes: { console: {
         entities: { specimens: { ...display, fields: { count: { signedBy: { field: 'state', negativeValue: canary } } } } },
-        pages: [{ id: 'sensitive_widgets', path: '/sensitive-widgets', label: 'Widgets', widgets: [
+        pages: [{ id: 'sensitive_widgets', grant: { entity: 'specimens' }, path: '/sensitive-widgets', label: 'Widgets', widgets: [
           ...dependencies.map((dependency, index) => ({ id: `private_${index}`, label: 'Private widget', kind: 'table' as const,
             columns: ['name'], query: { entity: 'specimens', select: ['id', 'name'], limit: 1, ...dependency } })),
           { id: 'public', label: 'Public widget', kind: 'table' as const, columns: ['name'],
@@ -646,7 +646,7 @@ it.each([false, true])('readable sensitive presentation literals fail closed for
     expect(body.console === null).toBe(!provider)
     if (provider) {
       expect(body.console?.entities.specimens.fields?.count).not.toHaveProperty('signedBy')
-      expect(body.console?.pages.find(page => page.id === 'sensitive_widgets')?.widgets?.map(widget => widget.id)).toEqual(['public'])
+      expect(body.console?.pages.find(page => page.id === 'sensitive_widgets')).toBeUndefined()
     }
     expect(JSON.stringify(body), role).not.toContain(canary)
   }
@@ -698,7 +698,7 @@ it.each(['entity', 'id', 'display', 'dependency', 'sensitive_hop', 'sensitive_di
   await start(defineInstance({ ...base,
     plugins: [...plugins, consoleUI(), { name: 'target-display', version: '1', requires: { console: '^1' },
       fieldMask(entity) { return entity === 'vaults' ? denial === 'id' ? ['name'] : denial === 'display' ? ['id'] : denial === 'sensitive_dependency' ? ['id', 'name', 'private_value'] : ['id', 'name'] : ['id', 'name', 'parent_id'] },
-      contributes: { console: { pages: [{ id: 'dependencies', path: '/dependencies', label: 'Dependencies',
+      contributes: { console: { pages: [{ id: 'dependencies', grant: { entity: 'specimens' }, path: '/dependencies', label: 'Dependencies',
         widgets: queries.map((dependencies, index) => ({ id: `dependency_${index}`, label: 'Dependent widget', kind: 'table' as const, columns: ['name'],
           query: { entity: 'specimens', select: ['id', 'name'], limit: 1, ...dependencies } })) }] } },
     }],

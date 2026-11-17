@@ -10,7 +10,7 @@ export interface SelfProfile {
 export interface ProfileNames { firstName: string; lastName: string }
 export const profileOptions = { queryKey: ['profile'], queryFn: () => api<SelfProfile>('/me/profile'), staleTime: 0, retry: false as const }
 export const profileClient = {
-  update: (names: ProfileNames) => api<SelfProfile>('/me/profile', { method: 'PATCH', body: names }),
+  update: (names: ProfileNames, signal?: AbortSignal) => api<SelfProfile>('/me/profile', { method: 'PATCH', body: names, signal }),
   rename: (orgId: string, name: string) => api<{ id: string; name: string; invalidates: string[] }>(`/organizations/${encodeURIComponent(orgId)}`, { orgId, method: 'PATCH', body: { name } }),
 }
 export const validProfileName = (value: string) => !!value.trim() && value.trim().length <= 200 && !/[\u0000-\u001f\u007f]/.test(value.trim())

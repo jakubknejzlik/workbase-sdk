@@ -1,3 +1,5 @@
+import { useAuthorityAction } from './api/authority'
+import { useActionMutation } from './api/action-mutation'
 import { Skeleton } from '@workbasehq/ui/components/ui/skeleton'
 import { useCapabilities } from './api/queries'
 import { Label } from '@workbasehq/ui/components/ui/label'
@@ -5,7 +7,7 @@ import { Input } from '@workbasehq/ui/components/ui/input'
 import { Card, CardContent } from '@workbasehq/ui/components/ui/card'
 import { useEffect, useState, type ReactNode } from 'react'
 import { Link } from '@tanstack/react-router'
-import { useMutation, useQuery } from '@tanstack/react-query'
+import { useQuery } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { ResourcePage, MutationSubmitButton, useMutationSubmit } from '@workbasehq/ui'
 import { useInvitationDestination } from './api/invitation-destination'
@@ -30,8 +32,8 @@ export function SignIn() {
   const { t } = useTranslation(); const [email, setEmail] = useState('')
   const returnTo = safeReturnTo(new URLSearchParams(window.location.search).get('returnTo'), useScopeHome())
   const providers = useQuery({ queryKey: ['providers'], queryFn: () => api<{ providers: { id: string }[] }>('/auth/providers', { redirect401: false }) })
-  const magic = useMutation({ mutationFn: () => api('/auth/sign-in/magic-link', { method: 'POST', body: { email, callbackURL: returnTo, errorCallbackURL: '/verify?failed=1' }, redirect401: false }), onSuccess: () => sessionStorage.setItem('console-returnTo', returnTo) })
-  const oidc = useMutation({ mutationFn: () => api<{ url: string }>('/auth/sign-in/social', { method: 'POST', body: { provider: 'oidc', callbackURL: '/auth/complete' }, redirect401: false }), onSuccess: data => { sessionStorage.setItem('console-returnTo', returnTo); window.location.assign(data.url) } })
+  const magic = useActionMutation(undefined, { mutationFn: ctx => ctx.run(() => api('/auth/sign-in/magic-link', { method: 'POST', body: { email, callbackURL: returnTo, errorCallbackURL: '/verify?failed=1' }, redirect401: false, signal: ctx.signal })), onSuccess: ctx => ctx.run(() => sessionStorage.setItem('console-returnTo', returnTo)) })
+  const oidc = useActionMutation(undefined, { mutationFn: ctx => ctx.run(() => api<{ url: string }>('/auth/sign-in/social', { method: 'POST', body: { provider: 'oidc', callbackURL: '/auth/complete' }, redirect401: false, signal: ctx.signal })), onSuccess: (ctx, data) => ctx.run(() => { sessionStorage.setItem('console-returnTo', returnTo); window.location.assign(data.url) }) })
   if (magic.isSuccess) return <Page title={t('inbox')}><p>{t('inboxDescription')}</p><Link to="/sign-in" onClick={() => magic.reset()}>{t('newLink')}</Link></Page>
   return <Page title={t('signIn')}><div className="c1-card"><p>{t('signInDescription')}</p><form onSubmit={event => { event.preventDefault(); void submit(() => magic.mutateAsync()) }}>
     <Label htmlFor="email">{t('email')}</Label><Input id="email" type="email" autoComplete="email" required value={email} onChange={event => setEmail(event.target.value)} />
@@ -41,15 +43,15 @@ export function SignIn() {
   {(oidc.error || providers.error) && <p role="alert">{t('signInFailed')}</p>}</div></Page>
 }
 export function Verify() {
-  const token = new URLSearchParams(window.location.search).get('token')
-  const verify = useQuery({ queryKey: ['verify', token], retry: false, staleTime: Infinity, queryFn: async () => {
+  const token = new URLSearchParams(window.location.search).get('token'); const authorize = useAuthorityAction()
+  const verify = useQuery({ queryKey: ['verify', token], retry: false, staleTime: Infinity, queryFn: () => authorize(async ctx => {
     if (!token) throw new Error('invalid_link')
     // Better Auth consumes the one-use token and sets its own cookie; it redirects to this
     // same-origin SPA callback, where /me (not the redirect alone) proves authentication.
-    const response = await fetch('/auth/magic-link/verify?' + new URLSearchParams({ token, callbackURL: '/auth/complete', errorCallbackURL: '/verify?failed=1' }), { credentials: 'same-origin' })
+    const response = await ctx.run(() => fetch('/auth/magic-link/verify?' + new URLSearchParams({ token, callbackURL: '/auth/complete', errorCallbackURL: '/verify?failed=1' }), { credentials: 'same-origin', signal: ctx.signal }))
     if (!response.ok || new URL(response.url).searchParams.has('error') || new URL(response.url).searchParams.has('failed')) throw new Error('invalid_link')
-    await api('/me', { redirect401: false }); window.location.replace('/auth/complete'); return true
-  } })
+    await ctx.run(() => api('/me', { redirect401: false, signal: ctx.signal })); ctx.run(() => window.location.replace('/auth/complete')); return true
+  }) })
   return verify.error ? <Failure kind="invalidLink" /> : <Loading />
 }
 export function Complete() {

@@ -1,3 +1,4 @@
+import { runAuthorityAction } from './authority'
 import type { QueryClient } from '@tanstack/react-query'
 
 export class ApiError extends Error {
@@ -18,25 +19,34 @@ export function signInLocation(returnTo = window.location.pathname + window.loca
   return '/sign-in?returnTo=' + encodeURIComponent(safeReturnTo(returnTo))
 }
 // Keep this set until the document unloads: late reads can finish after assign().
-let loggingOut = false
+let loggingOut: AbortSignal | undefined
 export async function logoutSession(client: QueryClient): Promise<void> {
-  loggingOut = true
-  try {
-    await client.cancelQueries()
+  return runAuthorityAction(client, undefined, async ctx => {
+    ctx.run(() => { loggingOut = ctx.signal })
     try {
-      await api('/auth/logout', { method: 'POST' })
+      await ctx.run(() => client.cancelQueries())
+      try {
+        await ctx.run(() => api('/auth/logout', { method: 'POST', signal: ctx.signal }))
+      } catch (error) {
+        // An expired session is already signed out; finish the same cache/navigation cleanup.
+        if (!(error instanceof ApiError && error.status === 401)) throw error
+      }
+      ctx.run(() => { window.location.assign('/sign-in'); client.clear() })
     } catch (error) {
-      // An expired session is already signed out; finish the same cache/navigation cleanup.
-      if (!(error instanceof ApiError && error.status === 401)) throw error
+      ctx.run(() => { loggingOut = undefined })
+      throw error
     }
-    window.location.assign('/sign-in')
-    client.clear()
-  } catch (error) {
-    loggingOut = false
-    throw error
-  }
+  })
 }
-export async function api<T>(path: string, options: { method?: string; body?: unknown; orgId?: string; redirect401?: boolean; idempotencyKey?: string } = {}): Promise<T> {
+const scopes = new Map<string, AbortController>()
+export function discardTransportScope(org: string) {
+  scopes.get(org)?.abort(); scopes.set(org, new AbortController())
+}
+export async function api<T>(path: string, options: { method?: string; body?: unknown; orgId?: string; redirect401?: boolean; idempotencyKey?: string; signal?: AbortSignal } = {}): Promise<T> {
+  const org = options.orgId ?? /^\/o\/([^/]+)\//.exec(path)?.[1]
+  if (org && !scopes.has(org)) scopes.set(org, new AbortController())
+  const signal = AbortSignal.any([...(org ? [scopes.get(org)!.signal] : []), ...(options.signal ? [options.signal] : [])])
+  signal.throwIfAborted()
   const method = options.method ?? 'GET'
   const mutation = !['GET', 'HEAD'].includes(method)
   const headers: Record<string, string> = { Accept: 'application/json' }
@@ -45,11 +55,15 @@ export async function api<T>(path: string, options: { method?: string; body?: un
   if (mutation) Object.assign(headers, { Origin: window.location.origin, 'Sec-Fetch-Site': 'same-origin', 'Content-Type': 'application/json' })
   // Browsers supply the forbidden Origin/Sec-Fetch-Site headers themselves; declaring them
   // here also preserves the contract for fetch adapters. Same-origin credentials are explicit.
-  const response = await fetch(path, { method, credentials: 'same-origin', headers, ...(mutation ? { body: JSON.stringify(options.body ?? {}) } : {}) })
+  const response = await fetch(path, { signal, method, credentials: 'same-origin', headers, ...(mutation ? { body: JSON.stringify(options.body ?? {}) } : {}) })
+  signal.throwIfAborted()
   if (!response.ok) {
     const data = await response.json().catch(() => ({})) as { error?: string; code?: string }
-    if (response.status === 401 && options.redirect401 !== false && !loggingOut) window.location.assign(signInLocation())
+    signal.throwIfAborted()
+    if (response.status === 401 && options.redirect401 !== false && (!loggingOut || loggingOut.aborted)) window.location.assign(signInLocation())
     throw new ApiError(response.status, data.error ?? data.code ?? 'request_failed', data)
   }
-  return response.status === 204 ? undefined as T : response.json() as Promise<T>
+  const value = response.status === 204 ? undefined as T : await response.json() as T
+  signal.throwIfAborted()
+  return value
 }
