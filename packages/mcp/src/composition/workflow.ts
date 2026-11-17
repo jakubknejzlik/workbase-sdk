@@ -1,6 +1,6 @@
 import { join } from 'node:path'
 import { durableAtomic, json, type Bundle, type Store } from '../storage.ts'
-import { fail, identifier, isPresentationChange, type AccessChange, type CompositionChange, type RuntimeChange } from '../schemas.ts'
+import { fail, identifier, isPresentationChange, type AccessChange, type CompositionChange, type RolesChange, type RuntimeChange } from '../schemas.ts'
 import { z } from 'zod'
 import { accessEntities } from '@workbasehq/core/schema'
 import { loadConfig } from '@workbasehq/core/schema/load'
@@ -8,13 +8,14 @@ import { hash } from '../planning.ts'
 import { instanceMeta, replayEngine } from '../offline.ts'
 import { applyDisposable } from '../disposable.ts'
 import type { CompositionProposal } from '../proposals.ts'
-import { applyRuntimeChanges, parseRuntimeSource, rewriteRuntimeSource } from './runtime-source.ts'
+import { applyRuntimeChanges, parseRuntimeSource, rewritePermissionsSource, rewriteRuntimeSource } from './runtime-source.ts'
 import { hydrateRuntimePlugins } from './registry.ts'
 import { accessPlan, compositionPlan, presentationPlan } from './plan.ts'
 import { compositionRequirements, assertCompositionRequirements } from './requirements.ts'
 import { promotionHash, submitChange } from '../submit-change.ts'
 import { replaySources } from '../replay-sources.ts'
 import type { GitHubConfiguration } from '../github.ts'
+import { assertRoleTargetSafe } from '../role-usage.ts'
 
 async function save(store: Store, proposal: CompositionProposal) {
   await durableAtomic(join(await store.proposalDirectory(proposal.instance), 'proposals', `${proposal.proposalId}.json`), json(proposal))
@@ -22,7 +23,7 @@ async function save(store: Store, proposal: CompositionProposal) {
 function revision(bundle: Bundle, expected: number) {
   if (bundle.config.revision !== expected) fail('stale_revision', 'Revision changed; inspect and propose against the current revision', 409)
 }
-const isAccess = (change: CompositionChange): change is AccessChange => change.kind === 'set_system_access' || change.kind === 'set_entity_access' || change.kind === 'set_account_link'
+const isAccess = (change: CompositionChange): change is AccessChange | RolesChange => change.kind === 'set_roles' || change.kind === 'set_system_access' || change.kind === 'set_entity_access' || change.kind === 'set_account_link'
 const accessEntityTarget = z.union([identifier, z.enum(accessEntities)])
 async function load(store: Store, instance: string, changes: CompositionChange[]) {
   // Check the closed SDK entity list before loading or editing the instance.
@@ -39,17 +40,19 @@ async function prepare(bundle: Bundle, changes: CompositionChange[], root: strin
   }
   if (bundle.config.baseline !== 'workbase-sdk') fail('composition_requires_v3', 'Composition authoring requires a V3 instance', 409)
   const runtimeChanges = changes.filter((change): change is RuntimeChange => change.kind === 'set_plugin' || change.kind === 'set_interactive')
-  const model = applyRuntimeChanges(parseRuntimeSource(bundle.runtimeSource!), runtimeChanges, bundle.config)
-  const source = runtimeChanges.length ? rewriteRuntimeSource(bundle.runtimeSource!, model, bundle.config) : bundle.runtimeSource!
   const accessChanges = changes.filter(isAccess)
   const access = accessChanges.length ? await accessPlan(root, accessChanges) : { config: bundle.config, files: [] }
   const presentation = await presentationPlan(root, changes.filter(isPresentationChange))
   const config = presentation?.config ?? access.config
+  const model = applyRuntimeChanges(parseRuntimeSource(bundle.runtimeSource!), runtimeChanges, config)
+  const source = runtimeChanges.length ? rewriteRuntimeSource(bundle.runtimeSource!, model, config)
+    : changes.some(change => change.kind === 'set_roles') ? rewritePermissionsSource(bundle.runtimeSource!, config) : bundle.runtimeSource!
   const runtime = { ...config, ...(model.interactive === undefined ? {} : { interactive: model.interactive }), plugins: hydrateRuntimePlugins(model, config) }
   const target = { ...bundle, config, runtime }
   try { replayEngine(target.config, runtime) }
   catch { fail('invalid_composition', 'The target plugin composition is invalid; check required providers and interactive login', 400) }
-  return { target, source, files: [...(runtimeChanges.length ? [{ path: 'runtime.ts', data: source }] : []), ...access.files, ...(presentation?.files ?? [])], model }
+  return { target, source, files: [...(source !== bundle.runtimeSource ? [{ path: 'runtime.ts', data: source }] : []), ...access.files, ...(presentation?.files ?? [])], model,
+    roleDiff: 'roleDiff' in access ? access.roleDiff : undefined }
 }
 function proof(bundle: Bundle, prepared: Awaited<ReturnType<typeof prepare>> & Awaited<ReturnType<typeof compositionPlan>>, changes: CompositionChange[], requirementGuards: Bundle['guards']) {
   return { fingerprint: bundle.fingerprint, planHash: hash({ files: prepared.files, ledger: prepared.ledger, statements: prepared.statements, model: prepared.model, changes, requirementGuards }),
@@ -115,8 +118,11 @@ export async function executeComposition(store: Store, proposal: CompositionProp
     return { ok: true, kind: proposal.kind, revision: bundle.config.revision, errors: [], requirements }
   }
   if (name === 'preview_migration') return { ok: true, kind: proposal.kind, revision: bundle.config.revision,
-    sql: '', files: prepared.files, composition: prepared.model, pluginMigrations: prepared.pluginMigrations, pluginSql: prepared.pluginSql }
+    sql: '', files: prepared.files, composition: prepared.model, pluginMigrations: prepared.pluginMigrations, pluginSql: prepared.pluginSql,
+    ...(prepared.roleDiff ? { roleDiff: prepared.roleDiff } : {}) }
   if (name === 'apply_to_disposable') {
+    await assertRoleTargetSafe(proposal.instance, bundle.config.roles.filter(role => !prepared.target.config.roles.includes(role)),
+      bundle.config.organizationOwnerRole !== prepared.target.config.organizationOwnerRole)
     const verification = await applyDisposable(prepared.target,
       { target: bundle.config, indexes: bundle.indexes, sql: '', composition: { statements: prepared.statements, ledger: prepared.ledger } }, expected, input.keep ?? false, signal)
     if (verification.verified) { proposal.verification = currentProof; proposal.status = 'verified' }
@@ -129,9 +135,11 @@ export async function executeComposition(store: Store, proposal: CompositionProp
     revision(latest, input.expectedRevision!)
     if (latest.fingerprint !== bundle.fingerprint) fail('stale_revision', 'Instance files changed since verification', 409)
     if (latest.dependencyDigest !== bundle.dependencyDigest) fail('dependencies_changed', 'Dependencies changed since verification; validate and verify again', 409)
+    await assertRoleTargetSafe(proposal.instance, bundle.config.roles.filter(role => !prepared.target.config.roles.includes(role)),
+      bundle.config.organizationOwnerRole !== prepared.target.config.organizationOwnerRole)
     proposal.status = 'promoted'; proposal.promotedFiles = prepared.files
     proposal.promotedRevision = bundle.config.revision
-    proposal.migrationPreview = { sql: prepared.pluginSql, configDiff: { composition: prepared.model, pluginMigrations: prepared.pluginMigrations }, revision: bundle.config.revision }
+    proposal.migrationPreview = { sql: prepared.pluginSql, configDiff: { composition: prepared.model, pluginMigrations: prepared.pluginMigrations, ...(prepared.roleDiff ? { roleDiff: prepared.roleDiff } : {}) }, revision: bundle.config.revision }
     if (bundle.dependencyDigest !== undefined) proposal.dependencyDigest = bundle.dependencyDigest
     proposal.promotionHash = promotionHash(proposal)
     await store.commit(proposal.instance, [...prepared.files,

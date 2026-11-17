@@ -87,7 +87,13 @@ export const accessChangeSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('set_account_link'), entity: identifier, invitationRole: identifier }),
 ])
 export type AccessChange = z.infer<typeof accessChangeSchema>
-export const compositionChangeSchema = z.union([runtimeChangeSchema, accessChangeSchema, setLocale, setInstanceDisplayName])
+export const setRolesSchema = z.strictObject({
+  kind: z.literal('set_roles'),
+  roles: z.array(identifier).min(1).refine(roles => new Set(roles).size === roles.length, 'Duplicate roles'),
+  organizationOwnerRole: identifier,
+}).refine(change => change.roles.includes(change.organizationOwnerRole), 'organizationOwnerRole must be in roles')
+export type RolesChange = z.infer<typeof setRolesSchema>
+export const compositionChangeSchema = z.union([runtimeChangeSchema, accessChangeSchema, setRolesSchema, setLocale, setInstanceDisplayName])
 export type CompositionChange = z.infer<typeof compositionChangeSchema>
 export const isPresentationChange = (change: { kind: string }): change is PresentationChange =>
   change.kind === 'set_locale' || change.kind === 'set_instance_display_name'

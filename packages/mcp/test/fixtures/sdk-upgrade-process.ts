@@ -28,7 +28,8 @@ export async function runSdkTarget(options: TargetOptions) {
     for (const socket of sockets) socket.write(JSON.stringify(message) + '\n')
   }
   process.on('message', command)
-  // Keep the IPC barrier usable with long operator-selected scratch paths.
+  // Long operator-owned scratch roots exceed macOS's Unix socket path limit.
+  // Keep all files in scratch and use an ephemeral loopback port for the barrier.
   await new Promise<void>((resolve, reject) => {
     server.once('error', reject)
     server.listen(0, '127.0.0.1', resolve)

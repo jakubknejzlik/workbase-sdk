@@ -397,6 +397,7 @@ it.each([
     ...(path === 'docs/sdk/mcp-composition.md' ? [
       { kind: 'set_locale', languages: ['en', 'cs'] },
       { kind: 'set_instance_display_name', displayName: 'Cleaning' },
+      { kind: 'set_roles', roles: ['owner', 'viewer'], organizationOwnerRole: 'owner' },
     ] : []),
   ]
   const kinds = examples.map(change => compositionChangeSchema.parse(change).kind)
