@@ -124,7 +124,7 @@ export function compileAccess(config: InstanceConfig, declarations: Record<strin
           emit(relation.entity, undefined, source)
           emit(relation.many ? relation.entity : entity, relation.field, source)
           emit(relation.many ? entity : relation.entity, 'id', source)
-          if (relation.through) { emit(relation.through.entity, undefined, source); emit(relation.through.entity, relation.through.field, source) }
+          if (relation.through) { emit(relation.through.entity, undefined, source); emit(relation.entity, relation.through.field, source) }
           references(relation.entity, (relation.many ? Object.values(value as object)[0] : value) as Filter, owner, kind)
         } else {
           emit(entity, key, source)

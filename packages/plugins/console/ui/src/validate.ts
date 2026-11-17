@@ -11,7 +11,7 @@ import type { Node, Span } from './index'
 import { checkDictionaries, type Catalogs } from './dictionaries'
 import { sdkCatalogs } from './catalogs'
 import { validateInstanceReferences } from './references'
-import type { ReferenceDiagnostic } from '@workbasehq/core/references'
+import { compareReferenceDiagnostics, type ReferenceDiagnostic } from '@workbasehq/core/references'
 export type Location = { file: string; line: number; col: number }
 export type Finding = Location & { code: string; key?: string; lang?: string; message?: string; reference?: ReferenceDiagnostic }
 export type KeySource = Location & { plural?: boolean }
@@ -140,5 +140,9 @@ export async function validateInstance(root: string): Promise<Finding[]> {
   }
   for (const family of Object.keys(manifest.keys)) if (!scan.families.has(family)) findings.push({ code: 'unused-family', ...sourceAt(resolve(root, 'ui/keys.ts'), sources.modules.get(resolve(root, 'ui/keys.ts')) ?? '', family), key: family })
   findings.push(...checkDictionaries(root, requiredKeys(loaded.config, manifest, scan, sdkCatalogs.en, sources, loaded.sources), catalogs, sdkCatalogs))
-  return findings.sort((a, b) => a.file.localeCompare(b.file, 'en') || a.line - b.line || a.col - b.col || a.code.localeCompare(b.code, 'en') || (a.key ?? '').localeCompare(b.key ?? '', 'en'))
+  return findings.sort((a, b) => {
+    // Keep shared diagnostics in the same order as MCP and the generated checker.
+    if (a.reference || b.reference) return a.reference ? b.reference ? compareReferenceDiagnostics(a.reference, b.reference) : -1 : 1
+    return a.file.localeCompare(b.file, 'en') || a.line - b.line || a.col - b.col || a.code.localeCompare(b.code, 'en') || (a.key ?? '').localeCompare(b.key ?? '', 'en')
+  })
 }

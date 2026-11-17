@@ -33,6 +33,13 @@ export interface ReferenceInput {
 export type RemovalIntent = { kind: 'remove_field'; entity: string; field: string } | { kind: 'remove_entity'; entity: string }
 const compare = (a: string, b: string) => a < b ? -1 : a > b ? 1 : 0
 const identity = (value: unknown) => JSON.stringify(value)
+/** Shared adapter order: semantic target first, then exact authored location. */
+export function compareReferenceDiagnostics(a: ReferenceDiagnostic, b: ReferenceDiagnostic): number {
+  return compare(a.kind ?? '', b.kind ?? '') || compare(a.target?.entity ?? '', b.target?.entity ?? '')
+    || compare(a.target?.field ?? '', b.target?.field ?? '') || compare(a.code, b.code)
+    || compare(a.source.file, b.source.file) || a.source.start - b.source.start || a.source.end - b.source.end
+    || compare(a.owner ?? '', b.owner ?? '') || compare(identity(a), identity(b))
+}
 export function nodeSpan(node: ts.Node): ReferenceSpan {
   const tree = node.getSourceFile(), start = node.getStart(tree), end = node.getEnd()
   const a = tree.getLineAndCharacterOfPosition(start), b = tree.getLineAndCharacterOfPosition(end)
@@ -111,7 +118,7 @@ export function referenceInventory(input: ReferenceInput): ReferenceInventory {
       add('relation', entity, { entity: relation.many ? relation.entity : entity, field: relation.field }, `${path}.field`)
       if (relation.through) {
         add('relation', entity, { entity: relation.through.entity }, `${path}.through.entity`)
-        add('relation', entity, { entity: relation.through.entity, field: relation.through.field }, `${path}.through.field`)
+        add('relation', entity, { entity: relation.entity, field: relation.through.field }, `${path}.through.field`)
       }
     }
     spec.checks.forEach((check, i) => { for (const key of ['left', 'right'] as const) add('constraint', entity, { entity, field: check[key] }, `${root}.checks.${i}.${key}`) })
@@ -179,7 +186,7 @@ export function referenceInventory(input: ReferenceInput): ReferenceInventory {
   }
   const stable = <T>(items: T[]) => [...new Map(items.map(item => [identity(item), item])).entries()].sort(([a], [b]) => compare(a, b)).map(([, item]) => item)
   return { references: [...grouped.entries()].sort(([a], [b]) => compare(a, b)).map(([, ref]) => ({ ...ref, useSites: stable(ref.useSites) })),
-    contracts: stable(contracts), diagnostics: stable(diagnostics), uncovered: stable(uncovered) }
+    contracts: stable(contracts), diagnostics: stable(diagnostics).sort(compareReferenceDiagnostics), uncovered: stable(uncovered).sort(compareReferenceDiagnostics) }
 }
 export function validateRemoval(inventory: ReferenceInventory, intent: RemovalIntent) {
   const blockers = inventory.references.filter(ref => {
@@ -194,7 +201,7 @@ export function validateRemoval(inventory: ReferenceInventory, intent: RemovalIn
     message: `${intent.kind} ${intent.entity}${intent.kind === 'remove_field' ? '.' + intent.field : ''} is blocked by ${ref.kind}: ${ref.owner}`,
     repairHint: repair[ref.kind],
   }))]
-  return { ok: diagnostics.length === 0, diagnostics }
+  return { ok: diagnostics.length === 0, diagnostics: diagnostics.sort(compareReferenceDiagnostics) }
 }
 /** Validate reference targets independently from loader fail-fast semantics. */
 export function referenceDiagnostics(input: ReferenceInput, inventory = referenceInventory(input)): ReferenceDiagnostic[] {
@@ -203,5 +210,5 @@ export function referenceDiagnostics(input: ReferenceInput, inventory = referenc
     return !spec || ref.target.field && !baseFields.includes(ref.target.field) && !Object.hasOwn(spec.fields, ref.target.field)
       ? [{ code: 'unknown-reference', kind: ref.kind, target: ref.target, source: ref.source, owner: ref.owner, useSites: ref.useSites,
         message: `Unknown reference ${ref.target.entity}${ref.target.field ? '.' + ref.target.field : ''}`, repairHint: repair[ref.kind] }] : []
-  })]
+  })].sort(compareReferenceDiagnostics)
 }

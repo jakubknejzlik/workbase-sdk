@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { defineInstance } from '../../src/config'
 import { accessEntities, accessSystemActions } from '../../src/access'
-import { referenceInventory, validateRemoval, type ReferenceInput } from '../../src/references'
+import { referenceInventory, referenceDiagnostics, validateRemoval, type ReferenceInput } from '../../src/references'
 
 const source = { file: '/instance/schema/tasks.ts', line: 1, column: 1, start: 0, end: 5, endLine: 1, endColumn: 6 }
 function input(): ReferenceInput {
@@ -121,4 +121,27 @@ it('keeps unused predicates valid but blocks removal while their entity context 
   expect(inventory.diagnostics).toEqual([])
   expect(inventory.uncovered.map(d => d.code)).toEqual(['unbound-predicate'])
   expect(validateRemoval(inventory, { kind: 'remove_field', entity: 'tasks', field: 'title' }).diagnostics.map(d => d.code)).toContain('unbound-predicate')
+})
+
+it.each([false, true])('through references use join-table foreign keys (access observation: %s)', withAccess => {
+  const data = input()
+  data.config = defineInstance({ id: 'joins', revision: 1, roles: ['owner'], commands: ['attach', 'detach'], entities: {
+    workers: { fields: { name: { type: 'string' } }, relations: { tags: { entity: 'worker_tags', field: 'worker_id', many: true,
+      through: { entity: 'tags', field: 'tag_id', createCommand: 'attach', deleteCommand: 'detach' } } } },
+    tags: { fields: { name: { type: 'string' } }, relations: { workers: { entity: 'worker_tags', field: 'tag_id', many: true,
+      through: { entity: 'workers', field: 'worker_id', createCommand: 'attach', deleteCommand: 'detach' } } } },
+    worker_tags: { displayField: 'id', fields: { worker_id: { type: 'ref', entity: 'workers' }, tag_id: { type: 'ref', entity: 'tags' } } },
+  } })
+  data.config.roles = ['owner']
+  if (withAccess) {
+    data.access!.shared!.predicates = {}
+    data.access!.entities = { workers: { owner: { read: { where: { tags: { some: { tag_id: { isNull: false } } } } },
+      create: 'deny', update: 'deny', delete: 'deny' } }, tags: { owner: 'deny' }, worker_tags: { owner: 'deny' } }
+  } else data.access = undefined
+  const inventory = referenceInventory(data)
+  const refs = inventory.references.filter(r => r.kind === (withAccess ? 'policy' : 'relation'))
+  expect(refs).toContainEqual(expect.objectContaining({ target: { entity: 'worker_tags', field: 'tag_id' } }))
+  expect(refs).not.toContainEqual(expect.objectContaining({ target: { entity: 'tags', field: 'tag_id' } }))
+  expect(refs).not.toContainEqual(expect.objectContaining({ target: { entity: 'workers', field: 'worker_id' } }))
+  expect(referenceDiagnostics(data, inventory)).toEqual([])
 })

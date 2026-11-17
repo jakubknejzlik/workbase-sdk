@@ -190,6 +190,44 @@ it('SR-83 field renames preserve composite calendar title operands and secondary
   expect(prepare(config, [], [{ kind: 'rename_field', entity: 'events', from: 'name', to: 'title' }]).target.ui?.entities.events.views).toEqual([{ kind: 'calendar', startField: 'start', titleFields: ['title'], secondaryField: 'title' }])
 })
 
+it('reference service parity: generated check accepts canonical workers through worker_tags to tags', async () => {
+  const { mkdtemp, realpath, readFile, writeFile, symlink, rm } = await import('node:fs/promises')
+  const { tmpdir } = await import('node:os')
+  const { join, resolve } = await import('node:path')
+  const { spawnSync } = await import('node:child_process')
+  const { bootstrapInstance } = await import('../src/bootstrap')
+  const { validateReferenceSources } = await import('../src/planning')
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'wb140-through-')))
+  try {
+    await bootstrapInstance(root, { id: 'through_regression', target: 'cloudflare-github' })
+    await symlink(resolve('node_modules'), join(root, 'node_modules'))
+    const config = join(root, 'config.ts')
+    await writeFile(config, (await readFile(config, 'utf8'))
+      .replace("import worker from './schema/worker'", "import worker from './schema/worker'\nimport workers from './schema/workers'\nimport tags from './schema/tags'\nimport worker_tags from './schema/worker_tags'")
+      .replace('entities: { worker }', "commands: ['attach', 'detach'], entities: { worker, workers, tags, worker_tags }"))
+    const access = `access: { admin: 'deny', staff: 'deny' }`
+    await writeFile(join(root, 'schema/workers.ts'), `import { defineEntity } from '@workbasehq/core/schema'
+export default defineEntity({ fields: { name: { type: 'string' } }, relations: { tags: { entity: 'worker_tags', field: 'worker_id', many: true,
+through: { entity: 'tags', field: 'tag_id', createCommand: 'attach', deleteCommand: 'detach' } } }, ${access} })`)
+    await writeFile(join(root, 'schema/tags.ts'), `import { defineEntity } from '@workbasehq/core/schema'
+export default defineEntity({ fields: { name: { type: 'string' } }, relations: { workers: { entity: 'worker_tags', field: 'tag_id', many: true,
+through: { entity: 'workers', field: 'worker_id', createCommand: 'attach', deleteCommand: 'detach' } } }, ${access} })`)
+    await writeFile(join(root, 'schema/worker_tags.ts'), `import { defineEntity } from '@workbasehq/core/schema'
+export default defineEntity({ displayField: 'id', fields: { worker_id: { type: 'ref', entity: 'workers' }, tag_id: { type: 'ref', entity: 'tags' } }, ${access} })`)
+    const catalog = join(root, 'locales/en/domain.json'), data = JSON.parse(await readFile(catalog, 'utf8'))
+    for (const [entity, fields] of Object.entries({ workers: ['name'], tags: ['name'], worker_tags: ['worker_id', 'tag_id'] })) {
+      data[`entity.${entity}_one`] = entity; data[`entity.${entity}_other`] = entity
+      for (const field of fields) data[`field.${entity}.${field}`] = field
+    }
+    await writeFile(catalog, JSON.stringify(data, null, 2))
+    for (const args of [['run', 'migrate:plan', '--init'], ['run', 'openapi:write'], ['run', 'access:lock'], ['run', 'check']]) {
+      const result = spawnSync('bun', args, { cwd: root, encoding: 'utf8' })
+      expect(result.status, `${args.join(' ')}\n${result.stdout}\n${result.stderr}`).toBe(0)
+    }
+    expect((await validateReferenceSources(root)).diagnostics).toEqual([])
+  } finally { await rm(root, { recursive: true, force: true }) }
+}, 60_000)
+
 it('reference service parity: MCP validate and sdk check expose identical source-located diagnostics without editing sources', async () => {
   const { mkdtemp, realpath, readFile, writeFile, symlink, rm } = await import('node:fs/promises')
   const { tmpdir } = await import('node:os')
@@ -211,7 +249,8 @@ it('reference service parity: MCP validate and sdk check expose identical source
     await writeFile(pageFile, (await readFile(pageFile, 'utf8')).replace("layout: ['name']", "uses: ['worker.name'], layout: ['name']"))
     const catalog = join(root, 'locales/en/domain.json')
     const data = JSON.parse(await readFile(catalog, 'utf8'))
-    data['field.worker.deleted'] = 'name'
+    data['field.worker.zzz'] = 'name'
+    data['field.worker.aaa'] = 'name'
     await writeFile(catalog, JSON.stringify(data, null, 2))
     const files = ['config.ts', 'schema/worker.ts', 'access.ts', 'runtime.ts', 'schema.lock.json', 'locales/en/domain.json', 'ui/workers/index.ts', 'ui/workers/-detail.layout.ts', 'ui/-slots.ts']
     const before = await Promise.all(files.map(file => readFile(join(root, file), 'utf8')))
@@ -219,8 +258,9 @@ it('reference service parity: MCP validate and sdk check expose identical source
     const mcp = await server.workflow.call('validate', { instance: 'reference-parity' }) as { ok: boolean; errors: unknown[] }
     const ci = (await validateInstance(root)).flatMap(finding => finding.reference ? [finding.reference] : [])
     const shared = await validateReferenceSources(root)
-    expect(shared.diagnostics).toHaveLength(1)
-    expect(shared.diagnostics[0]).toMatchObject({ code: 'unknown-reference', kind: 'i18n', target: { entity: 'worker', field: 'deleted' } })
+    expect(shared.diagnostics).toHaveLength(2)
+    expect(shared.diagnostics.map(d => d.target?.field)).toEqual(['aaa', 'zzz'])
+    expect(shared.diagnostics[0]).toMatchObject({ code: 'unknown-reference', kind: 'i18n', target: { entity: 'worker', field: 'aaa' } })
     expect(mcp.ok).toBe(false)
     expect(mcp.errors).toEqual(ci)
     const { spawnSync } = await import('node:child_process')

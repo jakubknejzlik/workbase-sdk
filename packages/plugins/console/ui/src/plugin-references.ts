@@ -97,9 +97,22 @@ export function pluginReferences(root: string) {
   if (existsSync(file)) {
     const tree = read(file), expression = symbol(tree, 'default')
     const object = expression && !ts.isFunctionDeclaration(expression) ? unwrapped(expression) : undefined
-    const plugins = object && ts.isObjectLiteralExpression(object) ? property(object, 'plugins')?.initializer : undefined
-    if (plugins && ts.isArrayLiteralExpression(plugins)) for (const item of plugins.elements) inspect(item, item, item.getText(), false, new Set())
-    else if (plugins) gap(plugins, 'Computed runtime plugin registrations cannot be inventoried.')
+    if (!object || !ts.isObjectLiteralExpression(object)) {
+      gap(expression ?? tree, 'Unresolved runtime export: plugin registration coverage is unknown.')
+    } else {
+      let plugins: ts.Expression | undefined, unknown: ts.Node | undefined
+      for (const member of object.properties) {
+        if (ts.isSpreadAssignment(member) || member.name && ts.isComputedPropertyName(member.name)) unknown = member
+        else if (member.name?.getText().replace(/^['"]|['"]$/g, '') === 'plugins') {
+          plugins = ts.isPropertyAssignment(member) ? unwrapped(member.initializer) : undefined
+          // An explicit property overrides preceding spreads/computed keys.
+          unknown = plugins ? undefined : member
+        }
+      }
+      if (plugins && ts.isArrayLiteralExpression(plugins)) for (const item of plugins.elements) inspect(item, item, item.getText(), false, new Set())
+      else if (plugins) gap(plugins, 'Computed runtime plugin registrations cannot be inventoried.')
+      if (unknown) gap(unknown, 'Unresolved runtime properties: plugin registration coverage is unknown.')
+    }
   }
   return { references, contracts, uncovered }
 }

@@ -1,8 +1,9 @@
 import { afterEach, expect, test } from 'vitest'
-import { rmSync } from 'node:fs'
+import { rmSync, symlinkSync, mkdirSync } from 'node:fs'
+import { join } from 'node:path'
 import { referenceInventory, validateRemoval } from '@workbasehq/core/references'
 import { checkSources, normalise } from '../src/check'
-import { consoleReferences } from '../src/references'
+import { consoleReferences, validateInstanceReferences } from '../src/references'
 import { pluginReferences } from '../src/plugin-references'
 import { entityListPage, entityDetailPage, link, slot, p } from '../src/index'
 import { fixture, sdk } from './fixture'
@@ -62,4 +63,37 @@ test('computed UI provenance and undeclared custom plugin dependencies are expli
   put('runtime.ts', `import custom from './plugin'\nexport default { plugins: [custom] }`)
   put('plugin.ts', `export default { name: 'custom', version: '1' }`)
   expect(pluginReferences(root).uncovered.map(d => d.code)).toContain('opaque-plugin-reference')
+})
+
+test.each([
+  ['exported variable', `const runtime = { ...config, plugins: [custom] }; export default runtime`],
+  ['object spread', `const composition = { plugins: [custom] }; export default { ...config, ...composition }`],
+])('runtime plugin coverage blocks removal through %s', async (_name, runtime) => {
+  const { root, put } = fixture(); roots.push(root)
+  rmSync(join(root, 'ui'), { recursive: true })
+  put('schema/worker.ts', `import { defineEntity } from '@workbasehq/core/schema'\nexport default defineEntity({ fields: { name: { type: 'text' }, note: { type: 'text' } } })`)
+  put('plugin.ts', `export default { name: 'custom', version: '1', schemaReferences: [{ entity: 'worker', field: 'note' }] }`)
+  put('runtime.ts', `import config from './config'\nimport custom from './plugin'\n${runtime}`)
+  const result = await validateInstanceReferences(root, { kind: 'remove_field', entity: 'worker', field: 'note' })
+  expect(result.ok).toBe(false)
+  expect(result.diagnostics).toContainEqual(expect.objectContaining({ code: 'opaque-plugin-reference', kind: 'plugin', message: expect.stringContaining('coverage is unknown') }))
+})
+
+test('independent linked source failures retain both errors and the known plugin blocker', async () => {
+  const { root, put } = fixture(); roots.push(root)
+  rmSync(join(root, 'ui'), { recursive: true })
+  put('schema/worker.ts', `import { defineEntity } from '@workbasehq/core/schema'\nexport default defineEntity({ fields: { name: { type: 'text' }, note: { type: 'text' } } })`)
+  put('plugin.ts', `export default { name: 'custom', version: '1', schemaReferences: [{ entity: 'worker', field: 'note' }] }`)
+  put('runtime.ts', `import custom from './plugin'\nexport default { plugins: [custom] }`)
+  mkdirSync(join(root, 'src'))
+  for (const name of ['a-linked.ts', 'z-linked.ts']) symlinkSync(join(root, 'plugin.ts'), join(root, 'src', name))
+  put('src/ordinary.ts', 'export const value = 1')
+  const result = await validateInstanceReferences(root, { kind: 'remove_field', entity: 'worker', field: 'note' })
+  expect(result.ok).toBe(false)
+  expect(result.diagnostics.filter(d => d.code === 'reference-source').map(d => d.source.file)).toEqual([
+    join(root, 'src/a-linked.ts'), join(root, 'src/z-linked.ts'),
+  ])
+  expect(result.diagnostics).toContainEqual(expect.objectContaining({ code: 'removal-reference', kind: 'plugin', owner: 'plugin:custom' }))
+  expect(result.inventory.references).toContainEqual(expect.objectContaining({ kind: 'plugin', target: { entity: 'worker', field: 'note' } }))
+  expect(result.inventory.uncovered).toContainEqual(expect.objectContaining({ code: 'opaque-instance-code', source: expect.objectContaining({ file: join(root, 'src/ordinary.ts') }) }))
 })

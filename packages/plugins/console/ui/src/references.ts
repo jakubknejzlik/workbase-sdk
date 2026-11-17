@@ -72,12 +72,14 @@ function sourceDiagnostic(error: unknown, fallback: string): ReferenceDiagnostic
 /** Capture adapters live outside the pure core. Callers get one common result. */
 export async function inventoryInstanceReferences(root: string): Promise<ReferenceInventory> {
   root = resolve(root)
-  let input: ReferenceInput
+  let input: ReferenceInput | undefined
   try {
     const loaded = await loadConfig(resolve(root, 'config.ts'))
     input = { config: loaded.config, access: loaded.authoredAccess, source: referenceSource(loaded.sources, loaded.sourceTexts), catalogs: {}, references: [], diagnostics: [], contracts: [], uncovered: [] }
-    const plugins = pluginReferences(root)
-    input.references!.push(...plugins.references); input.contracts!.push(...plugins.contracts); input.uncovered!.push(...plugins.uncovered)
+    try {
+      const plugins = pluginReferences(root)
+      input.references!.push(...plugins.references); input.contracts!.push(...plugins.contracts); input.uncovered!.push(...plugins.uncovered)
+    } catch (error) { input.diagnostics!.push(sourceDiagnostic(error, resolve(root, 'runtime.ts'))) }
     if (existsSync(resolve(root, 'ui'))) {
       try {
         const extracted = await (await import('./vite')).extractUI(root, loaded)
@@ -89,24 +91,39 @@ export async function inventoryInstanceReferences(root: string): Promise<Referen
       const catalogs: Record<string, { file: string; text: string }> = input.catalogs![language] = {}
       for (const ns of ['domain', 'ui', 'sdk']) {
         const file = resolve(root, 'locales', language, ns + '.json')
-        if (existsSync(file)) catalogs[ns] = { file, text: readFileSync(file, 'utf8') }
+        try { if (existsSync(file)) catalogs[ns] = { file, text: readFileSync(file, 'utf8') } }
+        catch (error) { input.diagnostics!.push(sourceDiagnostic(error, file)) }
       }
     }
     // Arbitrary executable code has no complete static dependency contract today.
     // Report that gap on removals instead of claiming that a text scan proved safety.
-    const codeFiles = (directory: string): string[] => !existsSync(directory) ? [] : readdirSync(directory, { withFileTypes: true }).flatMap(entry => {
-      const file = resolve(directory, entry.name)
-      if (entry.isSymbolicLink()) throw new SourceError({ file, line: 1, column: 1 }, 'Cannot classify a linked Instance source')
-      return entry.isDirectory() ? codeFiles(file) : /\.[cm]?[jt]sx?$/.test(entry.name) ? [file] : []
-    }).sort()
-    for (const file of [...codeFiles(resolve(root, 'server')), ...codeFiles(resolve(root, 'src'))]) input.uncovered!.push({ code: 'opaque-instance-code', kind: 'instance-code', source: nodeSpan(ts.createSourceFile(file, readFileSync(file, 'utf8'), ts.ScriptTarget.Latest, true)),
-      message: 'Instance code requires a scoped target typecheck and explicit dependency review before removal.', repairHint: 'Repair declared/typed dependencies in this file and run the Instance typecheck against the intended target.' })
-    const inventory = referenceInventory(input)
-    inventory.diagnostics = referenceDiagnostics(input, inventory)
-    return inventory
+    const diagnostics = input.diagnostics!
+    const codeFiles = (directory: string): string[] => {
+      try {
+        return !existsSync(directory) ? [] : readdirSync(directory, { withFileTypes: true }).flatMap(entry => {
+          const file = resolve(directory, entry.name)
+          if (entry.isSymbolicLink()) {
+            diagnostics.push(sourceDiagnostic(new SourceError({ file, line: 1, column: 1 }, 'Cannot classify a linked Instance source'), file))
+            return []
+          }
+          return entry.isDirectory() ? codeFiles(file) : /\.[cm]?[jt]sx?$/.test(entry.name) ? [file] : []
+        }).sort()
+      } catch (error) { diagnostics.push(sourceDiagnostic(error, directory)); return [] }
+    }
+    for (const file of [...codeFiles(resolve(root, 'server')), ...codeFiles(resolve(root, 'src'))]) {
+      try {
+        input.uncovered!.push({ code: 'opaque-instance-code', kind: 'instance-code', source: nodeSpan(ts.createSourceFile(file, readFileSync(file, 'utf8'), ts.ScriptTarget.Latest, true)),
+          message: 'Instance code requires a scoped target typecheck and explicit dependency review before removal.', repairHint: 'Repair declared/typed dependencies in this file and run the Instance typecheck against the intended target.' })
+      } catch (error) { diagnostics.push(sourceDiagnostic(error, file)) }
+    }
   } catch (error) {
-    return { references: [], contracts: [], uncovered: [], diagnostics: [sourceDiagnostic(error, resolve(root, 'config.ts'))] }
+    const diagnostic = sourceDiagnostic(error, resolve(root, 'config.ts'))
+    if (!input) return { references: [], contracts: [], uncovered: [], diagnostics: [diagnostic] }
+    input.diagnostics!.push(diagnostic)
   }
+  const inventory = referenceInventory(input)
+  inventory.diagnostics = referenceDiagnostics(input, inventory)
+  return inventory
 }
 export async function validateInstanceReferences(root: string, intent?: RemovalIntent) {
   const inventory = await inventoryInstanceReferences(root)
