@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises'
+import { cp, lstat, mkdir, mkdtemp, readFile, readdir, readlink, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { spawnSync } from 'node:child_process'
@@ -51,6 +51,57 @@ async function fixture() {
   return { root, app, call, preview, apply }
 }
 
+// Include directory metadata so a transient lock or mkdir/unlink is observable.
+async function tree(root: string): Promise<unknown> {
+  const entries: unknown[] = []
+  for (const name of (await readdir(root)).sort()) {
+    const path = join(root, name), stat = await lstat(path, { bigint: true })
+    entries.push([name, stat.mode.toString(), stat.ino.toString(), stat.mtimeNs.toString(), stat.ctimeNs.toString(),
+      stat.isSymbolicLink() ? await readlink(path) : stat.isDirectory() ? await tree(path) : (await readFile(path)).toString('base64')])
+  }
+  return entries
+}
+it.each(['bun', 'node'])('keeps the entire instance tree identical across first, repeated and initialized %s previews', async runtime => {
+  const root = await empty(), session = await stdio(root, runtime)
+  try {
+    expect(await session.call('bootstrap_instance', bootstrap)).toMatchObject({ ok: true })
+    await provision(root)
+    const before = await tree(root)
+    const first = await session.call('initialize_instance', { instance, mode: 'preview' })
+    expect(first, JSON.stringify(first)).toMatchObject({ ok: true })
+    expect(await tree(root)).toEqual(before)
+    expect(await session.call('initialize_instance', { instance, mode: 'preview' })).toMatchObject({ ok: true, planHash: first.planHash })
+    expect(await tree(root)).toEqual(before)
+    expect(await session.call('initialize_instance', { instance, mode: 'apply', planHash: first.planHash })).toMatchObject({ ok: true, status: 'initialized' })
+    // A read-only preview must not recreate even a missing proposals directory.
+    await rm(join(root, 'proposals'), { recursive: true })
+    const initialized = await tree(root)
+    expect(await session.call('initialize_instance', { instance, mode: 'preview' })).toMatchObject({ ok: true })
+    expect(await tree(root)).toEqual(initialized)
+  } finally { await session.close() }
+})
+it.each(['bun', 'node'])('fails closed without writes for a missing transitive zod dependency under %s', async runtime => {
+  const root = await empty()
+  await bootstrapInstance(root, bootstrap)
+  // Reuse review1's isolated consumer: SDK sources copied without their own
+  // node_modules, so they cannot fall back to the producer's installed zod.
+  for (const name of ['core', 'plugins']) {
+    await cp(resolve('packages', name), join(root, 'node_modules/@workbasehq', name), {
+      recursive: true, filter: path => !['node_modules', 'test', 'ui'].includes(path.split('/').at(-1)!),
+    })
+  }
+  const session = await stdio(root, runtime)
+  try {
+    const before = await tree(root)
+    for (const mode of ['preview', 'apply']) {
+      const result = await session.call('initialize_instance', { instance, mode, ...(mode === 'apply' ? { planHash: '0'.repeat(64) } : {}) })
+      expect(result).toMatchObject({ ok: false, error: { code: 'dependencies_missing', status: 422, details: {
+        entrypoint: '@workbasehq/core/kernel/registry', diagnostic: expect.stringContaining('zod'), remedy: expect.stringContaining('transitive'),
+      } } })
+      expect(await tree(root)).toEqual(before)
+    }
+  } finally { await session.close() }
+})
 it.each(['bun', 'node'])('initializes and composes through real %s stdio in one session and after restart, without generators', async runtime => {
   const root = await empty()
   let session = await stdio(root, runtime)
@@ -133,7 +184,11 @@ it.each(['@workbasehq/core', '@workbasehq/plugins'])('returns actionable missing
   }
   const session = await stdio(root)
   try {
-    expect(await session.call('initialize_instance', { instance })).toMatchObject({ ok: false, error: { code: 'dependencies_missing', details: { package: packageName, remedy: expect.stringContaining('node_modules') } } })
+    const before = await tree(root)
+    for (const mode of ['preview', 'apply']) {
+      expect(await session.call('initialize_instance', { instance, mode, ...(mode === 'apply' ? { planHash: '0'.repeat(64) } : {}) })).toMatchObject({ ok: false, error: { code: 'dependencies_missing', details: { package: packageName, remedy: expect.stringContaining('node_modules') } } })
+      expect(await tree(root)).toEqual(before)
+    }
     expect(await readdir(join(root, 'migrations'))).toEqual(['.gitkeep'])
   } finally { await session.close() }
 })

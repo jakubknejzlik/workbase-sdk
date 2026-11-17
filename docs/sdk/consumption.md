@@ -76,12 +76,17 @@ to SDK `provision()`. For later physical schema changes use
 
 ## V3 authoring through MCP
 
-After installation and initial artifact generation, `.mcp.json` provides
+After installing the SDK dependencies, `.mcp.json` provides
 `workbase_config` alongside the separate data and ops servers. Launch it from the
 Instance directory: it runs the installed `workbase config --root .` and needs no
 API credentials or optional environment variables. Remote data/ops credentials
 remain separate; their app origin can be `https://app.example.test`. Existing
 Instances must merge the config entry manually because init preserves `.mcp.json`.
+
+For a fresh scaffold, call `initialize_instance` with the Instance selector and
+`mode: "preview"`, review the plan, then call `mode: "apply"` with the returned
+`planHash`. Preview writes nothing; apply publishes the initial schema, migration,
+OpenAPI and access artifacts locally. Shell generation remains an alternative.
 
 Call `inspect_schema` with the Instance selector, then `propose_composition` with
 `instance`, the inspected `baseRevision` and `changes`. Use `set_plugin` to add or

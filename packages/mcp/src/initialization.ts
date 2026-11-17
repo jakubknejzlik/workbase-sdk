@@ -2,6 +2,8 @@ import { constants } from 'node:fs'
 import { createRequire } from 'node:module'
 import { readFile, readdir } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
+import { pathToFileURL } from 'node:url'
+import { execute } from './sdk-process.ts'
 import { bindSchemaLock } from '@workbasehq/core/schema'
 import { isLiteralConfig, loadConfig } from '@workbasehq/core/schema/load'
 import { plan } from '@workbasehq/core/migrations/schema-plan'
@@ -40,11 +42,12 @@ export async function assertInitialized(root: string, instance: string) {
     { missing, nextStep: nextStep(instance) })
 }
 
-/** Resolve prerequisites without importing consumer modules, network calls or installation.
- * The initializer uses this MCP release's primitives; require the same SDK release locally. */
+/** Check the installed consumer graph without importing authored config or installing.
+ * A fresh process prevents module caches from hiding removed transitive dependencies. */
 async function dependencies(root: string, model: RuntimeModel) {
   const require = createRequire(join(root, 'package.json'))
   const result: Record<string, string> = {}
+  const imports: Record<string, string> = {}
   for (const [packageName, entrypoints] of [
     ['@workbasehq/core', ['schema', 'kernel/registry']],
     ['@workbasehq/plugins', model.plugins.map(({ plugin }) => plugin)],
@@ -52,6 +55,7 @@ async function dependencies(root: string, model: RuntimeModel) {
     try {
       for (const entry of [...new Set(entrypoints)].sort()) {
         const path = require.resolve(`${packageName}/${entry}`)
+        imports[`${packageName}/${entry}`] = pathToFileURL(path).href
         let directory = dirname(path)
         let manifest: Buffer | undefined
         while (true) {
@@ -70,6 +74,27 @@ async function dependencies(root: string, model: RuntimeModel) {
       throw new WorkflowError('dependencies_missing', `${packageName}@${metadata.version} must be available from the instance root`, 422,
         { package: packageName, supportedVersion: metadata.version, remedy: `Provision ${packageName}@${metadata.version} in this instance's node_modules, then retry initialize_instance preview. No packages were installed.` })
     }
+  }
+  const script = `for (const [entrypoint, url] of Object.entries(${JSON.stringify(imports)})) {
+    try { await import(url) }
+    catch (error) { console.log(JSON.stringify({ entrypoint, diagnostic: String(error) })); process.exit(1) }
+  }`
+  try {
+    const runtime = process.versions.bun ? ['--no-install'] : ['--import', createRequire(import.meta.url).resolve('tsx')]
+    const checked = await execute([process.execPath, ...runtime, '--input-type=module', '--eval', script], root,
+      { timeoutMs: 30000, maxOutputBytes: 65536, env: { ...process.env, TSX_DISABLE_CACHE: '1' } })
+    if (checked.rc !== 0) {
+      let diagnostic: Record<string, unknown>
+      try { diagnostic = JSON.parse(checked.stdout) }
+      catch { diagnostic = { diagnostic: checked.timedOut ? 'Dependency import timed out' : checked.stderr.slice(0, 4000) } }
+      throw new WorkflowError('dependencies_missing', 'The installed SDK runtime dependency graph cannot be imported', 422,
+        { ...diagnostic, supportedVersion: metadata.version,
+          remedy: `Provision the complete dependencies of @workbasehq/core@${metadata.version} and @workbasehq/plugins@${metadata.version}, including transitive packages named in the diagnostic, in this instance's node_modules; retry initialize_instance preview. No packages were installed.` })
+    }
+  } catch (error) {
+    if (error instanceof WorkflowError) throw error
+    throw new WorkflowError('dependencies_missing', 'Unable to verify the installed SDK runtime dependency graph', 422,
+      { diagnostic: String(error), remedy: 'Ensure the local runtime and the complete SDK dependencies are available, then retry initialize_instance preview. No packages were installed.' })
   }
   return result
 }
@@ -92,8 +117,8 @@ async function snapshot(root: string) {
 }
 
 export async function initializeInstance(store: Store, instance: string, input: { mode: 'preview' | 'apply'; planHash?: string }) {
-  return store.locked(instance, async () => {
-    const root = await store.directory(instance)
+  const root = await store.directory(instance, true)
+  const run = async () => {
     const before = await snapshot(root)
     if (!isLiteralConfig(join(root, 'config.ts'))) fail('initialization_unsupported', 'initialize_instance supports fresh literal V3 declarations only', 422)
     const loaded = await loadConfig(join(root, 'config.ts'), { bindExistingLock: false })
@@ -132,5 +157,9 @@ export async function initializeInstance(store: Store, instance: string, input: 
     if (existing.length === files.length) return { ...report, mode: 'apply', status: 'unchanged' }
     await store.commit(instance, files.map(({ path, data }) => ({ path, data, create: true })), before.guards, verify)
     return { ...report, mode: 'apply', status: 'initialized' }
-  })
+  }
+  if (input.mode === 'preview') return run()
+  // Fail before creating even lock metadata when the consumer graph is broken.
+  await dependencies(root, parseRuntimeSource((await bytes(root, 'runtime.ts'))?.toString('utf8') ?? ''))
+  return store.locked(instance, run)
 }

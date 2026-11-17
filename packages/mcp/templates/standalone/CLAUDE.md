@@ -25,8 +25,11 @@ See README.md for installation,
 artifact generation and repeated-init conflict behavior.
 
 For V3 authoring, start `workbase_config` from this Instance directory after
-installation and initial artifact generation. It runs `workbase config --root .`
-and needs no API credentials or optional environment variables. Use
+installing the SDK dependencies. It runs `workbase config --root .`
+and needs no API credentials or optional environment variables. For a fresh
+scaffold, call `initialize_instance` with `instance: "{{INSTANCE_SELECTOR}}"` and
+`mode: "preview"`, then `mode: "apply"` with the returned `planHash`. Preview
+writes nothing; apply publishes the initial artifacts locally. Then use
 `inspect_schema` with selector `{{INSTANCE_SELECTOR}}`, then `propose_composition`
 with that `instance`, the inspected `baseRevision`, and `changes`. Supported kinds:
 `set_plugin` adds a built-in plugin or replaces its options; `set_interactive`

@@ -141,12 +141,17 @@ replacement.
 
 ## V3 authoring through MCP
 
-After installation and initial artifact generation, start `workbase_config` from
+After installing the SDK dependencies, start `workbase_config` from
 this Instance directory. `.mcp.json` runs `workbase config --root .` through the
 installed SDK; this local authoring server needs no API credentials or optional
 environment variables. The existing `workbase_data` and `workbase_ops` servers
 keep their separate data and provisioning responsibilities. For example, their
 canonical app origin can be `https://app.example.test`; it is not needed by config.
+
+For a fresh scaffold, call `initialize_instance` with the Instance selector and
+`mode: "preview"`, review the plan, then call `mode: "apply"` with the returned
+`planHash`. Preview writes nothing; apply publishes the initial schema, migration,
+OpenAPI and access artifacts locally. Shell generation remains an alternative.
 
 Call `inspect_schema` with `instance: "{{INSTANCE_SELECTOR}}"`. At the returned
 revision, call `propose_composition` with `instance`, `baseRevision` and `changes`.

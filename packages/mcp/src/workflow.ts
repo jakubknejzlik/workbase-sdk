@@ -47,6 +47,19 @@ export class Workflow {
     try {
       // Bootstrap validates before any write, then audits accepted calls at the server root.
       if (name === 'bootstrap_instance') return await bootstrapInstance(this.store.root, raw)
+      // Initialization preflight and preview must not audit, recover or create directories.
+      if (name === 'initialize_instance') {
+        const input = schemas.initialize_instance.parse(raw)
+        if (!this.store.allowed.size) await this.store.init(false, true)
+        const result = await initializeInstance(this.store, input.instance, input)
+        if (input.mode === 'apply') {
+          const log = join(await this.store.proposalDirectory(input.instance), 'proposals', 'log.jsonl')
+          await noLink(log, true)
+          await appendFile(log, JSON.stringify({ timestamp: new Date().toISOString(), callId, tool: name }) + '\n', { mode: 0o600 })
+          await this.store.init()
+        }
+        return result
+      }
       // Persist intent using only the request id and initialized canonical
       // directories. Closed proposals are rechecked under the lock without
       // starting an attempt that would revoke their promotion authorization.
@@ -97,11 +110,6 @@ export class Workflow {
       if (!Object.hasOwn(schemas, name)) fail('unknown_tool', 'Unknown tool', 404)
       const input = schemas[name as ToolName].parse(raw) as Record<string, any>
       const targetInstance = input.instance ?? (await this.store.find(input.proposalId)).instance
-      if (name === 'initialize_instance') {
-        const result = await initializeInstance(this.store, targetInstance, schemas.initialize_instance.parse(raw))
-        if (input.mode === 'apply') await this.store.init()
-        return result
-      }
       if (name === 'rollback') {
         const result = await rollback(this.store, targetInstance, Number(input.to.slice(1)), input)
         if (result.written === true) {
