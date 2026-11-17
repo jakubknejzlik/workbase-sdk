@@ -62,6 +62,33 @@ async function invitation(email?: string, row?: string) {
 const accept = (id: string) => request(app, `/invitations/${id}/accept`, 'POST', {}, 'member-a')
 const status = () => request(app, '/orgs/org-a/row-access/people/p1')
 
+it('targeted preflight redacts anonymous and other accounts; only the verified recipient gets the full preview', async () => {
+  const i = await invitation()
+  const token = new URL(i.accept_url).searchParams.get('token')
+  const response = await app.request('http://localhost/invitations/preflight', {
+    method: 'POST', headers: { Origin: 'http://localhost', 'Content-Type': 'application/json' }, body: JSON.stringify({ token }),
+  })
+  expect(response.status).toBe(200)
+  expect(await json(response)).toEqual({ id: i.id, account_match: null })
+  const other = await request(app, '/invitations/preflight', 'POST', { token }, 'owner-a')
+  expect(other.status).toBe(200)
+  expect(await json(other)).toEqual({ id: i.id, account_match: false })
+  const denied = await request(app, `/invitations/${i.id}/preview`, 'GET', undefined, 'owner-a')
+  expect(denied.status).toBe(404)
+  expect(await json(denied)).toEqual({ error: 'invitation_not_found' })
+  const preflight = await request(app, '/invitations/preflight', 'POST', { token }, 'member-a')
+  expect(preflight.status).toBe(200)
+  const body = await json(preflight)
+  expect(Object.keys(body).sort()).toEqual(['account_match', 'expires_at', 'id', 'inviter', 'organization', 'role', 'state', 'target'])
+  expect(Object.keys(body.organization).sort()).toEqual(['id', 'name'])
+  expect(Object.keys(body.inviter)).toEqual(['display_name'])
+  expect(body).toMatchObject({ organization: { id: 'org-a', name: 'A' }, role: i.role, target: { entity: 'people', row: 'p1' }, account_match: true })
+  const preview = await request(app, `/invitations/${i.id}/preview`, 'GET', undefined, 'member-a')
+  expect(preview.status).toBe(200)
+  expect(await json(preview)).toEqual({ ...body, navigation_target: `/invitation?id=${i.id}`,
+    return_to: '/o/org-a', profile_complete: true, next: 'preview', actions: ['accept', 'decline'] })
+})
+
 it('legacy row-access retains the pending invitation after manual account linking', async () => {
   const i = await invitation()
   const before = await status()

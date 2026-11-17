@@ -4,8 +4,7 @@ import { dirname, join, relative } from 'node:path'
 import { serializeAccessLock } from '@workbasehq/core/access/lock'
 import { accessSystemActions } from '@workbasehq/core/schema'
 import { configSources, decodeSource, loadConfig, SourceError } from '@workbasehq/core/schema/load'
-import { generate } from '@workbasehq/core/openapi/generate'
-import { KernelRegistry } from '@workbasehq/core/kernel/registry'
+import { runOpenApiCli } from '@workbasehq/core/openapi/cli'
 import { expectedPluginMigrations, type PluginMigrationRow } from '@workbasehq/core/kernel/migrations'
 import { checkSchema, parseLock } from '@workbasehq/core/migrations/schema-lock'
 import type { Bundle } from '../storage.ts'
@@ -134,10 +133,11 @@ async function loadEditedConfig(root: string, inputs: Record<string, Buffer>, fi
     // Presence in the captured instance graph is the artifact opt-in. Never
     // introduce OpenAPI into an instance that does not already maintain it.
     if (inputs['openapi.json']) {
-      // Use the same generator as the CLI without its human stdout messages:
-      // configuration MCP stdout must contain JSON-RPC frames only.
-      const kernel = new KernelRegistry(loaded.config)
-      files.set('openapi.json', generate(kernel.config, kernel, loaded.configHash))
+      await runOpenApiCli(['--root', scratch, '--write'], loadOptions, {
+        info: message => console.error(message),
+        error: message => console.error(message),
+      })
+      files.set('openapi.json', await readFile(join(scratch, 'openapi.json'), 'utf8'))
     }
     return { config: loaded.config, files: [...files].map(([path, data]) => ({ path, data })) }
   } catch (error) {

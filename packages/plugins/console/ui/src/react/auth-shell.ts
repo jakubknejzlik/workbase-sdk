@@ -52,7 +52,7 @@ function entry(): Entry {
 }
 type Membership = { organization_id: string; organization_name?: string }
 type Me = { actor: { id: string }; memberships: Membership[] }
-type Invitation = { id: string; state: string; account_match: boolean | null; next?: string; navigation_target?: string }
+type Invitation = { id: string; state?: string; account_match: boolean | null; next?: string; navigation_target?: string }
 type Profile = { firstName: string | null; lastName: string | null; capabilities: { canEditNames: boolean }; completeness: { complete: boolean } }
 type Auth = { request: Request; i18n: I18n; signOut: () => Promise<void> }
 function status(i18n: I18n, key: string) { return h('p', { role: 'status' }, i18n.t('sdk:auth.' + key)) }
@@ -128,7 +128,7 @@ function InvitationFlow({ auth, initial, go, select }: { auth: Auth; initial: En
   }
   if (mismatch) return h('div', null, status(auth.i18n, 'mismatch'), h(Logout, { auth }))
   if (login) return h(SignIn, { auth, returnTo: invitation ? '/invitation?id=' + encodeURIComponent(invitation.id) : initial.id ? '/invitation?id=' + initial.id : '/' })
-  const terminal = failure || invitation && invitation.state !== 'pending'
+  const terminal = failure || invitation?.state && invitation.state !== 'pending'
   if (terminal) return status(auth.i18n, /expired/.test(String(terminal)) || invitation?.state === 'expired' ? 'expired' : /revoked/.test(String(terminal)) || invitation?.state === 'revoked' ? 'revoked' : 'invitationUnavailable')
   if (!invitation) return status(auth.i18n, 'loading')
   if (!resolved) return h('button', { type: 'button', disabled: pending, onClick: () => { void resolve() } }, auth.i18n.t('sdk:auth.continue'))

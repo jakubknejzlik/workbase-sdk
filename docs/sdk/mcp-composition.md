@@ -22,7 +22,7 @@ remedy; initialization never installs packages, accesses a registry or deploys a
 
 Bootstrap accepts optional `displayName` (trimmed, nonblank, at most 1000
 characters), defaulting to `id`. The CLI forwards it as
-`init --id cleaning --target cloudflare-github --display-name Cleaning`. Bootstrap remains create-only;
+`init --id fieldops --target cloudflare-github --display-name "Field Ops"`. Bootstrap remains create-only;
 renaming an initialized instance uses the proposal flow below.
 
 Normal config calls on an incomplete scaffold return `initialization_required`
@@ -71,8 +71,8 @@ Supported kinds, as defined in [schemas.ts](../../packages/mcp/src/schemas.ts):
 - `set_account_link` takes `entity` and `invitationRole` and updates `access.ts`.
 - `set_instance_display_name` takes `displayName`: trimmed, nonblank text of at most
   1000 characters. Case, Unicode, quotes and backslashes are preserved as data.
-  Call `propose_change` with `{ "instance": "cleaning", "baseRevision": 1,
-  "changes": [{ "kind": "set_instance_display_name", "displayName": "Cleaning" }] }`.
+  Call `propose_change` with `{ "instance": "fieldops", "baseRevision": 1,
+  "changes": [{ "kind": "set_instance_display_name", "displayName": "Field Ops" }] }`.
   `inspect_schema` exposes the saved `displayName` while retaining the selector.
   Name and locale changes can share a presentation-only batch; combining them
   with domain, runtime or access changes is rejected. Continue through validation,

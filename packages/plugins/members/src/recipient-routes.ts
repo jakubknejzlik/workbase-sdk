@@ -28,6 +28,8 @@ interface Invitation {
 }
 const nowISO = () => new Date().toISOString()
 const tokenBody = z.object({ token: invitationTokenSchema, return_to: z.string().optional() })
+// A complete selector with a truncated proof still supports the private sign-in return contract.
+const preflightBody = z.object({ token: z.string().regex(/^[a-f0-9]{64}(?:\.[a-f0-9]{0,64})?$/) })
 function state(row: Invitation) {
   return row.accepted_at ? 'accepted' : row.declined_at ? 'declined' : row.revoked_at ? 'revoked'
     : row.expired_at || row.expires_at <= nowISO() ? 'expired' : 'pending'
@@ -86,10 +88,11 @@ export function recipientRoutes(app: App, config: InstanceConfig, env: RuntimeEn
     }
   }
   async function metadata(row: Invitation, actor: ResolvedActor | null) {
+    if (actor && !matches(row, actor)) throw new ApiError(403, 'invitation_not_for_this_account')
     const organization = await env.DB.prepare('SELECT name FROM organizations WHERE id=?').bind(row.organization_id).first<{ name: string }>()
     return { id: row.id, organization: { id: row.organization_id, name: organization?.name ?? null },
       inviter: { display_name: await inviterDisplay(env.DB, row.inviter_id) }, role: row.role, expires_at: row.expires_at,
-      ...(row.target_entity ? { target: { entity: row.target_entity, row: row.target_row } } : {}), state: state(row), account_match: actor ? matches(row, actor) : null }
+      ...(row.target_entity ? { target: { entity: row.target_entity, row: row.target_row } } : {}), state: state(row), account_match: actor ? true as const : null }
   }
   function navigation(row: Invitation) { return `/invitation?id=${encodeURIComponent(row.id)}` }
   // Return targets are local product destinations and must be accessible now (or after this invitation).
@@ -120,6 +123,7 @@ export function recipientRoutes(app: App, config: InstanceConfig, env: RuntimeEn
     }
   }
   async function preview(row: Invitation, actor: ResolvedActor, rawReturn?: string, bindRecipient = false) {
+    if (!matches(row, actor)) throw new ApiError(403, 'invitation_not_for_this_account')
     const target = returnTarget(rawReturn, actor, row)
     if (state(row) === 'pending') {
       await eligible(row, actor)
@@ -148,17 +152,19 @@ export function recipientRoutes(app: App, config: InstanceConfig, env: RuntimeEn
   })
   app.post('/invitations/preflight', async c => {
     const actor = await authenticate(c, true)
-    const { token } = tokenBody.parse(await c.req.json())
+    const { token } = preflightBody.parse(await c.req.json())
     const row = await lookup({ token })
-    return c.json(await metadata(row, actor))
+    if (actor && matches(row, actor)) return c.json(await metadata(row, actor))
+    // Mailbox proof authorizes recipient preview, including terminal states, before sign-in.
+    // An existing different account still gets only account-switch recovery.
+    if (!actor && await hasInvitationMailboxProof(env, token)) return c.json(await metadata(row, null))
+    // Copied selectors and invalid proofs expose no metadata or state diagnostics.
+    return c.json({ id: row.id, account_match: actor ? false : null })
   })
   async function resolve(c: AppContext, body: z.infer<typeof tokenBody>, initial: ResolvedActor | null) {
     let actor = initial
     let login: Awaited<ReturnType<typeof kernel.signInInvitation>> | undefined
     const row = await lookup({ token: body.token })
-    assertPending(row)
-    // Reject stale roles before creating any session; preview validates return-target authorization.
-    if (!config.roles.includes(row.role)) throw new ApiError(403, 'invalid_invitation_role')
     if (!actor) {
       // Login CSRF must be checked even when SameSite withheld an existing session cookie.
       const origin = invitationOrigin(env, c.req.url)
@@ -167,6 +173,12 @@ export function recipientRoutes(app: App, config: InstanceConfig, env: RuntimeEn
         c.req.header('Content-Type')?.split(';')[0].trim().toLowerCase() !== 'application/json') throw new ApiError(403, 'csrf_failed')
       // A creator/copy-link token (including legacy links) selects an invitation, never an identity.
       if (!await hasInvitationMailboxProof(env, body.token)) throw new ApiError(401, 'unauthenticated')
+    } else if (!matches(row, actor)) throw new ApiError(403, 'invitation_not_for_this_account')
+    // Only mailbox proof or a verified matching session authorizes invitation diagnostics.
+    assertPending(row)
+    // Reject stale roles before creating any session; preview validates return-target authorization.
+    if (!config.roles.includes(row.role)) throw new ApiError(403, 'invalid_invitation_role')
+    if (!actor) {
       login = await kernel.signInInvitation(row.email, c.req.raw, env)
       actor = login.actor
     }
@@ -174,6 +186,7 @@ export function recipientRoutes(app: App, config: InstanceConfig, env: RuntimeEn
       await requireVerifiedSession(actor, env.DB)
       // Re-read after the login adapter; expiry/rotation/revocation may race session establishment.
       const current = await lookup({ token: body.token })
+      if (!matches(current, actor)) throw new ApiError(403, 'invitation_not_for_this_account')
       assertPending(current)
       const result = await preview(current, actor, body.return_to, true)
       if (login) {
