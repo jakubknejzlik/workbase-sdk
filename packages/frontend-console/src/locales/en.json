@@ -604,5 +604,6 @@
   "memberPendingLink": "Pending link",
   "rowFindRequired": "Select a member or enter a valid email address.",
   "rowAccountNotLinkable": "This account cannot be linked to this row.",
-  "rowAccessActions": "Application access actions"
+  "rowAccessActions": "Application access actions",
+  "rowChangeMemberOrEmail": "Change member or e-mail"
 }
