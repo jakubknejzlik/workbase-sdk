@@ -25,6 +25,20 @@ const Session = createContext<Lifecycle | null>(null)
 export const useMutationSession = () => useContext(Session)
 interface NavigationGuard { blocked: () => boolean; request: () => Promise<boolean> }
 const guards = new Set<NavigationGuard>()
+export interface MutationSafetySnapshot { readonly dirty: boolean; readonly submitting: boolean }
+interface SafetySession { dirty: boolean; submitting: boolean }
+const safetySessions = new Set<SafetySession>()
+const safetyListeners = new Set<() => void>()
+/** Read-only aggregate; unlike navigation, completion cannot bypass active work. */
+export const getMutationSafetySnapshot = (): MutationSafetySnapshot => Object.freeze({
+  dirty: [...safetySessions].some(session => session.dirty),
+  submitting: [...safetySessions].some(session => session.submitting),
+})
+export function subscribeMutationSafety(listener: () => void) {
+  safetyListeners.add(listener)
+  return () => { safetyListeners.delete(listener) }
+}
+const notifySafety = () => { for (const listener of safetyListeners) listener() }
 export const hasUnsavedMutation = () => [...guards].some(guard => guard.blocked())
 /** Returns the router's shouldBlock result. A pending request never navigates. */
 export async function blockMutationNavigation() {
@@ -47,6 +61,7 @@ export function MutationSession({ children, close, cancelLabel, confirming = fal
   const forms = useRef(new Map<symbol, { dirty: boolean; reset?: () => void }>())
   const [defaultOwner] = useState(() => Symbol('form'))
   const latch = useRef(false); const mounted = useRef(true); const completeRequested = useRef(false)
+  const [safety] = useState<SafetySession>(() => ({ dirty: false, submitting: false }))
   const decision = useRef<((blocked: boolean) => void) | undefined>(undefined)
   const state = useRef({ dirty, pending }); state.current = { dirty, pending }
   useEffect(() => {
@@ -62,21 +77,30 @@ export function MutationSession({ children, close, cancelLabel, confirming = fal
       },
     }
     guards.add(guard)
-    return () => { mounted.current = false; guards.delete(guard); decision.current?.(true) }
+    safetySessions.add(safety); notifySafety()
+    return () => {
+      mounted.current = false; guards.delete(guard); decision.current?.(true)
+      safety.dirty = false
+      // A closed/unmounted session still owns its asynchronous action until finally.
+      if (!safety.submitting) safetySessions.delete(safety)
+      notifySafety()
+    }
   }, [])
   const updateDirty = () => {
     const next = [...forms.current.values()].some(form => form.dirty)
     state.current.dirty = next; setDirty(next)
+    safety.dirty = next; notifySafety()
   }
   const session: Lifecycle = {
     dirty, pending, confirming, cancelLabel, submissionKey,
     setForm: (next, reset, owner = defaultOwner) => { forms.current.set(owner, { dirty: next, reset }); updateDirty() },
     removeForm: owner => { forms.current.delete(owner); updateDirty() },
     cancel: () => { if (!latch.current) requestClose(value => value + 1) },
-    complete: () => { if (!mounted.current) return; completeRequested.current = true; if (latch.current) toast.success(labels.saved, { id: 'mutation-saved' }); close() },
+    complete: () => { if (!mounted.current) return; completeRequested.current = true; safety.dirty = false; notifySafety(); if (latch.current) toast.success(labels.saved, { id: 'mutation-saved' }); close() },
     run: async action => {
       if (latch.current) return
       latch.current = true; setPending(true); completeRequested.current = false
+      safety.submitting = true; safetySessions.add(safety); notifySafety()
       try {
         await action()
         if (mounted.current) {
@@ -85,9 +109,13 @@ export function MutationSession({ children, close, cancelLabel, confirming = fal
       } catch {
         // Consumers render translated, closed-code inline errors and retain values.
         completeRequested.current = false
+        if (mounted.current) safety.dirty = state.current.dirty
       } finally {
         latch.current = false
         if (mounted.current) setPending(false)
+        safety.submitting = false
+        if (!mounted.current) safetySessions.delete(safety)
+        notifySafety()
       }
     },
   }
