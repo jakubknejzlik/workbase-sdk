@@ -3,6 +3,19 @@
 Fork the repository, create a branch, and open a pull request. CI uses read-only
 repository permissions. Maintainers review changes before merging.
 
+PRs into `integration/*` use targeted local checks. Whenever a changed file has
+an exact-line review in `scripts/sdk-scan-policy.json` (including `bun.lock` and
+reviewed `package.json` files), or the policy itself changes, also run:
+
+```sh
+bun x --no-install vitest run --config vitest.tools.config.ts scripts/sdk-scan-policy.test.ts scripts/check-console-public.test.ts
+```
+
+Use the private vocabulary configuration described below. The tooling config is
+required because the default Vitest config includes only runtime tests. Verify
+every exact-line review against the changed files; retain each digest and update
+only line numbers when the reviewed bytes are unchanged.
+
 Use the Bun version in package.json and Node 25.8.0. Install gitleaks 8.24.3
 from its verified release, then run the public CI commands:
 
