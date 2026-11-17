@@ -1,0 +1,9 @@
+# Exact historical reviews for #158: synthetic rotated identity keys in tests.
+# Each entry binds one commit, file, rule and line; no current/future keys are allowed.
+# 320f96e8 is the #87 fix merged in PR #93. The four other findings remain
+# reachable through that PR's retained WR branch, which is absent from main.
+320f96e821455d85e9fa5be7c19284ef630ce60d:packages/plugins/members/test/mail-finalization.test.ts:generic-api-key:27
+344e803cc4f25b3acf3862f7b345f79d96fb24a2:packages/plugins/members/test/mail-finalization.test.ts:generic-api-key:27
+344e803cc4f25b3acf3862f7b345f79d96fb24a2:packages/plugins/members/test/mail-finalization.test.ts:generic-api-key:56
+9f6f4b2e111a66e7362d319ea5f0d4696a2204da:packages/plugins/members/test/mail-finalization.test.ts:generic-api-key:27
+f4aa0ce5a1506941af6da0f58476cc183c667445:packages/plugins/members/test/mail-finalization.test.ts:generic-api-key:31
