@@ -121,6 +121,7 @@ export function recipientRoutes(app: App, config: InstanceConfig, env: RuntimeEn
     }
   }
   async function preview(row: Invitation, actor: ResolvedActor, rawReturn?: string, bindRecipient = false) {
+    if (!matches(row, actor)) throw new ApiError(403, 'invitation_not_for_this_account')
     const target = returnTarget(rawReturn, actor, row)
     if (state(row) === 'pending') {
       await eligible(row, actor)
@@ -159,9 +160,6 @@ export function recipientRoutes(app: App, config: InstanceConfig, env: RuntimeEn
     let actor = initial
     let login: Awaited<ReturnType<typeof kernel.signInInvitation>> | undefined
     const row = await lookup({ token: body.token })
-    assertPending(row)
-    // Reject stale roles before creating any session; preview validates return-target authorization.
-    if (!config.roles.includes(row.role)) throw new ApiError(403, 'invalid_invitation_role')
     if (!actor) {
       // Login CSRF must be checked even when SameSite withheld an existing session cookie.
       const origin = invitationOrigin(env, c.req.url)
@@ -170,6 +168,12 @@ export function recipientRoutes(app: App, config: InstanceConfig, env: RuntimeEn
         c.req.header('Content-Type')?.split(';')[0].trim().toLowerCase() !== 'application/json') throw new ApiError(403, 'csrf_failed')
       // A creator/copy-link token (including legacy links) selects an invitation, never an identity.
       if (!await hasInvitationMailboxProof(env, body.token)) throw new ApiError(401, 'unauthenticated')
+    } else if (!matches(row, actor)) throw new ApiError(403, 'invitation_not_for_this_account')
+    // Only mailbox proof or a verified matching session authorizes invitation diagnostics.
+    assertPending(row)
+    // Reject stale roles before creating any session; preview validates return-target authorization.
+    if (!config.roles.includes(row.role)) throw new ApiError(403, 'invalid_invitation_role')
+    if (!actor) {
       login = await kernel.signInInvitation(row.email, c.req.raw, env)
       actor = login.actor
     }
@@ -177,6 +181,7 @@ export function recipientRoutes(app: App, config: InstanceConfig, env: RuntimeEn
       await requireVerifiedSession(actor, env.DB)
       // Re-read after the login adapter; expiry/rotation/revocation may race session establishment.
       const current = await lookup({ token: body.token })
+      if (!matches(current, actor)) throw new ApiError(403, 'invitation_not_for_this_account')
       assertPending(current)
       const result = await preview(current, actor, body.return_to, true)
       if (login) {
