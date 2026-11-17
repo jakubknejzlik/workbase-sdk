@@ -3,13 +3,14 @@ import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { dirname, join, relative, resolve } from 'node:path'
 import { checkConsolePublic } from './check-console-public'
 import { stageConsoleAssets } from './stage-console-assets'
 import { stageConsolePackage } from './lib/stage-console-package'
 
 const root = resolve(import.meta.dirname, '..')
-const scratch = registerTempDir(mkdtempSync('/tmp/workbase-console-packed-'))
+const scratch = registerTempDir(mkdtempSync(join(tmpdir(), 'workbase-console-packed-')))
 const env = { ...process.env, NODE_PATH: '', NODE_OPTIONS: '', npm_config_cache: join(scratch, 'npm-cache'), npm_config_userconfig: join(scratch, 'npmrc') }
 const npm = (args: string[], cwd: string) => execFileSync('npm', args, { cwd, env, encoding: 'utf8', timeout: 180000, stdio: 'pipe' })
 const digest = (path: string) => createHash('sha256').update(readFileSync(path)).digest('hex')
@@ -34,7 +35,7 @@ try {
     assert(!Object.hasOwn(manifest, 'private'))
     assert.equal(manifest.publishConfig.access, 'public')
     for (const entry of packed.files) {
-      assert(!/(?:frontend-console|console-generated|(?:^|\/)ui)(?:\/|$)|(?:^|\/)(?:node_modules|fixtures|test|tests|__tests__)(?:\/|$)|\.map$/.test(entry.path), `Producer content in tarball: ${entry.path}`)
+      assert(!/(?:frontend-console|console-generated)(?:\/|$)|(?:^|\/)(?:node_modules|fixtures|test|tests|__tests__)(?:\/|$)|\.map$/.test(entry.path), `Producer content in tarball: ${entry.path}`)
     }
     for (const legal of ['LICENSE', 'NOTICE']) assert(readFileSync(join(directory, legal), 'utf8').length > 0)
     for (const target of Object.values(manifest.exports) as (string | { default: string; types: string })[]) {

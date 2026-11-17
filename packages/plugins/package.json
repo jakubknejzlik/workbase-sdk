@@ -31,7 +31,11 @@
     "./console/ui/saved-views": "./console/ui/src/saved-views-storage.ts",
     "./console/ui/client": "./console/ui/src/client.ts",
     "./console/ui/react": "./console/ui/src/react/index.ts",
-    "./console/ui/i18n": "./console/ui/src/i18n.ts"
+    "./console/ui/i18n": "./console/ui/src/i18n.ts",
+    "./console/ui/styles.css": {
+      "types": "./console/ui/src/styles.d.ts",
+      "default": "./console/ui/src/styles.css"
+    }
   },
   "dependencies": {
     "zod": "4.6.7",

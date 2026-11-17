@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { isSecret, output, secret, type Output } from '@pulumi/pulumi'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { sha256 } from '../../src/infra'
+import { CONSOLE_SHA_MARKER, consoleArtifactsSHA, readConsoleArtifacts } from '../../src/console-build'
 import { createProvisionPlan, provision, ProvisionDiagnostic, provisionErrorMessage, validateProvisionOptions, type ProvisionOptions } from '../../src/infra/provision'
 
 const records = vi.hoisted(() => [] as { type: string; name: string; args: any; opts: any; resource: any; child?: any }[])
@@ -21,6 +22,13 @@ beforeEach(async () => {
   await mkdir(join(root, 'application inputs'))
   await mkdir(join(root, 'sql'))
   await mkdir(join(root, 'console assets'))
+  const assets = join(root, 'console assets')
+  const html = `<html><head><meta name="workbase-build-sha" content="${CONSOLE_SHA_MARKER}"></head></html>`
+  await writeFile(join(assets, 'index.html'), html)
+  await writeFile(join(assets, 'banner.svg'), '<svg>public asset</svg>')
+  const sha = consoleArtifactsSHA(await readConsoleArtifacts(assets))
+  await writeFile(join(assets, 'index.html'), html.replace(CONSOLE_SHA_MARKER, sha))
+  await writeFile(join(assets, 'build-meta.json'), JSON.stringify({ sha, builtAt: '2026-11-17T00:00:00.000Z' }))
   await writeFile(join(root, 'package.json'), '{"type":"module"}\n')
   await writeFile(join(root, 'application inputs/config.ts'), `export default { id: 'unfamiliar', revision: 1, roles: ['owner'], entities: {}, plugins: [] }\n`)
   await writeFile(join(root, 'worker.ts'), 'export default { fetch() { return new Response("ok") } }\n')
@@ -82,6 +90,37 @@ function mockSst() {
     },
   })
 }
+
+it.each(['missing-file', 'missing-sha', 'invalid-json', 'invalid-sha', 'missing-builtAt'])('rejects %s console metadata before resource registration/upload', async kind => {
+  mockSst()
+  const file = join(root, 'console assets/build-meta.json')
+  if (kind === 'missing-file') await rm(file)
+  else await writeFile(file, kind === 'invalid-json' ? '{' : JSON.stringify({
+    ...(kind !== 'missing-builtAt' ? { builtAt: '2026-11-17T00:00:00.000Z' } : {}),
+    ...(kind !== 'missing-sha' ? { sha: kind === 'invalid-sha' ? 'unbuilt' : '0'.repeat(40) } : {}),
+  }))
+  await expect(provision({ ...options, assetsDir: 'console assets' })).rejects.toMatchObject({ code: 'provision_console_metadata_invalid' })
+  expect(records).toEqual([])
+})
+
+it.each(['metadata-sha', 'html-stamp', 'missing-stamp', 'missing-html', 'public-asset', 'added-asset', 'removed-asset', 'restamped-html'])('rejects mismatched console artifacts: %s, before resource registration/upload', async kind => {
+  mockSst()
+  const assets = join(root, 'console assets')
+  if (kind === 'metadata-sha') await writeFile(join(assets, 'build-meta.json'), JSON.stringify({ sha: '0'.repeat(40), builtAt: '2026-11-17T00:00:00.000Z' }))
+  if (kind === 'html-stamp') await writeFile(join(assets, 'index.html'), `<meta name="workbase-build-sha" content="${'0'.repeat(40)}">`)
+  if (kind === 'missing-stamp') await writeFile(join(assets, 'index.html'), '<html>no stamp</html>')
+  if (kind === 'missing-html') await rm(join(assets, 'index.html'))
+  if (kind === 'public-asset') await writeFile(join(assets, 'banner.svg'), '<svg>changed</svg>')
+  if (kind === 'added-asset') await writeFile(join(assets, 'extra.txt'), 'unexpected')
+  if (kind === 'removed-asset') await rm(join(assets, 'banner.svg'))
+  if (kind === 'restamped-html') {
+    // Matching HTML/metadata alone is insufficient: verify the emitted bytes too.
+    await writeFile(join(assets, 'index.html'), `<meta name="workbase-build-sha" content="${'0'.repeat(40)}">`)
+    await writeFile(join(assets, 'build-meta.json'), JSON.stringify({ sha: '0'.repeat(40), builtAt: '2026-11-17T00:00:00.000Z' }))
+  }
+  await expect(provision({ ...options, assetsDir: 'console assets' })).rejects.toMatchObject({ code: 'provision_console_sha_mismatch' })
+  expect(records).toEqual([])
+})
 
 it.each([
   ['stage', undefined, 'provision_invalid_stage'], ['resourcePrefix', undefined, 'provision_invalid_prefix'],

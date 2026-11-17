@@ -187,6 +187,19 @@ export function printRuntimeSource(model: RuntimeModel, config: CompositionConfi
   const imports = importOrder.filter(name => used.has(name)).map(name => `import { ${names.get(name)} } from '@workbasehq/plugins/${name}'\n`).join('')
   return `${imports}import config from './config'\n\n// Executable plugin composition stays outside the literal config loader boundary.\nexport default ${objectSource(normalized, 'config', names)}\n`
 }
+/** Role-only authoring changes the derived provider options, preserving the
+ * surrounding runtime expression, imports, comments and factory choices. */
+export function rewritePermissionsSource(source: string, config: CompositionConfig): string {
+  const parsed = parse(source, 'runtime.ts')
+  const plugins = parsed.object.properties.find(property => ts.isPropertyAssignment(property)
+    && (ts.isIdentifier(property.name) || ts.isStringLiteral(property.name)) && property.name.text === 'plugins') as ts.PropertyAssignment
+  const call = (plugins.initializer as ts.ArrayLiteralExpression).elements.find(element => ts.isCallExpression(element)
+    && ts.isIdentifier(element.expression) && parsed.bindings.some(binding => binding.local === element.expression.getText(parsed.file) && binding.plugin === 'permissions')) as ts.CallExpression | undefined
+  if (!call) return source
+  const start = call.arguments.length ? call.arguments[0].getStart(parsed.file) : call.end - 1
+  const end = call.arguments.length ? call.arguments[0].end : start
+  return source.slice(0, start) + text(permissionOptions(config)) + source.slice(end)
+}
 /** Preserve all authored bytes outside the object and the necessary import edits. */
 export function rewriteRuntimeSource(source: string, model: RuntimeModel, config: CompositionConfig, filename = 'runtime.ts'): string {
   const parsed = parse(source, filename)

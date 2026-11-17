@@ -1,3 +1,5 @@
+import { isLiteralConfig, loadConfig } from '@workbasehq/core/schema/load'
+import { assertInitialized } from './initialization.ts'
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { acquireInstanceLock } from './instance-lock.ts'
 import { devFixtures } from './dev-support.ts'
@@ -136,7 +138,7 @@ async function dependencyHash(path: string) {
   const bytes = await fileBytes(path)
   return bytes === null ? null : byteHash(bytes)
 }
-const transactionPath = z.string().regex(/^(runtime\.ts|access\.ts|schema\/[a-z][a-z0-9_]{0,62}\.ts|openapi\.json|access\.lock\.(?:json|md)|package\.json|bun\.lock|config(?:\.v[1-9][0-9]*)?\.ts|config\.(?:indexes|versions)\.json|migrations\/\d{4}_[a-z0-9_]+\.sql|proposals\/[a-f0-9-]+\.json)$/)
+const transactionPath = z.string().regex(/^(runtime\.ts|access\.ts|schema\.lock\.json|schema\/[a-z][a-z0-9_]{0,62}\.ts|openapi\.json|access\.lock\.(?:json|md)|package\.json|bun\.lock|config(?:\.v[1-9][0-9]*)?\.ts|config\.(?:indexes|versions)\.json|migrations\/\d{4}_[a-z0-9_]+\.sql|proposals\/[a-f0-9-]+\.json)$/)
 const digest = z.string().regex(/^[a-f0-9]{64}$/)
 const base64 = z.string().refine(value => Buffer.from(value, 'base64').toString('base64') === value)
 const identityPart = z.union([z.string().regex(/^(0|[1-9][0-9]*)$/), z.number().int().nonnegative().transform(String)])
@@ -349,7 +351,8 @@ export class Store {
   constructor(public root: string, private requestedAllowed?: Set<string>) {
     this.allowed = requestedAllowed ?? new Set(devFixtures?.allowed ?? [])
   }
-  async init(allowEmpty = false) {
+  async init(allowEmpty = false, readOnly = false) {
+    this.configCache.clear()
     this.allowed = this.requestedAllowed ?? new Set(devFixtures?.allowed ?? [])
     this.standalone = false
     this.instanceDirectories.clear()
@@ -369,15 +372,23 @@ export class Store {
     this.root = await realpath(selectedRoot)
     if (exists || pending) {
       this.standalone = true
-      await mkdir(join(this.root, 'proposals'), { recursive: true, mode: 0o700 })
-      await this.withLock(this.root, async () => {
+      if (readOnly && pending) fail('instance_busy', 'Pending publication requires recovery before preview; restart the server', 409)
+      if (!readOnly) await mkdir(join(this.root, 'proposals'), { recursive: true, mode: 0o700 })
+      const discover = async () => {
         const configPath = join(this.root, 'config.ts')
-        const config = await importConfig(configPath, hash(await readFile(configPath, 'utf8')))
+        const literal = isLiteralConfig(configPath)
+        if (readOnly && !literal) fail('initialization_unsupported', 'initialize_instance supports fresh literal V3 declarations only', 422)
+        if (literal) await replaySources(this.root, { accessLock: true })
+        const config = literal
+          ? (await loadConfig(configPath, { bindExistingLock: false })).config
+          : await importConfig(configPath, hash(await readFile(configPath, 'utf8')))
         // Core IDs use SQL identifiers (underscores); MCP instance selectors use hyphens.
         const instance = instanceSelector(config.id)
         if (this.requestedAllowed && (this.requestedAllowed.size !== 1 || !this.requestedAllowed.has(instance))) fail('invalid_allowlist', 'Standalone allowlist must contain only the config id')
         this.allowed = new Set([instance])
-      })
+      }
+      if (readOnly) await discover()
+      else await this.withLock(this.root, discover)
     }
     if (!exists && !pending && allowEmpty && !this.requestedAllowed) {
       const names = await readdir(this.root)
@@ -388,7 +399,7 @@ export class Store {
     }
     for (const instance of this.allowed) {
       if (!/^[a-z][a-z0-9-]*$/.test(instance)) fail('invalid_allowlist', 'Invalid server allowlist')
-      if (this.standalone) await this.directory(instance)
+      if (this.standalone || readOnly) await this.directory(instance, readOnly)
       else await this.locked(instance, async () => { await this.directory(instance) })
     }
   }
@@ -399,7 +410,7 @@ export class Store {
     try { return (await lstat(journal)).isFile() }
     catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false; throw error }
   }
-  async directory(instance: string) {
+  async directory(instance: string, readOnly = false) {
     if (!this.allowed.has(instance)) fail('instance_not_allowed', 'Instance is not in the server allowlist', 403)
     await noLink(this.root)
     const directories: string[] = this.standalone ? [this.root] : []
@@ -424,7 +435,7 @@ export class Store {
     if (!config?.isFile() && !(config === null && await this.hasJournal(dir))) fail('invalid_instance_directory', 'Expected one configuration directory for the allowed instance')
     await noLink(join(dir, 'migrations'))
     await noLink(join(dir, 'proposals'), true)
-    await mkdir(join(dir, 'proposals'), { recursive: true, mode: 0o700 })
+    if (!readOnly) await mkdir(join(dir, 'proposals'), { recursive: true, mode: 0o700 })
     this.instanceDirectories.set(instance, dir)
     return dir
   }
@@ -450,6 +461,7 @@ export class Store {
   async load(instance: string, options: { canonicalRuntime?: boolean } = {}): Promise<Bundle> {
     const dir = await this.directory(instance)
     if (!this.owns(dir)) return this.withLock(dir, () => this.load(instance, options))
+    await assertInitialized(dir, instance)
     const dependencies = this.standalone ? await dependencySnapshot(dir) : undefined
     const names = (await readdir(dir)).filter(n => /^config(?:\.[a-z0-9_-]+)?\.(ts|json)$/.test(n)).sort()
     const sources: Record<string, string> = {}

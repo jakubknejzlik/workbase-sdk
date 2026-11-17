@@ -29,7 +29,7 @@ async function templateFiles(dir: string, prefix = ''): Promise<string[]> {
   }
   return paths.sort()
 }
-export type BootstrapReport = { ok: true; files: { path: string; status: 'created' | 'unchanged' | 'conflict' }[] }
+export type BootstrapReport = { ok: true; nextStep: { tool: 'initialize_instance'; arguments: { instance: string; mode: 'preview' }; root: string }; files: { path: string; status: 'created' | 'unchanged' | 'conflict' }[] }
 export async function bootstrapInstance(serverRoot: string, raw: unknown): Promise<BootstrapReport> {
   try { return await bootstrapFiles(serverRoot, raw) }
   catch (error) {
@@ -81,6 +81,7 @@ async function bootstrapFiles(serverRoot: string, raw: unknown): Promise<Bootstr
     const content = (await readFile(join(template, source), 'utf8'))
       .replaceAll('{{SDK_VERSION}}', version)
       .replaceAll('{{INSTANCE_ID}}', input.id).replaceAll('{{INSTANCE_SELECTOR}}', selector)
+      .replaceAll('{{INSTANCE_DISPLAY_NAME}}', () => JSON.stringify(input.displayName ?? input.id))
     try {
       const file = await open(destination, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o644)
       try { await file.writeFile(content) } finally { await file.close() }
@@ -92,5 +93,5 @@ async function bootstrapFiles(serverRoot: string, raw: unknown): Promise<Bootstr
       files.push({ path, status: same ? 'unchanged' : 'conflict' })
     }
   }
-  return { ok: true, files: files.sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0) }
+  return { ok: true, nextStep: { tool: 'initialize_instance', arguments: { instance: selector, mode: 'preview' }, root: target }, files: files.sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0) }
 }

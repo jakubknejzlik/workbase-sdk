@@ -90,6 +90,8 @@ it.each(['node', 'bun'])('reloads simultaneous config and schema changes twice i
   const results = JSON.parse(output)
   expect(results.map((b: { fields: string[] }) => b.fields)).toEqual([['name', 'third'], ['name', 'third']])
   expect(results.map((b: { runtime: string[] }) => b.runtime)).toEqual([['name', 'third'], ['name', 'third']])
+  expect(results.map((b: { displayName: string }) => b.displayName)).toEqual(['first-changed', 'first-changed'])
+  expect(results.map((b: { runtimeDisplayName: string }) => b.runtimeDisplayName)).toEqual(['first-changed', 'first-changed'])
   expect(results[0].fingerprint).toBe(results[1].fingerprint)
 })
 

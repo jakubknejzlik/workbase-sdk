@@ -67,6 +67,8 @@ it('row invitations use staff at issue and recheck the configured role at accept
   expect(bad.status).toBe(400)
 })
 it('persisted role tampering or issuer demotion denies acceptance without linking', async () => {
+  // This scenario needs an unlinked recipient; linked recipients are rejected at create.
+  await env.DB.exec("UPDATE worker SET user=NULL WHERE id='linked'")
   for (const tamper of ['role', 'issuer']) {
     const issued = await request('/orgs/org-a/invitations', 'admin', 'POST', { email: 'staff@example.test', target: { entity: 'worker', row: 'no_account' } })
     expect(issued.status, await issued.clone().text()).toBe(201)

@@ -9,6 +9,7 @@ import { createServer, transformWithEsbuild, type Plugin, type ViteDevServer } f
 import { init, parse } from 'es-module-lexer'
 import { Generator, getConfig } from '@tanstack/router-generator'
 import { loadConfig, SourceError } from '@workbasehq/core/schema/load'
+import { CONSOLE_SHA_MARKER, consoleArtifactsSHA, readConsoleArtifacts } from '@workbasehq/core/console-build'
 import { canonicalJSON, normalise, manifestHash, type Manifest } from './check'
 import { checkSources, type Sources } from './sources'
 
@@ -149,16 +150,29 @@ export function assertCleanDeploy(root: string): void {
 export interface UIOptions { directory?: string }
 export type UIPlugin = Plugin & { idle(): Promise<void>; generation?: Generation; error?: Error }
 export function consoleUI(options: UIOptions = {}): UIPlugin {
-  let sha: string | undefined
+  const marker = CONSOLE_SHA_MARKER
+  let production = false
   let root: string, output: string, server: ViteDevServer | undefined
   let requested = 0, completed = 0, running: Promise<void> | undefined, closed = false
   const plugin: UIPlugin = {
     name: 'workbase-console-ui', enforce: 'pre',
-    config(config, environment) {
-      sha = environment.command === 'build' ? resolveBuildSHA(resolve(config.root ?? process.cwd())) : undefined
-      return { define: { __WORKBASE_BUILD_SHA__: JSON.stringify(sha ?? 'unbuilt') } }
+    config(_config, environment) {
+      production = environment.command === 'build'
+      return { define: { __WORKBASE_BUILD_SHA__: JSON.stringify('unbuilt') } }
     },
-    generateBundle() { if (sha) this.emitFile({ type: 'asset', fileName: 'build-meta.json', source: JSON.stringify({ sha, builtAt: new Date().toISOString() }) + '\n' }) },
+    writeBundle: { order: 'post', sequential: true, async handler(options) {
+      if (!production) return
+      // Vite copies public/ outside Rollup's bundle. Hash the actual upload tree.
+      // Never mutate hashed JS/CSS after Rollup assigns their cacheable filenames.
+      const directory = resolve(root, options.dir!)
+      const files = await readConsoleArtifacts(directory), sha = consoleArtifactsSHA(files)
+      for (const [name, bytes] of files) {
+        if (name.endsWith('.html') && bytes.includes(marker)) {
+          await writeFile(resolve(directory, name), Buffer.from(bytes.toString('latin1').replaceAll(marker, sha), 'latin1'))
+        }
+      }
+      await writeFile(resolve(directory, 'build-meta.json'), JSON.stringify({ sha, builtAt: new Date().toISOString() }) + '\n')
+    } },
     // Keep generated IDs at the stable pointer. Vite's module graph otherwise
     // retains realpaths into deleted generations even after invalidateAll().
     resolveId(id, importer) {
@@ -173,7 +187,10 @@ export function consoleUI(options: UIOptions = {}): UIPlugin {
         try { if (statSync(file).isFile()) return file + query } catch { /* Let Vite report a missing generated import. */ }
       }
     },
-    transformIndexHtml() { return [{ tag: 'meta', attrs: { name: 'referrer', content: 'no-referrer' }, injectTo: 'head-prepend' }] },
+    transformIndexHtml() { return [
+      { tag: 'meta', attrs: { name: 'referrer', content: 'no-referrer' }, injectTo: 'head-prepend' as const },
+      ...(production ? [{ tag: 'meta', attrs: { name: 'workbase-build-sha', content: marker }, injectTo: 'head-prepend' as const }] : []),
+    ] },
     configResolved(config) { root = config.root; output = resolve(root, options.directory ?? '.workbase-ui') },
     async buildStart() { if (!requested) request(); await plugin.idle(); if (plugin.error && !server) throw plugin.error },
     configureServer(value) {

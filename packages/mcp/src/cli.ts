@@ -6,11 +6,11 @@ export function parseArgs(args: string[], cwd = process.cwd()) {
     const values: Record<string, string> = {}
     for (let i = 1; i < args.length; i += 2) {
       const key = args[i], value = args[i + 1]
-      if (!['--root', '--id', '--target'].includes(key) || key in values || !value || value.startsWith('--')) fail('invalid_arguments', 'Usage: init --root <dir> --id <id> --target cloudflare-github')
+      if (!['--root', '--id', '--target', '--display-name'].includes(key) || key in values || !value || value.startsWith('--')) fail('invalid_arguments', 'Usage: init --root <dir> --id <id> --target cloudflare-github [--display-name <name>]')
       values[key] = value
     }
-    if (!values['--id'] || values['--target'] !== 'cloudflare-github') fail('invalid_arguments', 'Usage: init --root <dir> --id <id> --target cloudflare-github')
-    return { command: 'init' as const, root: resolve(cwd, values['--root'] ?? '.'), id: values['--id'], target: 'cloudflare-github' as const, agentTest: false }
+    if (!values['--id'] || values['--target'] !== 'cloudflare-github') fail('invalid_arguments', 'Usage: init --root <dir> --id <id> --target cloudflare-github [--display-name <name>]')
+    return { command: 'init' as const, root: resolve(cwd, values['--root'] ?? '.'), id: values['--id'], ...(values['--display-name'] === undefined ? {} : { displayName: values['--display-name'] }), target: 'cloudflare-github' as const, agentTest: false }
   }
   let root = cwd
   let agentTest = false

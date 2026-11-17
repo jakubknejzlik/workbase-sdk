@@ -1,6 +1,6 @@
 # Standalone V3 Instance getting started
 
-The standalone template serves the prebuilt SDK console and a Worker from
+The standalone template builds its own Vite console and serves it with a Worker from
 three coordinated SDK packages: core, plugins and mcp. Use Bun 1.4.3 and Node
 25.8.0. The canonical template and its operator guide live in
 [packages/mcp/templates/standalone](../../packages/mcp/templates/standalone/).
@@ -74,14 +74,16 @@ artifacts and never overwrites them.
 
 `check` runs `check:schema`, `check:access`, `check:openapi` and `check:ui` in that
 order. UI validation includes dictionary completeness and bare-text checks.
-`typecheck` runs `generate:ui` before TypeScript. Vite remains a development
-dependency for this authoring check. The served console comes prebuilt from
-`@workbasehq/plugins`, with SDK layout, CSS, cs/en and magic-link sign-in;
-Instance `ui/*` sources are validated but are not bundled into that console.
-The shipped `.gitignore` uses `.workbase-ui*` to ignore both the `.workbase-ui` symlink and
-its `.workbase-ui.generation-*/` sibling directories; `dist/` and `.sst/` are also
-ignored. Existing Instances must replace `.workbase-ui/` with `.workbase-ui*`
-before generating or staging files.
+`typecheck` runs `generate:ui` before TypeScript. `bun run build:console`
+validates UI and builds the thin Vite host from Instance `ui/*`, browser components
+and dictionaries, using public SDK renderer/auth/CSS exports. Wrangler and SST
+both rebuild and serve `dist/console`; Vite is a consumer development dependency.
+This follows ADR 0008 and replaces the shared prebuilt scaffold delivery from #45.
+The bundle SHA includes browser components and dictionaries independently of the
+schema revision or git SHA. The browser and `/build.json` share that identity;
+the shared auth/CRUD watcher defers reloads while forms are dirty. V3 boot uses
+compiled metadata with no console-model, console-info, bootstrap or schema fetch.
+The shipped `.gitignore` ignores `.workbase-ui*`, `dist/` and `.sst/`.
 
 For later physical schema changes use `bun run migrate:plan --base <git-ref>`.
 `bun run check:schema` works without git; `bun run check:schema --base <git-ref>`
@@ -96,9 +98,9 @@ It also preserves generated artifacts and the lockfile.
 
 Copy `.dev.vars.example` to private `.dev.vars` and configure credentials.
 `bun run dev` (or `bun run dev:worker`) starts the Worker at
-`http://127.0.0.1:9290`, serving assets directly from
-`node_modules/@workbasehq/plugins/console/assets` alongside the API.
-No console build or `WORKBASE_BUILD_SHA` is needed. Unauthenticated `/me`
+`http://127.0.0.1:9290`, checking and rebuilding `dist/console` through Wrangler's custom build command,
+then serving those assets alongside the API. After editing UI sources, restart
+Wrangler or run `bun run build:console` to rebuild them. Unauthenticated `/me`
 returns JSON 401. A fresh, unconfigured Worker returns 503 for magic-link
 sign-in. The template supplies no complete local database/auth bootstrap flow;
 use a configured deployed origin for end-to-end login acceptance.
@@ -126,9 +128,9 @@ Then run:
 bun run deploy --stage <stage>
 ```
 
-The deploy script checks, then runs SST. Its thin `sst.config.ts` passes
-`configPath: './runtime.ts'` and `assetsDir: consoleAssetsDir()` from
-`@workbasehq/plugins/console/assets` to SDK `provision()`. The provisioner sets
+The deploy script checks, then runs SST. Its thin `sst.config.ts` rebuilds the
+console (also for direct `sst deploy`) and passes `configPath: './runtime.ts'`
+and `assetsDir: './dist/console'` to SDK `provision()`. The provisioner sets
 `htmlHandling: 'none'`, `notFoundHandling: 'none'` and `runWorkerFirst: true`
 so the Worker handles SPA fallback and auth/API routes.
 Provisioning applies SDK → plugin → Instance migrations before upload. See the
@@ -153,10 +155,15 @@ and keep credentials private.
 
 ## V3 changes through MCP
 
-After installation and initial artifact generation, start `workbase_config` from
+After installing the SDK dependencies, start `workbase_config` from
 the Instance directory. It runs `workbase config --root .` without API credentials
 or optional environment variables. Existing Instances must merge this entry from
 the template manually because init never overwrites `.mcp.json`.
+
+For a fresh scaffold, call `initialize_instance` with the Instance selector and
+`mode: "preview"`, review the plan, then call `mode: "apply"` with the returned
+`planHash`. Preview writes nothing; apply publishes the initial schema, migration,
+OpenAPI and access artifacts locally. Shell generation remains an alternative.
 
 Use `inspect_schema` with the Instance selector, then `propose_composition` with
 `instance`, the inspected `baseRevision`, and `changes`. Use `set_plugin` to add a
@@ -185,5 +192,5 @@ changes. See [composition and access inputs](mcp-composition.md).
 Remote acceptance covers schema compatibility, console assets under CSP, HTTPS
 login, organization creation, permitted and denied writes, redeploy/data retention,
 queue/cron and stage removal. The SDK pack gate's V3 template smoke verifies
-installed candidate bytes and the local generation/check/prebuilt-assets/migration path;
+installed candidate bytes and the local generation/check/Instance-build/migration path;
 it does not deploy or prove remote acceptance.

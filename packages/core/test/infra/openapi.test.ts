@@ -118,7 +118,7 @@ it('validates 3.1, rejects broken documents, and round-trips exact canonical byt
     '/api/users', '/api/users/{id}', '/api/worker', '/api/worker/{id}',
     ...['invite', 'cancel_invite', 'link_account', 'unlink_account'].map(action => `/api/worker/{id}/actions/${action}`),
     ...fixture().config.commands.map(name => `/commands/${name}`),
-    '/query', '/o/{org}/capabilities', '/me', '/orgs/{orgId}/members', '/me/invitations', '/invitations/preflight', '/invitations/resolve', '/invitations/{id}/resolve', '/invitations/{id}/preview', '/invitations/{id}/accept', '/invitations/{id}/decline', '/me/profile', '/auth/providers', '/auth/logout', '/auth/sign-in/magic-link', '/build.json', '/health', '/openapi.json',
+    '/query', '/o/{org}/capabilities', '/me', '/orgs/{orgId}/members', '/orgs/{orgId}/invitations', '/me/invitations', '/invitations/preflight', '/invitations/resolve', '/invitations/{id}/resolve', '/invitations/{id}/preview', '/invitations/{id}/accept', '/invitations/{id}/decline', '/me/profile', '/auth/providers', '/auth/logout', '/auth/sign-in/magic-link', '/build.json', '/health', '/openapi.json',
   ].sort())
 })
 it('validates recorded detail fixtures and rejects malformed or leaking responses', async () => {

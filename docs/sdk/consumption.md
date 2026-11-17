@@ -66,22 +66,29 @@ auditing needs that lock and writes `access.lock.json` and `access.lock.md`.
 OpenAPI follows and stamps revision and `x-workbase-config-hash`.
 Commit these artifacts with `package-lock.json`. `check` runs schema, access,
 OpenAPI and UI checks. `typecheck` generates UI first under ignored
-`.workbase-ui*`. The console uses the installed SDK's prebuilt assets from
-`@workbasehq/plugins`; no Instance console build or `WORKBASE_BUILD_SHA` is needed.
-SST passes `assetsDir: consoleAssetsDir()` from `@workbasehq/plugins/console/assets`
-to SDK `provision()`. For later physical schema changes use
+`.workbase-ui*`. `bun run build:console` validates and bundles Instance routes,
+browser components and dictionaries with public SDK renderer/auth/CSS exports
+into `dist/console`. Both Wrangler and SST rebuild and serve that directory.
+ADR 0008 per-Instance delivery supersedes #45's shared prebuilt scaffold. The
+emitted bundle SHA changes with page/dictionary edits at a fixed schema revision
+and is shared with `/build.json`; no `WORKBASE_BUILD_SHA` is required. For later physical schema changes use
 `bun run migrate:plan --base <git-ref>` and review generated diffs. Sources:
 [template scripts](../../packages/mcp/templates/standalone/package.json),
 [artifact/asset assertions](../../scripts/smoke-template.ts).
 
 ## V3 authoring through MCP
 
-After installation and initial artifact generation, `.mcp.json` provides
+After installing the SDK dependencies, `.mcp.json` provides
 `workbase_config` alongside the separate data and ops servers. Launch it from the
 Instance directory: it runs the installed `workbase config --root .` and needs no
 API credentials or optional environment variables. Remote data/ops credentials
 remain separate; their app origin can be `https://app.example.test`. Existing
 Instances must merge the config entry manually because init preserves `.mcp.json`.
+
+For a fresh scaffold, call `initialize_instance` with the Instance selector and
+`mode: "preview"`, review the plan, then call `mode: "apply"` with the returned
+`planHash`. Preview writes nothing; apply publishes the initial schema, migration,
+OpenAPI and access artifacts locally. Shell generation remains an alternative.
 
 Call `inspect_schema` with the Instance selector, then `propose_composition` with
 `instance`, the inspected `baseRevision` and `changes`. Use `set_plugin` to add or
