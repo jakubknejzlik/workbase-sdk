@@ -51,8 +51,8 @@ function fixture(revision = 1, layout: Layout = 'simple') {
   }
   return next
 }
-async function setup(id?: string, layout: Layout = 'simple') {
-  let next = fixture(1, layout), status = 200, detailStatus = 200, writeStatus = 200, row = { id: id ?? 'one', version: 1, name: 'Ada', note: 'Original note' }, missing = false, sha = 'A'
+async function setup(id?: string, layout: Layout = 'simple', initial = fixture(1, layout)) {
+  let next = initial, status = 200, detailStatus = 200, writeStatus = 200, row = { id: id ?? 'one', version: 1, name: 'Ada', note: 'Original note' }, missing = false, sha = 'A'
   const gates = new Map<string, { promise: Promise<void>; release: () => void }>()
   const queryStatus = new Map<string, number>()
   const tasks = new Set<() => void>(), reload = vi.fn(), storage = new Map<string, string>()
@@ -75,7 +75,7 @@ async function setup(id?: string, layout: Layout = 'simple') {
       await (gates.get(kind) ?? gates.get('all'))?.promise
       const code = queryStatus.get(kind) ?? (kind === 'detail' ? detailStatus : 200)
       if (code !== 200) return Response.json({ error: 'permission_denied' }, { status: code })
-      const data = kind === 'category-membership' ? [{ id: 'category-join', entry_id: row.id, category_id: 'category' }] : query.entity === 'categories' ? [{ id: 'category', name: 'Category' }, { id: 'other-category', name: 'Other category' }] : kind === 'membership' ? [{ id: 'join', entry_id: row.id, tag_id: 'tag' }] : kind === 'picker' ? [{ id: 'tag', name: 'Tag' }] : missing ? [] : [row]
+      const data = kind === 'category-membership' ? [{ id: 'category-join', entry_id: row.id, category_id: 'category' }] : query.entity === 'categories' ? [{ id: 'category', name: 'Category' }, { id: 'other-category', name: 'Other category' }] : kind === 'membership' ? [{ id: 'join', entry_id: row.id, tag_id: 'tag' }] : kind === 'picker' ? [{ id: 'tag', name: 'Tag' }] : missing ? [] : [Object.fromEntries(Object.entries(row).filter(([name]) => query.select.includes(name)))]
       return Response.json({ data, next_cursor: null })
     }
     if (path.startsWith('/commands/')) return Response.json({ id: 'created-join' })
@@ -150,6 +150,67 @@ it.each(['simple', 'grouped', 'membership'] as const)('revision-only refresh ret
   fireEvent.click(within(test.dialog).getByRole('button', { name: 'Save' }))
   await waitFor(() => expect(writes(test)).toHaveLength(1))
   expect(JSON.parse(writes(test)[0][1]!.body as string)).toEqual({ name: 'Grace', version: 1 })
+})
+function scalarGrant(layout: 'simple' | 'grouped', readable: boolean, revision = 1) {
+  const next = fixture(revision, layout)
+  next.capabilities.entities.entries.writable = ['name']
+  if (!readable) next.capabilities.entities.entries.readable = ['id', 'version', 'name']
+  return next
+}
+const scalarCases = (['simple', 'grouped'] as const).flatMap(layout => [false, true].map(readable => ({ layout, readable })))
+it.each(scalarCases)('$layout newly writable scalar seeds from the authorized read (initially readable=$readable)', async ({ layout, readable }) => {
+  const test = await setup('one', layout, scalarGrant(layout, readable))
+  expect(screen.queryByRole('textbox', { name: 'Note' })).toBeNull()
+  test.holdQueries()
+  await refresh(test, fixture(2, layout))
+  expectDraft(test)
+  expect(within(test.dialog).getByRole('button', { name: 'Save' })).toHaveProperty('disabled', true)
+  await act(async () => { fireEvent.submit(test.form) })
+  expect(writes(test)).toHaveLength(0)
+  await act(async () => test.releaseQueries())
+  await waitFor(() => expect(within(test.dialog).getByRole('button', { name: 'Save' })).toHaveProperty('disabled', false))
+  const note = within(test.dialog).getByRole('textbox', { name: 'Note' }) as HTMLInputElement
+  expect(note.value).toBe('Original note'); expectDraft(test)
+  // Seeding is a clean default: only Name keeps the draft dirty.
+  fireEvent.change(test.input, { target: { value: 'Ada' } })
+  expect(getMutationSafetySnapshot().dirty).toBe(false)
+  fireEvent.change(test.input, { target: { value: 'Grace' } })
+  fireEvent.change(note, { target: { value: note.value + ' appended' } })
+  // Later successful reads must not replace either initialized field or version.
+  test.serverRow({ id: 'one', version: 9, name: 'Server replacement', note: 'Replacement note' })
+  await refresh(test, fixture(3, layout))
+  await waitFor(() => expect(within(test.dialog).getByRole('button', { name: 'Save' })).toHaveProperty('disabled', false))
+  expectDraft(test); expect(within(test.dialog).getByRole('textbox', { name: 'Note' })).toBe(note)
+  expect(note.value).toBe('Original note appended')
+  fireEvent.click(within(test.dialog).getByRole('button', { name: 'Save' }))
+  await waitFor(() => expect(writes(test)).toHaveLength(1))
+  expect(JSON.parse(writes(test)[0][1]!.body as string)).toEqual({ name: 'Grace', note: 'Original note appended', version: 1 })
+})
+it.each(['simple', 'grouped'] as const)('%s newly writable field waits for the latest read even when an older readable value exists', async layout => {
+  const test = await setup('one', layout, scalarGrant(layout, true))
+  test.holdQueries(); test.serverRow({ id: 'one', version: 9, name: 'Server replacement', note: 'Latest note' })
+  await refresh(test, fixture(2, layout))
+  expectDraft(test)
+  await act(async () => test.releaseQueries())
+  await waitFor(() => expect(within(test.dialog).getByRole('button', { name: 'Save' })).toHaveProperty('disabled', false))
+  const note = within(test.dialog).getByRole('textbox', { name: 'Note' }) as HTMLInputElement
+  expect(note.value).toBe('Latest note')
+  fireEvent.change(note, { target: { value: note.value + ' appended' } })
+  fireEvent.click(within(test.dialog).getByRole('button', { name: 'Save' }))
+  await waitFor(() => expect(writes(test)).toHaveLength(1))
+  expect(JSON.parse(writes(test)[0][1]!.body as string)).toEqual({ name: 'Grace', note: 'Latest note appended', version: 1 })
+})
+it.each(scalarCases.flatMap(test => [403, 500].map(status => ({ ...test, status }))))('$layout failed new scalar read ($status, initially readable=$readable) blocks submission', async ({ layout, readable, status }) => {
+  const test = await setup('one', layout, scalarGrant(layout, readable))
+  const kind = layout === 'grouped' ? 'edit' : 'detail'
+  test.holdQueries(kind); test.queryStatus(kind, status)
+  await refresh(test, fixture(2, layout))
+  expectDraft(test)
+  expect(within(test.dialog).getByRole('button', { name: 'Save' })).toHaveProperty('disabled', true)
+  await act(async () => { fireEvent.submit(test.form) }); expect(writes(test)).toHaveLength(0)
+  await act(async () => test.releaseQueries(kind))
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+  await act(async () => { fireEvent.submit(test.form) }); expect(writes(test)).toHaveLength(0)
 })
 it('fresh runtime metadata and unchanged SHA cause zero reloads after a clean draft', async () => {
   const test = await setup('one'); await refresh(test); await act(async () => { await test.coordinator.refresh() }); test.flush()

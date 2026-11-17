@@ -182,7 +182,17 @@ function EntityMutation(props: Context & { row?: Record<string, any>; controls: 
   const newMemberships = initial.isSuccess ? Object.fromEntries(relations.filter(([name]) => !Object.hasOwn(seededMemberships, name) && Object.hasOwn(initial.data, name)).map(([name]) => [name, initial.data[name]])) : {}
   const membershipValues = { ...seededMemberships, ...newMemberships }
   if (Object.keys(newMemberships).length) setMembershipSeed({ generation, values: membershipValues })
-  const waitingForSeed = needsEditRead && !editingRow || !!row && relations.some(([name]) => !Object.hasOwn(membershipValues, name))
+  const [scalarSeed, setScalarSeed] = useState<{ generation: number; values: Record<string, any> }>()
+  const seededScalars = scalarSeed?.generation === generation ? scalarSeed.values : {}
+  const scalarFields = writableFields(model, entity, caps).filter(name => Object.hasOwn(schema.properties, name) && !relations.some(([key]) => key === name))
+  // Keep each field's first seed, independently of the retained version baseline.
+  // New controls must wait for the current authorized read, never a cached row.
+  const latestRow = readPending ? undefined : needsEditRead ? editRecord.isSuccess && !editRecord.isFetching ? editRecord.data.data[0] : undefined : row
+  const scalarRow = scalarSeed?.generation === generation ? latestRow : editingRow
+  const newScalars = row && scalarRow ? Object.fromEntries(scalarFields.filter(name => !Object.hasOwn(seededScalars, name)).map(name => [name, scalarRow[name]])) : {}
+  const scalarValues = { ...seededScalars, ...newScalars }
+  if (row && scalarRow && (scalarSeed?.generation !== generation || Object.keys(newScalars).length)) setScalarSeed({ generation, values: scalarValues })
+  const waitingForSeed = needsEditRead && !editingRow || !!row && (relations.some(([name]) => !Object.hasOwn(membershipValues, name)) || scalarFields.some(name => !Object.hasOwn(scalarValues, name)))
   const [formInitialized, setFormInitialized] = useState(false)
   if (!formInitialized && !waitingForSeed) setFormInitialized(true)
   const readFailed = needsEditRead && (!!editRecord.error || editRecord.isSuccess && !editRecord.data.data.length) || !!relations.length && !!initial.error
@@ -246,7 +256,6 @@ function EntityMutation(props: Context & { row?: Record<string, any>; controls: 
   const breadcrumbDenied = !visibleEntities(model, caps).includes(entity) || [403, 404].includes((mutation.error as WriteFailure | null)?.status ?? 0) || !!reload.error
   usePublishRecordBreadcrumb(!inline && row && current ? { orgId, entity, id: String(current.id), status: breadcrumbDenied ? 'unavailable' : 'ready', label: breadcrumbDenied ? undefined : breadcrumbRecordLabel(model, entity, current, caps, i18n.language, t) } : undefined, 'edit')
   const conflict = (mutation.error as { code?: string } | null)?.code === 'version_conflict'
-  const values = Object.fromEntries(writableFields(model, entity, caps).filter(field => editingRow?.[field] !== undefined).map(field => [field, editingRow![field]]))
   if (readFailed) return <WriteError error={editRecord.error ?? initial.error ?? { code: 'entity_not_found' }} />
   if (!formInitialized && waitingForSeed) return <p role="status">{t('loading')}</p>
   return <><WriteError error={mutation.error ?? reload.error ?? versionError ?? editRecord.error ?? initial.error} schema={schema} />
@@ -263,7 +272,7 @@ function EntityMutation(props: Context & { row?: Record<string, any>; controls: 
     <div onChange={event => {
       const input = event.target as HTMLInputElement
       if (contactField && input.closest('[data-write-field]')?.getAttribute('data-write-field') === contactField) setContactEmail(input.value)
-    }}><RegistryForm secondaryAction={inline && <Button data-inline-cancel type="button" variant="outline" disabled={mutation.isPending || reload.isPending} onClick={controls.close}>{t('cancel')}</Button>} optionLabel={value => t(`value_${value}`, { defaultValue: value })} key={generation} requireDirty={!!current} partial={!!current} schema={schema} lockedValues={props.lockedValues} values={{ ...props.initialValues, ...values, ...membershipValues }} label={name => inline?.label ?? formLabel(model, entity, name, t)} submitLabel={inviteFailed ? t('rowInviteRetry') : inline ? t('save', { context: '' }) : t(current ? 'save' : 'create')} invalidLabel={t('invalidField')} pending={mutation.isPending || reload.isPending} disabled={readBlocked || conflict || versionError != null || !!savedRow && createAccess.blocked} serverErrors={translatedFieldErrors(mutation.error, schema, t)} onSubmit={data => {
+    }}><RegistryForm secondaryAction={inline && <Button data-inline-cancel type="button" variant="outline" disabled={mutation.isPending || reload.isPending} onClick={controls.close}>{t('cancel')}</Button>} optionLabel={value => t(`value_${value}`, { defaultValue: value })} key={generation} requireDirty={!!current} partial={!!current} schema={schema} lockedValues={props.lockedValues} seedNewFields={!!row} values={{ ...props.initialValues, ...scalarValues, ...membershipValues }} label={name => inline?.label ?? formLabel(model, entity, name, t)} submitLabel={inviteFailed ? t('rowInviteRetry') : inline ? t('save', { context: '' }) : t(current ? 'save' : 'create')} invalidLabel={t('invalidField')} pending={mutation.isPending || reload.isPending} disabled={readBlocked || conflict || versionError != null || !!savedRow && createAccess.blocked} serverErrors={translatedFieldErrors(mutation.error, schema, t)} onSubmit={data => {
       if (canInviteAtCreate && inviteNow && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
         invitationForm.setError('email', { type: 'validate', message: t('rowInviteEmailInvalid') }, { shouldFocus: true })
         return Promise.reject({ code: 'validation_failed' })

@@ -1,7 +1,7 @@
 import { MutationSubmitButton, useMutationForm, useMutationSubmit, useMutationSession } from '../dialog/mutation-lifecycle'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
-import { useEffect, useId } from 'react'
+import { useEffect, useId, useRef } from 'react'
 import { FormProvider, type UseFormReturn } from 'react-hook-form'
 import { Input } from '../components/ui/input'
 import { Label } from '../components/ui/label'
@@ -24,8 +24,8 @@ export function NameForm({ label, submitLabel, onSubmit }: { label: string; subm
 }
 
 /** JSON-schema resolution and normalization stay in the host; rendering uses source fields. */
-export function RegistryForm({ schema: inputSchema, values = {}, lockedValues = {}, label, submitLabel, invalidLabel, pending, disabled, onSubmit, relation, serverInvalid = false, serverErrors = {}, inline = false, requireDirty = false, partial = false, secondaryAction, optionLabel = value => value }: {
-  schema: RegistrySchema; values?: Record<string, any>; lockedValues?: Record<string, any>; label: (name: string) => string; submitLabel: string; invalidLabel: string; pending?: boolean; disabled?: boolean; serverInvalid?: boolean; serverErrors?: Record<string, string>; inline?: boolean; requireDirty?: boolean; partial?: boolean; optionLabel?: (value: string) => string
+export function RegistryForm({ schema: inputSchema, values = {}, lockedValues = {}, label, submitLabel, invalidLabel, pending, disabled, onSubmit, relation, serverInvalid = false, serverErrors = {}, inline = false, requireDirty = false, partial = false, seedNewFields = false, secondaryAction, optionLabel = value => value }: {
+  schema: RegistrySchema; values?: Record<string, any>; lockedValues?: Record<string, any>; label: (name: string) => string; submitLabel: string; invalidLabel: string; pending?: boolean; disabled?: boolean; serverInvalid?: boolean; serverErrors?: Record<string, string>; inline?: boolean; requireDirty?: boolean; partial?: boolean; seedNewFields?: boolean; optionLabel?: (value: string) => string
   onSubmit: (values: Record<string, any>) => void | Promise<unknown>
   secondaryAction?: React.ReactNode
   relation?: (name: string, value: string, change: (value: string) => void, error?: string) => React.ReactNode
@@ -61,6 +61,17 @@ export function RegistryForm({ schema: inputSchema, values = {}, lockedValues = 
     for (const error of Object.values(result.errors) as any[]) error.message = invalidLabel
     return result
   }, defaultValues: defaults })
+  const initializedFields = useRef(new Set(Object.keys(defaults)))
+  useEffect(() => {
+    if (!seedNewFields) return
+    for (const [name] of fields) {
+      if (initializedFields.current.has(name) || !Object.hasOwn(values, name) && !Object.hasOwn(lockedValues, name)) continue
+      // Only install a newly supplied field default. Existing drafts and their
+      // dirty state survive every subsequent refresh, including reauthorization.
+      if (!form.getFieldState(name).isDirty) form.resetField(name, { defaultValue: defaults[name] })
+      initializedFields.current.add(name)
+    }
+  })
   const serverKey = JSON.stringify(serverErrors)
   useEffect(() => {
     for (const name of Object.keys(form.formState.errors)) if (form.getFieldState(name).error?.type === 'server') form.clearErrors(name)
