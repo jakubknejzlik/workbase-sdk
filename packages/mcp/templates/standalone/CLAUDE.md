@@ -25,8 +25,11 @@ See README.md for installation,
 artifact generation and repeated-init conflict behavior.
 
 For V3 authoring, start `workbase_config` from this Instance directory after
-installation and initial artifact generation. It runs `workbase config --root .`
-and needs no API credentials or optional environment variables. Use
+installing the SDK dependencies. It runs `workbase config --root .`
+and needs no API credentials or optional environment variables. For a fresh
+scaffold, call `initialize_instance` with `instance: "{{INSTANCE_SELECTOR}}"` and
+`mode: "preview"`, then `mode: "apply"` with the returned `planHash`. Preview
+writes nothing; apply publishes the initial artifacts locally. Then use
 `inspect_schema` with selector `{{INSTANCE_SELECTOR}}`, then `propose_composition`
 with that `instance`, the inspected `baseRevision`, and `changes`. Supported kinds:
 `set_plugin` adds a built-in plugin or replaces its options; `set_interactive`
@@ -46,3 +49,9 @@ V3 domain-change promotion is unsupported and returns `v3_promote_unsupported`;
 physical schema changes require reviewed source edits and migration generation.
 Custom plugins/commands, plugin removal and role definitions also require reviewed
 source changes. Do not mix legacy changes with these V3 kinds in one proposal.
+
+Fresh V3 MCP workflow: `bootstrap_instance` → `initialize_instance` (preview, then
+apply with the returned `planHash`) → `inspect_schema`. Dependencies must already
+be provisioned. Initialization writes schema, migration, OpenAPI and composed
+access artifacts locally; it never installs or deploys. Existing differing or
+partial artifacts require review and are never overwritten.

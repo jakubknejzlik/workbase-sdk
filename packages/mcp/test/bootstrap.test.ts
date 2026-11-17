@@ -366,10 +366,6 @@ it('starts generated workbase_config with no optional environment variables', as
   await bootstrapInstance(root, input)
   await mkdir(join(root, 'node_modules/@workbasehq'), { recursive: true })
   for (const name of ['core', 'plugins', 'mcp']) await symlink(resolve('packages', name), join(root, 'node_modules/@workbasehq', name))
-  const plan = spawnSync('bun', [resolve('packages/core/src/migrations/schema-cli.ts'), 'plan', '--root', root, '--init'], { encoding: 'utf8' })
-  expect(plan.status, plan.stderr).toBe(0)
-  const openapi = spawnSync('bun', [resolve('packages/core/src/openapi/cli.ts'), '--root', root, '--write'], { encoding: 'utf8' })
-  expect(openapi.status, openapi.stderr).toBe(0)
   const config = JSON.parse(await readFile(join(root, '.mcp.json'), 'utf8')).mcpServers.workbase_config
   const transport = new StdioClientTransport({
     command: config.command, args: config.args, cwd: root, stderr: 'pipe',

@@ -110,6 +110,8 @@ export const changeSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('add_index'), entity: identifier, name: identifier, fields: z.array(identifier).min(1).max(8) }),
 ])
 export const schemas = {
+  initialize_instance: z.strictObject({ instance, mode: z.enum(['preview', 'apply']).default('preview'), planHash: z.string().regex(/^[a-f0-9]{64}$/).optional() })
+    .refine(input => input.mode !== 'apply' || input.planHash !== undefined, 'Apply requires the preview planHash'),
   bootstrap_instance: z.strictObject({ root: z.string().min(1).optional(), id: z.string(), target: z.literal('cloudflare-github').describe('Standalone registry SDK packages, packaged console and SST Cloudflare deployment with GitHub workflows') }),
   list_versions: z.strictObject({ instance }),
   rollback: z.strictObject({ instance, to: z.string().regex(/^v[1-9][0-9]*$/), expectedRevision: revision, allowDestructive: z.boolean().optional(), preview: z.boolean().optional() }),

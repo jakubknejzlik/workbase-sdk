@@ -155,10 +155,15 @@ and keep credentials private.
 
 ## V3 changes through MCP
 
-After installation and initial artifact generation, start `workbase_config` from
+After installing the SDK dependencies, start `workbase_config` from
 the Instance directory. It runs `workbase config --root .` without API credentials
 or optional environment variables. Existing Instances must merge this entry from
 the template manually because init never overwrites `.mcp.json`.
+
+For a fresh scaffold, call `initialize_instance` with the Instance selector and
+`mode: "preview"`, review the plan, then call `mode: "apply"` with the returned
+`planHash`. Preview writes nothing; apply publishes the initial schema, migration,
+OpenAPI and access artifacts locally. Shell generation remains an alternative.
 
 Use `inspect_schema` with the Instance selector, then `propose_composition` with
 `instance`, the inspected `baseRevision`, and `changes`. Use `set_plugin` to add a

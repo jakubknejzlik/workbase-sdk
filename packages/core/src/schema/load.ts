@@ -290,7 +290,15 @@ export function configSources(file: string, options: LoadConfigOptions = {}): So
   return sources
 }
 
+/** Identify V3 declarations without evaluating consumer code or artifact imports. */
+export function isLiteralConfig(file: string): boolean {
+  const source = readSource(file)
+  return [...imports(source).values()].some(binding => sdkBinding(binding, file, 'defineConfig'))
+}
+
 export interface LoadConfigOptions {
+  /** Fresh initialization must ignore existing artifacts, including invalid/partial locks. */
+  bindExistingLock?: boolean
   /** Original config directory when interpreting a staged graph. Only SDK import
    * resolution moves; graph reads, source locations and hashes retain staged bytes. */
   sdkResolutionRoot?: string
@@ -406,7 +414,7 @@ export async function loadConfig(file: string, options: LoadConfigOptions = {}):
       hash.update(JSON.stringify([relative(dirname(entry), file), text]))
     }
     const lockPath = resolve(dirname(entry), 'schema.lock.json')
-    if (existsSync(lockPath)) bindSchemaLock(config, parseLock(readFileSync(lockPath, 'utf8')))
+    if (options.bindExistingLock !== false && existsSync(lockPath)) bindSchemaLock(config, parseLock(readFileSync(lockPath, 'utf8')))
     return { config, sources, configHash: hash.digest('hex'), authoredAccess: {
       ...(data.access ? { shared: data.access as AccessInput } : {}),
       entities: Object.fromEntries(Object.entries(entities).map(([name, entity]) => [name, entity.access])),
