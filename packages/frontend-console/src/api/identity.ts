@@ -11,7 +11,7 @@ export interface NavigationConfig {
 }
 export interface InstanceSchema { locale?: 'en' | 'cs'; instance: string; displayName?: string; roles: string[]; ui?: { defaultLanguage?: 'en' | 'cs'; navigation?: NavigationConfig } }
 export interface Member { user_id: string; email: string; role: string; joined_at?: string; display_name?: string | null; last_administrator?: boolean; kind?: 'member'; actions?: string[] }
-export interface Invitation { id: string; email: string; role: string; expires_at: string; accepted_at: string | null; revoked_at: string | null; declined_at?: string | null; expired_at?: string | null; created_at?: string; kind?: 'invitation'; inviter?: { display_name: string }; actions?: string[] }
+export interface Invitation { target_entity?: string | null; target_row?: string | null; id: string; email: string; role: string; expires_at: string; accepted_at: string | null; revoked_at: string | null; declined_at?: string | null; expired_at?: string | null; created_at?: string; kind?: 'invitation'; inviter?: { display_name: string }; actions?: string[] }
 export interface RoleOption { id: string; administrator: boolean }
 export interface MembersView { data: (Member | Invitation)[]; role_options: RoleOption[]; default_role: string }
 export interface Delivery { status: 'queued' | 'sending' | 'delivered' | 'failed' | 'not_requested'; attempts: number; sent_at: string | null; error: string | null }

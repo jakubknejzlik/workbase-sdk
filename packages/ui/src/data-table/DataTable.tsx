@@ -9,21 +9,21 @@ import { DataTableSearch } from './DataTableSearch'
 import { CursorPagination, type PaginationLabels } from './cursor-pagination'
 import { Button } from '../components/ui/button'
 export interface DataTableState { search: string; sort: { key: string; direction: 'asc' | 'desc' } | null; limit: number }
-export interface ServerColumn<T> { id: string; label: string; sortable?: boolean; filter?: ReactNode; cell: (row: T) => ReactNode }
+export interface ServerColumn<T> { id: string; label: string; keepOnNarrow?: boolean; wrap?: boolean; sortable?: boolean; filter?: ReactNode; cell: (row: T) => ReactNode }
 interface ServerMeta<T> { compact?: boolean; serverColumn: ServerColumn<T>; labelId: string; sortLabel: string }
 /** Stable React render types retain focused headers and open mutation sessions across query updates. */
 function ServerFilter({ column }: { column: { filterOptions?: { renderFilter?: () => ReactNode } } }) { return column.filterOptions?.renderFilter?.() }
 function ServerHeader<T>(context: HeaderContext<T, unknown>) {
   const meta = context.column.columnDef.meta as ServerMeta<T>
   const column = meta.serverColumn
-  const definition = mapColumn({ id: column.id, title: column.label, type: column.id === '_actions' ? 'actions' : 'string', filterable: !!column.filter, filterOptions: { renderFilter: () => column.filter } }, {
+  const definition = mapColumn({ id: column.id, title: column.wrap ? <span className="whitespace-normal break-words">{column.label}</span> : column.label, type: column.id === '_actions' ? 'actions' : 'string', filterable: !!column.filter, filterOptions: { renderFilter: () => column.filter } }, {
     labelId: meta.labelId, sortLabel: () => meta.sortLabel, enableFilters: true, FilterDropdown: ServerFilter,
   })
   return (definition.header as (context: HeaderContext<T, unknown>) => ReactNode)(context)
 }
 function ServerCell<T>({ column, row }: CellContext<T, unknown>) {
   const config = (column.columnDef.meta as ServerMeta<T>).serverColumn
-  return column.id === '_actions' ? config.cell(row.original) : <div className={(column.columnDef.meta as ServerMeta<T>).compact ? "whitespace-normal break-words" : "truncate"} ref={node => { if (node) node.title = node.textContent ?? '' }}>{config.cell(row.original)}</div>
+  return column.id === '_actions' ? config.cell(row.original) : <div className={((column.columnDef.meta as ServerMeta<T>).compact || config.wrap) ? "whitespace-normal break-words" : "truncate"} ref={node => { if (node) node.title = node.textContent ?? '' }}>{config.cell(row.original)}</div>
 }
 /** Workbase owns server state; the source provider renders it without local filtering/paging. */
 export function DataTable<T extends { id?: unknown }>({ rows, columns, state, onStateChange, page, range, onPage, nextCursor, isFetching, label, labels, onRowClick, searchDescription, searchAvailable = true, pendingSearch = false, staleLabel, clearFilters, onClearFilters, error, compact = false, mobileCards = false }: {
@@ -52,7 +52,7 @@ export function DataTable<T extends { id?: unknown }>({ rows, columns, state, on
   })
   const table = useReactTable({ data: rows, columns: definitions, getCoreRowModel: getCoreRowModel(), getRowId: (row, index) => String(row.id ?? index),
     enableMultiSort: false, manualSorting: true, manualFiltering: true, manualPagination: true,
-    state: { columnVisibility: narrow ? Object.fromEntries(columns.slice(1).filter(column => column.id !== '_actions').map(column => [column.id, false])) : {}, sorting: state.sort ? [{ id: state.sort.key, desc: state.sort.direction === 'desc' }] : [], pagination: { pageIndex: page, pageSize: state.limit }, columnPinning: { right: columns.some(column => column.id === '_actions') ? ['_actions'] : [] } },
+    state: { columnVisibility: narrow ? Object.fromEntries(columns.slice(1).filter(column => column.id !== '_actions' && !column.keepOnNarrow).map(column => [column.id, false])) : {}, sorting: state.sort ? [{ id: state.sort.key, desc: state.sort.direction === 'desc' }] : [], pagination: { pageIndex: page, pageSize: state.limit }, columnPinning: { right: columns.some(column => column.id === '_actions') ? ['_actions'] : [] } },
     onSortingChange: updater => { const next = typeof updater === 'function' ? updater(table.getState().sorting) : updater; onStateChange({ ...state, sort: next[0] ? { key: next[0].id, direction: next[0].desc ? 'desc' : 'asc' } : null }, 'sort') },
     onPaginationChange: updater => { const next = typeof updater === 'function' ? updater(table.getState().pagination) : updater; if (next.pageSize !== state.limit) onStateChange({ ...state, limit: next.pageSize }, 'limit') },
   })

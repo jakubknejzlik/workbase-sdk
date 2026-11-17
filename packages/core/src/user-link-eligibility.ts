@@ -24,3 +24,13 @@ export function accountLinkUnique(config: InstanceConfig, organizationId: string
     bindings: [organizationId, ...('userId' in candidate ? [candidate.userId] : []), target.row],
   }
 }
+
+/** A known invitee must satisfy the same per-entity uniqueness rule, even if
+ * their membership was removed. Unknown addresses remain valid invitations. */
+export function invitationAccountUnique(config: InstanceConfig, organizationId: string, target: { entity: string; row: string }, email: string): SqlStatement {
+  const unique = accountLinkUnique(config, organizationId, target, { member: true })
+  return {
+    sql: `NOT EXISTS (SELECT 1 FROM users u WHERE u.organization_id=? AND lower(trim(u.email))=lower(trim(?)) AND NOT (${unique.sql}))`,
+    bindings: [organizationId, email, ...(unique.bindings ?? [])],
+  }
+}

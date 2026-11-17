@@ -111,6 +111,19 @@ it('two invites commit exactly one invitation, outbox intent and audit event', a
   expect(results.map(result => result.status).sort()).toEqual([201, 409])
   for (const table of ['invitations', 'email_outbox', 'audit_outbox']) expect(await env.DB.prepare(`SELECT count(*) n FROM ${table}`).first('n')).toBe(1)
 })
+it.each(['preflight', 'atomic'])('178 record-action invite rejects an account linked to another worker at %s', async phase => {
+  const link = () => env.DB.prepare("UPDATE worker SET user='recipient' WHERE id='other'").run()
+  if (phase === 'preflight') await link()
+  else {
+    const batch = env.DB.batch.bind(env.DB)
+    vi.spyOn(env.DB, 'batch').mockImplementationOnce(async statements => { await link(); return batch(statements) })
+  }
+  const response = await act('local', 'invite', { email: ' RECIPIENT@EXAMPLE.TEST ' })
+  expect([response.status, await response.json()]).toEqual([409, { error: 'account_already_linked' }])
+  for (const table of ['invitations', 'email_outbox', 'audit_outbox']) expect(await env.DB.prepare(`SELECT count(*) n FROM ${table}`).first('n')).toBe(0)
+  expect(await env.DB.prepare("SELECT user FROM worker WHERE id='local'").first('user')).toBeNull()
+  expect(await env.DB.prepare("SELECT count(*) n FROM memberships WHERE user_id='recipient'").first('n')).toBe(1)
+})
 it('two links of an account to distinct workers commit only one link', async () => {
   const results = await Promise.all([act('local', 'link_account', { user_id: 'recipient' }), act('other', 'link_account', { user_id: 'recipient' })])
   expect(results.map(result => result.status).sort()).toEqual([200, 409])

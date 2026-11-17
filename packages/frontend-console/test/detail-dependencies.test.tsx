@@ -72,5 +72,5 @@ it.each([
   expect(container.querySelector('[data-detail-field="user"]')).toBeNull()
   expect(screen.queryByText('Raw User')).toBeNull()
   expect(screen.queryByText('account')).toBeNull()
-  expect(screen.getAllByText('Application access')).toHaveLength(1)
+  expect(screen.queryByText('Application access')).toBeNull()
 })

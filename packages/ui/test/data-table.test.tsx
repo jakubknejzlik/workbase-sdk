@@ -207,3 +207,19 @@ it('mobile hidden columns retain keyboard sort, three accessible states and filt
     expect(screen.getAllByRole('cell').map(cell => cell.textContent)).toEqual(['John Doe', '2026-11-05', 'Row actions'])
   } finally { vi.restoreAllMocks() }
 })
+
+it('178 narrow tables retain opted-in state and identity alongside row actions', () => {
+  vi.spyOn(window, 'matchMedia').mockReturnValue({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() } as any)
+  try {
+    render(<DataTable rows={[{ id: 'one' }]} columns={[
+      { id: 'name', label: 'Name', cell: () => 'Jana' },
+      { id: 'date', label: 'Date', cell: () => '2026-11-17' },
+      { id: 'access', label: 'Application access', keepOnNarrow: true, wrap: true, cell: () => <div>Invited <span>jana@example.test</span><button>Access actions</button></div> },
+      { id: '_actions', label: 'Actions', cell: () => <button>Row actions</button> },
+    ]} state={{ search: '', sort: null, limit: 30 }} onStateChange={vi.fn()} page={0} onPage={vi.fn()} isFetching={false} label="Records" labels={labels} onRowClick={vi.fn()} />)
+    expect(screen.getAllByRole('columnheader').map(cell => cell.textContent)).toEqual(['Name', 'Application access', 'Actions'])
+    expect(screen.getByText('jana@example.test')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Access actions' })).toBeTruthy()
+    expect(screen.queryByText('2026-11-17')).toBeNull()
+  } finally { vi.restoreAllMocks() }
+})

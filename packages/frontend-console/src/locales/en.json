@@ -557,7 +557,7 @@
   "rowInvite_remove": "Remove access",
   "rowInviteDescription": "The account is linked to this row only after acceptance. Cancel to invite another email.",
   "rowLinkDescription": "Link an existing organization member to this row. Access applies immediately.",
-  "rowLinkPickerHint": "Only members not linked to another record are listed.",
+  "rowLinkPickerHint": "Select a member to link. Unavailable accounts show why they cannot be linked.",
   "rowInviteRemoveDescription": "Clears all account links in this application. The account is kept.",
   "rowInvitationTarget": "Accepting links your account to the {{entity}} row ({{row}}).",
   "rowAccess_expired": "Expired",
@@ -597,5 +597,9 @@
   "savedViewsError_storage": "Could not save or read views in this browser.",
   "savedViewsError_invalid": "Saved views could not be read. No changes were saved.",
   "savedViewsError_limit": "View limit exceeded (20 views, 16 KiB per view, 128 KiB per list). No changes were saved.",
-  "savedViewsError_name": "Enter a view name of 1–80 characters."
+  "savedViewsError_name": "Enter a view name of 1–80 characters.",
+  "memberPendingLink": "Pending link",
+  "rowFindRequired": "Select a member or enter a valid email address.",
+  "rowAccountNotLinkable": "This account cannot be linked to this row.",
+  "rowAccessActions": "Application access actions"
 }
