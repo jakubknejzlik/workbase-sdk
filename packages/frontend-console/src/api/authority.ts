@@ -6,6 +6,13 @@ import { discardTransportScope } from './client'
 const states = new WeakMap<QueryClient, Map<string, number>>()
 const listeners = new WeakMap<QueryClient, Set<() => void>>()
 export const authorityGeneration = (client: QueryClient, org: string) => states.get(client)?.get(org) ?? 0
+/** Keep asynchronous actions bound to the authority they started under. */
+export function authorityGuard(client: QueryClient, org: string) {
+  const generation = authorityGeneration(client, org)
+  return () => {
+    if (generation !== authorityGeneration(client, org)) throw new DOMException('Superseded authority', 'AbortError')
+  }
+}
 export function useAuthorityGeneration(client: QueryClient, org: string) {
   return useSyncExternalStore(listener => {
     let set = listeners.get(client); if (!set) listeners.set(client, set = new Set())

@@ -155,3 +155,17 @@ test('renderer detail mode refetches a bare mutation response while ordinary one
   expect(await client.one('test', { id: 'x' }, signal(), true)).toHaveProperty('actions')
   await client.one('test', { id: 'x' }, signal(), true); expect(fetch).toHaveBeenCalledTimes(2)
 })
+
+test('a disposed mutation rejects late bytes and cannot seed its old transport cache', async () => {
+  let release: (response: Response) => void = () => {}, requestSignal: AbortSignal | undefined
+  const client = createClient({ baseURL: '', orgId: 'A', actorId: 'actor', fetch: async (_path, init) => {
+    requestSignal = init.signal ?? undefined
+    return new Promise<Response>(resolve => { release = resolve })
+  } })
+  const pending = client.update('probe', 'one', 1, { name: 'Draft' }, signal()).catch(error => error)
+  client.dispose()
+  expect(requestSignal?.aborted).toBe(true)
+  release(Response.json({ id: 'one', version: 2, name: 'Old private row' }))
+  expect(await pending).toMatchObject({ name: 'AbortError' })
+  await expect(client.one('probe', { id: 'one' }, signal())).rejects.toMatchObject({ name: 'AbortError' })
+})

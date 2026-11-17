@@ -75,8 +75,9 @@ function TokenCreate({ orgId, roles, onCreated }: { orgId: string; roles: string
   const form = useMutationForm<CreateFields>({ defaultValues: { name: '', role: '', expiry: '', restricted: false, operations: '' } })
   // Return void and collect immediately. Only mounted local state receives the secret.
   const create = useMutation({ gcTime: 0, mutationFn: async (data: CreateFields) => {
-    await authorize('tokens.create', async () => {
+    await authorize('tokens.create', async assertCurrent => {
       const result = await tokenClient.create(orgId, { name: data.name.trim(), role: data.role, ...(data.expiry ? { expires_at: new Date(data.expiry).toISOString() } : {}), ...(data.restricted ? { operations: data.operations.split(/[\s,]+/).filter(Boolean) } : {}) })
+      assertCurrent()
       if (alive.current) onCreated(data.name.trim(), result.token)
       void client.invalidateQueries({ queryKey: tokenKey(orgId) })
     })

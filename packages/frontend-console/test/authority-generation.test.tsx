@@ -83,3 +83,48 @@ it('a cancelled old bootstrap cannot seed private metadata after a scope generat
   expect(client.getQueryData(['me'])).toBeUndefined()
   client.clear()
 })
+
+it('a retired mutation rejects JSON completion even when the fetch adapter ignores abort', async () => {
+  let release: (value: unknown) => void = () => {}
+  const json = new Promise(resolve => { release = resolve })
+  vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, status: 200, json: () => json })))
+  const client = new QueryClient()
+  const pending = api('/api/probe/one', { orgId: 'A', method: 'PATCH', body: { name: 'Draft' } }).catch(error => error)
+  await Promise.resolve()
+  discardAuthority(client, 'A'); release({ id: 'one', name: 'Obsolete bytes' })
+  expect(await pending).toMatchObject({ name: 'AbortError' })
+  client.clear()
+})
+
+it('token create sends no POST after its downgrade preflight retires the private page', async () => {
+  const { useTokenAction, tokenClient } = await import('../src/api/tokens')
+  const previous = doc(), next = doc()
+  previous.capabilities.resources = { 'tokens.read': true, 'tokens.create': true }
+  next.capabilities.resources = { 'tokens.read': false, 'tokens.create': true }
+  previous.console!.pages = [{ id: 'tokens', path: '/tokens', label: 'Tokens', grant: 'tokens.read', renderer: 'tokens' }]
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  client.setQueryData(['capabilities', 'A'], previous.capabilities)
+  client.setQueryData(['console-model', 'A'], adaptConsoleModel(previous))
+  let authorize: ReturnType<typeof useTokenAction> = async () => {}, release: (r: Response) => void = () => {}
+  const fetch = vi.fn(async (path: string) => {
+    if (path.endsWith('/capabilities')) return new Promise<Response>(resolve => { release = resolve })
+    if (path.endsWith('/console-model')) return Response.json(next)
+    return Response.json({ token: 'synthetic' })
+  })
+  vi.stubGlobal('fetch', fetch)
+  function TokenDraft() { authorize = useTokenAction('A'); return <p>Private token draft</p> }
+  function TokenHost() {
+    const runtime = useRuntimeModel('A')
+    return runtime.data?.console.pages.some(page => page.id === 'tokens') ? <TokenDraft /> : <p>Retired private view</p>
+  }
+  const view = render(<QueryClientProvider client={client}><TokenHost /></QueryClientProvider>)
+  const action = vi.fn(async () => { await tokenClient.create('A', { name: 'OLD DRAFT', role: 'viewer' }) })
+  const pending = authorize('tokens.create', action).catch(error => error)
+  await act(async () => { release(Response.json(next)); await pending })
+  expect(await pending).toMatchObject({ name: 'AbortError' })
+  expect(authorityGeneration(client, 'A')).toBeGreaterThan(0)
+  expect(screen.queryByText('Private token draft')).toBeNull()
+  expect(action).not.toHaveBeenCalled()
+  expect(fetch.mock.calls.map(([path]) => path)).not.toContain('/orgs/A/tokens')
+  view.unmount(); client.clear()
+})

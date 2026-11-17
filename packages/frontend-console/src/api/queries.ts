@@ -1,4 +1,4 @@
-import { authorityGeneration, authorityKey, discardAuthority, parseConsoleCapabilities } from './authority'
+import { authorityGeneration, authorityGuard, authorityKey, discardAuthority, parseConsoleCapabilities } from './authority'
 import { buildReload } from '../build-reload'
 import { useQuery, useQueryClient, type QueryClient, type QueryFunctionContext } from '@tanstack/react-query'
 import { refreshRuntimeModel } from './runtime-model'
@@ -50,6 +50,7 @@ export function useBuild() {
 }
 export async function fetchCapabilities(client: QueryClient, orgId: string) {
   const generation = authorityGeneration(client, orgId)
+  const assertCurrent = authorityGuard(client, orgId)
   let next: ConsoleCapabilities
   try {
     next = parseConsoleCapabilities(await api<unknown>(`/o/${encodeURIComponent(orgId)}/capabilities`))
@@ -59,6 +60,7 @@ export async function fetchCapabilities(client: QueryClient, orgId: string) {
     await client.cancelQueries({ queryKey: ['console-model', orgId] })
     throw error
   }
+  assertCurrent()
   const previous = client.getQueryData<ConsoleCapabilities>(['capabilities', orgId])
   if (previous && previous.revision !== next.revision) {
     void buildReload.refresh()

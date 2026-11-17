@@ -137,6 +137,11 @@ function path(link: ResolvedLink | undefined, id?: string) {
   return buildPath(link.to, Object.fromEntries(Object.keys(link.bind).map(name => [name, id ?? ''])))
 }
 type ViewProps = { definition: Page; route: Manifest['routes'][number]; entities: Manifest['entities']; params: Record<string, string | number>; search: Record<string, string | number>; navigate: (path: string) => void; slots?: Record<string, Slot>; routes?: Manifest['routes']; onDirty?: (dirty: boolean) => void }
+/** Generated links are eligible only when their destination page is allowed. */
+function allowedPath(props: ViewProps, caps: Capabilities | undefined, link: ResolvedLink | undefined, id?: string) {
+  const target = link && props.routes?.find(route => route.path === link.to)
+  return target && gate(caps, { entities: props.entities }).allows(target) ? path(link, id) : undefined
+}
 function Form({ props, metadata, initial, reload }: { props: ViewProps; metadata: EntityMeta; initial: Record<string, unknown>; reload?: () => Promise<RecordData> }) {
   const runtime = useRuntime(), { client, t: translate } = runtime, { definition, route, navigate, onDirty } = props
   const [hadConflict, setHadConflict] = useState(false)
@@ -146,7 +151,8 @@ function Form({ props, metadata, initial, reload }: { props: ViewProps; metadata
   useAuthDirty(dirty)
   useEffect(() => { onDirty?.(dirty); return () => onDirty?.(false) }, [dirty, onDirty])
   useEffect(() => () => controller.current?.abort(), [])
-  const destination = (id?: string) => path(route.links.detail, id) ?? path(route.links.list)
+  const destination = (id?: string) => allowedPath(props, runtime.caps, route.links.detail, id) ?? allowedPath(props, runtime.caps, route.links.list)
+  const back = allowedPath(props, runtime.caps, definition.mode === 'create' ? route.links.list : route.links.detail ?? route.links.list, String(base.id))
   function leave(to: string | undefined, confirm = true) {
     if (!to || confirm && dirty && !browser.confirm(translate('sdk:discardChanges'))) return
     onDirty?.(false); navigate(to)
@@ -178,8 +184,8 @@ function Form({ props, metadata, initial, reload }: { props: ViewProps; metadata
     conflict ? h('div', { role: 'alert' }, translate('sdk:conflict'), h('button', { type: 'button', disabled: saving, onClick: () => { void reloadCopy() } }, translate('sdk:reloadServerCopy'))) : state && message(state, translate),
     ...definition.layout.map((node, i) => h('div', { key: i }, renderNode(node, ctx))),
     h('button', { type: 'submit', disabled: saving }, translate('sdk:save')),
-    h('button', { type: 'button', disabled: saving, onClick: () => leave(definition.mode === 'create' ? path(route.links.list) : destination(String(base.id))) }, translate('sdk:back')),
-    h('button', { type: 'button', disabled: saving, onClick: () => leave(definition.mode === 'create' ? path(route.links.list) : destination(String(base.id))) }, translate('sdk:cancel')))
+    back && h('button', { type: 'button', disabled: saving, onClick: () => leave(back) }, translate('sdk:back')),
+    back && h('button', { type: 'button', disabled: saving, onClick: () => leave(back) }, translate('sdk:cancel')))
 }
 function RecordView({ props, metadata, id }: { props: ViewProps; metadata: EntityMeta; id: string }) {
   const runtime = useRuntime(), { state, reload } = useRecord(props.definition.entity!, id)
@@ -218,7 +224,7 @@ export function PageView(input: ViewProps) {
   const metadata = definition.entity && props.entities[definition.entity] && permission.metadata(definition.entity, definition.mode)
   const binding = Object.values(definition.data).find(binding => binding.kind === 'one')
   const id = binding?.bind.id && String(props.params[binding.bind.id.name] ?? props.search[binding.bind.id.name] ?? '')
-  const back = path(route.links.list)
+  const back = allowedPath(props, runtime.caps, route.links.list)
   const content = definition.kind === 'customPage' ? h(definition.component!) : !metadata ? h('div', null, ...definition.layout.map((node, i) => h('div', { key: i }, renderNode(node, { ...runtime, slots: props.slots ?? runtime.slots, metadata: { displayField: '', fields: {} }, entity: '', record: {} })))) : definition.mode === 'list' ? h(ListView, { props, metadata }) : definition.mode === 'create' ? h(Form, { props, metadata, initial: {} }) : id ? h(RecordView, { key: definition.entity + ':' + id, props, metadata, id }) : h('p', { role: 'alert' }, translate('sdk:notFound'))
   return h('main', null, h('h1', null, translate('ui:' + definition.title)), back && !['create', 'edit'].includes(definition.mode ?? '') && h('button', { onClick: () => props.navigate(back) }, translate('sdk:back')), content)
 }
