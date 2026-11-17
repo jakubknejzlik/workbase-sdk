@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { z } from 'zod'
 import { hash } from './planning.ts'
-import { fail, type Change, type CompositionChange } from './schemas.ts'
+import { fail, isPresentationChange, type Change, type CompositionChange } from './schemas.ts'
 import { noLink } from './storage.ts'
 import type { GitHubConfiguration, CheckRun } from './github.ts'
 
@@ -20,7 +20,7 @@ export function promotionHash(p: Submission) {
 const changeLabels: Record<Change['kind'] | CompositionChange['kind'], string> = {
   set_plugin: 'Úprava pluginu', set_interactive: 'Úprava interactive',
   set_system_access: 'Úprava systémového přístupu', set_entity_access: 'Úprava přístupu k entitě', set_account_link: 'Úprava vazby na účet',
-  set_label: 'Úprava popisku', set_locale: 'Úprava jazyka', add_role: 'Přidání role', remove_role: 'Odebrání role',
+  set_instance_display_name: 'Úprava názvu instance', set_label: 'Úprava popisku', set_locale: 'Úprava jazyka', add_role: 'Přidání role', remove_role: 'Odebrání role',
   set_permissions: 'Úprava oprávnění', set_organization_permissions: 'Úprava oprávnění organizace',
   add_entity: 'Přidání entity', set_policy: 'Úprava pravidla přístupu', set_display_field: 'Úprava zobrazeného názvu',
   add_field: 'Přidání pole', add_computed_field: 'Přidání vypočteného pole', set_computed_field: 'Úprava výpočtu pole',
@@ -40,9 +40,9 @@ export async function submitChange(directory: string, p: Submission, expectedBas
   if (!p.validation || !p.verification || hash(p.validation) !== hash(p.verification)) fail('verification_required', 'Chybí ověření této změny.', 409)
   if (!p.promotedFiles || !p.migrationPreview || p.promotionHash !== promotionHash(p)) fail('promotion_snapshot_required', 'Chybí platný záznam souborů povýšené změny.', 409)
   const accessChanges = p.changes.filter(change => ['set_system_access', 'set_entity_access', 'set_account_link'].includes(change.kind))
-  const allowed = new Set(p.kind === 'composition_change' ? [...(p.changes.some(change => change.kind === 'set_locale') ? ['config.ts'] : []), 'runtime.ts', 'access.lock.json', 'access.lock.md',
+  const allowed = new Set(p.kind === 'composition_change' ? [...(p.changes.some(isPresentationChange) ? ['config.ts'] : []), 'runtime.ts', 'access.lock.json', 'access.lock.md',
     ...(accessChanges.length ? ['access.ts'] : []),
-    ...(accessChanges.length || p.changes.some(change => change.kind === 'set_locale') ? ['openapi.json'] : []),
+    ...(accessChanges.length || p.changes.some(isPresentationChange) ? ['openapi.json'] : []),
     ...accessChanges.flatMap(change => change.kind === 'set_entity_access' ? [`schema/${change.entity}.ts`] : [])] : ['config.ts', 'config.indexes.json', 'config.versions.json', `config.v${p.baseRevision}.ts`, `config.v${p.promotedRevision}.ts`, `migrations/${p.migration}`])
   const paths = new Set<string>()
   for (const file of p.promotedFiles) {

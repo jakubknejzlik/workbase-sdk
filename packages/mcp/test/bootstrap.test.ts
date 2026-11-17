@@ -61,7 +61,7 @@ it('creates registry-only files, substitutes ids and resolves the release versio
   expect(sst).toContain("assetsDir: './dist/console'")
   expect(sst).toContain("configPath: './runtime.ts'")
   expect(sst).toContain("execFileSync('bun', ['run', 'build:console']")
-  for (const path of files) expect(await readFile(join(root, path), 'utf8')).not.toMatch(/workspace:|link:|\{\{(?:SDK_VERSION|INSTANCE_ID|INSTANCE_SELECTOR)\}\}/)
+  for (const path of files) expect(await readFile(join(root, path), 'utf8')).not.toMatch(/workspace:|link:|\{\{(?:SDK_VERSION|INSTANCE_ID|INSTANCE_SELECTOR|INSTANCE_DISPLAY_NAME)\}\}/)
   expect(JSON.parse(await readFile(join(root, 'tsconfig.json'), 'utf8')).compilerOptions.paths).toBeUndefined()
   expect(JSON.parse(await readFile(join(root, 'package.json'), 'utf8')).name).toBe('workbase-demo-sandbox')
   const wrangler = JSON.parse(await readFile(join(root, 'wrangler.jsonc'), 'utf8'))
@@ -394,7 +394,10 @@ it.each([
     { kind: 'set_system_access', role: 'admin', grants: { 'members.read': 'allow' } },
     { kind: 'set_entity_access', entity: 'worker', role: 'staff', access: 'deny' },
     { kind: 'set_account_link', entity: 'worker', invitationRole: 'staff' },
-    ...(path === 'docs/sdk/mcp-composition.md' ? [{ kind: 'set_locale', languages: ['en', 'cs'] }] : []),
+    ...(path === 'docs/sdk/mcp-composition.md' ? [
+      { kind: 'set_locale', languages: ['en', 'cs'] },
+      { kind: 'set_instance_display_name', displayName: 'Cleaning' },
+    ] : []),
   ]
   const kinds = examples.map(change => compositionChangeSchema.parse(change).kind)
   for (const kind of kinds) expect(guide, kind).toContain('`' + kind + '`')
