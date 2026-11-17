@@ -91,9 +91,10 @@ it.each([
   await writeFile(join(root, '.test-bin/bun'), '#!/bin/sh\nprintf "%s\\n" "$*" > build-command.txt\n')
   await chmod(join(root, '.test-bin/bun'), 0o755)
   const script = `import { mock } from 'bun:test'
+const { resolvePublicOrigin } = await import(${JSON.stringify(resolve('packages/core/src/infra/public-origin.ts'))})
 process.env.PATH = ${JSON.stringify(join(root, '.test-bin'))} + ':' + process.env.PATH
 let options
-mock.module('@workbasehq/core/infra/provision', () => ({ provision: async value => {
+mock.module('@workbasehq/core/infra/provision', () => ({ resolvePublicOrigin, provision: async value => {
   options = value
   return { url: 'https://example.test', databaseId: 'test-db', ...(value.devMailbox ? { devMailboxUrl: 'https://mailbox.example.test' } : {}) }
 } }))

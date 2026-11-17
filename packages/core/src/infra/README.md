@@ -60,7 +60,8 @@ export default $config({
 The operator supplies `CLOUDFLARE_DEFAULT_ACCOUNT_ID`, `CLOUDFLARE_API_TOKEN`,
 a stable SST `AuthSecret` and either `publicHostname` or `authBaseUrl` before
 deployment. The auth secret must be at least 32 characters; retain it across
-redeployments. `publicHostname` is trimmed/lowercased and derives the HTTPS origin
+redeployments. The raw `publicHostname` is validated without normalization and
+must use only lowercase ASCII `[a-z0-9.-]`. It derives the HTTPS origin
 used for `AUTH_BASE_URL` and the Cloudflare Custom Domain attachment (DNS and
 certificate managed by SST). It must be a literal bare DNS hostname: no scheme,
 port, path, credentials, query, fragment, trailing dot, embedded whitespace, IP,
@@ -79,8 +80,10 @@ continues to report the Worker URL.
 
 The removed `domain` option fails with a typed diagnostic naming `publicHostname`.
 Update existing configs to the new option and env variable; no alias is provided.
-The standalone template treats blank optional env values as unset and fails on the
-removed hostname env variable. Only its `AUTH_BASE_URL` fallback expands `{stage}`
+In the standalone template, only an unset `WORKBASE_PUBLIC_HOSTNAME` means no
+public hostname; an empty or whitespace-only set value is rejected. Blank
+`AUTH_BASE_URL` values are unset. The template fails on the removed hostname env
+variable. Only its `AUTH_BASE_URL` fallback expands `{stage}`
 for preview stages such as `prefix-pr-N`; the core performs no stage substitution.
 A separately launched MCP client must set `WORKBASE_BASE_URL` to the resolved
 origin itself; it does not inherit the deployment environment.

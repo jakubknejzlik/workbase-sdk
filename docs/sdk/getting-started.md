@@ -116,12 +116,15 @@ For deployment, copy `deploy.env.example` to private `.env`. Configure
 `EMAIL_FROM` (or a dev/test mailbox token), plus `WORKBASE_OPS_TOKEN`.
 Set `WORKBASE_PUBLIC_HOSTNAME` to a literal bare hostname such as `app.example.test`:
 the SDK derives its HTTPS origin and attaches a Cloudflare Custom Domain, managing
-DNS and the certificate. The hostname is trimmed/lowercased; no scheme, port, path,
+DNS and the certificate. The raw hostname is validated without normalization and
+must use only lowercase ASCII `[a-z0-9.-]`; no scheme, port, path,
 trailing dot, embedded whitespace, IP, wildcard or placeholder is allowed. Punycode
 labels/TLDs are accepted. Configure each environment's hostname explicitly.
 Alternatively, without a custom hostname, set `AUTH_BASE_URL` to an exact HTTPS
 origin (for example workers.dev). Only this fallback expands `{stage}`, including
-`prefix-pr-N` previews. Blank values are unset; at least one input is required.
+`prefix-pr-N` previews. Only an unset `WORKBASE_PUBLIC_HOSTNAME` means no public
+hostname; an empty or whitespace-only set value is rejected. Blank `AUTH_BASE_URL`
+values are unset; at least one input is required.
 A supplied hostname wins over a differing or malformed fallback with one warning;
 invalid hostnames fail. Existing scaffolds must replace the removed hostname env
 variable and `domain` option with `WORKBASE_PUBLIC_HOSTNAME` and `publicHostname`;

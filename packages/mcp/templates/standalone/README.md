@@ -108,7 +108,8 @@ run `bun run build:console` to regenerate the complete output.
 The Worker handles SPA fallback and auth/API routes on the same origin.
 SDK `provision()` applies SDK → plugin → Instance migrations before upload.
 Set `WORKBASE_PUBLIC_HOSTNAME` to a literal bare hostname, for example
-`app.example.test`. The SDK trims/lowercases it, derives `https://app.example.test`
+`app.example.test`. The SDK validates the raw value without normalization; only
+lowercase ASCII `[a-z0-9.-]` is allowed. It derives `https://app.example.test`
 for the `AUTH_BASE_URL` Worker binding, and attaches a Cloudflare Custom Domain
 that manages DNS and its certificate. Set each environment's hostname explicitly;
 placeholders such as `{stage}` are rejected. Schemes, ports, paths, trailing dots,
@@ -117,7 +118,9 @@ embedded whitespace, IPs and wildcards are rejected; ASCII punycode labels are a
 Without a custom hostname, set `AUTH_BASE_URL` to an exact HTTPS origin, for
 example a workers.dev origin. Only this fallback expands `{stage}`, including
 preview stages such as `prefix-pr-123`. Both inputs are optional individually;
-blank values are unset and at least one is required. When both are supplied the
+only an unset `WORKBASE_PUBLIC_HOSTNAME` means no public hostname. An empty or
+whitespace-only set value is rejected. Blank `AUTH_BASE_URL` values are unset and
+at least one input is required. When both are supplied the
 hostname wins, with one warning for a differing origin or malformed unused fallback.
 An invalid hostname always fails. Native Worker requests redirect to the resolved
 origin, which must be reachable and must not redirect to itself.
