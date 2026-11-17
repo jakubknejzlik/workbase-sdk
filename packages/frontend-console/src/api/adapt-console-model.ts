@@ -1,3 +1,4 @@
+import { consolePage } from '@workbasehq/core/console-page'
 import type { ConsoleModelContract, ConsoleRegistry } from '@workbasehq/core/console-contract'
 import type { Model } from '@workbasehq/console-generated/read'
 import { coreConsoleContribution } from '../../../core/src/console-contribution'
@@ -10,9 +11,9 @@ export function adaptConsoleModel(document: ConsoleModelContract): RuntimeConsol
   const { model, capabilities } = document
   // A console provider is optional. The packaged console still owns its built-in
   // overview and authorized Members page when the server has no contributed registry.
-  const homePages = coreConsoleContribution.pages!.filter(page => page.id === 'core.overview')
+  const homePages = coreConsoleContribution.pages!.filter(page => page.id === 'core.overview' && consolePage(capabilities, page))
   const membersPages = membersConsoleContribution.pages!.filter(page => typeof page.grant === 'string' && capabilities.resources[page.grant])
-  const homeNavigation = capabilities.organization.role === 'member' ? [] : coreConsoleContribution.navigation!.filter(item => item.page === 'core.overview')
+  const homeNavigation = capabilities.organization.role === 'member' ? [] : coreConsoleContribution.navigation!.filter(item => item.page === 'core.overview' && homePages.length > 0)
   const registry: ConsoleRegistry = document.console ?? {
     navigation: [...homeNavigation, ...Object.keys(model.entities).filter(entity => capabilities.entities[entity]?.operations.includes('read') && capabilities.entities[entity].readable.includes('id')).map(entity => ({ id: `entity.${entity}`, entity, label: `entity_${entity}`, placement: 'sidebar' as const }))],
     pages: [...homePages, ...membersPages], entities: {}, modelUi: model.ui,

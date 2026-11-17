@@ -1,7 +1,8 @@
+import { consoleGrant, consolePage, type PageRule } from './console-page'
 import { readableComputed } from './query/expressions'
 import type { KernelRegistry } from './kernel/registry'
 import type { Scope } from './types'
-import type { ConsoleGrant, ConsoleModelCapabilities } from './console-contract'
+import type { ConsoleGrant, ConsoleModelCapabilities, ConsoleWidget } from './console-contract'
 import { labelDependencies, labelPath } from './query/labels'
 import { fieldsFor, validateQuery, type QueryInput, type Selection } from './query/schema'
 import { QueryError } from './query/errors'
@@ -15,7 +16,11 @@ export function consoleAuthorization(kernel: KernelRegistry, scope: Scope, caps:
   )]))
   const operation = (entity: string, operation: string) => readable.has(entity) && caps.entities[entity]?.operations.includes(operation) === true
   const command = (name: string) => caps.commands.includes(name)
-  const grant = (grant?: ConsoleGrant) => !grant || (typeof grant === 'string' ? caps.resources[grant] === true : operation(grant.entity, grant.operation ?? 'read'))
+  const grant = (grant?: ConsoleGrant) => consoleGrant(caps, grant)
+  const page = (rule: PageRule & { widgets?: readonly ConsoleWidget[] }, dependencies = true) => consolePage(caps, rule, dependencies && (rule.widgets ?? []).every(widget => {
+    const input = widget.kind === 'stat' ? { ...widget.query, select: widget.aggregate.fn === 'sum' ? [...new Set(['id', widget.aggregate.field])] : ['id'], limit: 1 } : widget.query
+    return !!query(input)
+  }))
   const canRead = (entity: string) => readable.get(entity)?.has('id') === true
   function readableField(entity: string, field: string): boolean {
     if (!readable.get(entity)?.has(field)) return false
@@ -25,7 +30,7 @@ export function consoleAuthorization(kernel: KernelRegistry, scope: Scope, caps:
   function read(entity: string, field: string): boolean {
     if (!readableField(entity, field) || !readableComputed(kernel, scope, entity, field)) return false
     const spec = config.entities[entity]
-    return field !== spec.displayField || !spec.label || labelDependencies(config, entity).every(dependency => readableField(dependency.entity, dependency.field))
+    return field !== spec.displayField || !spec.label || labelDependencies(config, entity).every(dependency => readableField(dependency.entity, dependency.field) && readableComputed(kernel, scope, dependency.entity, dependency.field))
   }
   const write = (entity: string, field: string, action: 'create' | 'update') => !!config.entities[entity]?.fields[field]
     && !config.entities[entity].fields[field].readOnly && operation(entity, action)
@@ -81,6 +86,6 @@ export function consoleAuthorization(kernel: KernelRegistry, scope: Scope, caps:
   const predicate = (entity: string, where: Record<string, unknown>) => !!query({ entity, select: ['id'], limit: 1, where })
   const schema = (node: Record<string, unknown>) => node.sensitive !== true
     && (node.referenceEntity === undefined || typeof node.referenceEntity === 'string' && canRead(node.referenceEntity))
-  return { operation, command, grant, canRead, read, write, literals, defaults, relation, label, query, predicate, schema }
+  return { operation, command, grant, page, canRead, read, write, literals, defaults, relation, label, query, predicate, schema }
 }
 export type ConsoleAuthorization = ReturnType<typeof consoleAuthorization>

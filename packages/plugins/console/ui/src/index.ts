@@ -56,7 +56,9 @@ export const layout = <E extends EntityShape>(nodes: Node<Field<E>, ActionName<E
 export type Target = { entity: string; mode: 'list' | 'detail' | 'edit' }
 export const link = (entity: string, mode: Target['mode'] = 'detail'): Target => ({ entity, mode })
 export const defineNav = <const T extends { title: string; target: Target }[]>(items: T): T => items
+export type PageGrant = import('@workbasehq/core/console-contract').ConsoleGrant
 export type Page = {
+  grant?: PageGrant
   kind: 'page' | 'customPage'; title: string; params: Record<string, ParamSpec>; search: Record<string, ParamSpec>
   data: Record<string, Binding>; layout: Node[]; entity?: string; mode?: 'list' | 'detail' | 'create' | 'edit'; uses: string[]; omit: string[]
   component?: (...args: any[]) => any

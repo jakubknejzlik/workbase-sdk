@@ -30,11 +30,11 @@ test('Instance can register the SDK AccessCard directly; extraction stubs it wit
   const manifest = await extractManifest(f.root)
   expect(manifest.slots.fieldValue.props.access).toEqual({ kind: 'access' })
 })
-test('existing committed manifest v3 bytes stay identical to base 369ae2e', async () => {
+test('committed manifest v3 includes explicit page rules with a stable digest', async () => {
   const root = resolve('packages/plugins/console/ui/fixture')
   const output = execFileSync('bun', ['-e', "import { extractManifest } from './packages/plugins/console/ui/src/vite'; import { canonicalJSON } from './packages/plugins/console/ui/src/client'; console.log(canonicalJSON(await extractManifest('packages/plugins/console/ui/fixture')))"], { cwd: root.replace('/packages/plugins/console/ui/fixture', ''), encoding: 'utf8' })
-  // Independent checked-in digest was captured from the base extraction before adding p.access.
-  expect((await import('node:crypto')).createHash('sha256').update(output.trim()).digest('hex')).toBe('f7ea9349ee329ce607847304ecbcde881c7531055a649104050a30794b19e051')
+  // The explicit page-grant declarations are part of the checked manifest.
+  expect((await import('node:crypto')).createHash('sha256').update(output.trim()).digest('hex')).toBe('878f7788d059927369c550b8228c6850279de26def7cae2c0a5e8deed9f8d54e')
   expect(canonicalJSON(await extractManifest(root))).toBe(output.trim())
 })
 test('other action reasons belong to Instance ui dictionaries; access reasons belong to SDK', () => {

@@ -5,6 +5,7 @@ import type { WorkbasePlugin } from '@workbasehq/core/kernel/plugin'
 import { builtinPlugin } from '@workbasehq/core/kernel/builtin-source'
 import { kernelFor } from '@workbasehq/core/kernel/registry'
 import { scopeMiddleware } from '../../../core/src/authorization'
+import { consoleAuthorization } from '../../../core/src/console-authorization'
 import { capabilities } from '../../../core/src/capabilities'
 import { coreConsoleContribution } from '../../../core/src/console-contribution'
 import { validateCalendarViews } from '../../../core/src/calendar-display'
@@ -59,20 +60,21 @@ export function validateConsole(config: InstanceConfig) {
 /** Fresh organization/actor projection. No shared cache and no authorization granted by UI. */
 export function consoleRegistry(config: InstanceConfig, scope: Scope): ConsoleRegistry {
   const caps = capabilities(kernelFor(config), scope)
-  const permits = (grant?: ConsoleGrant) => !grant || (typeof grant === 'string' ? caps.resources[grant as keyof typeof caps.resources] === true : caps.entities[grant.entity]?.operations.includes(grant.operation ?? 'read'))
+  const authority = consoleAuthorization(kernelFor(config), scope, caps)
+  const permits = (grant?: ConsoleGrant) => !grant || authority.grant(grant)
   const parts = contributions(config)
-  const pages = parts.flatMap(part => part.pages ?? []).filter(page => permits(page.grant)).map(page => {
+  const pages = parts.flatMap(part => part.pages ?? []).filter(page => authority.page(page)).map(page => {
     if (!page.widgets) return page
     const widgets = visibleWidgets(kernelFor(config), scope, page.widgets)
     const ids = new Set(widgets.map(widget => widget.id))
     return { ...page, widgets, sections: page.sections?.map(section => ({ row: section.row.filter(id => ids.has(id)) })).filter(section => section.row.length) }
   })
-  const navigation: ConsoleNavigation[] = parts.flatMap(part => part.navigation ?? []).filter(item => (scope.role !== 'member' || item.placement === 'sidebar' && !!item.entity) && permits(item.grant) && (!item.roles || item.roles.includes(scope.role)) && (!item.page || pages.some(page => page.id === item.page)) && (!item.entity || caps.entities[item.entity]?.operations.includes('read')))
+  const navigation: ConsoleNavigation[] = parts.flatMap(part => part.navigation ?? []).filter(item => (scope.role !== 'member' || item.placement === 'sidebar' && !!item.entity) && permits(item.grant) && (!item.roles || item.roles.includes(scope.role)) && (!item.page || pages.some(page => page.id === item.page)) && (!item.entity || authority.page({ grant: { entity: item.entity }, entity: item.entity, mode: 'list' })))
   const hints = config.ui?.navigation
   const configured = new Set(hints?.items.map(item => item.entity))
   const entityItems: NonNullable<NonNullable<InstanceConfig['ui']>['navigation']>['items'] = [...(hints?.items ?? []), ...Object.keys(config.entities).filter(entity => !configured.has(entity)).map(entity => ({ id: entity, entity }))]
   for (const item of entityItems) {
-    if (item.hidden || !caps.entities[item.entity]?.operations.includes('read') || !caps.entities[item.entity].readable.includes('id') || item.roles && !item.roles.includes(scope.role)) continue
+    if (item.hidden || !authority.page({ grant: { entity: item.entity }, entity: item.entity, mode: 'list' }) || item.roles && !item.roles.includes(scope.role)) continue
     if (item.view) {
       const view = config.ui?.entities?.[item.entity]?.list?.views?.find(view => view.id === item.view)
       if (!view) continue

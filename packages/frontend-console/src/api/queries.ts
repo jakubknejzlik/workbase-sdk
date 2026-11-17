@@ -1,3 +1,4 @@
+import { authorityGeneration, authorityKey, discardAuthority, parseConsoleCapabilities } from './authority'
 import { buildReload } from '../build-reload'
 import { useQuery, useQueryClient, type QueryClient, type QueryFunctionContext } from '@tanstack/react-query'
 import { refreshRuntimeModel } from './runtime-model'
@@ -48,15 +49,21 @@ export function useBuild() {
   })
 }
 export async function fetchCapabilities(client: QueryClient, orgId: string) {
+  const generation = authorityGeneration(client, orgId)
   let next: ConsoleCapabilities
-  try { next = await api<ConsoleCapabilities>(`/o/${encodeURIComponent(orgId)}/capabilities`) } catch (error) {
-    if (error instanceof ApiError && [401, 403].includes(error.status)) await refreshRuntimeModel(client, orgId).catch(() => {})
+  try {
+    next = parseConsoleCapabilities(await api<unknown>(`/o/${encodeURIComponent(orgId)}/capabilities`))
+  } catch (error) {
+    if (generation !== authorityGeneration(client, orgId)) throw error
+    discardAuthority(client, orgId)
+    await client.cancelQueries({ queryKey: ['console-model', orgId] })
     throw error
   }
   const previous = client.getQueryData<ConsoleCapabilities>(['capabilities', orgId])
   if (previous && previous.revision !== next.revision) {
     void buildReload.refresh()
   }
+  if (previous && authorityKey(previous) !== authorityKey(next)) discardAuthority(client, orgId)
   if (previous && JSON.stringify(previous) !== JSON.stringify(next)) await refreshRuntimeModel(client, orgId)
   return next
 }

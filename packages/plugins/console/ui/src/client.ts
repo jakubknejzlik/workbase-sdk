@@ -41,6 +41,7 @@ export function createClient(options: { baseURL: string; orgId: string; actorId:
   const transport = options.fetch
   const cache = new Map<string, unknown>(), latest = new Map<string, object>()
   let epoch = 0
+  const lifetime = new AbortController()
   const listeners = new Set<() => void>()
   function invalidate(entity?: string, row?: RecordData) {
     epoch++; cache.clear()
@@ -48,6 +49,7 @@ export function createClient(options: { baseURL: string; orgId: string; actorId:
     for (const listener of listeners) listener()
   }
   async function wire(path: string, signal: AbortSignal, method = 'GET', body?: unknown, extra?: Record<string, string>) {
+    signal = AbortSignal.any([signal, lifetime.signal])
     signal.throwIfAborted()
     try {
       const response = await transport(options.baseURL.replace(/\/$/, '') + path, {
@@ -81,26 +83,31 @@ export function createClient(options: { baseURL: string; orgId: string; actorId:
   const entityPath = (entity: string) => '/api/' + encodeURIComponent(entity)
   async function mutate(entity: string, path: string, method: string, body: unknown, headers: Record<string, string>, signal: AbortSignal) {
     const row = await wire(path, signal, method, body, headers) as RecordData
+    lifetime.signal.throwIfAborted()
     invalidate(entity, row)
     return row
   }
   async function actWith(entity: string, id: string, name: string, body: Record<string, unknown>, signal: AbortSignal): Promise<{ record: RecordData; result: Record<string, unknown> }> {
     const detail = entityPath(entity) + '/' + encodeURIComponent(id)
     const result = await wire(detail + '/actions/' + encodeURIComponent(name), signal, 'POST', body)
+    lifetime.signal.throwIfAborted()
     invalidate()
     const row = result.id === id && Number.isSafeInteger(result.version) && result.actions && typeof result.actions === 'object'
       ? result as RecordData : await wire(detail, signal) as RecordData
+    lifetime.signal.throwIfAborted()
     invalidate(entity, row)
     return { record: row, result }
   }
   return {
     async members(signal: AbortSignal): Promise<Member[]> {
       const response = await wire('/orgs/' + encodeURIComponent(options.orgId) + '/members', signal)
+      lifetime.signal.throwIfAborted()
       return (response.data as Member[]).map(({ user_id, email }) => ({ user_id, email }))
     },
     scope: { actorId: options.actorId, orgId: options.orgId },
     subscribe(listener: () => void) { listeners.add(listener); return () => { listeners.delete(listener) } },
     invalidate: () => invalidate(),
+    dispose() { lifetime.abort(); epoch++; cache.clear(); latest.clear(); listeners.clear() },
     one(entity: string, request: { id: string }, signal: AbortSignal, requireDetail = false): Promise<RecordData> {
       const key = cacheKey('one', entity, request), row = cache.get(key)
       // Generic mutation envelopes intentionally omit detail-only metadata.

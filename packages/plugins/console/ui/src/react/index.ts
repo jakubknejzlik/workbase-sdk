@@ -20,7 +20,7 @@ export function failureState(error: unknown): State<never> {
   return error instanceof ApiFailure && error.status === 404 ? { kind: 'notFound' } : error instanceof ApiFailure && error.status === 403 ? { kind: 'forbidden' }
     : error instanceof ApiFailure && error.issues ? { kind: 'validation', issues: error.issues } : { kind: 'network' }
 }
-type Runtime = { client: Client; identity: { actorId: string; orgId: string }; t: Translate; slots: Record<string, Slot>; caps?: Capabilities }
+type Runtime = { authorityGeneration?: number; client: Client; identity: { actorId: string; orgId: string }; t: Translate; slots: Record<string, Slot>; caps?: Capabilities }
 const browser = globalThis as typeof globalThis & { confirm(message: string): boolean }
 const Context = createContext<Runtime | null>(null)
 export type ProviderProps = { caps?: Capabilities; onAuthorizationFailure?: (status: 401 | 403) => void; identity: Runtime['identity']; t: Runtime['t']; baseURL?: string; fetch?: (url: string, init: ClientRequestInit) => Promise<Response>; slots?: Record<string, Slot>; i18n?: I18n; children?: ReactNode }
@@ -30,11 +30,13 @@ export function ConsoleProvider({ identity, t, baseURL = '', fetch: transport = 
   // A fresh translator identity per language makes memoized authored consumers re-render on language change.
   const translate = useMemo<Translate>(() => t.bind(null), [t, language])
   const scopeKey = canonicalJSON([identity.actorId, identity.orgId, caps ?? null])
+  const authority = useRef({ key: scopeKey, generation: 0 })
+  if (authority.current.key !== scopeKey) authority.current = { key: scopeKey, generation: authority.current.generation + 1 }
   const client = useMemo(() => createClient({ baseURL, ...identity, fetch: transport, onAuthorizationFailure }), [baseURL, scopeKey, transport, onAuthorizationFailure])
   const queries = useMemo(() => new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity, refetchOnWindowFocus: false } } }), [client])
   useEffect(() => client.subscribe(() => { void queries.invalidateQueries() }), [client, queries])
-  useEffect(() => () => queries.clear(), [queries])
-  return h(Context.Provider, { value: { client, identity, t: translate, slots, caps }, key: canonicalJSON([baseURL, scopeKey]) }, h(TranslationContext.Provider, { value: translate }, h(QueryClientProvider, { client: queries }, children)))
+  useEffect(() => () => { client.dispose(); void queries.cancelQueries(); queries.clear() }, [client, queries])
+  return h(Context.Provider, { value: { client, identity, t: translate, slots, caps, authorityGeneration: authority.current.generation }, key: canonicalJSON([baseURL, scopeKey]) }, h(TranslationContext.Provider, { value: translate }, h(QueryClientProvider, { client: queries }, children)))
 }
 export function useRuntime() { const runtime = useContext(Context); if (!runtime) throw new Error('ConsoleProvider is required'); return runtime }
 export function useRecord(entity: string, id: string) {
@@ -80,14 +82,14 @@ export function renderNode(node: Node, ctx: RenderContext): ReactNode {
     for (const [key, spec] of Object.entries(slot.props)) {
       const value = node.props[key] ?? ('default' in spec ? spec.default : undefined)
       if (spec.kind === 'when' && value !== ctx.mode) return null
-      if (spec.kind === 'field' && !permission.readable(ctx.entity, String(value))) return null
+      if (spec.kind === 'field' && !(ctx.mode === 'create' ? permission.writable(ctx.entity, String(value), 'create') : permission.readable(ctx.entity, String(value)))) return null
       props[key] = spec.kind === 'field' ? (ctx.draft ?? ctx.record)[String(value)] : spec.kind === 'key' ? ctx.t('ui:' + value) : value
     }
     return h(ResolvedSlot, { slot, props, ctx })
   }
-  if (!permission.readable(ctx.entity, node)) return null
+  if (!(ctx.mode === 'create' ? permission.writable(ctx.entity, node, 'create') : permission.readable(ctx.entity, node))) return null
   const field = ctx.metadata.fields[node], renderer = field && fieldRenderers[field.type]
-  const editable = permission.writable(ctx.entity, node) && !!ctx.change && field && !field.readOnly && !field.computed && !field.userLink
+  const editable = permission.writable(ctx.entity, node, ctx.mode === 'create' ? 'create' : 'update') && !!ctx.change && field && !field.readOnly && !field.computed && !field.userLink
   if (!renderer || editable && field.type === 'ref') return h('p', { role: 'alert' }, ctx.t('sdk:unsupported') + ': ' + (field?.type ?? node))
   const error = ctx.issues?.filter(issue => issue.path[0] === node).map(issue => issue.code).join(', ')
   return h('div', null, h('label', null, ctx.t('domain:field.' + ctx.entity + '.' + node)), editable ? renderer({ field, name: ctx.t('domain:field.' + ctx.entity + '.' + node), t: ctx.t, enumKey: 'domain:enum.' + ctx.entity + '.' + node + '.', value: ctx.draft?.[node], change: value => ctx.change!(node, value), error }) : h('span', null, field.type === 'enum' && ctx.record[node] != null ? ctx.t('domain:enum.' + ctx.entity + '.' + node + '.' + ctx.record[node]) : String(ctx.record[node] ?? '')), error && h('span', { role: 'alert' }, ctx.t(error === 'required' ? 'sdk:required' : 'sdk:validation')))
@@ -185,7 +187,7 @@ function RecordView({ props, metadata, id }: { props: ViewProps; metadata: Entit
   if (props.definition.mode === 'edit') return h(Form, { props, metadata, initial: state.data, reload })
   const ctx = { ...runtime, slots: props.slots ?? runtime.slots, metadata, entity: props.definition.entity!, record: state.data, mode: props.definition.mode }
   return h('div', null, ...props.definition.layout.map((node, i) => h('div', { key: i }, renderNode(node, ctx))),
-    props.route.links.edit && gate(runtime.caps, { entities: props.entities }).allows({ ...props.definition, mode: 'edit' }) && h('button', { onClick: () => props.navigate(path(props.route.links.edit, state.data.id)!) }, runtime.t('sdk:edit')))
+    props.route.links.edit && props.routes?.some(target => target.path === props.route.links.edit?.to && gate(runtime.caps, { entities: props.entities }).allows(target)) && h('button', { onClick: () => props.navigate(path(props.route.links.edit, state.data.id)!) }, runtime.t('sdk:edit')))
 }
 function ListView({ props, metadata }: { props: ViewProps; metadata: EntityMeta }) {
   const runtime = useRuntime(), { t: translate } = runtime, binding = Object.values(props.definition.data).find(binding => binding.kind === 'list')
@@ -201,7 +203,8 @@ function ListView({ props, metadata }: { props: ViewProps; metadata: EntityMeta 
     h('select', { 'aria-label': translate('sdk:sort'), value: bind.sort || metadata.displayField, onChange: (e: { target: { value: string } }) => setBind(current => ({ ...current, sort: e.target.value })) }, ...[...new Set(['id', ...Object.keys(metadata.fields)])].map(field => h('option', { key: field, value: field }, field === 'id' ? translate('sdk:identifier') : translate('domain:field.' + props.definition.entity + '.' + field)))),
     h('select', { 'aria-label': translate('sdk:direction'), value: bind.dir || 'asc', onChange: (e: { target: { value: string } }) => setBind(current => ({ ...current, dir: e.target.value })) }, ...['asc', 'desc'].map(dir => h('option', { key: dir, value: dir }, translate('sdk:' + dir)))),
     message(state, translate), state.kind === 'ready' && h('ul', null, ...state.data.map(record => h('li', { key: record.id },
-      props.route.links.detail && h('button', { onClick: () => props.navigate(path(props.route.links.detail, record.id)!) }, String(record[metadata.displayField] ?? record.id)),
+      props.route.links.detail && props.routes?.some(target => target.path === props.route.links.detail?.to && gate(runtime.caps, { entities: props.entities }).allows(target)) && h('button', { onClick: () => props.navigate(path(props.route.links.detail, record.id)!) }, String(record[metadata.displayField] ?? record.id)),
+      (!props.route.links.detail || !props.routes?.some(target => target.path === props.route.links.detail?.to && gate(runtime.caps, { entities: props.entities }).allows(target))) && h('span', null, String(record[metadata.displayField] ?? record.id)),
       ...props.definition.layout.map((node, i) => h('div', { key: i }, renderNode(node, { ...runtime, slots: props.slots ?? runtime.slots, metadata, entity: props.definition.entity!, record, mode: 'list' })))))),
     hasMore && h('button', { disabled: loadingMore, onClick: more }, translate('sdk:loadMore')))
 }
@@ -212,7 +215,7 @@ export function PageView(input: ViewProps) {
   const props = { ...input, definition }, { route } = props
   const permission = gate(runtime.caps, { entities: props.entities })
   if (!permission.allows(definition)) return message({ kind: 'forbidden' }, translate)
-  const metadata = definition.entity && props.entities[definition.entity] && permission.metadata(definition.entity)
+  const metadata = definition.entity && props.entities[definition.entity] && permission.metadata(definition.entity, definition.mode)
   const binding = Object.values(definition.data).find(binding => binding.kind === 'one')
   const id = binding?.bind.id && String(props.params[binding.bind.id.name] ?? props.search[binding.bind.id.name] ?? '')
   const back = path(route.links.list)

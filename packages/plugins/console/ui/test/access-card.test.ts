@@ -36,7 +36,7 @@ test.each(['cs', 'en'])('four committed server fixtures agree exactly with contr
   }
 })
 function view(options: { fetch?: (url: string, init: ClientRequestInit) => Promise<Response>; component?: (...args: any[]) => any; entity?: string; readable?: string[]; members?: boolean; extra?: unknown } = {}) {
-  const entity = options.entity ?? 'probe', entities = { [entity]: meta }, definition = entityDetailPage(entity, { title: 'page.detail', recordParam: 'assetId', layout: [slot('accessCard', { account: 'user' })] })
+  const entity = options.entity ?? 'probe', entities = { [entity]: meta }, definition = entityDetailPage(entity, { grant: { entity }, title: 'page.detail', recordParam: 'assetId', layout: [slot('accessCard', { account: 'user' })] })
   const caps = grants(entities); caps.resources['members.read'] = options.members ?? true
   if (options.readable) caps.entities[entity].readable = options.readable
   return h(ConsoleProvider, { identity: { actorId: 'actor', orgId: 'org' }, t, caps, fetch: options.fetch ?? (async () => json(noAccount)), slots: { accessCard: { contexts: ['record'], props: { account: p.field('userLink'), access: p.access() }, component: options.component ?? AccessCard } } }, h(PageView, { definition, route: { ...definition, path: '/assets/$assetId', source: 'ui/items.ts', links: {} }, entities, params: { assetId: 'wrk_1' }, search: {}, navigate: () => {} }), options.extra as never)

@@ -36,7 +36,15 @@ export async function logoutSession(client: QueryClient): Promise<void> {
     throw error
   }
 }
-export async function api<T>(path: string, options: { method?: string; body?: unknown; orgId?: string; redirect401?: boolean; idempotencyKey?: string } = {}): Promise<T> {
+const scopes = new Map<string, AbortController>()
+export function discardTransportScope(org: string) {
+  scopes.get(org)?.abort(); scopes.set(org, new AbortController())
+}
+export async function api<T>(path: string, options: { method?: string; body?: unknown; orgId?: string; redirect401?: boolean; idempotencyKey?: string; signal?: AbortSignal } = {}): Promise<T> {
+  const org = options.orgId ?? /^\/o\/([^/]+)\//.exec(path)?.[1]
+  if (org && !scopes.has(org)) scopes.set(org, new AbortController())
+  const signal = AbortSignal.any([...(org ? [scopes.get(org)!.signal] : []), ...(options.signal ? [options.signal] : [])])
+  signal.throwIfAborted()
   const method = options.method ?? 'GET'
   const mutation = !['GET', 'HEAD'].includes(method)
   const headers: Record<string, string> = { Accept: 'application/json' }
@@ -45,11 +53,15 @@ export async function api<T>(path: string, options: { method?: string; body?: un
   if (mutation) Object.assign(headers, { Origin: window.location.origin, 'Sec-Fetch-Site': 'same-origin', 'Content-Type': 'application/json' })
   // Browsers supply the forbidden Origin/Sec-Fetch-Site headers themselves; declaring them
   // here also preserves the contract for fetch adapters. Same-origin credentials are explicit.
-  const response = await fetch(path, { method, credentials: 'same-origin', headers, ...(mutation ? { body: JSON.stringify(options.body ?? {}) } : {}) })
+  const response = await fetch(path, { signal, method, credentials: 'same-origin', headers, ...(mutation ? { body: JSON.stringify(options.body ?? {}) } : {}) })
+  signal.throwIfAborted()
   if (!response.ok) {
     const data = await response.json().catch(() => ({})) as { error?: string; code?: string }
+    signal.throwIfAborted()
     if (response.status === 401 && options.redirect401 !== false && !loggingOut) window.location.assign(signInLocation())
     throw new ApiError(response.status, data.error ?? data.code ?? 'request_failed', data)
   }
-  return response.status === 204 ? undefined as T : response.json() as Promise<T>
+  const value = response.status === 204 ? undefined as T : await response.json() as T
+  signal.throwIfAborted()
+  return value
 }

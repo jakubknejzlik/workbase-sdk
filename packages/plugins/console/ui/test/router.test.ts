@@ -10,7 +10,7 @@ const histories: ReturnType<typeof createBrowserHistory>[] = []
 afterEach(() => { cleanup(); histories.splice(0).forEach(history => history.destroy()); vi.restoreAllMocks() })
 test('real router back guards dirty draft and confirms before leaving', async () => {
   const confirm = vi.spyOn(globalThis as typeof globalThis & { confirm(message: string): boolean }, 'confirm').mockReturnValue(false)
-  const definition = entityEditPage('probe', { title: 'probe.edit', recordParam: 'itemId', layout: ['name'] })
+  const definition = entityEditPage('probe', { grant: { entity: 'probe', operation: 'update' }, title: 'probe.edit', recordParam: 'itemId', layout: ['name'] })
   const fields = { name: { type: 'string', required: true, readOnly: false, computed: false, userLink: false } }
   const route = { ...definition, path: '/items/$itemId/edit', source: 'ui/items.ts', links: { detail: { to: '/items/$itemId', bind: { itemId: 'record.id' } } } }
   const root = createRootRoute({ component: Outlet })

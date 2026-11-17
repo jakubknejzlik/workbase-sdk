@@ -39,7 +39,7 @@ function rebindConfig(mode:string,selection:string){
  const sub=Q.select().from('notes','n').field(Fn.count('n.id'),field).orderBy(field,'ASC');
  v.entities.notes.fields.value.computed=Fn.if(Cond.exists(sub),field,Q.value(0)).serialize();
  v.plugins.push(consoleUI(),{name:'rebind-count',version:'1',requires:{console:'^1'},contributes:{console:{pages:[{
-  id:'r5.count',path:'/r5-count',label:'Count',widgets:[{id:'count',kind:'stat',label:'Count',aggregate:{fn:'count'},
+  id:'r5.count',grant:{entity:'notes'},path:'/r5-count',label:'Count',widgets:[{id:'count',kind:'stat',label:'Count',aggregate:{fn:'count'},
    query:{entity:'notes',...(selection==='selected'?{where:{value:{eq:mode==='stored'?3:4}}}:{})}}],
  }]}}});
  return defineInstance(v);

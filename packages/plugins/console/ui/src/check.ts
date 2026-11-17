@@ -26,6 +26,7 @@ const node: z.ZodType<Node> = z.lazy(() => z.union([
 ]))
 const pageSchema = z.strictObject({
   kind: z.enum(['page', 'customPage']), title, params, search: params, data: z.record(id, binding), layout: z.array(node), uses: z.array(z.string()), omit: z.array(id),
+  grant: z.union([z.string().min(1), z.strictObject({ entity: id, operation: z.enum(['read', 'create', 'update', 'delete']).optional() })]).optional(),
   entity: id.optional(), mode: z.enum(['list', 'detail', 'create', 'edit']).optional(),
 })
 const targetSchema = z.strictObject({ entity: id, mode: z.enum(['list', 'detail', 'edit']) })

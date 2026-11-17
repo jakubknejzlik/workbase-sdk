@@ -1,3 +1,4 @@
+import { discardAuthority } from './api/authority'
 import { useConsoleRegistry } from './api/console'
 import { useEffect, useRef, useState } from 'react'
 import { ConsoleLayout, LayoutNavigationItem, LayoutNavigationGroup, LayoutNavigationSubItem, SidebarMenu, LayoutUserDropdown, Dialog, ResourcePage, useMutationSubmit } from '@workbasehq/ui'
@@ -42,6 +43,7 @@ export function Frame() {
   useEffect(() => () => {
     if (!orgId) return
     const scope = decodeURIComponent(orgId)
+    discardAuthority(client, scope)
     for (const key of ['console-model', 'bootstrap', 'capabilities', 'console-registry', 'workflow-schema']) client.removeQueries({ queryKey: [key, scope], exact: true })
   }, [client, orgId])
   // Profile and bootstrap are independent reads. Keep the completeness gate while

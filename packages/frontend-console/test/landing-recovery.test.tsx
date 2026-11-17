@@ -108,7 +108,7 @@ it('a cold Members-only admin opens Members from the instance Overview without a
   const document: ConsoleModelContract = {
     contractVersion: 1, console: null,
     model: { instance: 'test', revision: 1, locale: 'en', timeZone: 'UTC', limits: {}, entities: {}, commands: [], workflows: [] },
-    capabilities: { revision: 1, organization: { role: 'admin' }, entities: {}, commands: [], workflows: {}, resources: { 'members.read': true } },
+    capabilities: { revision: 1, organization: { role: 'admin' }, entities: {}, commands: [], workflows: {}, resources: { 'console.overview': true, 'members.read': true } },
   }
   const { router, fetch, replace, assign } = await mount('/o/instance', me, document)
   expect(await screen.findByRole('heading', { name: 'Overview' })).toBeTruthy()

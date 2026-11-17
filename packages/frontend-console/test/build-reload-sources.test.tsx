@@ -31,7 +31,7 @@ it('poll, focus, capabilities and bootstrap route repeated SHA through one coord
   const fetcher = vi.fn(async (path: string) => {
     if (path === '/build.json') return Response.json({ sha, revision, builtAt: '2026-11-17T00:00:00Z' })
     if (path === '/me') return Response.json({ user: null, memberships: [] })
-    if (path.endsWith('/capabilities')) return Response.json({ revision, entities: {} })
+    if (path.endsWith('/capabilities')) return Response.json({ revision, entities: {}, resources: {}, organization: { role: 'admin' }, commands: [], workflows: {} })
     throw new Error(`Unexpected read ${path}`)
   }); vi.stubGlobal('fetch', fetcher)
   render(<QueryClientProvider client={client}><Poll /><MutationSession close={() => {}} cancelLabel="Cancel">{() => <Draft />}</MutationSession></QueryClientProvider>)
@@ -40,7 +40,7 @@ it('poll, focus, capabilities and bootstrap route repeated SHA through one coord
   // The interval's query function and a real focus notification both observe B.
   await act(async () => { await client.refetchQueries({ queryKey: ['build'] }) })
   focusManager.setFocused(false); await act(async () => focusManager.setFocused(true)); await waitFor(() => expect(fetcher.mock.calls.filter(([path]) => path === '/build.json').length).toBeGreaterThanOrEqual(3))
-  client.setQueryData(['capabilities', 'org'], { revision: 1, entities: {} }); revision = 2
+  client.setQueryData(['capabilities', 'org'], { revision: 1, entities: {}, resources: {}, organization: { role: 'admin' }, commands: [], workflows: {} }); revision = 2
   await act(async () => { await fetchCapabilities(client, 'org'); await coordinator.refresh() })
   client.setQueryData(['instance'], { instance: 'test', roles: [] })
   await act(async () => { await bootstrapOptions(client).queryFn() })
@@ -51,8 +51,8 @@ it('poll, focus, capabilities and bootstrap route repeated SHA through one coord
 })
 it('same SHA with a changed capabilities revision observes fresh build metadata without a hard reload', async () => {
   const { coordinator, client, reload, flush } = setup(); coordinator.observe({ sha: 'A' })
-  const fetcher = vi.fn(async (path: string) => Response.json(path === '/build.json' ? { sha: 'A', revision: 2, builtAt: 'later' } : { revision: 2, entities: {} }))
-  vi.stubGlobal('fetch', fetcher); client.setQueryData(['capabilities', 'org'], { revision: 1, entities: {} })
+  const fetcher = vi.fn(async (path: string) => Response.json(path === '/build.json' ? { sha: 'A', revision: 2, builtAt: 'later' } : { revision: 2, entities: {}, resources: {}, organization: { role: 'admin' }, commands: [], workflows: {} }))
+  vi.stubGlobal('fetch', fetcher); client.setQueryData(['capabilities', 'org'], { revision: 1, entities: {}, resources: {}, organization: { role: 'admin' }, commands: [], workflows: {} })
   await fetchCapabilities(client, 'org'); await coordinator.refresh(); flush()
   expect(fetcher.mock.calls.some(([path]) => path === '/build.json')).toBe(true); expect(reload).toHaveBeenCalledTimes(0)
 })

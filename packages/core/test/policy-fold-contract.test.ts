@@ -39,7 +39,7 @@ for (const deny of ['empty', 'forbidden'] as const) {
           deny === 'empty' ? { status: 404, error: 'not_found' } : { status: 403, error: 'policy_violation', path: [] },
           ...Array.from({ length: 3 }, () => ({ status: 403, error: 'permission_denied' })),
         ])
-        expect(capability).toEqual({ operations: [], readable: ['id', 'name'], writable: ['name', 'team_id'], displayField: 'name' })
+        expect(capability).toEqual({ operations: [], readable: [], writable: ['name', 'team_id'] })
         expect(audit).toBe(0)
       }
       // Compare serialized bodies as well as the pinned status/error/metadata contract.

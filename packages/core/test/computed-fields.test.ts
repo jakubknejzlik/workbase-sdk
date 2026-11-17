@@ -121,3 +121,39 @@ it('W44 validation rejects physical entities, unknown functions, mutual computed
   hops.entities.bookings.displayField = Fn.concat('customer.caption', Q.value('!')).serialize()
   expect(() => defineInstance(hops)).toThrow(/at most one hop/)
 })
+
+it.each(['own', 'source', 'target', 'transitive', 'target_policy', 'allowed'] as const)('page fields use server-projected effective computed permissions: %s', async denial => {
+  const { capabilities } = await import('../src/capabilities')
+  const { consoleModel } = await import('../src/console-model')
+  const value = input() as any
+  const bookings = value.entities.bookings
+  bookings.fields = { ...bookings.fields,
+    chained: { type: 'int', computed: Fn.add('doubled', Q.value(1)).serialize() },
+    customer_caption: { type: 'string', computed: Fn.concat('customer.name', Q.value('!')).serialize() },
+  }
+  const omitted = denial === 'own' ? 'doubled' : denial === 'source' ? 'amount' : denial === 'transitive' ? 'doubled' : undefined
+  value.plugins!.push({ name: 'effective-field-fixture', version: '1', fieldMask(entity: string) {
+    return entity === 'bookings' ? ['id', 'version', ...Object.keys(bookings.fields).filter(field => field !== omitted)] : ['id', 'name']
+  } })
+  if (denial === 'target') value.permissions!.owner.people = []
+  if (denial === 'target_policy') value.policies!.people.owner = 'none'
+  const config = defineInstance(value)
+  await setup(config)
+  const kernel = new KernelRegistry(config)
+  const freshScope = await requireScope(await resolveActor(new Request('http://localhost', { headers: { Authorization: 'Bearer synthetic-owner-a' } }), runtime(), kernel.config), 'org-a', kernel.config)
+  const projected = capabilities(kernel, freshScope)
+  const document = consoleModel(kernel, freshScope)
+  const allowed = denial === 'allowed'
+  const field = ['target', 'target_policy'].includes(denial) ? 'customer_caption' : denial === 'transitive' ? 'chained' : 'doubled'
+  expect(projected.entities.bookings.readable.includes(field)).toBe(allowed)
+  expect(Object.hasOwn(document.model.entities.bookings.fields, field)).toBe(allowed)
+  const now = '2026-11-11T15:26:00Z'
+  await env.DB.prepare('INSERT INTO bookings(id,organization_id,title,amount,created_at,updated_at) VALUES (?,?,?,?,?,?)').bind('effective','org-a','Booking',3,now,now).run()
+  // Existing API redaction remains independent of the page projection.
+  if (denial === 'own') {
+    await expect(executeQuery(kernel, freshScope, env.DB, 'synthetic', { entity: 'bookings', select: ['id', field], limit: 1 }, { writeLog: () => {} })).rejects.toHaveProperty('code', 'field_forbidden')
+  } else {
+    const result = await executeQuery(kernel, freshScope, env.DB, 'synthetic', { entity: 'bookings', select: ['id', field], limit: 1 }, { writeLog: () => {} })
+    expect(result.data[0][field]).toBe(allowed ? 6 : null)
+  }
+})

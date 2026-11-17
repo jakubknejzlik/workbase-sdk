@@ -32,7 +32,7 @@ it.each([
   const document: ConsoleModelContract = {
     contractVersion: 1, console: null,
     model: { instance: 'test', revision: 1, locale: 'en', timeZone: 'UTC', entities: {}, commands: [], workflows: [], limits: {} },
-    capabilities: { revision: 1, organization: { role: 'admin' }, entities: {}, commands: [], workflows: {}, resources: {} },
+    capabilities: { revision: 1, organization: { role: 'admin' }, entities: {}, commands: [], workflows: {}, resources: { 'console.overview': true } },
   }
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } })
   client.setQueryData(['me'], me)
