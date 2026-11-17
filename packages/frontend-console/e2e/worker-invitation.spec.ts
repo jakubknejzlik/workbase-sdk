@@ -43,7 +43,8 @@ test('V3 worker invite retries failed transport and its delivered link reaches a
     const page = await recipient.newPage()
     await page.goto(delivered)
     await expect(page.getByRole('button', { name: 'Accept invitation', exact: true })).toBeVisible()
-    await expect(page.getByText('Invitation workspace', { exact: true })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Invitation to Public instance', exact: true })).toBeVisible()
+    await expect(page.getByText('Invitation workspace', { exact: true })).toHaveCount(0)
     const accepted = page.waitForResponse(response => response.url().endsWith('/invitations/accept') && response.request().method() === 'POST')
     await page.getByRole('button', { name: 'Accept invitation', exact: true }).click()
     const response = await accepted
@@ -82,10 +83,17 @@ for (const language of ['en', 'cs'] as const) test(`${language} copied invitatio
       expect(new URL(page.url()).search).toBe('')
       await page.screenshot({ path: join(process.env.WORKER_INVITATION_SCREENSHOTS, `${language}-${step}.png`), fullPage: true })
     }
+    const preflight = page.waitForResponse(response => new URL(response.url()).pathname === '/invitations/preflight')
     await page.goto(copiedUrl)
+    const publicResponse = await preflight
+    expect(publicResponse.status()).toBe(200)
+    expect(await publicResponse.json()).toEqual({ id: invitation.id, account_match: null })
     await expect(page.getByRole('button', { name: copy.p10SignInToAccept, exact: true })).toBeVisible()
     await expect(page.getByText(copy.p10CopiedSignInDescription, { exact: true })).toBeVisible()
     await expect(page).toHaveURL(`${origin}/invitation`)
+    await expect(page.getByRole('heading', { name: language === 'en' ? 'Invitation to Public instance' : 'Pozvánka do Public instance', exact: true })).toBeVisible()
+    await expect(page.getByText('Invitation workspace', { exact: true })).toHaveCount(0)
+    await expect(page.getByRole('button', { name: copy.p10Decline, exact: true })).toHaveCount(0)
     await screenshot('anonymous')
     await page.getByRole('button', { name: copy.p10SignInToAccept, exact: true }).click()
     await expect(page).toHaveURL(`${origin}/sign-in?returnTo=${encodeURIComponent(`/invitation?id=${invitation.id}`)}`)
@@ -99,12 +107,16 @@ for (const language of ['en', 'cs'] as const) test(`${language} copied invitatio
     const message = messages.filter((value: { to: string; text: string }) => value.to === email && value.text.includes('/auth/magic-link/verify')).at(-1)
     const loginUrl = message?.text.match(/https?:\/\/[^\s]+/)?.[0]
     expect(Boolean(loginUrl), 'synthetic mailbox contains a magic link').toBe(true)
+    const preview = page.waitForResponse(response => new URL(response.url()).pathname === `/invitations/${invitation.id}/preview`)
     await page.goto(loginUrl)
     await expect(page.getByRole('heading', { name: copy.profileSetupTitle, exact: true })).toBeVisible()
     expect(accepts).toEqual([])
     await page.getByLabel(copy.firstName, { exact: true }).fill('Copied')
     await page.getByLabel(copy.lastName, { exact: true }).fill('Synthetic')
     await page.getByRole('button', { name: copy.profileContinue, exact: true }).click()
+    const recipientResponse = await preview
+    expect(recipientResponse.status()).toBe(200)
+    expect(await recipientResponse.json()).toMatchObject({ organization: { id: 'org-a', name: 'Invitation workspace' }, inviter: { display_name: 'admin' }, role: 'staff', account_match: true })
     await expect(page.getByRole('button', { name: copy.acceptInvitation, exact: true })).toBeVisible()
     await expect(page).toHaveURL(`${origin}/invitation`)
     expect(accepts).toEqual([])
@@ -115,6 +127,8 @@ for (const language of ['en', 'cs'] as const) test(`${language} copied invitatio
       return (await response.json()).memberships
     })
     expect(await memberships()).toEqual([])
+    await expect(page.getByText('Invitation workspace', { exact: true })).toBeVisible()
+    await expect(page.getByRole('button', { name: copy.p10Decline, exact: true })).toBeVisible()
     await screenshot('authenticated')
     const acceptance = page.waitForResponse(response => new URL(response.url()).pathname === `/invitations/${invitation.id}/accept` && response.request().method() === 'POST')
     await page.getByRole('button', { name: copy.acceptInvitation, exact: true }).click()
@@ -124,4 +138,39 @@ for (const language of ['en', 'cs'] as const) test(`${language} copied invitatio
     expect(await memberships()).toEqual([expect.objectContaining({ organization_id: 'org-a', role: 'staff' })])
     await screenshot('joined')
   } finally { await recipient.close() }
+})
+
+for (const language of ['en', 'cs'] as const) test(`${language} copied invitation with a different verified account exposes only recovery`, async ({ browser, request }) => {
+  const copy = language === 'en' ? en : cs
+  const headers = { Authorization: 'Bearer worker-admin-session', 'X-Organization-Id': 'org-a' }
+  const created = await request.post('/orgs/org-a/invitations', { headers, data: { email: `other-${language}@example.test`, role: 'staff' } })
+  expect(created.status()).toBe(201)
+  const invitation = await created.json()
+  const copied = await request.post(`/orgs/org-a/invitations/${invitation.id}/copy-link`, { headers, data: {} })
+  expect(copied.status()).toBe(200)
+  const copiedUrl = (await copied.json()).accept_url
+  const other = await browser.newContext({ baseURL: origin, extraHTTPHeaders: { Authorization: 'Bearer worker-admin-session' } })
+  try {
+    await other.addInitScript(locale => localStorage.setItem('console-language', locale), language)
+    const page = await other.newPage()
+    let mutations = 0
+    page.on('request', incoming => { if (incoming.method() === 'POST' && /\/invitations\/(?:[^/]+\/)?(?:accept|decline|resolve)$/.test(new URL(incoming.url()).pathname)) mutations++ })
+    const preflight = page.waitForResponse(response => new URL(response.url()).pathname === '/invitations/preflight')
+    await page.goto(copiedUrl)
+    const response = await preflight
+    expect(response.status()).toBe(200)
+    expect(await response.json()).toEqual({ id: invitation.id, account_match: false })
+    await expect(page.getByText(copy.p10WrongAccountTitle, { exact: true })).toBeVisible()
+    await expect(page.getByRole('heading', { name: language === 'en' ? 'Invitation to Public instance' : 'Pozvánka do Public instance', exact: true })).toBeVisible()
+    await expect(page.getByRole('button', { name: copy.p10SwitchAccount, exact: true })).toBeVisible()
+    await expect(page.getByText('Invitation workspace', { exact: true })).toHaveCount(0)
+    await expect(page.getByRole('button', { name: copy.acceptInvitation, exact: true })).toHaveCount(0)
+    await expect(page.getByRole('button', { name: copy.p10Decline, exact: true })).toHaveCount(0)
+    expect(mutations).toBe(0)
+    if (process.env.WORKER_INVITATION_SCREENSHOTS) {
+      mkdirSync(process.env.WORKER_INVITATION_SCREENSHOTS, { recursive: true })
+      expect(new URL(page.url()).search).toBe('')
+      await page.screenshot({ path: join(process.env.WORKER_INVITATION_SCREENSHOTS, `${language}-other-account.png`), fullPage: true })
+    }
+  } finally { await other.close() }
 })

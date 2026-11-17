@@ -71,7 +71,7 @@ it('accepts invitations once, ignores forged role, rejects expiry, and requires 
   expect(await env.DB.prepare("SELECT role FROM memberships JOIN users ON users.id=memberships.user_id WHERE email='owner.b@example.test' AND organization_id='org-a'").first('role')).toBe('viewer')
   expect((await request(app, '/invitations/accept', 'POST', { token }, 'owner-b', 'org-b')).status).toBe(200)
   await env.DB.prepare("UPDATE invitations SET expires_at='2000-01-01T00:00:00.000Z' WHERE email='expired@example.test'").run()
-  expect(await json(await request(app, '/invitations/preflight', 'POST', { token: expired }, 'owner-b', 'org-b'))).toMatchObject({ state: 'expired', account_match: false })
+  expect(await json(await request(app, '/invitations/preflight', 'POST', { token: expired }, 'owner-b', 'org-b'))).toEqual({ id: await env.DB.prepare("SELECT id FROM invitations WHERE email='expired@example.test'").first('id'), account_match: false })
   expect((await request(app, '/auth/register', 'POST', { token: expired }, 'owner-b', 'org-b')).status).toBe(403)
   expect(await env.DB.prepare("SELECT count(*) AS n FROM users WHERE email='owner.b@example.test'").first('n')).toBe(1)
 })

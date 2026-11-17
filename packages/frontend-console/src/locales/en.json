@@ -429,6 +429,7 @@
   "p10WrongAccountDescription": "You are signed in with a different account. Sign out, then use this invitation to verify the invited account.",
   "p10SwitchAccount": "Sign out and switch account",
   "p10AnonymousDescription": "This invitation verifies your email and signs you in. Complete your profile before joining.",
+  "p10PublicInvitationTitle": "Invitation to {{instance}}",
   "p10SignInToAccept": "Sign in to accept",
   "p10CopiedSignInDescription": "Sign in with the invited email address to accept this invitation.",
   "p10Accepting": "Accepting…",

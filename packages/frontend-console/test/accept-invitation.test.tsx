@@ -24,7 +24,7 @@ const profile = (complete: boolean) => ({
 const clients: QueryClient[] = []
 afterEach(() => { cleanup(); clients.splice(0).forEach(client => client.clear()); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
-async function mount(language: 'en' | 'cs', options: { authenticated?: boolean; complete?: boolean; delivered?: boolean; byId?: boolean } = {}) {
+async function mount(language: 'en' | 'cs', options: { authenticated?: boolean; complete?: boolean; delivered?: boolean; byId?: boolean; wrongAccount?: boolean; overbroad?: boolean } = {}) {
   let authenticated = options.authenticated ?? false
   let complete = options.complete ?? true
   const assign = vi.fn()
@@ -35,7 +35,8 @@ async function mount(language: 'en' | 'cs', options: { authenticated?: boolean; 
   vi.stubGlobal('window', new Proxy(originalWindow, { get: (target, key) => key === 'location'
     ? { origin: 'http://localhost', search, assign, replace: vi.fn() } : Reflect.get(target, key) }))
   const fetch = vi.fn(async (path: string) => {
-    if (path === '/invitations/preflight' || path === `/invitations/${summary.id}/preview`) return Response.json({ ...summary, account_match: authenticated ? true : null })
+    if (path === '/console-info') return Response.json({ instance: 'synthetic-instance', displayName: 'Public instance', roles: [] })
+    if (path === '/invitations/preflight' || path === `/invitations/${summary.id}/preview`) return Response.json({ ...(authenticated && !options.wrongAccount || options.overbroad ? summary : { id: summary.id }), account_match: authenticated ? !options.wrongAccount : null })
     if (path === '/me/profile') return authenticated ? Response.json(profile(complete)) : Response.json({ error: 'unauthenticated' }, { status: 401 })
     if (path.endsWith('/accept')) {
       if (!authenticated) {
@@ -65,8 +66,12 @@ it.each(languages)('$language copied link signs in without attempting acceptance
   const anonymous = await mount(language)
   const button = await screen.findByRole('button', { name: signIn })
   expect(screen.getByText(hint)).toBeTruthy()
-  expect(screen.getByText(summary.organization.name)).toBeTruthy()
-  expect(screen.getByText(summary.inviter.display_name)).toBeTruthy()
+  expect(screen.getByRole('heading', { name: language === 'en' ? 'Invitation to Public instance' : 'Pozvánka do Public instance' })).toBeTruthy()
+  expect(screen.queryByText(summary.organization.name)).toBeNull()
+  expect(screen.queryByText(summary.inviter.display_name)).toBeNull()
+  expect(screen.queryByRole('button', { name: language === 'en' ? en.p10Decline : cs.p10Decline })).toBeNull()
+  expect(screen.queryByText('member')).toBeNull()
+  expect(document.body.textContent).not.toContain('workers')
   expect(document.body.textContent).not.toContain(targetRow)
   expect(document.body.textContent).not.toContain(summary.id)
   expect(document.body.textContent).not.toContain(summary.organization.id)
@@ -82,6 +87,11 @@ it.each(languages)('$language copied link signs in without attempting acceptance
   expect(loggedIn.fetch.mock.calls.filter(([path]) => path.endsWith('/accept'))).toHaveLength(0)
   loggedIn.finishProfile()
   const confirm = await screen.findByRole('button', { name: accept })
+  expect(screen.getByText(summary.organization.name)).toBeTruthy()
+  expect(screen.getByText(summary.inviter.display_name)).toBeTruthy()
+  expect(screen.getByText('member')).toBeTruthy()
+  expect(screen.getByRole('button', { name: language === 'en' ? en.p10Decline : cs.p10Decline })).toBeTruthy()
+  expect(document.body.textContent).toContain('workers')
   expect(document.body.textContent).not.toContain(targetRow)
   expect(loggedIn.fetch.mock.calls.filter(([path]) => path.endsWith('/accept'))).toHaveLength(0)
   await loggedIn.user.click(confirm)
@@ -110,4 +120,22 @@ it('delivered mailbox-proof link preserves confirmation through its profile gate
   await screen.findByRole('heading', { name: en.p10JoinedTitle })
   await waitFor(() => expect(view.fetch.mock.calls.filter(([path]) => path.endsWith('/accept'))).toHaveLength(2))
   expect(view.assign).not.toHaveBeenCalled()
+})
+
+it.each(languages)('$language other account sees recovery without recipient-only data or confirmation', async ({ language, accept, signIn }) => {
+  const view = await mount(language, { authenticated: true, wrongAccount: true, complete: false })
+  await screen.findByText(language === 'en' ? en.p10WrongAccountTitle : cs.p10WrongAccountTitle)
+  expect(screen.getByRole('heading', { name: language === 'en' ? 'Invitation to Public instance' : 'Pozvánka do Public instance' })).toBeTruthy()
+  for (const value of [summary.organization.name, summary.inviter.display_name, targetRow, summary.organization.id, 'workers']) expect(document.body.textContent).not.toContain(value)
+  expect(screen.queryByText('member')).toBeNull()
+  expect(screen.queryByRole('button', { name: accept })).toBeNull()
+  expect(screen.queryByRole('button', { name: signIn })).toBeNull()
+  expect(screen.queryByRole('button', { name: language === 'en' ? en.p10Decline : cs.p10Decline })).toBeNull()
+  expect(view.fetch.mock.calls.filter(([path]) => path.endsWith('/accept') || path.endsWith('/resolve'))).toHaveLength(0)
+})
+
+it.each(languages)('$language public UI also withholds an overbroad response from a non-recipient', async ({ language, signIn }) => {
+  await mount(language, { overbroad: true })
+  await screen.findByRole('button', { name: signIn })
+  for (const value of [summary.organization.name, summary.inviter.display_name, targetRow, 'workers']) expect(document.body.textContent).not.toContain(value)
 })

@@ -85,11 +85,12 @@ export function recipientRoutes(app: App, config: InstanceConfig, env: RuntimeEn
       if (account && account.organization_id !== row.organization_id) throw new ApiError(409, 'account_already_assigned')
     }
   }
-  async function metadata(row: Invitation, actor: ResolvedActor | null) {
+  async function metadata(row: Invitation, actor: ResolvedActor) {
+    if (!matches(row, actor)) throw new ApiError(403, 'invitation_not_for_this_account')
     const organization = await env.DB.prepare('SELECT name FROM organizations WHERE id=?').bind(row.organization_id).first<{ name: string }>()
     return { id: row.id, organization: { id: row.organization_id, name: organization?.name ?? null },
       inviter: { display_name: await inviterDisplay(env.DB, row.inviter_id) }, role: row.role, expires_at: row.expires_at,
-      ...(row.target_entity ? { target: { entity: row.target_entity, row: row.target_row } } : {}), state: state(row), account_match: actor ? matches(row, actor) : null }
+      ...(row.target_entity ? { target: { entity: row.target_entity, row: row.target_row } } : {}), state: state(row), account_match: true as const }
   }
   function navigation(row: Invitation) { return `/invitation?id=${encodeURIComponent(row.id)}` }
   // Return targets are local product destinations and must be accessible now (or after this invitation).
@@ -150,7 +151,9 @@ export function recipientRoutes(app: App, config: InstanceConfig, env: RuntimeEn
     const actor = await authenticate(c, true)
     const { token } = tokenBody.parse(await c.req.json())
     const row = await lookup({ token })
-    return c.json(await metadata(row, actor))
+    // Only the opaque ID is needed to return safely after a separate sign-in.
+    // Mailbox-proof links also stay private until proof establishes a verified session.
+    return c.json(actor && matches(row, actor) ? await metadata(row, actor) : { id: row.id, account_match: actor ? false : null })
   })
   async function resolve(c: AppContext, body: z.infer<typeof tokenBody>, initial: ResolvedActor | null) {
     let actor = initial

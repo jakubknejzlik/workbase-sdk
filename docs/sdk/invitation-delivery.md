@@ -25,14 +25,23 @@ opaque ID in `returnTo` and makes no acceptance request. After sign-in and any
 required profile completion, **Accept invitation** explicitly confirms membership.
 Delivered links retain their mailbox-proof session and confirmation flow.
 
-The public preflight metadata contract is curated in
-`packages/core/src/openapi/public-paths.ts`: invitation ID, organization ID/name,
-inviter display name, role, expiry, state, account match, and optional target
-entity/row selectors. Recipient preview also carries navigation, return target,
-profile completeness, next step and actions. The target row is an API selector;
-the invitation card displays the entity context without printing that internal ID.
-Recipient e-mail, credentials, hashes and profile data are outside preflight's
-contract. The response field set is unchanged.
+Anonymous preflight (including delivered selectors before mailbox verification)
+returns only `{ id, account_match: null }`. A signed-in different account receives
+only `{ id, account_match: false }`; ID-based preview returns 404 for that account.
+The opaque invitation ID is needed for safe `returnTo` after sign-in. No
+organization, inviter, role, expiry/state or target identifiers cross that boundary.
+The public card uses the existing instance `displayName` from `/console-info`
+(`packages/core/src/app.ts`), with the console's standard Workbase fallback.
+It shows the generic localized invitation title, invited-email guidance and sign-in
+CTA only. A different account gets account-switch recovery without confirmation.
+
+Only a verified matching recipient receives organization ID/name, inviter display
+name, role, expiry, state and optional target entity/row, before Accept / Decline.
+Recipient preview also carries navigation, return target, profile completeness,
+next step and actions. The target row remains an API selector; the card displays
+its entity context without printing that internal ID. Preflight's two disjoint
+response shapes and recipient-only preview are curated in
+`packages/core/src/openapi/public-paths.ts` and the frontend invitation types.
 
 Outbox rows store template inputs in `body`: display metadata,
 locale, timezone, expiry, configured origin and the unsigned delivered selector.

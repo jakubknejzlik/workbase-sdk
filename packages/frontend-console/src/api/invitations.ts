@@ -1,15 +1,16 @@
 import { api } from './client'
 
-export interface InvitationSummary {
+export type InvitationSummary = RecipientInvitationSummary | { id: string; account_match: false | null }
+export interface RecipientInvitationSummary {
   id: string
   target?: { entity: string; row: string }
   organization: { id: string; name: string | null }
   inviter: { display_name: string | null }
   role: string; expires_at: string
   state: 'pending' | 'accepted' | 'declined' | 'revoked' | 'expired'
-  account_match: boolean | null
+  account_match: true
 }
-export interface InvitationPreview extends InvitationSummary {
+export interface InvitationPreview extends RecipientInvitationSummary {
   navigation_target: string; return_to: string; profile_complete: boolean
   next: 'terminal' | 'preview' | 'profile'
   actions: ('accept' | 'decline')[]
@@ -29,5 +30,5 @@ export const invitationClient = {
   // Anonymous acceptance establishes a session and returns a preview, without membership.
   accept: (selector: InvitationSelector) => api<InvitationPreview | AcceptedInvitation>(endpoint(selector, 'accept'), { method: 'POST', body: body(selector), redirect401: false }),
   decline: (selector: InvitationSelector) => api<DeclinedInvitation>(endpoint(selector, 'decline'), { method: 'POST', body: body(selector), redirect401: false }),
-  inbox: () => api<{ data: (InvitationSummary & { navigation_target: string })[]; next: string }>('/me/invitations', { redirect401: false }),
+  inbox: () => api<{ data: (RecipientInvitationSummary & { navigation_target: string })[]; next: string }>('/me/invitations', { redirect401: false }),
 }

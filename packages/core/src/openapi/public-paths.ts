@@ -17,7 +17,9 @@ const invitation = object({ id: string, email: string, expires_at: string })
 const org = object({ id: string, name: nullable(string) })
 const target = object({ entity: string, row: nullable(string) })
 const metadata = { id: string, organization: org, inviter: object({ display_name: string }), role: string, expires_at: string, target,
-  state: { type: 'string', enum: ['pending', 'expired', 'accepted', 'declined', 'revoked'] }, account_match: nullable(boolean) }
+  state: { type: 'string', enum: ['pending', 'expired', 'accepted', 'declined', 'revoked'] }, account_match: { type: 'boolean', enum: [true] } }
+const publicEntry = object({ id: string, account_match: { enum: [false, null] } })
+const preflight = { oneOf: [publicEntry, object(metadata, Object.keys(metadata).filter(key => key !== 'target'))] }
 const metadataRequired = Object.keys(metadata).filter(key => key !== 'target')
 const preview = object({ ...metadata, navigation_target: string, return_to: string, profile_complete: boolean, next: { type: 'string', enum: ['terminal', 'preview', 'profile'] }, actions: strings }, [...metadataRequired, 'navigation_target', 'return_to', 'profile_complete', 'next', 'actions'])
 const profile = object({ id: string, email: string, firstName: nullable(string), lastName: nullable(string), displayName: nullable(string),
@@ -45,8 +47,9 @@ export function publicPaths(): Record<string, Schema> {
     '/o/{org}/capabilities': { parameters: [parameter('org', 'path', string, true)], get: operation({ '200': response(ref('Capabilities')) }) },
     '/orgs/{orgId}/members': { parameters: [parameter('orgId', 'path', string, true)], get: operation({ '200': response({ oneOf: [object({ data: array(member) }), object({ data: array({ oneOf: [memberPending, invited] }), role_options: array(object({ id: string, administrator: boolean })), default_role: string }, ['data', 'role_options'])] }) }, { parameters: [parameter('include', 'query', { type: 'string', enum: ['pending'] }), parameter('q', 'query', { type: 'string', maxLength: 200, description: 'Optional literal name/email search for eligible=link_account; all whitespace-separated tokens must match (at most 20).' }), parameter('eligible', 'query', { type: 'string', enum: ['link_account'] }), parameter('target_entity', 'query', { type: 'string', pattern: '^[a-z][a-z0-9_]*$', description: 'Required for eligible=link_account; configured entity with a user link.' }), parameter('target_row', 'query', { type: 'string', minLength: 1, maxLength: 200, description: 'Required for eligible=link_account; visible, writable row in this organization.' })], description: 'Link eligibility requires an administrator with members.read, target_entity and target_row plus Link authority. Missing, malformed or inaccessible targets return 400 invalid_link_target. Results exclude accounts linked to another row of that entity in this organization.' }) },
     '/me/invitations': { get: operation({ '200': response(object({ data: array(object({ ...metadata, navigation_target: string }, [...metadataRequired, 'navigation_target'])), next: string })) }, { parameters: [parameter('return_to', 'query', string)] }) },
-    '/invitations/preflight': { post: operation({ '200': response(object(metadata, metadataRequired)) }, { security: [], requestBody: request(tokenBody) }) },
+    '/invitations/preflight': { post: operation({ '200': response(preflight) }, { security: [], requestBody: request(tokenBody) }) },
     '/invitations/resolve': { post: operation({ '200': response(preview) }, { security: [], requestBody: request(tokenBody) }) },
+    '/invitations/{id}/preview': { parameters: [parameter('id', 'path', string, true)], get: operation({ '200': response(preview) }, { parameters: [parameter('return_to', 'query', string)] }) },
     '/invitations/{id}/resolve': { parameters: [parameter('id', 'path', string, true)], post: operation({ '200': response(preview) }, { requestBody: request(returnBody) }) },
     ...Object.fromEntries(['accept', 'decline'].map(action => [`/invitations/{id}/${action}`, { parameters: [parameter('id', 'path', string, true)], post: operation({
       '200': response(object({ id: string, state: { type: 'string', enum: [action === 'accept' ? 'accepted' : 'declined'] }, replayed: boolean, organization_id: string, role: string, entry_target: string }, ['id', 'state', 'replayed'])),
