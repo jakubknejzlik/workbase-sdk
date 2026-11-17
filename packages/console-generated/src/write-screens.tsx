@@ -448,7 +448,11 @@ function ApplicationAccess(props: AccessContext & { rowMenu?: boolean }) {
   const pendingMenu = props.rowMenu && valid && data?.state === 'invited'
   // Pending invitations have a specific order; every entry still comes from
   // the live controller, including the unified find-or-invite dialog.
-  const overflow = props.rowMenu ? pendingMenu ? ['resend', 'copy', 'find', 'cancel'].filter(action => visibleActions.includes(action)) : visibleActions : visibleActions.filter(action => action === 'cancel')
+  const pendingOrder = ['resend', 'copy', 'find']
+  const pendingActions = [...pendingOrder.filter(action => visibleActions.includes(action)),
+    ...visibleActions.filter(action => !pendingOrder.includes(action) && action !== 'cancel'),
+    ...visibleActions.filter(action => action === 'cancel')]
+  const overflow = props.rowMenu ? pendingMenu ? pendingActions : visibleActions : visibleActions.filter(action => action === 'cancel')
   const label = (action: string) => t(action === 'find' ? pendingMenu ? 'rowChangeMemberOrEmail' : 'rowFindMember' : `rowInvite_${action}`)
   const open = (action: string, button: HTMLButtonElement) => { trigger.current = button; setSelected(action) }
   const stateLabel = t(message ?? `rowAccess_${data?.state}`)

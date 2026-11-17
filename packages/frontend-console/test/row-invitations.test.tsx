@@ -39,7 +39,7 @@ it.each(['no_account', 'invited', 'expired', 'signed_in'])('176 renders Czech st
   await mount(state, false)
   const trigger = await screen.findByRole('button', { name: new RegExp(cs[`rowAccess_${state}` as keyof typeof cs]) })
   await userEvent.setup().click(trigger)
-  expect(screen.queryAllByRole('menuitem').map(item => item.textContent)).toEqual(state === 'invited' ? [] : [cs.rowInvite_remove])
+  expect(screen.queryAllByRole('menuitem').map(item => item.textContent)).toEqual([cs.rowInvite_remove])
   expect(screen.queryByRole('button', { name: 'Pozvat do aplikace' })).toBeNull()
   expect(screen.queryByRole('button', { name: 'Znovu odeslat' })).toBeNull()
   expect(screen.queryByRole('button', { name: 'Kopírovat odkaz' })).toBeNull()
@@ -125,7 +125,7 @@ for (const language of ['en', 'cs'] as const) it.each(['no_account', 'invited', 
   expect(header.getAttribute('role')).toBeNull()
   expect(header.hasAttribute('tabindex')).toBe(false)
   expect(header.nextElementSibling?.getAttribute('role')).toBe('separator')
-  const expected = state === 'no_account' ? [t.rowInvite_remove, t.rowFindMember] : state === 'signed_in' ? [t.rowInvite_remove] : state === 'invited' ? [t.rowInvite_resend, t.rowInvite_copy, t.rowChangeMemberOrEmail, t.rowInvite_cancel] : [t.rowInvite_resend, t.rowInvite_cancel, t.rowInvite_remove, t.rowFindMember]
+  const expected = state === 'no_account' ? [t.rowInvite_remove, t.rowFindMember] : state === 'signed_in' ? [t.rowInvite_remove] : state === 'invited' ? [t.rowInvite_resend, t.rowInvite_copy, t.rowChangeMemberOrEmail, t.rowInvite_remove, t.rowInvite_cancel] : [t.rowInvite_resend, t.rowInvite_cancel, t.rowInvite_remove, t.rowFindMember]
   expect(screen.getAllByRole('menuitem').map(item => item.textContent)).toEqual(expected)
 })
 it('209 never requests or renders access without invitation-read authority', async () => {
