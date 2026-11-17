@@ -223,3 +223,50 @@ it('forwards the optional CLI bootstrap name with safe serialization', async () 
   expect((await loadConfig(join(root, 'config.ts'))).config).toMatchObject({ id: 'cleaning', displayName: name.trim() })
   expect(schemas.bootstrap_instance.safeParse({ id: 'cleaning', displayName: 'Cleaning', extra: true, target: 'cloudflare-github' }).success).toBe(false)
 })
+
+it('stdio refuses byte-only authored comment edits after verification and preserves valid U+FFFD, BOM and CRLF on promotion', async () => {
+  const root = await fixture()
+  const file = join(root, 'config.ts')
+  const source = '\ufeff// authored \ufffd\r\n' + (await readFile(file, 'utf8')).replaceAll('\n', '\r\n')
+  await writeFile(file, source)
+  await runOpenApiCli(['--root', root, '--write'])
+  const specFile = join(root, 'openapi.json')
+  const spec = Buffer.from((await readFile(specFile, 'utf8')).replace('{', '{\n  "x-byte-control": "\ufffd",'))
+  await writeFile(specFile, spec)
+  const migrationFile = join(root, 'migrations', (await readdir(join(root, 'migrations'))).find(name => name.endsWith('.sql'))!)
+  const migration = Buffer.concat([await readFile(migrationFile), Buffer.from('\n-- authored '), Buffer.from([0x80]), Buffer.from('\n')])
+  await writeFile(migrationFile, migration)
+  const connection = await connect(root)
+  try {
+    const args = await propose(connection.call, [rename('Cleaning')])
+    expect(await connection.call('validate', args)).toMatchObject({ ok: true })
+    expect(await connection.call('preview_migration', args)).toMatchObject({ ok: true })
+    expect(await connection.call('apply_to_disposable', args)).toMatchObject({ ok: true, verified: true })
+    const before = await snapshot(root)
+    const artifacts = await Promise.all(['openapi.json', 'access.lock.json', 'access.lock.md'].map(path => readFile(join(root, path))))
+    const bytes = Buffer.from(source), position = bytes.indexOf(Buffer.from('\ufffd'))
+    for (const value of [0x80, 0x81]) {
+      const external = Buffer.concat([bytes.subarray(0, position), Buffer.from([value]), bytes.subarray(position + 3)])
+      await writeFile(file, external)
+      expect(await connection.call('promote', { ...args, expectedRevision: 1 })).toMatchObject({ ok: false, error: { code: 'stale_revision', message: expect.stringContaining('UTF-8') } })
+      expect(await readFile(file)).toEqual(external)
+      expect(await Promise.all(['openapi.json', 'access.lock.json', 'access.lock.md'].map(path => readFile(join(root, path))))).toEqual(artifacts)
+    }
+    await writeFile(file, bytes)
+    for (const [target, original, from, to] of [
+      [specFile, spec, Buffer.from('\ufffd'), Buffer.from([0x80])],
+      [migrationFile, migration, Buffer.from([0x80]), Buffer.from([0x81])],
+    ] as const) {
+      const offset = original.indexOf(from)
+      const external = Buffer.concat([original.subarray(0, offset), to, original.subarray(offset + from.length)])
+      await writeFile(target, external)
+      expect(await connection.call('promote', { ...args, expectedRevision: 1 })).toMatchObject({ ok: false, error: { code: 'stale_revision' } })
+      expect(await readFile(target)).toEqual(external)
+      expect(await readFile(file)).toEqual(bytes)
+      await writeFile(target, original)
+    }
+    expect(await snapshot(root)).toEqual(before)
+    expect(await connection.call('promote', { ...args, expectedRevision: 1 })).toMatchObject({ ok: true, status: 'promoted', revision: 1 })
+    expect(await readFile(file)).toEqual(Buffer.from(source.replace('"cleaning"', '"Cleaning"')))
+  } finally { await connection.close() }
+})

@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promi
 import { dirname, join, relative } from 'node:path'
 import { serializeAccessLock } from '@workbasehq/core/access/lock'
 import { accessSystemActions } from '@workbasehq/core/schema'
-import { configSources, loadConfig, SourceError } from '@workbasehq/core/schema/load'
+import { configSources, decodeSource, loadConfig, SourceError } from '@workbasehq/core/schema/load'
 import { generate } from '@workbasehq/core/openapi/generate'
 import { KernelRegistry } from '@workbasehq/core/kernel/registry'
 import { expectedPluginMigrations, type PluginMigrationRow } from '@workbasehq/core/kernel/migrations'
@@ -28,7 +28,7 @@ export async function accessPlan(root: string, changes: (AccessChange | RolesCha
   const inputs = await replaySources(root, { accessLock: true })
   const files = new Map<string, string>()
   const edit = (file: string, path: string[], value: unknown) => {
-    files.set(file, replaceLiteral(files.get(file) ?? inputs[file].toString('utf8'), path, value, join(root, file)))
+    files.set(file, replaceLiteral(files.get(file) ?? decodeSource(inputs[file], join(root, file)), path, value, join(root, file)))
   }
   const roleChanges = changes.filter(change => change.kind === 'set_roles')
   if (roleChanges.length > 1) fail('invalid_input', 'Provide only one set_roles operation per proposal')
@@ -43,7 +43,7 @@ export async function accessPlan(root: string, changes: (AccessChange | RolesCha
     }
     // Stage the entire role graph before applying grants or compiling. Retain
     // grants only for identical identifiers; every new role starts denied.
-    let configSource = await readFile(join(root, 'config.ts'), 'utf8')
+    let configSource = decodeSource(await readFile(join(root, 'config.ts')), join(root, 'config.ts'))
     configSource = replaceLiteral(configSource, ['roles'], roles, join(root, 'config.ts'), { config: true })
     configSource = replaceLiteral(configSource, ['organizationOwnerRole'], roleChange.organizationOwnerRole, join(root, 'config.ts'), { config: true })
     files.set('config.ts', configSource)
@@ -104,7 +104,7 @@ export async function accessPlan(root: string, changes: (AccessChange | RolesCha
 export async function presentationPlan(root: string, changes: PresentationChange[]) {
   if (!changes.length) return undefined
   const { config } = await loadConfig(join(root, 'config.ts'))
-  let source = await readFile(join(root, 'config.ts'), 'utf8')
+  let source = decodeSource(await readFile(join(root, 'config.ts')), join(root, 'config.ts'))
   for (const change of changes) {
     if (change.kind === 'set_instance_display_name') {
       source = replaceLiteral(source, ['displayName'], change.displayName, join(root, 'config.ts'), { config: true })

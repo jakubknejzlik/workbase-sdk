@@ -1,4 +1,4 @@
-import { isLiteralConfig, loadConfig } from '@workbasehq/core/schema/load'
+import { decodeSource, isLiteralConfig, loadConfig } from '@workbasehq/core/schema/load'
 import { assertInitialized } from './initialization.ts'
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { acquireInstanceLock } from './instance-lock.ts'
@@ -16,6 +16,7 @@ import { inspectInstance, isDisplayFieldError, serializableInstanceConfig, type 
 import { isBuiltinPlugin } from '@workbasehq/core/plugins'
 import { z } from 'zod'
 import { hash } from './planning.ts'
+import { byteHash, byteManifest } from './byte-digest.ts'
 import { WorkflowError, fail, identifier, instanceSelector, type Index } from './schemas.ts'
 
 export type Migration = { name: string; sql: string }
@@ -124,7 +125,6 @@ async function fileSnapshot(path: string) {
     throw error
   } finally { await handle?.close() }
 }
-const byteHash = (bytes: Uint8Array) => hash(Buffer.from(bytes).toString('base64'))
 // Also fail closed for this process if the filesystem rejects both ways of
 // publishing a revocation marker. A successful retry must not reuse that proof.
 const unknownSdkEvidence = new Set<string>()
@@ -135,6 +135,7 @@ function revokedSdkRecord(record: any) {
   return { ...proposal, status: proposal.status === 'discarded' ? 'discarded' : 'proposed' }
 }
 async function dependencyHash(path: string) {
+  await noLink(path, true)
   const bytes = await fileBytes(path)
   return bytes === null ? null : byteHash(bytes)
 }
@@ -344,7 +345,7 @@ export class Store {
       return await this.lockContext.run(held, fn)
     } finally { held.active = false; await release() }
   }
-  private configCache = new Map<string, { sourceHash: string; config: InstanceConfig; runtimeHash?: string; runtime?: InstanceConfig; paths?: Record<string, Buffer> }>()
+  private configCache = new Map<string, { config: InstanceConfig; runtimeHash?: string; runtime?: InstanceConfig; paths?: Record<string, Buffer> }>()
   private instanceDirectories = new Map<string, string>()
   private standalone = false
   public allowed: Set<string>
@@ -381,7 +382,7 @@ export class Store {
         if (literal) await replaySources(this.root, { accessLock: true })
         const config = literal
           ? (await loadConfig(configPath, { bindExistingLock: false })).config
-          : await importConfig(configPath, hash(await readFile(configPath, 'utf8')))
+          : await importConfig(configPath, byteHash((await fileBytes(configPath))!))
         // Core IDs use SQL identifiers (underscores); MCP instance selectors use hyphens.
         const instance = instanceSelector(config.id)
         if (this.requestedAllowed && (this.requestedAllowed.size !== 1 || !this.requestedAllowed.has(instance))) fail('invalid_allowlist', 'Standalone allowlist must contain only the config id')
@@ -464,25 +465,25 @@ export class Store {
     await assertInitialized(dir, instance)
     const dependencies = this.standalone ? await dependencySnapshot(dir) : undefined
     const names = (await readdir(dir)).filter(n => /^config(?:\.[a-z0-9_-]+)?\.(ts|json)$/.test(n)).sort()
-    const sources: Record<string, string> = {}
-    for (const name of names) { await noLink(join(dir, name)); sources[name] = await readFile(join(dir, name), 'utf8') }
+    const sources: Record<string, Buffer> = {}
+    for (const name of names) { await noLink(join(dir, name)); sources[name] = (await fileBytes(join(dir, name)))! }
     // Hash the complete tracked graph before evaluating either entrypoint.
     const inputs = await replaySources(dir, { accessLock: true })
-    const runtimeSource = inputs['runtime.ts']?.toString('utf8')
+    const graph = { ...sources, ...inputs }
+    // Reject malformed authored TypeScript before parsing, importing or editing it.
+    for (const [path, bytes] of Object.entries(graph)) if (path.endsWith('.ts')) decodeSource(bytes, join(dir, path))
+    const runtimeSource = inputs['runtime.ts'] === undefined ? undefined : decodeSource(inputs['runtime.ts'], join(dir, 'runtime.ts'))
     if (options.canonicalRuntime && runtimeSource === undefined) fail('runtime_not_canonical', 'runtime.ts is required for composition changes')
     // Interpret before any runtime import; custom expressions must never execute
     // merely because a caller tried to compose built-ins.
     const model = options.canonicalRuntime ? parseRuntimeSource(runtimeSource!) : undefined
-    const sourceHash = hash(sources)
     const cached = this.configCache.get(instance)
-    const graph = { ...sources, ...Object.fromEntries(Object.entries(inputs).map(([path, bytes]) => [path, bytes.toString('utf8')])) }
-    const runtimeHash = hash(graph)
+    const runtimeHash = hash(byteManifest(graph))
     const fresh = cached?.runtimeHash !== runtimeHash
     const paths = [...new Set([...Object.keys(inputs), ...Object.keys(cached?.paths ?? {})])]
     const config = fresh ? await importConfig(join(dir, 'config.ts'), runtimeHash, paths) : cached.config
     let runtime: InstanceConfig | undefined
     if (config.baseline === 'workbase-sdk') {
-      Object.assign(sources, graph)
       if (inputs['runtime.ts']) {
         // The config import already invalidated the graph. Preserve that same
         // graph when loading runtime, including its import of config.ts.
@@ -491,21 +492,26 @@ export class Store {
         if (runtime?.id !== config.id || runtime.revision !== config.revision) fail('revision_mismatch', 'runtime.ts and config.ts disagree', 409)
       }
     }
-    if (!options.canonicalRuntime) this.configCache.set(instance, { sourceHash, config, runtimeHash, runtime, paths: inputs })
+    if (!options.canonicalRuntime) this.configCache.set(instance, { config, runtimeHash, runtime, paths: inputs })
     const migrationNames = (await readdir(join(dir, 'migrations'))).filter(name => name !== '.gitkeep').sort()
     if (migrationNames.some(n => !/^\d{4}_[a-z0-9_]+\.sql$/.test(n))) fail('invalid_migrations', 'Unexpected migration filename')
     const migrations: Migration[] = []
-    for (const name of migrationNames) { await noLink(join(dir, 'migrations', name)); migrations.push({ name, sql: await readFile(join(dir, 'migrations', name), 'utf8') }) }
-    const indexes = sources['config.indexes.json'] ? z.array(z.strictObject({ entity: identifier, name: identifier, fields: z.array(identifier).min(1) })).parse(JSON.parse(sources['config.indexes.json'])) : []
+    for (const name of migrationNames) {
+      const path = `migrations/${name}`
+      await noLink(join(dir, path))
+      const bytes = (await fileBytes(join(dir, path)))!
+      graph[path] = bytes
+      migrations.push({ name, sql: bytes.toString('utf8') })
+    }
+    const indexes = sources['config.indexes.json'] ? z.array(z.strictObject({ entity: identifier, name: identifier, fields: z.array(identifier).min(1) })).parse(JSON.parse(sources['config.indexes.json'].toString('utf8'))) : []
     const guards = Object.fromEntries([
       ...Object.entries(dependencies?.guards ?? {}),
-      ...Object.entries(sources).map(([name, source]) => [name, hash(source)]),
-      ...migrations.map(m => [`migrations/${m.name}`, hash(m.sql)]),
+      ...Object.entries(byteManifest(graph)),
     ])
     const sdkVersion = dependencies?.guards['package.json'] && config.baseline === 'workbase-sdk'
       ? JSON.parse(await readFile(join(dir, 'package.json'), 'utf8')).dependencies?.['@workbasehq/core'] : undefined
     return { config, ...(runtime ? { runtime } : {}), ...(options.canonicalRuntime ? { runtimeSource } : {}), indexes, migrations, ...(typeof sdkVersion === 'string' ? { sdkVersion } : {}), ...(dependencies ? { dependencyDigest: dependencies.digest } : {}),
-      fingerprint: hash({ sources, config, migrations, indexes, ...(dependencies ? { dependencyDigest: dependencies.digest } : {}) }), guards }
+      fingerprint: hash({ version: 2, sources: byteManifest(graph), config, indexes, ...(dependencies ? { dependencyDigest: dependencies.digest } : {}) }), guards }
   }
   async find(id: string) {
     for (const instance of this.allowed) {
@@ -812,14 +818,6 @@ export class Store {
     await capture(journalPath, byteHash(Buffer.from(source)), byteHash, fence, txid)
   }
 
-  private async contentHash(path: string) {
-    await noLink(path, true)
-    try { return hash(await readFile(path, 'utf8')) }
-    catch (e) { if ((e as NodeJS.ErrnoException).code === 'ENOENT') return null; throw e }
-  }
-  private publicationHash(path: string, bytes: Buffer) {
-    return ['package.json', 'bun.lock'].includes(path) ? byteHash(bytes) : hash(bytes.toString('utf8'))
-  }
   // Caller holds the instance lock across loading guards, staging, publication and rollback.
   async commit(instance: string, files: { path: string; data: string | Uint8Array; create?: boolean }[], guards: Bundle['guards'], verify?: () => Promise<void>): Promise<void> {
     const dir = await this.directory(instance)
@@ -842,7 +840,7 @@ export class Store {
         const path = join(dir, f.path)
         const before = await fileSnapshot(path)
         if (f.create && before !== null) fail('migration_exists', 'Migration file already exists', 409)
-        if (!Object.hasOwn(expected, f.path)) expected[f.path] = before === null ? null : this.publicationHash(f.path, before.bytes)
+        if (!Object.hasOwn(expected, f.path)) expected[f.path] = before === null ? null : byteHash(before.bytes)
         expectedBytes.set(f.path, before?.identity.hash ?? null)
         const stage = crypto.randomUUID(), temporary = join(dir, 'proposals', `.promotion-${stage}.tmp`)
         await fence(temporary)
@@ -868,9 +866,8 @@ export class Store {
     const check = async (temporary?: string, publishing?: string) => {
       const paths = new Set([
         ...Object.keys(expected),
-        // Composition publication must also reject newly added authored graph
-        // inputs, as well as edits/deletions of the originally guarded paths.
-        ...(Object.hasOwn(guards, 'runtime.ts') ? Object.keys(await replaySources(dir, { accessLock: true })) : []),
+        // Reject additions as well as edits/deletions of tracked graph inputs.
+        ...Object.keys(await replaySources(dir, { accessLock: true })),
         ...(await readdir(dir)).filter(n => /^config(?:\.[a-z0-9_-]+)?\.(ts|json)$/.test(n)),
         ...(await readdir(join(dir, 'migrations'))).filter(n => n !== '.gitkeep').map(n => `migrations/${n}`),
       ])
@@ -878,8 +875,7 @@ export class Store {
       if (publishing) { paths.delete(publishing); paths.add(publishing) }
       for (const path of paths) {
         if (join(dir, path) === temporary || internalPaths.has(join(dir, path))) continue
-        if ((['package.json', 'bun.lock'].includes(path)
-          ? await dependencyHash(join(dir, path)) : await this.contentHash(join(dir, path))) !== (expected[path] ?? null)
+        if ((await dependencyHash(join(dir, path))) !== (expected[path] ?? null)
           || (expectedBytes.has(path) && await dependencyHash(join(dir, path)) !== expectedBytes.get(path))) {
           fail('concurrent_modification', `Instance files changed during promotion: ${path}`, 409)
         }
@@ -904,7 +900,7 @@ export class Store {
         try { await install(stage.path, path, fence, undefined, stage.identity) }
         catch (error) { if ((error as NodeJS.ErrnoException).code === 'EEXIST') conflict(path); throw error }
         await assertOwned(path, stage.identity, fence)
-        expected[f.path] = this.publicationHash(f.path, Buffer.from(f.data))
+        expected[f.path] = byteHash(Buffer.from(f.data))
         expectedBytes.set(f.path, byteHash(Buffer.from(f.data)))
       }
       await check()

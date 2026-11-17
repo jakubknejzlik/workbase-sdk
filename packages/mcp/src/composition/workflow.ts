@@ -3,8 +3,9 @@ import { durableAtomic, json, type Bundle, type Store } from '../storage.ts'
 import { fail, identifier, isPresentationChange, type AccessChange, type CompositionChange, type RolesChange, type RuntimeChange } from '../schemas.ts'
 import { z } from 'zod'
 import { accessEntities } from '@workbasehq/core/schema'
-import { loadConfig } from '@workbasehq/core/schema/load'
+import { loadConfig, SourceError } from '@workbasehq/core/schema/load'
 import { hash } from '../planning.ts'
+import { byteHash } from '../byte-digest.ts'
 import { instanceMeta, replayEngine } from '../offline.ts'
 import { applyDisposable } from '../disposable.ts'
 import type { CompositionProposal } from '../proposals.ts'
@@ -94,11 +95,16 @@ export async function executeComposition(store: Store, proposal: CompositionProp
     // Check the captured artifact before importing a config that binds it: a
     // removed or malformed replacement must still invalidate the saved proof.
     const spec = (await replaySources(root, { accessLock: true }))['openapi.json']
-    if ((spec === undefined ? null : hash(spec.toString('utf8'))) !== proposal.validation.openapiHash) {
+    if ((spec === undefined ? null : byteHash(spec)) !== proposal.validation.openapiHash) {
       fail('stale_revision', 'Instance files changed since validation', 409)
     }
   }
-  const bundle = await load(store, proposal.instance, proposal.changes)
+  const bundle = await load(store, proposal.instance, proposal.changes).catch(error => {
+    // A previously checked source that is no longer interpretable cannot consume
+    // a saved proof. Preserve the located diagnostic when reporting stale input.
+    if (name === 'promote' && proposal.validation && error instanceof SourceError) fail('stale_revision', `Instance sources changed since validation: ${error.message}`, 409)
+    throw error
+  })
   if (name === 'promote') revision(bundle, input.expectedRevision!)
   revision(bundle, proposal.baseRevision)
   if (name === 'promote' && proposal.validation && proposal.validation.fingerprint !== bundle.fingerprint) fail('stale_revision', 'Instance files changed since validation', 409)

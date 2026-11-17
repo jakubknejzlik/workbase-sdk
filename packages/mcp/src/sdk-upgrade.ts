@@ -1,3 +1,4 @@
+import { byteHash } from './byte-digest.ts'
 import { SqlTokenizationError } from './sql-tokens.ts'
 import { fileURLToPath } from 'node:url'
 import { join, resolve } from 'node:path'
@@ -10,7 +11,6 @@ import { MigrationReplayError } from './migration-replay.ts'
 import { captureSdkInputs, runSdkTarget, type SdkInputs } from './sdk-target.ts'
 import { assertBound, bridgeDigest, digestBytes } from './sdk-upgrade-protocol.ts'
 import { RegistrySdkError } from './sdk-registry.ts'
-import { hash } from './planning.ts'
 
 const hashes = (inputs: SdkInputs) => Object.fromEntries(Object.keys(inputs).sort().map(path => [path, digestBytes(inputs[path])]))
 const checkoutRoot = fileURLToPath(new URL('../../../', import.meta.url).href)
@@ -153,7 +153,7 @@ async function promoteSdkUpgrade(store: Store, proposal: SdkUpgradeProposal, rec
   await store.commit(proposal.instance, [
     ...['package.json', 'bun.lock', marker.path].map(path => ({ path, data: Buffer.from(evidence.artifacts[path].data, 'base64'), ...(path === marker.path ? { create: true } : {}) })),
     { path: `proposals/${proposal.proposalId}.json`, data: json(proposal) },
-  ], { ...bundle.guards, [`proposals/${proposal.proposalId}.json`]: hash(source!.toString('utf8')) }, authorizeTarget)
+  ], { ...bundle.guards, [`proposals/${proposal.proposalId}.json`]: byteHash(source!) }, authorizeTarget)
   return result
 }
 
