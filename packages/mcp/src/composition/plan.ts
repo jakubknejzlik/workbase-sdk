@@ -81,7 +81,10 @@ async function loadEditedConfig(root: string, inputs: Record<string, Buffer>, fi
     // Presence in the captured instance graph is the artifact opt-in. Never
     // introduce OpenAPI into an instance that does not already maintain it.
     if (inputs['openapi.json']) {
-      await runOpenApiCli(['--root', scratch, '--write'], loadOptions)
+      await runOpenApiCli(['--root', scratch, '--write'], loadOptions, {
+        info: message => console.error(message),
+        error: message => console.error(message),
+      })
       files.set('openapi.json', await readFile(join(scratch, 'openapi.json'), 'utf8'))
     }
     return { config: loaded.config, files: [...files].map(([path, data]) => ({ path, data })) }

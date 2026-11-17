@@ -11,7 +11,8 @@ import { targetProof } from './sdk-upgrade-evidence.ts'
 // process-group runner are real. D2's install/bridge contract has its own tests.
 export { captureSdkInputs }
 export async function runSdkTarget(options: TargetOptions) {
-  const scratch = registerTempDir(await mkdtemp(join(tmpdir(), 'wb-sdk-ipc-')))
+  // Leave room for caller-owned TMPDIR roots in Darwin's Unix socket path budget.
+  const scratch = registerTempDir(await mkdtemp(join(tmpdir(), 'i')))
   const socketPath = join(scratch, 'barrier.sock')
   const sockets = new Set<Socket>()
   const server = createServer(socket => {
