@@ -1,4 +1,4 @@
-# Authoring V3 composition, access and languages through MCP
+# Authoring V3 composition, access and presentation through MCP
 
 The standalone `.mcp.json` registers `workbase_config` alongside `workbase_data`
 and `workbase_ops`. After provisioning dependencies, launch it from the Instance
@@ -19,6 +19,12 @@ recovery. A matching completed initialization is unchanged; partial or differing
 artifacts return `initialization_conflict` and are preserved. Source or dependency
 changes invalidate the plan. `dependencies_missing` identifies the package and
 remedy; initialization never installs packages, accesses a registry or deploys an instance.
+
+Bootstrap accepts optional `displayName` (trimmed, nonblank, at most 1000
+characters), defaulting to `id`. The CLI forwards it as
+`init --id cleaning --target cloudflare-github --display-name Cleaning`. Bootstrap remains create-only;
+renaming an initialized instance uses the proposal flow below.
+
 Normal config calls on an incomplete scaffold return `initialization_required`
 with this next step. Bootstrap retains its file-copy and conflict contract.
 
@@ -63,8 +69,16 @@ Supported kinds, as defined in [schemas.ts](../../packages/mcp/src/schemas.ts):
   `"deny"`, or `{ "where": { ... }, "fields": [ ... ] }` with optional `fields`.
   Domain access lives in `schema/<entity>.ts`; system entity access in `access.ts`.
 - `set_account_link` takes `entity` and `invitationRole` and updates `access.ts`.
+- `set_instance_display_name` takes `displayName`: trimmed, nonblank text of at most
+  1000 characters. Case, Unicode, quotes and backslashes are preserved as data.
+  Call `propose_change` with `{ "instance": "cleaning", "baseRevision": 1,
+  "changes": [{ "kind": "set_instance_display_name", "displayName": "Cleaning" }] }`.
+  `inspect_schema` exposes the saved `displayName` while retaining the selector.
+  Name and locale changes can share a presentation-only batch; combining them
+  with domain, runtime or access changes is rejected. Continue through validation,
+  preview, disposable verification and promotion as below.
 - `set_locale` takes `locale`, `defaultLanguage` and/or `languages` (`en`/`cs`).
-  V3 language changes require a separate proposal and preserve the domain revision
+  V3 presentation changes require a separate proposal and preserve the domain revision
   and schema lock. See the language example below.
 
 The access compiler checks roles, actions and entity matrices. Composition and
@@ -132,10 +146,10 @@ close an unpromoted proposal.
 
 Promotion writes changed `runtime.ts`, access declarations in `access.ts` or
 `schema/<entity>.ts`, regenerated `access.lock.json`/`access.lock.md`, and proposal
-metadata. Access and language edits regenerate `openapi.json` only if it already exists.
-Language and role proposals also write `config.ts`. Role proposals derive runtime
+metadata. Access and presentation edits regenerate `openapi.json` only if it already exists.
+Presentation and role proposals also write `config.ts`. Role proposals derive runtime
 permissions options and the SDK account-role enum from the final config, preserving
-the requested order. `inspect_schema` exposes `organizationOwnerRole` alongside
+the requested order. `inspect_schema` exposes `displayName` and `organizationOwnerRole` alongside
 `roles`. The domain revision, schema lock and
 domain migrations stay unchanged. Role authoring verifies the physical schema
 against the existing lock and replays committed history; a stale physical lock

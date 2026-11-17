@@ -1,5 +1,5 @@
 import { registerTempDir, cleanupTempDir } from '../../../../scripts/lib/test-temp-dir.mjs'
-import { createServer, type Socket } from 'node:net'
+import { createServer, type AddressInfo, type Socket } from 'node:net'
 import { mkdtemp } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -34,12 +34,12 @@ export async function runSdkTarget(options: TargetOptions) {
     server.once('error', reject)
     server.listen(0, '127.0.0.1', resolve)
   })
-  const endpoint = { host: '127.0.0.1', port: (server.address() as { port: number }).port }
+  const address = { host: '127.0.0.1', port: (server.address() as AddressInfo).port }
   try {
     for (const phase of ['install', 'verify']) {
       const descendant = `
         const net = require('node:net');
-        const socket = net.connect(${JSON.stringify(endpoint)});
+        const socket = net.connect(${JSON.stringify(address)});
         socket.on('connect', () => socket.write(JSON.stringify({event:${JSON.stringify(phase)},descendant:process.pid})+'\\n'));
         process.on('SIGTERM', () => socket.write(JSON.stringify({event:'cleanup',descendant:process.pid})+'\\n'));
         socket.on('data', bytes => { if (bytes.toString().includes('continue')) process.exit(0) });

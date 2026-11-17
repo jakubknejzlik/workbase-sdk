@@ -81,6 +81,7 @@ async function bootstrapFiles(serverRoot: string, raw: unknown): Promise<Bootstr
     const content = (await readFile(join(template, source), 'utf8'))
       .replaceAll('{{SDK_VERSION}}', version)
       .replaceAll('{{INSTANCE_ID}}', input.id).replaceAll('{{INSTANCE_SELECTOR}}', selector)
+      .replaceAll('{{INSTANCE_DISPLAY_NAME}}', () => JSON.stringify(input.displayName ?? input.id))
     try {
       const file = await open(destination, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o644)
       try { await file.writeFile(content) } finally { await file.close() }

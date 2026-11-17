@@ -1,6 +1,6 @@
 import { join } from 'node:path'
 import { durableAtomic, json, type Bundle, type Store } from '../storage.ts'
-import { fail, identifier, type AccessChange, type CompositionChange, type RolesChange, type RuntimeChange } from '../schemas.ts'
+import { fail, identifier, isPresentationChange, type AccessChange, type CompositionChange, type RolesChange, type RuntimeChange } from '../schemas.ts'
 import { z } from 'zod'
 import { accessEntities } from '@workbasehq/core/schema'
 import { loadConfig } from '@workbasehq/core/schema/load'
@@ -10,7 +10,7 @@ import { applyDisposable } from '../disposable.ts'
 import type { CompositionProposal } from '../proposals.ts'
 import { applyRuntimeChanges, parseRuntimeSource, rewritePermissionsSource, rewriteRuntimeSource } from './runtime-source.ts'
 import { hydrateRuntimePlugins } from './registry.ts'
-import { accessPlan, compositionPlan, localePlan } from './plan.ts'
+import { accessPlan, compositionPlan, presentationPlan } from './plan.ts'
 import { compositionRequirements, assertCompositionRequirements } from './requirements.ts'
 import { promotionHash, submitChange } from '../submit-change.ts'
 import { replaySources } from '../replay-sources.ts'
@@ -31,19 +31,19 @@ async function load(store: Store, instance: string, changes: CompositionChange[]
   for (const change of changes) if (change.kind === 'set_entity_access') accessEntityTarget.parse(change.entity)
   // Surface compiler diagnostics before the trusted config import can throw an
   // unlocated runtime declaration error for an incomplete source matrix.
-  if (changes.some(change => isAccess(change) || change.kind === 'set_locale')) await loadConfig(join(await store.directory(instance), 'config.ts'))
+  if (changes.some(change => isAccess(change) || isPresentationChange(change))) await loadConfig(join(await store.directory(instance), 'config.ts'))
   return store.load(instance, { canonicalRuntime: true })
 }
 async function prepare(bundle: Bundle, changes: CompositionChange[], root: string) {
-  if (changes.some(change => change.kind === 'set_locale') && !changes.every(change => change.kind === 'set_locale')) {
-    fail('mixed_change_kinds', 'Propose V3 language changes separately from runtime and access changes')
+  if (changes.some(isPresentationChange) && !changes.every(isPresentationChange)) {
+    fail('mixed_change_kinds', 'Propose V3 presentation changes separately from runtime and access changes')
   }
   if (bundle.config.baseline !== 'workbase-sdk') fail('composition_requires_v3', 'Composition authoring requires a V3 instance', 409)
   const runtimeChanges = changes.filter((change): change is RuntimeChange => change.kind === 'set_plugin' || change.kind === 'set_interactive')
   const accessChanges = changes.filter(isAccess)
   const access = accessChanges.length ? await accessPlan(root, accessChanges) : { config: bundle.config, files: [] }
-  const locales = await localePlan(root, changes.filter(change => change.kind === 'set_locale'))
-  const config = locales?.config ?? access.config
+  const presentation = await presentationPlan(root, changes.filter(isPresentationChange))
+  const config = presentation?.config ?? access.config
   const model = applyRuntimeChanges(parseRuntimeSource(bundle.runtimeSource!), runtimeChanges, config)
   const source = runtimeChanges.length ? rewriteRuntimeSource(bundle.runtimeSource!, model, config)
     : changes.some(change => change.kind === 'set_roles') ? rewritePermissionsSource(bundle.runtimeSource!, config) : bundle.runtimeSource!
@@ -51,7 +51,7 @@ async function prepare(bundle: Bundle, changes: CompositionChange[], root: strin
   const target = { ...bundle, config, runtime }
   try { replayEngine(target.config, runtime) }
   catch { fail('invalid_composition', 'The target plugin composition is invalid; check required providers and interactive login', 400) }
-  return { target, source, files: [...(source !== bundle.runtimeSource ? [{ path: 'runtime.ts', data: source }] : []), ...access.files, ...(locales?.files ?? [])], model,
+  return { target, source, files: [...(source !== bundle.runtimeSource ? [{ path: 'runtime.ts', data: source }] : []), ...access.files, ...(presentation?.files ?? [])], model,
     roleDiff: 'roleDiff' in access ? access.roleDiff : undefined }
 }
 function proof(bundle: Bundle, prepared: Awaited<ReturnType<typeof prepare>> & Awaited<ReturnType<typeof compositionPlan>>, changes: CompositionChange[], requirementGuards: Bundle['guards']) {

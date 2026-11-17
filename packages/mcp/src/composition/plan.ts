@@ -10,7 +10,7 @@ import { expectedPluginMigrations, type PluginMigrationRow } from '@workbasehq/c
 import { checkSchema, parseLock } from '@workbasehq/core/migrations/schema-lock'
 import type { Bundle } from '../storage.ts'
 import { noLink } from '../storage.ts'
-import { fail, type AccessChange, type LocaleChange, type RolesChange } from '../schemas.ts'
+import { fail, type AccessChange, type PresentationChange, type RolesChange } from '../schemas.ts'
 import { replaySources } from '../replay-sources.ts'
 import { replaceLiteral } from './literal-edit.ts'
 import { replayBundle, replayEngine, snapshot } from '../offline.ts'
@@ -100,12 +100,16 @@ export async function accessPlan(root: string, changes: (AccessChange | RolesCha
   } } : {}) }
 }
 
-/** Languages are presentation metadata: preserve V3 source imports and lock binding. */
-export async function localePlan(root: string, changes: LocaleChange[]) {
+/** Names and languages are presentation metadata: preserve V3 source imports and lock binding. */
+export async function presentationPlan(root: string, changes: PresentationChange[]) {
   if (!changes.length) return undefined
   const { config } = await loadConfig(join(root, 'config.ts'))
   let source = await readFile(join(root, 'config.ts'), 'utf8')
   for (const change of changes) {
+    if (change.kind === 'set_instance_display_name') {
+      source = replaceLiteral(source, ['displayName'], change.displayName, join(root, 'config.ts'), { config: true })
+      continue
+    }
     if (change.languages !== undefined) source = replaceLiteral(source, ['languages'], change.languages, join(root, 'config.ts'), { config: true })
     if (change.locale !== undefined) source = replaceLiteral(source, ['locale'], change.locale, join(root, 'config.ts'), { config: true })
     if (change.defaultLanguage !== undefined) {
