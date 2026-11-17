@@ -11,3 +11,7 @@ f4aa0ce5a1506941af6da0f58476cc183c667445:packages/plugins/members/test/mail-fina
 # Exact historical review for #182: per-run synthetic MCP preflight test value.
 # The superseded #169 WR branch was deleted; only the squash hit is reachable.
 93783a5d6f0a97b421d0b30d40ce52162145093c:packages/mcp/test/initialization.test.ts:generic-api-key:136
+
+# Exact historical review for #194: synthetic rotated invitation identity key.
+# The superseded #176 branch was deleted after verifying the #177 squash tree.
+fd6b017be1c252b87d491d7c47e526ca21b6652b:packages/core/test/invitation-privacy.test.ts:generic-api-key:90
