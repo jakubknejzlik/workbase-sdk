@@ -1,6 +1,10 @@
 declare const __WORKBASE_BUILD_SHA__: string
 import type { ClientRequestInit } from './client'
-export const buildSHA = typeof __WORKBASE_BUILD_SHA__ === 'string' ? __WORKBASE_BUILD_SHA__ : 'unbuilt'
+// The host stamps HTML after hashing the complete emitted bundle. Reading it
+// keeps cacheable JS bytes immutable after Vite assigns content filenames.
+const htmlSHA = (globalThis as typeof globalThis & { document?: { querySelector?(selector: string): { getAttribute(name: string): string | null } | null } })
+  .document?.querySelector?.('meta[name="workbase-build-sha"]')?.getAttribute('content')
+export const buildSHA = htmlSHA ?? (typeof __WORKBASE_BUILD_SHA__ === 'string' ? __WORKBASE_BUILD_SHA__ : 'unbuilt')
 const hex = (sha: unknown): sha is string => typeof sha === 'string' && /^[a-f0-9]{40}$/i.test(sha)
 type Visibility = { visibilityState: string; addEventListener(event: string, listener: () => void): void; removeEventListener(event: string, listener: () => void): void }
 type Options = { sha: string; fetch: (url: string, init: ClientRequestInit) => Promise<Response>; dirty: () => boolean; storage: Pick<Storage, 'getItem' | 'setItem'>; document: Visibility; reload: () => void }
