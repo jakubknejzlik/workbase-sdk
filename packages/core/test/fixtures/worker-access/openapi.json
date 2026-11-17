@@ -5063,16 +5063,15 @@
     },
     "/invitations/preflight": {
       "post": {
+        "description": "Read-only preview. A matching verified session or an anonymous token with a server-verified mailbox proof receives full metadata, including terminal state. Copied selectors and invalid mailbox proofs receive only id and account_match, uniformly across states. A different signed-in account always receives the minimal response.",
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
                 "additionalProperties": false,
                 "properties": {
-                  "return_to": {
-                    "type": "string"
-                  },
                   "token": {
+                    "pattern": "^[a-f0-9]{64}(?:\\.[a-f0-9]{0,64})?$",
                     "type": "string"
                   }
                 },
@@ -5115,9 +5114,9 @@
                       "properties": {
                         "account_match": {
                           "enum": [
-                            true
-                          ],
-                          "type": "boolean"
+                            true,
+                            null
+                          ]
                         },
                         "expires_at": {
                           "type": "string"

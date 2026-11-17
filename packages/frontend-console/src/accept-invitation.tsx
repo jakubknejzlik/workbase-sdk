@@ -105,13 +105,15 @@ export function AcceptInvitation() {
       <CardContent className="space-y-4">{content}</CardContent>{footer && <CardFooter className="flex gap-2">{footer}</CardFooter>}
     </Card>
   </div>
-  const recipient = summary?.account_match === true ? summary : null
+  // Full anonymous metadata is trusted only on mailbox entry; copied-link DOM stays minimal.
+  const recipient = summary && 'organization' in summary && (summary.account_match === true
+    || summary.account_match === null && selector && 'token' in selector && selector.token.includes('.')) ? summary : null
   const organization = recipient?.organization.name ?? t('p10OrganizationUnavailable')
   const alreadyMember = code === 'already_member'
   const memberOrganization = error instanceof ApiError ? (error.details as { detail?: { organization_id?: string } } | undefined)?.detail?.organization_id : undefined
   const entryOrganization = recipient?.organization.id ?? memberOrganization
   const entryTarget = accepted?.entry_target ?? (entryOrganization ? `/o/${encodeURIComponent(entryOrganization)}` : null)
-  const usedByAccount = recipient && (recipient.state === 'accepted' || code === 'invitation_used')
+  const usedByAccount = recipient?.account_match === true && (recipient.state === 'accepted' || code === 'invitation_used')
   if (accepted || alreadyMember || usedByAccount) return shell(t(alreadyMember ? 'p10AlreadyMemberTitle' : 'p10JoinedTitle'), <CheckCircle className="h-6 w-6 text-green-600" />, <>{summary && <p className="font-medium break-words">{organization}</p>}<p className="text-sm text-muted-foreground">{t(alreadyMember ? 'p10AlreadyMemberDescription' : 'p10JoinedDescription')}</p></>, entryTarget ? <Button className="w-full" onClick={() => window.location.replace(safeReturnTo(entryTarget, home))}>{t('p10GoToOrganization')}</Button> : recover)
   if (declined || recipient?.state === 'declined') return shell(t('p10DeclinedTitle'), <XCircle className="h-6 w-6" />, <p className="text-sm text-muted-foreground">{t('p10DeclinedDescription')}</p>, recover)
   if (loading || profile.isPending) return <div role="status" aria-label={t('p10LoadingInvitation')} className="min-h-screen flex items-center justify-center p-4"><Card className="w-full max-w-md"><CardHeader><Skeleton className="mx-auto h-8 w-3/4" /><Skeleton className="h-4 w-full" /></CardHeader><CardContent><Skeleton className="h-20 w-full" /></CardContent></Card></div>
@@ -130,6 +132,7 @@ export function AcceptInvitation() {
     <CardDescription className="text-center">{t('p10PreviewDescription')}</CardDescription>
     <dl className="space-y-2 rounded-lg border p-4 text-sm">{[[t('p10Organization'), organization], [t('p10InvitedBy'), recipient.inviter.display_name ?? t('p10InviterUnavailable')], [t('role'), t(`role_${recipient.role}`, { defaultValue: recipient.role })]].map(([label, value]) => <div key={label} className="flex justify-between gap-4"><dt className="text-muted-foreground">{label}</dt><dd className="min-w-0 break-words text-right font-medium">{value}</dd></div>)}</dl>
     {recipient.target && <p>{t('rowInvitationTarget', { entity: t(`entitySingular_${recipient.target.entity}`, { defaultValue: recipient.target.entity }) })}</p>}
+    {recipient.account_match === null && <p className="text-sm text-muted-foreground">{t('p10AnonymousDescription')}</p>}
     {action.error && <p role="alert" className="text-sm text-destructive">{t('p10ActionFailed')}</p>}
   </>, <><Button className="flex-1" variant="outline" disabled={busy} onClick={() => void run('decline')}>{t(action.isPending && action.variables === 'decline' ? 'p10Declining' : 'p10Decline')}</Button><Button className="flex-1" disabled={busy || confirmed} onClick={() => void run('accept')}>{t(action.isPending && action.variables === 'accept' || confirmed ? 'p10Accepting' : 'acceptInvitation')}</Button></>)
 }

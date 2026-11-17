@@ -28,6 +28,8 @@ interface Invitation {
 }
 const nowISO = () => new Date().toISOString()
 const tokenBody = z.object({ token: invitationTokenSchema, return_to: z.string().optional() })
+// A complete selector with a truncated proof still supports the private sign-in return contract.
+const preflightBody = z.object({ token: z.string().regex(/^[a-f0-9]{64}(?:\.[a-f0-9]{0,64})?$/) })
 function state(row: Invitation) {
   return row.accepted_at ? 'accepted' : row.declined_at ? 'declined' : row.revoked_at ? 'revoked'
     : row.expired_at || row.expires_at <= nowISO() ? 'expired' : 'pending'
@@ -85,12 +87,12 @@ export function recipientRoutes(app: App, config: InstanceConfig, env: RuntimeEn
       if (account && account.organization_id !== row.organization_id) throw new ApiError(409, 'account_already_assigned')
     }
   }
-  async function metadata(row: Invitation, actor: ResolvedActor) {
-    if (!matches(row, actor)) throw new ApiError(403, 'invitation_not_for_this_account')
+  async function metadata(row: Invitation, actor: ResolvedActor | null) {
+    if (actor && !matches(row, actor)) throw new ApiError(403, 'invitation_not_for_this_account')
     const organization = await env.DB.prepare('SELECT name FROM organizations WHERE id=?').bind(row.organization_id).first<{ name: string }>()
     return { id: row.id, organization: { id: row.organization_id, name: organization?.name ?? null },
       inviter: { display_name: await inviterDisplay(env.DB, row.inviter_id) }, role: row.role, expires_at: row.expires_at,
-      ...(row.target_entity ? { target: { entity: row.target_entity, row: row.target_row } } : {}), state: state(row), account_match: true as const }
+      ...(row.target_entity ? { target: { entity: row.target_entity, row: row.target_row } } : {}), state: state(row), account_match: actor ? true as const : null }
   }
   function navigation(row: Invitation) { return `/invitation?id=${encodeURIComponent(row.id)}` }
   // Return targets are local product destinations and must be accessible now (or after this invitation).
@@ -150,11 +152,14 @@ export function recipientRoutes(app: App, config: InstanceConfig, env: RuntimeEn
   })
   app.post('/invitations/preflight', async c => {
     const actor = await authenticate(c, true)
-    const { token } = tokenBody.parse(await c.req.json())
+    const { token } = preflightBody.parse(await c.req.json())
     const row = await lookup({ token })
-    // Only the opaque ID is needed to return safely after a separate sign-in.
-    // Mailbox-proof links also stay private until proof establishes a verified session.
-    return c.json(actor && matches(row, actor) ? await metadata(row, actor) : { id: row.id, account_match: actor ? false : null })
+    if (actor && matches(row, actor)) return c.json(await metadata(row, actor))
+    // Mailbox proof authorizes recipient preview, including terminal states, before sign-in.
+    // An existing different account still gets only account-switch recovery.
+    if (!actor && await hasInvitationMailboxProof(env, token)) return c.json(await metadata(row, null))
+    // Copied selectors and invalid proofs expose no metadata or state diagnostics.
+    return c.json({ id: row.id, account_match: actor ? false : null })
   })
   async function resolve(c: AppContext, body: z.infer<typeof tokenBody>, initial: ResolvedActor | null) {
     let actor = initial

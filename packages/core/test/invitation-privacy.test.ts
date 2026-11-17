@@ -53,6 +53,58 @@ async function privateResponse(response: Response) {
   return { status: response.status, body: await json(response) }
 }
 
+it.each(['pending', ...terminals] as const)('valid mailbox proof preflight returns full %s preview without establishing a session', async state => {
+  const a = await invite()
+  await setState(a.id, state)
+  // The optional row selector belongs to the recipient preview contract too.
+  await env.DB.prepare('UPDATE invitations SET target_entity=?,target_row=? WHERE id=?').bind('workers', 'synthetic-worker', a.id).run()
+  expect(await privateResponse(await anonymous('/invitations/preflight', { token: a.proof }))).toEqual({ status: 200, body: {
+    id: a.id, organization: { id: 'org-a', name: 'Organization A' }, inviter: { display_name: 'owner-a' },
+    role: 'viewer', expires_at: state === 'expired' ? '2000-01-01T00:00:00.000Z' : '2099-01-01T00:00:00.000Z',
+    target: { entity: 'workers', row: 'synthetic-worker' }, state, account_match: null,
+  } })
+  expect(await env.DB.prepare('SELECT count(*) n FROM "session"').first('n')).toBe(0)
+  expect(await env.DB.prepare('SELECT bound_user_id FROM invitations WHERE id=?').bind(a.id).first('bound_user_id')).toBeNull()
+  expect(await env.DB.prepare("SELECT count(*) n FROM memberships WHERE user_id='owner-b' AND organization_id='org-a'").first('n')).toBe(0)
+})
+
+it.each(['copied', 'stripped', 'tampered', 'forged', 'truncated', 'empty-proof', 'other-invitation', 'rotated-secret', 'other-account'] as const)(
+  '%s preflight is exactly the same minimal HTTP body across all invitation states', async purpose => {
+    const a = await invite()
+    const other = await invite('privacy-other@example.test')
+    const [selector, proof] = a.proof.split('.')
+    const tokens = {
+      copied: a.copied, stripped: selector, tampered: `${selector}.${proof[0] === 'a' ? 'b' : 'a'}${proof.slice(1)}`,
+      forged: `${selector}.${'0'.repeat(64)}`, truncated: a.proof.slice(0, -1), 'empty-proof': `${selector}.`,
+      'other-invitation': `${selector}.${other.proof.split('.')[1]}`, 'rotated-secret': a.proof, 'other-account': a.proof,
+    }
+    let bearer: string | undefined
+    if (purpose === 'other-account') {
+      const login = await anonymous('/invitations/resolve', { token: other.proof })
+      expect(login.status).toBe(200)
+      bearer = login.headers.get('set-auth-token')!
+      expect(bearer).toBeTruthy()
+    }
+    if (purpose === 'rotated-secret') {
+      const original = runtime()
+      app = createApp(sample, { ...original, IDENTITY: { ...original.IDENTITY, secret: 'rotated-synthetic-secret-at-least-32' } })
+    }
+    const expected = { id: a.id, account_match: bearer ? false : null }
+    let baseline: string | undefined
+    for (const state of ['pending', ...terminals] as const) {
+      await setState(a.id, state)
+      const response = await (bearer ? session('/invitations/preflight', bearer, { token: tokens[purpose] })
+        : anonymous('/invitations/preflight', { token: tokens[purpose] }))
+      const raw = await response.clone().text()
+      expect(await privateResponse(response), state).toEqual({ status: 200, body: expected })
+      expect(raw, state).toBe(JSON.stringify(expected))
+      if (baseline === undefined) baseline = raw
+      else expect(raw, state).toBe(baseline)
+    }
+    expect(await env.DB.prepare('SELECT bound_user_id FROM invitations WHERE id=?').bind(a.id).first('bound_user_id')).toBeNull()
+  },
+)
+
 it.each(terminals)('%s is indistinguishable from pending to non-recipients on every entry route', async terminal => {
   const a = await invite()
   // Exercise a real verified session as well as unsigned copied/delivery selectors.
@@ -155,7 +207,7 @@ it('real verified sessions enforce raw field sets and only explicit recipient ac
   expect(otherBearer).toBeTruthy()
   expect(await json(await session('/invitations/preflight', otherBearer, { token: a.copied }))).toEqual({ id: a.id, account_match: false })
   expect(await privateResponse(await session(`/invitations/${a.id}/preview`, otherBearer))).toEqual({ status: 404, body: { error: 'invitation_not_found' } })
-  for (const token of [a.copied, a.proof, a.proof.split('.')[0]]) {
+  for (const token of [a.copied, a.proof.split('.')[0]]) {
     expect(await privateResponse(await anonymous('/invitations/preflight', { token }))).toEqual({ status: 200, body: { id: a.id, account_match: null } })
   }
   const recipient = await anonymous('/invitations/resolve', { token: a.proof })

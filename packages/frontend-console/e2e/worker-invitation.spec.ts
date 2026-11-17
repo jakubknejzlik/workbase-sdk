@@ -43,8 +43,10 @@ test('V3 worker invite retries failed transport and its delivered link reaches a
     const page = await recipient.newPage()
     await page.goto(delivered)
     await expect(page.getByRole('button', { name: 'Accept invitation', exact: true })).toBeVisible()
-    await expect(page.getByRole('heading', { name: 'Invitation to Public instance', exact: true })).toBeVisible()
-    await expect(page.getByText('Invitation workspace', { exact: true })).toHaveCount(0)
+    await expect(page.getByRole('heading', { name: 'Accept invitation', exact: true })).toBeVisible()
+    await expect(page.getByText('Invitation workspace', { exact: true })).toBeVisible()
+    await expect(page.getByText('admin', { exact: true })).toBeVisible()
+    expect(await recipient.cookies()).toEqual([])
     const accepted = page.waitForResponse(response => response.url().endsWith('/invitations/accept') && response.request().method() === 'POST')
     await page.getByRole('button', { name: 'Accept invitation', exact: true }).click()
     const response = await accepted

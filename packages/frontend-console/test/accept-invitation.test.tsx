@@ -24,7 +24,7 @@ const profile = (complete: boolean) => ({
 const clients: QueryClient[] = []
 afterEach(() => { cleanup(); clients.splice(0).forEach(client => client.clear()); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
-async function mount(language: 'en' | 'cs', options: { authenticated?: boolean; complete?: boolean; delivered?: boolean; byId?: boolean; wrongAccount?: boolean; overbroad?: boolean } = {}) {
+async function mount(language: 'en' | 'cs', options: { authenticated?: boolean; complete?: boolean; delivered?: boolean; byId?: boolean; wrongAccount?: boolean; overbroad?: boolean; state?: string } = {}) {
   let authenticated = options.authenticated ?? false
   let complete = options.complete ?? true
   const assign = vi.fn()
@@ -36,7 +36,7 @@ async function mount(language: 'en' | 'cs', options: { authenticated?: boolean; 
     ? { origin: 'http://localhost', search, assign, replace: vi.fn() } : Reflect.get(target, key) }))
   const fetch = vi.fn(async (path: string) => {
     if (path === '/console-info') return Response.json({ instance: 'synthetic-instance', displayName: 'Public instance', roles: [] })
-    if (path === '/invitations/preflight' || path === `/invitations/${summary.id}/preview`) return Response.json({ ...(authenticated && !options.wrongAccount || options.overbroad ? summary : { id: summary.id }), account_match: authenticated ? !options.wrongAccount : null })
+    if (path === '/invitations/preflight' || path === `/invitations/${summary.id}/preview`) return Response.json({ ...(authenticated && !options.wrongAccount || options.delivered || options.overbroad ? { ...summary, state: options.state ?? summary.state } : { id: summary.id }), account_match: authenticated ? !options.wrongAccount : null })
     if (path === '/me/profile') return authenticated ? Response.json(profile(complete)) : Response.json({ error: 'unauthenticated' }, { status: 401 })
     if (path.endsWith('/accept')) {
       if (!authenticated) {
@@ -104,6 +104,12 @@ it.each(languages)('$language delivered mailbox-proof link keeps session establi
   const button = await screen.findByRole('button', { name: accept })
   expect(screen.queryByRole('button', { name: signIn })).toBeNull()
   expect(screen.getByText(language === 'en' ? en.p10AnonymousDescription : cs.p10AnonymousDescription)).toBeTruthy()
+  expect(screen.getByText(summary.organization.name)).toBeTruthy()
+  expect(screen.getByText(summary.inviter.display_name)).toBeTruthy()
+  expect(screen.getByText('member')).toBeTruthy()
+  expect(document.body.textContent).toContain('workers')
+  expect(document.body.textContent).not.toContain(targetRow)
+  expect(view.fetch.mock.calls.map(([path]) => path)).not.toContain('/invitations/resolve')
   expect(view.fetch.mock.calls.filter(([path]) => path.endsWith('/accept'))).toHaveLength(0)
   await view.user.click(button)
   await screen.findByRole('heading', { name: joined })
@@ -120,6 +126,15 @@ it('delivered mailbox-proof link preserves confirmation through its profile gate
   await screen.findByRole('heading', { name: en.p10JoinedTitle })
   await waitFor(() => expect(view.fetch.mock.calls.filter(([path]) => path.endsWith('/accept'))).toHaveLength(2))
   expect(view.assign).not.toHaveBeenCalled()
+})
+
+for (const state of ['expired', 'revoked', 'declined', 'accepted']) it.each(languages)(`$language delivered ${state} preview shows its terminal state without accepting`, async ({ language, accept, joined }) => {
+  const view = await mount(language, { delivered: true, state })
+  const copy = language === 'en' ? en : cs
+  await screen.findByRole('heading', { name: state === 'declined' ? copy.p10DeclinedTitle : copy.p10UnavailableTitle })
+  expect(screen.queryByRole('heading', { name: joined })).toBeNull()
+  expect(screen.queryByRole('button', { name: accept })).toBeNull()
+  expect(view.fetch.mock.calls.filter(([path]) => path.endsWith('/accept') || path.endsWith('/resolve'))).toHaveLength(0)
 })
 
 it.each(languages)('$language other account sees recovery without recipient-only data or confirmation', async ({ language, accept, signIn }) => {

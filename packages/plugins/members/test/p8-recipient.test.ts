@@ -65,12 +65,15 @@ it('ID discovery and token resolution share recipient and profile eligibility', 
   await complete()
   expect(await json(await call(`/invitations/${a.id}/preview`))).toMatchObject({ actions: ['accept', 'decline'] })
 })
-it.each(['copied', 'delivered'])('anonymous %s preflight returns exactly the minimal return contract without recipient metadata', async purpose => {
+it.each(['copied', 'delivered'])('anonymous %s preflight is read-only and gates recipient metadata on mailbox proof', async purpose => {
   const a = await invite()
   const r = await anonymous('/invitations/preflight', { token: purpose === 'copied' ? new URL(a.accept_url).searchParams.get('token') : a.token })
   expect(r.status).toBe(200)
   const body = await json(r)
-  expect(body).toEqual({ id: a.id, account_match: null })
+  expect(body).toEqual(purpose === 'copied' ? { id: a.id, account_match: null } : {
+    id: a.id, organization: { id: 'org-a', name: 'Organization A' }, inviter: { display_name: 'owner-a' },
+    role: 'viewer', expires_at: a.expires_at, state: 'pending', account_match: null,
+  })
   expect(r.headers.get('Cache-Control')).toContain('no-store')
   expect(r.headers.get('Referrer-Policy')).toBe('no-referrer')
   expect(r.headers.get('set-auth-token')).toBeNull()

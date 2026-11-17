@@ -1,6 +1,8 @@
 import { api } from './client'
 
-export type InvitationSummary = RecipientInvitationSummary | { id: string; account_match: false | null }
+export type InvitationSummary = RecipientInvitationSummary | MailboxInvitationSummary | { id: string; account_match: false | null }
+/** Full anonymous preview is returned only after server-side mailbox-proof verification. */
+export type MailboxInvitationSummary = Omit<RecipientInvitationSummary, 'account_match'> & { account_match: null }
 export interface RecipientInvitationSummary {
   id: string
   target?: { entity: string; row: string }

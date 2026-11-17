@@ -291,7 +291,7 @@ it('detects transforms inside function arguments and returns without evaluating 
   }
 })
 
-it('preflight permits only minimal public entry or matching-recipient metadata; ID preview requires the full recipient contract', () => {
+it('preflight permits minimal entry or full mailbox/recipient metadata; ID preview requires the matching recipient', () => {
   const doc = JSON.parse(bytes())
   const schema = doc.paths['/invitations/preflight'].post.responses['200'].content['application/json'].schema
   const entry = { id: 'synthetic-invitation', account_match: null }
@@ -304,6 +304,17 @@ it('preflight permits only minimal public entry or matching-recipient metadata; 
   }
   const full = { ...entry, ...privateFields, account_match: true }
   expect(check(full)).toBe(true)
+  expect(check({ ...full, account_match: null })).toBe(true)
+  expect(check({ ...full, account_match: false })).toBe(false)
+  expect(check({ ...full, account_match: null, email: 'recipient@example.test' })).toBe(false)
+  const { target: _target, ...withoutTarget } = full
+  expect(check({ ...withoutTarget, account_match: null })).toBe(true)
+  for (const state of ['pending', 'expired', 'revoked', 'declined', 'accepted']) expect(check({ ...full, account_match: null, state })).toBe(true)
+  const input = doc.paths['/invitations/preflight'].post.requestBody.content['application/json'].schema
+  const token = 'a'.repeat(64)
+  const validInput = validate(doc, input, { token })
+  for (const suffix of ['', '.', '.b', `.${'b'.repeat(64)}`]) expect(validInput({ token: token + suffix })).toBe(true)
+  for (const invalid of [token.slice(1), `${token}.${'b'.repeat(65)}`, `${token}.forged`]) expect(validInput({ token: invalid })).toBe(false)
   const preview = { ...full, navigation_target: '/invitation?id=synthetic-invitation', return_to: '/o/synthetic-org', profile_complete: true, next: 'preview', actions: ['accept', 'decline'] }
   const recipient = validate(doc, doc.paths['/invitations/{id}/preview'].get.responses['200'].content['application/json'].schema, preview)
   for (const match of [null, false]) expect(recipient({ ...preview, account_match: match })).toBe(false)
