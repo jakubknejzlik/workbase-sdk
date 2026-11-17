@@ -394,7 +394,10 @@ it.each([
     { kind: 'set_system_access', role: 'admin', grants: { 'members.read': 'allow' } },
     { kind: 'set_entity_access', entity: 'worker', role: 'staff', access: 'deny' },
     { kind: 'set_account_link', entity: 'worker', invitationRole: 'staff' },
-    ...(path === 'docs/sdk/mcp-composition.md' ? [{ kind: 'set_locale', languages: ['en', 'cs'] }] : []),
+    ...(path === 'docs/sdk/mcp-composition.md' ? [
+      { kind: 'set_locale', languages: ['en', 'cs'] },
+      { kind: 'set_roles', roles: ['owner', 'viewer'], organizationOwnerRole: 'owner' },
+    ] : []),
   ]
   const kinds = examples.map(change => compositionChangeSchema.parse(change).kind)
   for (const kind of kinds) expect(guide, kind).toContain('`' + kind + '`')

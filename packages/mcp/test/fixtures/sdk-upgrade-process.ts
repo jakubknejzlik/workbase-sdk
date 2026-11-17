@@ -12,7 +12,6 @@ import { targetProof } from './sdk-upgrade-evidence.ts'
 export { captureSdkInputs }
 export async function runSdkTarget(options: TargetOptions) {
   const scratch = registerTempDir(await mkdtemp(join(tmpdir(), 'wb-sdk-ipc-')))
-  const socketPath = join(scratch, 'barrier.sock')
   const sockets = new Set<Socket>()
   const server = createServer(socket => {
     sockets.add(socket); socket.on('close', () => sockets.delete(socket))
@@ -29,12 +28,18 @@ export async function runSdkTarget(options: TargetOptions) {
     for (const socket of sockets) socket.write(JSON.stringify(message) + '\n')
   }
   process.on('message', command)
-  await new Promise<void>(resolve => server.listen(socketPath, resolve))
+  // Long operator-owned scratch roots exceed macOS's Unix socket path limit.
+  // Keep all files in scratch and use an ephemeral loopback port for the barrier.
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject)
+    server.listen(0, '127.0.0.1', resolve)
+  })
+  const endpoint = { host: '127.0.0.1', port: (server.address() as { port: number }).port }
   try {
     for (const phase of ['install', 'verify']) {
       const descendant = `
         const net = require('node:net');
-        const socket = net.connect(${JSON.stringify(socketPath)});
+        const socket = net.connect(${JSON.stringify(endpoint)});
         socket.on('connect', () => socket.write(JSON.stringify({event:${JSON.stringify(phase)},descendant:process.pid})+'\\n'));
         process.on('SIGTERM', () => socket.write(JSON.stringify({event:'cleanup',descendant:process.pid})+'\\n'));
         socket.on('data', bytes => { if (bytes.toString().includes('continue')) process.exit(0) });

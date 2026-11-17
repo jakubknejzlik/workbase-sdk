@@ -2,12 +2,15 @@ import { DatabaseSync } from 'node:sqlite'
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { dirname, join, relative } from 'node:path'
 import { serializeAccessLock } from '@workbasehq/core/access/lock'
+import { accessSystemActions } from '@workbasehq/core/schema'
 import { configSources, loadConfig, SourceError } from '@workbasehq/core/schema/load'
-import { runOpenApiCli } from '@workbasehq/core/openapi/cli'
+import { generate } from '@workbasehq/core/openapi/generate'
+import { KernelRegistry } from '@workbasehq/core/kernel/registry'
 import { expectedPluginMigrations, type PluginMigrationRow } from '@workbasehq/core/kernel/migrations'
+import { checkSchema, parseLock } from '@workbasehq/core/migrations/schema-lock'
 import type { Bundle } from '../storage.ts'
 import { noLink } from '../storage.ts'
-import { fail, type AccessChange, type LocaleChange } from '../schemas.ts'
+import { fail, type AccessChange, type LocaleChange, type RolesChange } from '../schemas.ts'
 import { replaySources } from '../replay-sources.ts'
 import { replaceLiteral } from './literal-edit.ts'
 import { replayBundle, replayEngine, snapshot } from '../offline.ts'
@@ -18,7 +21,7 @@ export const pluginLedger = (db: DatabaseSync) => db.prepare('SELECT namespace,n
 
 /** Interpret the original graph, edit literal spans, then compile the staged graph.
  * Consumer modules are never evaluated to obtain authored access declarations. */
-export async function accessPlan(root: string, changes: AccessChange[]) {
+export async function accessPlan(root: string, changes: (AccessChange | RolesChange)[]) {
   const original = await loadConfig(join(root, 'config.ts'))
   const { shared, entities } = original.authoredAccess
   if (!shared) fail('invalid_access', 'V3 access authoring requires access.ts')
@@ -27,7 +30,39 @@ export async function accessPlan(root: string, changes: AccessChange[]) {
   const edit = (file: string, path: string[], value: unknown) => {
     files.set(file, replaceLiteral(files.get(file) ?? inputs[file].toString('utf8'), path, value, join(root, file)))
   }
+  const roleChanges = changes.filter(change => change.kind === 'set_roles')
+  if (roleChanges.length > 1) fail('invalid_input', 'Provide only one set_roles operation per proposal')
+  const roleChange = roleChanges[0]
+  const removedRows: { file: string; path: string[]; before: unknown; after: null }[] = []
+  if (roleChange) {
+    const roles = roleChange.roles
+    const removed = original.config.roles.filter(role => !roles.includes(role))
+    const matrix = <T>(file: string, path: string[], previous: Record<string, T>, deny: () => T) => {
+      for (const role of removed) if (Object.hasOwn(previous, role)) removedRows.push({ file, path: [...path, role], before: previous[role], after: null })
+      return Object.fromEntries(roles.map(role => [role, Object.hasOwn(previous, role) ? previous[role] : deny()]))
+    }
+    // Stage the entire role graph before applying grants or compiling. Retain
+    // grants only for identical identifiers; every new role starts denied.
+    let configSource = await readFile(join(root, 'config.ts'), 'utf8')
+    configSource = replaceLiteral(configSource, ['roles'], roles, join(root, 'config.ts'), { config: true })
+    configSource = replaceLiteral(configSource, ['organizationOwnerRole'], roleChange.organizationOwnerRole, join(root, 'config.ts'), { config: true })
+    files.set('config.ts', configSource)
+    shared.roles = matrix('access.ts', ['roles'], shared.roles, () => ({ system: Object.fromEntries(accessSystemActions.map(action => [action, 'deny' as const])) }))
+    edit('access.ts', ['roles'], shared.roles)
+    for (const [entity, previous] of Object.entries(shared.entities)) {
+      shared.entities[entity] = matrix('access.ts', ['entities', entity], previous, () => 'deny' as const)
+      edit('access.ts', ['entities', entity], shared.entities[entity])
+    }
+    for (const [entity, previous] of Object.entries(entities)) {
+      entities[entity] = matrix(`schema/${entity}.ts`, ['access'], previous!, () => 'deny' as const)
+      edit(`schema/${entity}.ts`, ['access'], entities[entity])
+    }
+    for (const item of original.config.ui?.navigation?.items ?? []) for (const role of item.roles ?? []) {
+      if (!roles.includes(role)) fail('role_reference_unresolved', `config.ts ui.navigation.items.${item.id}.roles references removed role ${role}; explicitly update the navigation declaration before proposing set_roles`, 422)
+    }
+  }
   for (const change of changes) {
+    if (change.kind === 'set_roles') continue
     if (change.kind === 'set_system_access') {
       const known = Object.hasOwn(shared.roles, change.role)
       shared.roles[change.role] = { system: change.grants }
@@ -48,7 +83,21 @@ export async function accessPlan(root: string, changes: AccessChange[]) {
       edit('access.ts', present ? ['accountLinks'] : [], present ? shared.accountLinks : shared)
     }
   }
-  return loadEditedConfig(root, inputs, files)
+  if (roleChange) for (const [entity, mapping] of Object.entries(shared.accountLinks ?? {})) {
+    if (!roleChange.roles.includes(mapping.invitationRole) || mapping.invitationRole === roleChange.organizationOwnerRole) {
+      fail('role_reference_unresolved', `access.ts accountLinks.${entity}.invitationRole (${mapping.invitationRole}) must reference a final non-owner role; include an explicit set_account_link operation`, 422)
+    }
+  }
+  const target = await loadEditedConfig(root, inputs, files)
+  if (roleChange) {
+    try { checkSchema(target.config, parseLock(inputs['schema.lock.json'].toString('utf8'))) }
+    catch { fail('schema_lock_mismatch', 'set_roles preserves the physical schema; run check:schema and repair the committed schema lock and migration history before proposing role changes', 422) }
+  }
+  return { ...target, ...(roleChange ? { roleDiff: {
+    roles: { before: original.config.roles, after: roleChange.roles },
+    organizationOwnerRole: { before: original.config.organizationOwnerRole, after: roleChange.organizationOwnerRole },
+    removedRows,
+  } } : {}) }
 }
 
 /** Languages are presentation metadata: preserve V3 source imports and lock binding. */
@@ -81,8 +130,10 @@ async function loadEditedConfig(root: string, inputs: Record<string, Buffer>, fi
     // Presence in the captured instance graph is the artifact opt-in. Never
     // introduce OpenAPI into an instance that does not already maintain it.
     if (inputs['openapi.json']) {
-      await runOpenApiCli(['--root', scratch, '--write'], loadOptions)
-      files.set('openapi.json', await readFile(join(scratch, 'openapi.json'), 'utf8'))
+      // Use the same generator as the CLI without its human stdout messages:
+      // configuration MCP stdout must contain JSON-RPC frames only.
+      const kernel = new KernelRegistry(loaded.config)
+      files.set('openapi.json', generate(kernel.config, kernel, loaded.configHash))
     }
     return { config: loaded.config, files: [...files].map(([path, data]) => ({ path, data })) }
   } catch (error) {
