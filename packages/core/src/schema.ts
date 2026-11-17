@@ -1,5 +1,6 @@
 import { assertSchemaLockBound } from './schema/revision'
 export { bindSchemaLock } from './schema/revision'
+export { createPhysicalNameResolver } from './schema/physical-names'
 export { bindOpenApi } from './openapi/routes'
 import { recordActionsSchema, type ActionWhen } from './record-actions-data'
 export { actionReasonKeys } from './record-actions-data'
@@ -21,6 +22,7 @@ const relationSchema = z.strictObject({
 // Field validation and normalized field types are shared with the kernel.
 // Strict objects prevent inline labels and plugin lifecycle hooks from being silently stripped.
 export const declarationSchema = z.strictObject({
+  renameFrom: identifier.optional(),
   fields: z.record(identifier, fieldSchema.strict()),
   relations: z.record(identifier, relationSchema).optional(),
   displayField: z.union([serializedExpressionSchema, z.literal(false)]).optional(),

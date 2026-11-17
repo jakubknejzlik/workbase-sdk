@@ -72,7 +72,7 @@ export function renderTable(table: TableSpec) {
 export function createEntity(name: string, entity: InstanceConfig['entities'][string]) { return renderTable(physicalTable(name, entity)) }
 
 /** New tables have canonical order; existing columns retain the base's physical order. */
-export function physicalTables(config: InstanceConfig, base: readonly TableSpec[] = []): TableSpec[] {
+export function physicalTables(config: Pick<InstanceConfig, 'entities' | 'account'>, base: readonly TableSpec[] = []): TableSpec[] {
   return Object.entries(config.entities).filter(([name]) => name !== config.account?.entity).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).map(([name, entity]) => {
     const table = physicalTable(name, { ...entity, fields: Object.fromEntries(Object.entries(entity.fields).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)) })
     const previous = base.find(t => t.name === name)

@@ -30,7 +30,7 @@ it('initializes final bundle and r1 lock; rerun requires base; init refuses exis
   expect(await runSchemaCli('plan', [...args, '--init'])).toBe(0)
   const lock = readFileSync(join(root, 'schema.lock.json'), 'utf8')
   const sql = readFileSync(join(root, 'migrations/0001_r1.sql'), 'utf8')
-  expect(JSON.parse(lock)).toMatchObject({ lockVersion: 1, revision: 1, parent: null })
+  expect(JSON.parse(lock)).toMatchObject({ lockVersion: 2, revision: 1, parent: null, transitions: [] })
   expect(sql).toMatch(/^-- workbase:migration r1 parent=none manual=none\n-- workbase:begin pre-data\n-- workbase:end pre-data\n-- workbase:begin generated\nCREATE TABLE/)
   expect(sql).toMatch(/-- workbase:end generated\n-- workbase:begin post-data\n-- workbase:end post-data\n$/)
   expect(sql).not.toMatch(/instance_meta|CREATE TABLE "users"|core_version/)
@@ -145,7 +145,7 @@ it('legacy fixture DDL byte snapshot captured before the projection refactor', a
 // New nonphysical keys automatically become probes, including absent optional keys.
 it('zod-enumerated nonphysical config keys cannot leak into lock or SQL', () => {
   const physical = new Set(['entities', 'account', 'baseline', 'revision'])
-  const physicalEntity = new Set(['fields', 'checks'])
+  const physicalEntity = new Set(['fields', 'checks', 'renameFrom'])
   const physicalField = new Set(['type', 'required', 'values', 'entity', 'default', 'min', 'computed', 'renameFrom', 'backfillFrom'])
   const base = schemaLock(fixture), bytes = lockBytes(base), sql = diffSpecs([], base.tables)
   const assert = (config: InstanceConfig, key: string) => {

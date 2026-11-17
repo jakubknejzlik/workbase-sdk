@@ -222,6 +222,44 @@ Installed consumers invoke `@workbasehq/core/migrations/schema-cli` with `plan` 
 Runtime builds bind the lock with `bindSchemaLock`; direct `defineConfig`
 declarations remain unbound until a lock is supplied.
 
+New locks use `lockVersion: 2`. The lock retains SQL-only `tables` and adds
+`entities[]` with immutable `ent_…` IDs, `logicalName`, `physicalName`, and
+`fields[]` with immutable `fld_…` IDs and the same name pair. These are storage
+identities: SDK-owned accounts and computed fields have no domain storage entry;
+implicit domain columns do. IDs are deterministically seeded from the initial
+physical path, then preserved across explicit rename intents.
+
+`parseLock` and `bindSchemaLock` validate v2 and bootstrap repository v1 locks
+deterministically. A plan with no schema diff can write exactly that v2 bootstrap
+without a migration or revision change. Its original parent, physical names and
+all existing migration bytes remain unchanged. Old SDKs reject v2: upgrade the
+SDK before consuming a v2 lock.
+
+Both rename inputs use `renameFrom`: a field option, or a top-level entity option
+such as `defineEntity({ renameFrom: 'worker', fields: { … } })` in
+`schema/staff.ts`. Sources must exist in the base lock and disappear from the
+authored schema; names/IDs cannot collide or be claimed twice. Similar shapes
+never imply a rename. A rename must preserve the SQL definition and be isolated
+from other schema edits. Computed/implicit/account renames and backfill intents
+remain unsupported.
+
+Each rename appends to `transitions[]`: `id`, `entityId`, optional `fieldIds`
+(one field in this slice), `from`/`to` (`logical`, `physical`), `bridge`
+(`field` = dual column, `entity` = view), and `phase`
+(`expanded | switched | contracted`). History is retained. At most one
+non-contracted transition may exist per entity, including field transitions.
+An expanded candidate retains the source mapping and records the target as
+intent; logical switching belongs to a later release. This slice only builds
+pure candidate records: SQL planning rejects open transitions by ID before any
+lock/bundle writes. It cannot apply expansion, advance phases or contract.
+
+`createPhysicalNameResolver(lock)` is exported from `@workbasehq/core/schema`
+and `@workbasehq/core/schema/physical-names`. It validates and snapshots the lock;
+`entityId(logicalName)` and `fieldId(entityId, logicalName)` locate identities,
+while `table(entityId)` and `column(entityId, fieldId)` return pinned physical
+names. Unknown IDs/names and fields belonging to another entity fail. Runtime
+CRUD, query and policy compilers will adopt the resolver in the next slice.
+
 Record actions are strict entity data pointing at registered commands:
 
 ```ts
