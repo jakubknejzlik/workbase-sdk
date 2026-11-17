@@ -44,3 +44,21 @@ it('preserves every exact-line scan review independently of private vocabulary',
     expect(reviewDigest(lines[review.lineNumber - 1]), `${path}:${review.lineNumber}`).toBe(review.lineDigest)
   }
 })
+
+it('every literal exact-line review matches its source line', () => {
+  const root = resolve(import.meta.dirname, '..')
+  const paths = new Set(execFileSync('git', ['ls-files', '-z'], { cwd: root, encoding: 'utf8' }).split('\0').filter(Boolean))
+  for (const category of ['ids', 'emails', 'encoded', 'hostLiterals'] as const) {
+    for (const [index, review] of (policy[category] ?? []).entries()) {
+      const location = `${category}[${index}] ${review.path}:${review.lineNumber}`
+      expect.soft(paths.has(review.path), location).toBe(true)
+      expect.soft(Number.isInteger(review.lineNumber) && review.lineNumber > 0, location).toBe(true)
+      expect.soft(review.reason.trim(), location).not.toBe('')
+      if (!paths.has(review.path) || !Number.isInteger(review.lineNumber) || review.lineNumber < 1) continue
+      const lines = readFileSync(resolve(root, review.path), 'utf8').split('\n')
+      expect.soft(review.lineNumber <= lines.length, location).toBe(true)
+      if (review.lineNumber > lines.length) continue
+      expect.soft(lines[review.lineNumber - 1], location).toBe(review.line)
+    }
+  }
+})
