@@ -4,6 +4,7 @@ import { once } from 'node:events'
 import { createHash } from 'node:crypto'
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:net'
+import { createServer as createMailServer } from 'node:http'
 import { constants, platform, release, tmpdir } from 'node:os'
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -234,16 +235,32 @@ export async function open() {
       assert.equal(response.status, 200, 'Installed mailbox handler must read the shared D1')
       return (await response.json()).messages
     }
-    return { readMail, dispose: proxy.dispose, sessionCookie: SESSION_COOKIE }
+    const mailStatus = (id: string) => db.prepare('SELECT delivery_status,attempts,sent_at,last_error FROM email_outbox WHERE id=?').bind(id).first()
+    return { readMail, mailStatus, dispose: proxy.dispose, sessionCookie: SESSION_COOKIE }
   } catch (error) { await proxy.dispose(); throw error }
 }
 `)
   const { open } = await import(pathToFileURL(bridge).href)
-  const proxy: { readMail(recipient: string): Promise<{ body: string }[]>; sessionCookie: string; dispose(): Promise<void> } = await open()
+  const proxy: { readMail(recipient: string): Promise<{ id: string; subject: string; body: string }[]>; mailStatus(id: string): Promise<{ delivery_status: string; attempts: number; sent_at: string | null; last_error: string | null }>; sessionCookie: string; dispose(): Promise<void> } = await open()
+  // Test-only transport: only EMAIL.send can populate this inbox. Never render or
+  // sign in the harness, and never treat the stored outbox inputs as delivered mail.
+  const delivered: { to: string; from: string; subject: string; text: string; html: string }[] = []
+  const mailPath = '/' + crypto.randomUUID()
+  const mailServer = createMailServer(async (request, response) => {
+    if (request.method !== 'POST' || request.url !== mailPath) { response.writeHead(404).end(); return }
+    try {
+      let body = ''
+      for await (const chunk of request) body += chunk
+      const message = JSON.parse(body)
+      assert(['to', 'from', 'subject', 'text', 'html'].every(key => typeof message[key] === 'string'))
+      delivered.push(message)
+      response.writeHead(204).end()
+    } catch { response.writeHead(400).end() }
+  })
   let worker: ChildProcess | undefined, browser: Browser | undefined, logs = ''
   const startWorker = async () => {
     logs = ''
-    worker = spawn('node', [join(consumer, 'node_modules/wrangler/bin/wrangler.js'), 'dev', '--local', '--ip', '127.0.0.1', '--port', String(port), '--inspector-port', '0', '--persist-to', '.wrangler/state', '--log-level', 'error'], { cwd: consumer, env: process.env, stdio: ['ignore', 'pipe', 'pipe'] })
+    worker = spawn('node', [join(consumer, 'node_modules/wrangler/bin/wrangler.js'), 'dev', '.smoke/live-worker.mjs', '--local', '--ip', '127.0.0.1', '--port', String(port), '--inspector-port', '0', '--persist-to', '.wrangler/state', '--log-level', 'error'], { cwd: consumer, env: process.env, stdio: ['ignore', 'pipe', 'pipe'] })
     const output = (data: Buffer) => { logs = (logs + data.toString()).slice(-12000) }
     worker.stdout!.on('data', output); worker.stderr!.on('data', output)
     worker.on('error', error => { logs += String(error) })
@@ -261,6 +278,7 @@ export async function open() {
     const closing = (async () => {
       const results = await Promise.allSettled(contexts.map(context => context.close()))
       results.push(...await Promise.allSettled([browser?.close(), stop(worker), proxy.dispose()]))
+      if (mailServer.listening) await new Promise<void>((resolve, reject) => mailServer.close(error => error ? reject(error) : resolve()))
       const failures = results.filter(result => result.status === 'rejected')
       assert.equal(failures.length, 0, 'Live process cleanup failed')
     })()
@@ -269,6 +287,18 @@ export async function open() {
   const interrupted = () => { void cleanup().finally(() => process.exit(143)) }
   process.once('SIGTERM', interrupted); process.once('SIGINT', interrupted)
   try {
+    mailServer.listen(0, '127.0.0.1')
+    await once(mailServer, 'listening')
+    const mailAddress = mailServer.address()
+    assert(mailAddress && typeof mailAddress !== 'string')
+    writeFileSync(join(consumer, '.smoke/live-worker.mjs'), `import worker from '../src/index.ts'
+export default { ...worker, fetch(request, env, ctx) {
+  return worker.fetch(request, { ...env, EMAIL_FROM: 'login@example.test', EMAIL: { async send(message) {
+    const response = await fetch(${JSON.stringify(`http://127.0.0.1:${mailAddress.port}${mailPath}`)}, { method: 'POST', body: JSON.stringify(message) })
+    if (!response.ok) throw Error('Installed consumer mail transport rejected delivery')
+  } } }, ctx)
+} }
+`)
     await startWorker()
     browser = await chromium.launch(process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH } : {})
     const newContext = async () => {
@@ -299,8 +329,12 @@ export async function open() {
       await call(context, '/auth/sign-in/magic-link', 'POST', { email, callbackURL: '/me' })
       const [mail] = await proxy.readMail(email)
       assert(mail, 'Magic link must come through the installed mailbox handler')
-      assert.equal(new URL(mail.body).origin, origin)
-      await call(context, mail.body, 'GET', undefined, undefined, {}, 302)
+      const message = delivered.find(message => message.to === email && message.subject === mail.subject)
+      const link = message?.text.match(/^https?:\/\/\S+$/m)?.[0]
+      assert(link, 'Magic link must come through installed EMAIL.send')
+      assert.equal(link, mail.body)
+      assert.equal(new URL(link).origin, origin)
+      await call(context, link, 'GET', undefined, undefined, {}, 302)
       assert((await context.cookies()).some(cookie => cookie.name === proxy.sessionCookie))
       await call(context, '/me/profile', 'PATCH', { firstName: 'Synthetic', lastName: 'Person' })
       return context
@@ -335,12 +369,22 @@ export async function open() {
     assert.equal((await (await call(admin, rowPath, 'GET', undefined, orgA.id)).json()).name, 'Persistent renamed')
     const invite = await (await call(admin, rowPath + '/actions/invite', 'POST', { email: 'staff@example.test' }, orgA.id, {}, 201)).json()
     const staff = await signIn('staff@example.test')
-    const invitationMail = (await proxy.readMail('staff@example.test')).find(mail => mail.body.startsWith('Accept: '))
-    assert(invitationMail, 'Invitation link must come through the installed mailbox handler')
-    const invitationUrl = new URL(invitationMail.body.slice('Accept: '.length))
+    const invitationIntent = (await proxy.readMail('staff@example.test')).find(mail => mail.subject === 'Workbase invitation')
+    assert(invitationIntent, 'Invitation intent must come through the installed mailbox handler')
+    const invitationMail = delivered.find(message => message.to === 'staff@example.test' && message.text.includes('/invitations/accept?'))
+    assert(invitationMail, 'Invitation link must come through installed EMAIL.send')
+    const link = invitationMail.text.match(/^https?:\/\/\S+$/m)?.[0]
+    assert(link, 'Delivered invitation must contain an acceptance URL')
+    assert(invitationMail.html.includes(link), 'Delivered text and HTML must contain the same URL')
+    const invitationUrl = new URL(link)
     assert.equal(invitationUrl.origin, origin)
     const token = invitationUrl.searchParams.get('token')
-    assert(token)
+    assert(token && /^[a-f0-9]{64}\.[a-f0-9]{64}$/.test(token), 'Delivered invitation must carry mailbox proof')
+    const delivery = await proxy.mailStatus(invitationIntent.id)
+    assert.equal(delivery.delivery_status, 'sent'); assert.equal(delivery.attempts, 1)
+    assert(delivery.sent_at); assert.equal(delivery.last_error, null)
+    console.log('Installed invitation delivery:', JSON.stringify(delivery), 'EMAIL.send received rendered text + HTML with signed acceptance URL')
+    if (evidence) writeFileSync(join(evidence, 'invitation-delivery.json'), JSON.stringify({ delivery, message: invitationMail }, null, 2).replaceAll(token, '<signed-token>') + '\n')
     await call(staff, '/invitations/resolve', 'POST', { token })
     await call(staff, '/invitations/' + invite.invitation_id + '/accept', 'POST', {}, undefined, {}, 201)
     const staffMe = await (await call(staff, '/me')).json()
