@@ -11,12 +11,12 @@ import type { Model, Capabilities } from '../../console-generated/src/read'
 
 const model = { entities: { people: { rowInvitations: true } } } as unknown as Model
 const caps = { resources: { 'invitations.read': true }, revision: 1, commands: ['people/remove_access'], entities: {} } as Capabilities
-async function mount(state: string, canInvite = true, language: 'en' | 'cs' = 'cs', read = true, identity = false, commands = caps.commands) {
+async function mount(state: string, canInvite = true, language: 'en' | 'cs' = 'cs', read = true, identity = false, commands = caps.commands, canCancel = canInvite) {
   const i18n = i18next.createInstance()
   await i18n.use(initReactI18next).init({ lng: language, resources: { en: { translation: en }, cs: { translation: cs } } })
   let current = state
   const write = vi.fn(async (path: string, method: string, _body?: unknown) => {
-    if (method === 'GET') return { state: current, can_invite: canInvite, can_cancel: canInvite, linked_accounts: identity && current === 'signed_in' ? [{ id: 'account', label: 'Jana Example' }] : [],
+    if (method === 'GET') return { state: current, can_invite: canInvite, can_cancel: canCancel, linked_accounts: identity && current === 'signed_in' ? [{ id: 'account', label: 'Jana Example' }] : [],
       ...(['invited', 'expired'].includes(current) ? { invitation: { id: 'pending', email: 'one@example.test' } } : {}) }
     current = method === 'DELETE' || path.includes('remove_access') ? 'no_account' : 'invited'
     return { accept_url: 'credential-must-not-be-cached' }
@@ -39,7 +39,7 @@ it.each(['no_account', 'invited', 'expired', 'signed_in'])('176 renders Czech st
   await mount(state, false)
   const trigger = await screen.findByRole('button', { name: new RegExp(cs[`rowAccess_${state}` as keyof typeof cs]) })
   await userEvent.setup().click(trigger)
-  expect(screen.getAllByRole('menuitem').map(item => item.textContent)).toEqual([cs.rowInvite_remove])
+  expect(screen.queryAllByRole('menuitem').map(item => item.textContent)).toEqual(state === 'invited' ? [] : [cs.rowInvite_remove])
   expect(screen.queryByRole('button', { name: 'Pozvat do aplikace' })).toBeNull()
   expect(screen.queryByRole('button', { name: 'Znovu odeslat' })).toBeNull()
   expect(screen.queryByRole('button', { name: 'Kopírovat odkaz' })).toBeNull()
@@ -104,9 +104,11 @@ for (const language of ['en', 'cs'] as const) it.each(['no_account', 'invited', 
   const { user } = await mount(state, true, language, true, true)
   const stateLabel = t[`rowAccess_${state}`]
   const button = await screen.findByRole('button', { name: new RegExp(`${stateLabel}, ${t.rowAccessActions}`) })
-  expect(button.textContent).toContain(state === 'no_account' ? t.rowAccess_no_account : state === 'signed_in' ? 'Jana Example' : 'one@example.test')
-  // No-account is the existing textual fallback when there is no identity.
-  if (state !== 'no_account') expect(button.parentElement!.textContent).not.toContain(stateLabel)
+  expect(button.textContent).toBe(state === 'no_account' ? '–' : state === 'signed_in' ? 'Jana Example' : 'one@example.test')
+  expect(button.parentElement!.textContent).not.toContain(stateLabel)
+  expect(button.classList.contains('h-6')).toBe(true)
+  expect(button.classList.contains('h-8')).toBe(false)
+  expect(button.className).not.toMatch(/(?:^| )(?:(?:pointer-coarse:)?min-[hw]-11)(?: |$)/)
   expect(button.querySelector('[aria-hidden="true"]')).toBeTruthy()
   await user.tab()
   expect(document.activeElement).toBe(button)
@@ -117,8 +119,13 @@ for (const language of ['en', 'cs'] as const) it.each(['no_account', 'invited', 
   expect((await screen.findByRole('tooltip')).textContent).toBe(stateLabel)
   await user.click(button)
   expect(screen.getByRole('menu').textContent).toContain(stateLabel)
-  expect(screen.getByRole('menu').textContent).toContain(t[`rowAccessDot_${state}`])
-  const expected = state === 'no_account' ? [t.rowInvite_remove, t.rowFindMember] : state === 'signed_in' ? [t.rowInvite_remove] : [t.rowInvite_resend, ...(state === 'invited' ? [t.rowInvite_copy] : []), t.rowInvite_cancel, t.rowInvite_remove, t.rowFindMember]
+  const header = screen.getByRole('menu').querySelector('[data-slot="dropdown-menu-label"]')!
+  expect(header.textContent).toBe(stateLabel)
+  expect(header.querySelector('[aria-hidden="true"].rounded-full')).toBeTruthy()
+  expect(header.getAttribute('role')).toBeNull()
+  expect(header.hasAttribute('tabindex')).toBe(false)
+  expect(header.nextElementSibling?.getAttribute('role')).toBe('separator')
+  const expected = state === 'no_account' ? [t.rowInvite_remove, t.rowFindMember] : state === 'signed_in' ? [t.rowInvite_remove] : state === 'invited' ? [t.rowInvite_resend, t.rowInvite_copy, t.rowChangeMemberOrEmail, t.rowInvite_cancel] : [t.rowInvite_resend, t.rowInvite_cancel, t.rowInvite_remove, t.rowFindMember]
   expect(screen.getAllByRole('menuitem').map(item => item.textContent)).toEqual(expected)
 })
 it('209 never requests or renders access without invitation-read authority', async () => {
@@ -130,8 +137,27 @@ it('209 never requests or renders access without invitation-read authority', asy
 it('209 status-only rows can inspect the header without receiving any actions', async () => {
   const { user } = await mount('signed_in', false, 'en', true, false, [])
   const button = await screen.findByRole('button', { name: /Signed in, Application access actions/ })
-  expect(button.textContent).toBe(en.rowAccess)
+  expect(button.textContent).toBe('–')
   await user.click(button)
   expect(screen.getByRole('menu').textContent).toContain(en.rowAccess_signed_in)
   expect(screen.queryByRole('menuitem')).toBeNull()
+})
+
+it.each([[true, true], [true, false], [false, true], [false, false]])('209 pending menu filters live invite=%s cancel=%s authority', async (invite, cancel) => {
+  const { user, write } = await mount('invited', invite, 'en', true, false, [], cancel)
+  await user.click(await screen.findByRole('button', { name: /Invited, Application access actions/ }))
+  expect(write.mock.calls.every(([, method]) => method === 'GET')).toBe(true)
+  const expected = [...(invite ? [en.rowInvite_resend, en.rowInvite_copy] : []), ...(invite && cancel ? [en.rowChangeMemberOrEmail] : []), ...(cancel ? [en.rowInvite_cancel] : [])]
+  expect(screen.queryAllByRole('menuitem').map(item => item.textContent)).toEqual(expected)
+  if (cancel) {
+    const item = screen.getByRole('menuitem', { name: en.rowInvite_cancel })
+    expect(item.getAttribute('data-variant')).toBe('destructive')
+    if (invite) expect(item.parentElement?.previousElementSibling?.querySelector('[role="menuitem"]')?.textContent).toBe(en.rowChangeMemberOrEmail)
+    if (invite) expect(item.previousElementSibling?.getAttribute('role')).toBe('separator')
+  }
+  if (invite && cancel) {
+    await user.click(screen.getByRole('menuitem', { name: en.rowChangeMemberOrEmail }))
+    expect(screen.getByRole('combobox')).toHaveProperty('value', 'one@example.test')
+    expect(screen.getByRole('dialog')).toBeTruthy()
+  }
 })

@@ -100,8 +100,7 @@ export function GeneratedRowActions(props: Context & { row: Record<string, any>;
     ...commands.map(command => ({ id: command.name, label: commandLabel(command, i18n.language, t) })),
     ...(operations.includes('delete') ? [{ id: 'delete', label: t('delete'), destructive: true }] : []),
   ]
-  const accessControl = (model.entities[entity].accountLink || model.entities[entity].rowInvitations) && canReadApplicationAccess(caps)
-  return <><RowActions triggerLabel={accessControl ? t('rowRecord') : undefined} label={t(accessControl ? 'rowRecordActions' : 'rowActions', { name: recordLabel(model, entity, row, caps, i18n.language, t) })} items={items} disabled={props.disabled}>{(action, close, restoreFocus) => {
+  return <><RowActions label={t('rowActions', { name: recordLabel(model, entity, row, caps, i18n.language, t) })} items={items} disabled={props.disabled}>{(action, close, restoreFocus) => {
     const common = { open: true, onOpenChange: (open: boolean) => { if (!open) close() }, onCloseAutoFocus: restoreFocus, cancelLabel: t('cancel') }
     if (action.id === 'edit') return <ResourceFormDialog entity={entity} outcome={row ? 'updated' : 'created'} schema={writeSchema(model, entity, caps, 'edit')} {...common} title={t('editEntity', { entity: t(`entitySingular_${entity}`) })} description={t('editEntityDescription', { entity: t(`entitySingular_${entity}`) })}>{controls => <EntityMutation {...props} row={row} controls={controls} />}</ResourceFormDialog>
     if (action.id === 'delete') return <ResourceDeleteDialog entity={entity} {...common} title={t('deleteRecord')} description={t('deleteDescription')} entityType={t(`entity_${entity}`)} entityName={recordLabel(model, entity, row, caps, i18n.language, t)} targetDescription={t('deleteTarget')} warningMessage={t('deleteDescription')} confirmText={t('delete')}>{controls => <DeleteMutation {...props} row={row} close={controls.close} />}</ResourceDeleteDialog>
@@ -446,13 +445,16 @@ function ApplicationAccess(props: AccessContext & { rowMenu?: boolean }) {
     if (selected && !selectionAllowed) setSelected(undefined)
   }, [selected, selectionAllowed])
   const visibleActions = [...actions.filter(action => !(find && ['link', 'invite', 'change'].includes(action))), ...(find ? ['find'] : [])]
-  const overflow = props.rowMenu ? visibleActions : visibleActions.filter(action => action === 'cancel')
-  const label = (action: string) => t(action === 'find' ? 'rowFindMember' : `rowInvite_${action}`)
+  const pendingMenu = props.rowMenu && valid && data?.state === 'invited'
+  // Pending invitations have a specific order; every entry still comes from
+  // the live controller, including the unified find-or-invite dialog.
+  const overflow = props.rowMenu ? pendingMenu ? ['resend', 'copy', 'find', 'cancel'].filter(action => visibleActions.includes(action)) : visibleActions : visibleActions.filter(action => action === 'cancel')
+  const label = (action: string) => t(action === 'find' ? pendingMenu ? 'rowChangeMemberOrEmail' : 'rowFindMember' : `rowInvite_${action}`)
   const open = (action: string, button: HTMLButtonElement) => { trigger.current = button; setSelected(action) }
   const stateLabel = t(message ?? `rowAccess_${data?.state}`)
   // A policy-hidden identity never falls back to a raw account field.
   const identity = data?.linked_accounts?.[0]?.label ?? data?.linked_accounts?.[0]?.id ?? data?.invitation?.email
-  const triggerText = identity ?? t(message ?? (data?.state === 'no_account' ? 'rowAccess_no_account' : 'rowAccess'))
+  const triggerText = data?.state === 'no_account' ? '–' : identity ?? '–'
   const rowControl = props.rowMenu && (!message || !!overflow.length)
   const dotClass = data?.state === 'signed_in' ? 'bg-green-600' : data?.state === 'invited' ? 'bg-amber-500' : data?.state === 'expired' ? 'bg-red-600' : 'bg-slate-400'
   return <div className="flex flex-wrap items-center gap-2" aria-label={t('rowAccess')}>
@@ -464,11 +466,11 @@ function ApplicationAccess(props: AccessContext & { rowMenu?: boolean }) {
     {enabled && !status.isFetching && (status.error || data && !valid && !multiple && !explicitOnly) && <Button type="button" variant="outline" onClick={() => { void status.refetch() }}>{t('reloadRetry')}</Button>}
     {delivery.data === true && <span role="alert">{t('rowInviteDeliveryFailed')}</span>}
     {status.isFetching && data && !multiple && <span role="status">{t('rowAccessRefreshing')}</span>}
-    {visibleActions.filter(action => !overflow.includes(action)).map(action =>
+    {(!props.rowMenu ? visibleActions.filter(action => !overflow.includes(action)) : []).map(action =>
       <Button key={action} type="button" variant="outline" disabled={blocked} onClick={event => open(action, event.currentTarget)}>{label(action)}</Button>)}
     {(props.rowMenu ? rowControl : !!overflow.length) && <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
       {props.rowMenu ? <TooltipProvider><Tooltip><TooltipTrigger asChild><DropdownMenuTrigger asChild>
-        <Button type="button" variant="ghost" size="sm" className="max-w-full pointer-coarse:min-h-11 pointer-coarse:min-w-11" disabled={blocked}
+        <Button type="button" variant="ghost" size="sm" className="relative h-6 max-w-full gap-1 px-1 py-0 has-[>svg]:px-1 pointer-coarse:after:absolute pointer-coarse:after:-inset-y-2.5 pointer-coarse:after:inset-x-0 pointer-coarse:after:min-w-11" disabled={blocked}
           aria-label={`${triggerText} – ${stateLabel}, ${t('rowAccessActions')}`} onFocus={event => { trigger.current = event.currentTarget }} onClick={event => { trigger.current = event.currentTarget }}>
           <span aria-hidden="true" className={`size-2 shrink-0 rounded-full ${dotClass}`} />
           <span className="min-w-0 whitespace-normal text-left [overflow-wrap:anywhere]">{triggerText}</span>
@@ -477,8 +479,8 @@ function ApplicationAccess(props: AccessContext & { rowMenu?: boolean }) {
       </DropdownMenuTrigger></TooltipTrigger><TooltipContent>{stateLabel}</TooltipContent></Tooltip></TooltipProvider>
         : <DropdownMenuTrigger asChild><Button type="button" variant="outline" size="sm" className="pointer-coarse:min-h-11 pointer-coarse:min-w-11" disabled={blocked} aria-label={t('rowInvitationActions')} onFocus={event => { trigger.current = event.currentTarget }} onClick={event => { trigger.current = event.currentTarget }}>⋯</Button></DropdownMenuTrigger>}
       <DropdownMenuContent align="end" onCloseAutoFocus={event => { if (requested.current) { event.preventDefault(); setSelected(requested.current); requested.current = undefined } }}>
-        {props.rowMenu && <><DropdownMenuLabel><span className="block">{stateLabel}</span><span className="block text-xs font-normal">{t(`rowAccessDot_${message ? 'unavailable' : data!.state}`)}</span></DropdownMenuLabel>{!!overflow.length && <DropdownMenuSeparator />}</>}
-        {overflow.map(action => <DropdownMenuItem className="pointer-coarse:min-h-11" key={action} onSelect={() => { requested.current = action }}>{label(action)}</DropdownMenuItem>)}
+        {props.rowMenu && <><DropdownMenuLabel className="flex items-center gap-2"><span aria-hidden="true" className={`size-2 shrink-0 rounded-full ${dotClass}`} />{stateLabel}</DropdownMenuLabel><DropdownMenuSeparator /></>}
+        {overflow.map((action, index) => <div key={action}>{pendingMenu && action === 'cancel' && index > 0 && <DropdownMenuSeparator />}<DropdownMenuItem variant={action === 'cancel' ? 'destructive' : 'default'} className="pointer-coarse:min-h-11" onSelect={() => { requested.current = action }}>{label(action)}</DropdownMenuItem></div>)}
       </DropdownMenuContent>
     </DropdownMenu>}
     {selected && <ResourceFormDialog entity={props.entity} key={selected} open onOpenChange={open => { if (!open) setSelected(undefined) }}
