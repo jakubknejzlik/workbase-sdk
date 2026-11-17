@@ -2,8 +2,7 @@ import { constants } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import { createRequire } from 'node:module'
 import { readFile, readdir } from 'node:fs/promises'
-import { dirname, join } from 'node:path'
-import { pathToFileURL } from 'node:url'
+import { isAbsolute, join } from 'node:path'
 import { execute } from './sdk-process.ts'
 import { bindSchemaLock } from '@workbasehq/core/schema'
 import { isLiteralConfig, loadConfig } from '@workbasehq/core/schema/load'
@@ -44,47 +43,56 @@ export async function assertInitialized(root: string, instance: string) {
 }
 
 /** Check the installed consumer graph without importing authored config or installing.
- * A fresh process prevents module caches from hiding removed transitive dependencies. */
+ * Resolve and import in a fresh process: Bun caches consumer resolution as well as modules. */
 async function dependencies(root: string, model: RuntimeModel) {
-  const require = createRequire(join(root, 'package.json'))
-  const result: Record<string, string> = {}
-  const imports: Record<string, string> = {}
-  for (const [packageName, entrypoints] of [
+  const packages = [
     ['@workbasehq/core', ['schema', 'kernel/registry']],
     ['@workbasehq/plugins', model.plugins.map(({ plugin }) => plugin)],
-  ] as const) {
-    try {
-      for (const entry of [...new Set(entrypoints)].sort()) {
-        const path = require.resolve(`${packageName}/${entry}`)
-        imports[`${packageName}/${entry}`] = pathToFileURL(path).href
-        let directory = dirname(path)
-        let manifest: Buffer | undefined
-        while (true) {
-          const candidate = await bytes(directory, 'package.json')
-          if (candidate && JSON.parse(candidate.toString()).name === packageName) { manifest = candidate; break }
-          const parent = dirname(directory)
-          if (parent === directory) throw new Error('Package metadata missing')
-          directory = parent
-        }
-        const version = JSON.parse(manifest.toString()).version
-        if (version !== metadata.version) throw new Error(`Installed version ${String(version)} is incompatible`)
-        result[`${packageName}/package.json`] = hash(manifest.toString('base64'))
-        result[`${packageName}/${entry}`] = hash((await readFile(path)).toString('base64'))
-      }
-    } catch {
-      throw new WorkflowError('dependencies_missing', `${packageName}@${metadata.version} must be available from the instance root`, 422,
-        { package: packageName, supportedVersion: metadata.version, remedy: `Provision ${packageName}@${metadata.version} in this instance's node_modules, then retry initialize_instance preview. No packages were installed.` })
-    }
-  }
+  ] as const
+  const entrypoints = packages.flatMap(([name, entries]) => [...new Set(entries)].sort().map(entry => `${name}/${entry}`))
   const nonce = randomUUID()
   // Only this closed vocabulary can cross the process boundary. A dependency
   // can put arbitrary data (including credentials) in its exception or output.
   const dependencyNames = ['zod', 'hono', 'typescript', 'better-auth'] as const
-  const script = `const write = process.stdout.write.bind(process.stdout);
+  const script = `import { createRequire } from 'node:module';
+  import { createHash } from 'node:crypto';
+  import { constants } from 'node:fs';
+  import { lstat, readFile } from 'node:fs/promises';
+  import { dirname, join } from 'node:path';
+  import { pathToFileURL } from 'node:url';
+  const write = process.stdout.write.bind(process.stdout);
   const emit = result => write(JSON.stringify({ nonce: ${JSON.stringify(nonce)}, ...result }));
+  const require = createRequire(join(process.cwd(), 'package.json'));
+  const hash = data => createHash('sha256').update(data.toString('base64')).digest('hex');
+  const resolved = [];
+  for (const [packageName, entries] of ${JSON.stringify(packages)}) {
+    try {
+      for (const entry of [...new Set(entries)].sort()) {
+        const entrypoint = packageName + '/' + entry;
+        const path = require.resolve(entrypoint);
+        let directory = dirname(path), manifest;
+        while (true) {
+          const candidate = join(directory, 'package.json');
+          try {
+            if ((await lstat(candidate)).isSymbolicLink()) throw new Error('Unsafe package metadata');
+            const data = await readFile(candidate, { flag: constants.O_RDONLY | constants.O_NOFOLLOW });
+            if (JSON.parse(data.toString()).name === packageName) { manifest = data; break }
+          } catch (error) { if (error.code !== 'ENOENT') throw error }
+          const parent = dirname(directory);
+          if (parent === directory) throw new Error('Package metadata missing');
+          directory = parent;
+        }
+        if (JSON.parse(manifest.toString()).version !== ${JSON.stringify(metadata.version)}) throw new Error('Incompatible package version');
+        resolved.push({ entrypoint, path, manifestHash: hash(manifest), hash: hash(await readFile(path)) });
+      }
+    } catch {
+      emit({ status: 'resolution_failed', package: packageName });
+      process.exit(1);
+    }
+  }
   const names = ${JSON.stringify(dependencyNames)};
-  for (const [entrypoint, url] of Object.entries(${JSON.stringify(imports)})) {
-    try { await import(url) }
+  for (const { entrypoint, path } of resolved) {
+    try { await import(pathToFileURL(path).href) }
     catch (error) {
       let missingDependency;
       if (error?.code === 'ERR_MODULE_NOT_FOUND' || error?.code === 'MODULE_NOT_FOUND') {
@@ -96,36 +104,54 @@ async function dependencies(root: string, model: RuntimeModel) {
       break;
     }
   }
-  if (!process.exitCode) emit({ status: 'complete', entrypoints: ${JSON.stringify(Object.keys(imports))} });`
+  if (!process.exitCode) emit({ status: 'complete', entrypoints: resolved });`
   try {
     const runtime = process.versions.bun ? ['--no-install'] : ['--import', createRequire(import.meta.url).resolve('tsx')]
     const checked = await execute([process.execPath, ...runtime, '--input-type=module', '--eval', script], root,
       { timeoutMs: 30000, maxOutputBytes: 65536, env: { ...process.env, TSX_DISABLE_CACHE: '1' }, onStderr: () => {} })
     // Treat stdout as untrusted, including syntactically valid JSON. Never
-    // spread it into a response, and require proof that every import finished.
+    // spread it into a response, and require proof that every resolution and import finished.
     let outcome: Record<string, unknown> | undefined
     try {
       const parsed: unknown = JSON.parse(checked.stdout)
       if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) outcome = parsed as Record<string, unknown>
     } catch { /* missing/malformed result fails closed */ }
     const verified = outcome?.nonce === nonce ? outcome : undefined
+    const result: Record<string, string> = {}
     const completed = verified?.status === 'complete' &&
-      JSON.stringify(verified.entrypoints) === JSON.stringify(Object.keys(imports)) &&
-      Object.keys(verified).sort().join(',') === 'entrypoints,nonce,status'
+      Object.keys(verified).sort().join(',') === 'entrypoints,nonce,status' &&
+      Array.isArray(verified.entrypoints) && verified.entrypoints.length === entrypoints.length &&
+      verified.entrypoints.every((entry: unknown, index: number) => {
+        if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return false
+        const resolved = entry as Record<string, unknown>
+        if (Object.keys(resolved).sort().join(',') !== 'entrypoint,hash,manifestHash,path' ||
+          resolved.entrypoint !== entrypoints[index] || typeof resolved.path !== 'string' || !isAbsolute(resolved.path) ||
+          typeof resolved.hash !== 'string' || !/^[a-f0-9]{64}$/.test(resolved.hash) ||
+          typeof resolved.manifestHash !== 'string' || !/^[a-f0-9]{64}$/.test(resolved.manifestHash)) return false
+        const packageName = packages.find(([name]) => entrypoints[index].startsWith(name + '/'))![0]
+        const manifestKey = `${packageName}/package.json`
+        if (result[manifestKey] !== undefined && result[manifestKey] !== resolved.manifestHash) return false
+        result[manifestKey] = resolved.manifestHash
+        result[entrypoints[index]] = resolved.hash
+        return true
+      })
     if (checked.rc !== 0 || !completed) {
-      const entrypoint = verified?.status === 'import_failed' ? Object.keys(imports).find(name => name === verified.entrypoint) : undefined
+      const packageName = verified?.status === 'resolution_failed' ? packages.find(([name]) => name === verified.package)?.[0] : undefined
+      if (packageName) throw new WorkflowError('dependencies_missing', `${packageName}@${metadata.version} must be available from the instance root`, 422,
+        { package: packageName, supportedVersion: metadata.version, remedy: `Provision ${packageName}@${metadata.version} in this instance's node_modules, then retry initialize_instance preview. No packages were installed.` })
+      const entrypoint = verified?.status === 'import_failed' ? entrypoints.find(name => name === verified.entrypoint) : undefined
       const missingDependency = entrypoint ? dependencyNames.find(name => name === verified?.missingDependency) : undefined
       throw new WorkflowError('dependencies_missing', 'The installed SDK runtime dependency graph cannot be imported', 422,
         { reason: checked.timedOut ? 'preflight_timeout' : entrypoint ? 'import_failed' : 'preflight_incomplete',
           ...(entrypoint ? { entrypoint } : {}), ...(missingDependency ? { missingDependency } : {}), supportedVersion: metadata.version,
           remedy: `Provision the complete dependencies of @workbasehq/core@${metadata.version} and @workbasehq/plugins@${metadata.version}, including transitive dependencies, in this instance's node_modules; retry initialize_instance preview. No packages were installed.` })
     }
+    return result
   } catch (error) {
     if (error instanceof WorkflowError) throw error
     throw new WorkflowError('dependencies_missing', 'Unable to verify the installed SDK runtime dependency graph', 422,
       { reason: 'preflight_failed', remedy: 'Ensure the local runtime and the complete SDK dependencies are available, then retry initialize_instance preview. No packages were installed.' })
   }
-  return result
 }
 
 async function snapshot(root: string) {
