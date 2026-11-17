@@ -108,7 +108,13 @@ function InvitationFlow({ auth, initial, go, select, displayName }: { auth: Auth
     let active = true
     const path = initial.token ? '/invitations/preflight' : initial.id ? '/invitations/' + encodeURIComponent(initial.id) + '/resolve' : undefined
     if (!path) { setFailure('invitation_not_found'); return }
-    void auth.request<Invitation>(path, initial.token ? { token: initial.token } : {}).then(value => { if (active) { setInvitation(value); setResolved(!initial.token) } }, error => { if (active) { if (error instanceof ApiFailure && error.status === 401) setLogin(true); else fail(error) } })
+    void auth.request<Invitation>(path, initial.token ? { token: initial.token } : {}).then(value => { if (active) { setInvitation(value); setResolved(!initial.token) } }, error => {
+      if (!active) return
+      if (error instanceof ApiFailure && error.status === 401) {
+        if (initial.id) setInvitation({ id: initial.id, account_match: null })
+        else setLogin(true)
+      } else fail(error)
+    })
     return () => { active = false }
   }, [auth.request, initial])
   async function resolve() {

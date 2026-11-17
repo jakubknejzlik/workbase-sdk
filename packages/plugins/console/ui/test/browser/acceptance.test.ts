@@ -160,6 +160,41 @@ test('auth shell: wrong accounts cannot bind; sign-out, inline magic link, profi
   } finally { await admin.close(); await b.close() }
 }, 60000)
 
+test('anonymous ID invitation shows only the minimal screen before sign-in on real D1', async () => {
+  const admin = await session('admin'), anonymous = await newContext({ baseURL: origin })
+  try {
+    const email = 'anonymous-id-recipient@example.test', invited = await invite(admin, email)
+    const tab = await anonymous.newPage(), calls: string[] = []
+    tab.on('request', request => calls.push(new URL(request.url()).pathname))
+    const resolvePath = '/invitations/' + invited.invitation_id + '/resolve'
+    const resolved = tab.waitForResponse(response => new URL(response.url()).pathname === resolvePath)
+    await tab.goto('/invitation?id=' + invited.invitation_id)
+    const response = await resolved
+    expect(response.status()).toBe(401); expect(await response.json()).toEqual({ error: 'unauthenticated' })
+    await tab.getByRole('heading', { name: 'Invitation to Workbase', exact: true }).waitFor()
+    await tab.getByText('Sign in with the invited email address to accept this invitation.', { exact: true }).waitFor()
+    await tab.getByRole('button', { name: 'Sign in to accept', exact: true }).waitFor()
+    expect(new URL(tab.url()).search).toBe('')
+    expect(await tab.getByLabel('Email', { exact: true }).count()).toBe(0)
+    expect(await tab.getByText(/Invitation expired|Invitation revoked|Invitation unavailable|Invitation used|Invitation declined|pending/).count()).toBe(0)
+    expect(await tab.getByRole('button', { name: 'Continue', exact: true }).count()).toBe(0)
+    expect(await tab.getByRole('button', { name: 'Accept invitation', exact: true }).count()).toBe(0)
+    const body = await tab.locator('body').innerText()
+    for (const value of [invited.invitation_id, invited.workerId, email, 'org-a', 'Auth recipient', 'admin', 'staff']) expect(body).not.toContain(value)
+    expect(calls.filter(path => path.startsWith('/invitations/'))).toEqual([resolvePath])
+    calls.length = 0
+    await tab.getByRole('button', { name: 'Sign in to accept', exact: true }).click()
+    await tab.getByLabel('Email', { exact: true }).waitFor()
+    expect(calls.filter(path => path.startsWith('/invitations/'))).toEqual([])
+    await tab.getByLabel('Email', { exact: true }).fill(email)
+    await tab.getByRole('button', { name: 'Sign in', exact: true }).click(); await tab.getByText('Check your mail', { exact: true }).waitFor()
+    expect(await tab.evaluate(() => sessionStorage.getItem('workbase.returnTo'))).toBe('/invitation?id=' + invited.invitation_id)
+    expect(calls.filter(path => path.startsWith('/invitations/'))).toEqual([])
+    const unchanged = await admin.request.get('/__test/invitation?id=' + invited.invitation_id, { headers: control })
+    expect(await unchanged.json()).toMatchObject({ bound_user_id: null, accepted_at: null, members: 0 })
+  } finally { await admin.close(); await anonymous.close() }
+}, 60000)
+
 test('expired/revoked invitation terminal screens on real D1', async () => {
   const admin = await session('admin')
   try {

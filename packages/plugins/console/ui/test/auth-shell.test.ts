@@ -85,6 +85,24 @@ test.each(['en', 'cs'])('%s copied links and rejected mailbox proofs show only t
     mounted.unmount()
   }
 })
+test('anonymous ID links show the minimal invitation screen before sign-in and retain the safe return path', async () => {
+  history.replaceState({ oldURL: '/invitation?id=invite-A' }, '', '/invitation?id=invite-A')
+  const fetch = vi.fn(async (_path: string, _init: ClientRequestInit) => json({ error: 'unauthenticated' }, 401))
+  render(view(fetch).element)
+  await screen.findByRole('heading', { name: 'Invitation to Public instance' })
+  expect(screen.getByText('Sign in with the invited email address to accept this invitation.')).toBeTruthy()
+  expect(location.pathname + location.search).toBe('/invitation'); expect(history.state).toBeNull()
+  expect(screen.queryByLabelText('Email')).toBeNull()
+  expect(screen.queryByText(/Invitation expired|Invitation revoked|Invitation unavailable|Invitation used|Invitation declined|Continue|Accept invitation/)).toBeNull()
+  expect(document.body.textContent).not.toContain(invitation.id)
+  expect(fetch.mock.calls.map(([path]) => path)).toEqual(['/invitations/invite-A/resolve'])
+  fireEvent.click(screen.getByRole('button', { name: 'Sign in to accept' })); await screen.findByLabelText('Email')
+  expect(fetch).toHaveBeenCalledTimes(1)
+  fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'id-recipient@example.test' } }); fireEvent.click(screen.getByRole('button', { name: 'Sign in' }))
+  await screen.findByText('Check your mail')
+  expect(sessionStorage.getItem('workbase.returnTo')).toBe('/invitation?id=invite-A')
+  expect(fetch.mock.calls.map(([path]) => path)).toEqual(['/invitations/invite-A/resolve', '/auth/sign-in/magic-link'])
+})
 test('server-authorized delivered preview retains metadata and explicit resolution', async () => {
   history.replaceState(null, '', '/invitation?token=' + 'a'.repeat(64) + '.' + 'b'.repeat(64))
   const metadata = { ...invitation, organization: { name: 'Synthetic workspace' }, inviter: { display_name: 'Synthetic inviter' }, role: 'staff', target: { entity: 'workers', row: 'private-worker-id' } }
