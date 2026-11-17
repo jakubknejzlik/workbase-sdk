@@ -162,7 +162,7 @@ it.each(['bun', 'node'].flatMap(runtime => ['early-exit', 'throw-secret', 'stder
     'overflow': `await new Promise(resolve => process.stdout.write(process.env.WB_PREFLIGHT_TEST_SECRET.repeat(70000), resolve)); process.exit(1)`,
   }
   await writeFile(join(zod, 'index.js'), `export const z = {}; export class ZodError extends Error {}\n${source[failure]};\n`)
-  const secret = 'wb166f2-synthetic-secret-' + randomUUID()
+  const secret = ['wb166f2', 'synthetic', 'secret', randomUUID()].join('-')
   const session = await stdio(root, runtime, { WB_PREFLIGHT_TEST_SECRET: secret })
   try {
     const before = await tree(root)
