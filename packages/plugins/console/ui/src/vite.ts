@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { createHash, randomUUID } from 'node:crypto'
+import { randomUUID } from 'node:crypto'
 import { statSync, existsSync, readFileSync } from 'node:fs'
 import { mergeCatalogs, type Catalogs } from './catalogs'
 import { writeFile, mkdir, rm, rename, symlink, readlink } from 'node:fs/promises'
@@ -9,6 +9,7 @@ import { createServer, transformWithEsbuild, type Plugin, type ViteDevServer } f
 import { init, parse } from 'es-module-lexer'
 import { Generator, getConfig } from '@tanstack/router-generator'
 import { loadConfig, SourceError } from '@workbasehq/core/schema/load'
+import { CONSOLE_SHA_MARKER, consoleArtifactsSHA, readConsoleArtifacts } from '@workbasehq/core/console-build'
 import { canonicalJSON, normalise, manifestHash, type Manifest } from './check'
 import { checkSources, type Sources } from './sources'
 
@@ -149,7 +150,7 @@ export function assertCleanDeploy(root: string): void {
 export interface UIOptions { directory?: string }
 export type UIPlugin = Plugin & { idle(): Promise<void>; generation?: Generation; error?: Error }
 export function consoleUI(options: UIOptions = {}): UIPlugin {
-  const marker = 'WORKBASE_BUNDLE_SHA_' + 'X'.repeat(21)
+  const marker = CONSOLE_SHA_MARKER
   let production = false
   let root: string, output: string, server: ViteDevServer | undefined
   let requested = 0, completed = 0, running: Promise<void> | undefined, closed = false
@@ -159,24 +160,18 @@ export function consoleUI(options: UIOptions = {}): UIPlugin {
       production = environment.command === 'build'
       return { define: { __WORKBASE_BUILD_SHA__: JSON.stringify('unbuilt') } }
     },
-    generateBundle: { order: 'post', handler(_options, bundle) {
+    writeBundle: { order: 'post', sequential: true, async handler(options) {
       if (!production) return
-      // Hash the emitted application before stamping HTML with its own identity.
+      // Vite copies public/ outside Rollup's bundle. Hash the actual upload tree.
       // Never mutate hashed JS/CSS after Rollup assigns their cacheable filenames.
-      const hash = createHash('sha1')
-      for (const name of Object.keys(bundle).sort()) {
-        const output = bundle[name]
-        hash.update(JSON.stringify(name) + '\0')
-        hash.update(output.type === 'chunk' ? output.code : output.source)
-        hash.update('\0')
-      }
-      const sha = hash.digest('hex')
-      for (const output of Object.values(bundle)) {
-        if (output.type === 'asset' && output.fileName.endsWith('.html') && typeof output.source === 'string') {
-          output.source = output.source.replaceAll(marker, sha)
+      const directory = resolve(root, options.dir!)
+      const files = await readConsoleArtifacts(directory), sha = consoleArtifactsSHA(files)
+      for (const [name, bytes] of files) {
+        if (name.endsWith('.html') && bytes.includes(marker)) {
+          await writeFile(resolve(directory, name), Buffer.from(bytes.toString('latin1').replaceAll(marker, sha), 'latin1'))
         }
       }
-      this.emitFile({ type: 'asset', fileName: 'build-meta.json', source: JSON.stringify({ sha, builtAt: new Date().toISOString() }) + '\n' })
+      await writeFile(resolve(directory, 'build-meta.json'), JSON.stringify({ sha, builtAt: new Date().toISOString() }) + '\n')
     } },
     // Keep generated IDs at the stable pointer. Vite's module graph otherwise
     // retains realpaths into deleted generations even after invalidateAll().

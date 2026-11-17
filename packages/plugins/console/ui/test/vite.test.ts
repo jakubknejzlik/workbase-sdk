@@ -8,6 +8,7 @@ import { canonicalJSON, manifestHash, SourceError } from '../src/check'
 import * as sourceChecks from '../src/sources'
 import { buildPath } from '../src/index'
 import { fixture, declaration, sdk, forbidden } from './fixture'
+import { consoleArtifactsSHA, readConsoleArtifacts } from '@workbasehq/core/console-build'
 const roots: string[] = [], servers: ViteDevServer[] = []
 beforeEach(() => vi.stubEnv('WORKBASE_BUILD_SHA', 'a'.repeat(40)))
 afterEach(async () => { vi.unstubAllEnvs(); await Promise.all(servers.splice(0).map(s => s.close())); roots.splice(0).forEach(root => rmSync(root, { recursive: true, force: true })) })
@@ -250,6 +251,7 @@ test('bundle SHA includes real components and dictionaries independently of sche
     expect(metadata.sha).not.toBe('a'.repeat(40))
     expect(Number.isFinite(Date.parse(metadata.builtAt))).toBe(true)
     expect(readFileSync(join(root, 'dist/index.html'), 'utf8')).toContain(metadata.sha)
+    expect(consoleArtifactsSHA(await readConsoleArtifacts(join(root, 'dist')))).toBe(metadata.sha)
     expect(code).not.toContain('WORKBASE_BUNDLE_SHA_')
     expect(readFileSync(join(root, 'config.ts'), 'utf8')).toBe(config)
     expect((await extractManifest(root)).configHash).toBe(configHash)
@@ -257,6 +259,22 @@ test('bundle SHA includes real components and dictionaries independently of sche
   }
   const first = await compile()
   expect(await compile()).toEqual(first)
+  put('public/nested/banner.svg', '<svg fill="red"/>')
+  put('public/robots.txt', 'User-agent: *')
+  const publicRed = await compile()
+  expect(publicRed.sha).not.toBe(first.sha)
+  expect(publicRed.script).toBe(first.script)
+  expect(publicRed.code).toBe(first.code)
+  put('public/nested/banner.svg', '<svg fill="blue"/>')
+  const publicBlue = await compile()
+  expect(publicBlue.sha).not.toBe(publicRed.sha)
+  expect(publicBlue.script).toBe(publicRed.script)
+  expect(readFileSync(join(root, 'dist/nested/banner.svg'), 'utf8')).toContain('blue')
+  // Recreate copied files in reverse insertion order; filesystem enumeration is irrelevant.
+  rmSync(join(root, 'public'), { recursive: true })
+  put('public/robots.txt', 'User-agent: *')
+  put('public/nested/banner.svg', '<svg fill="blue"/>')
+  expect(await compile()).toEqual(publicBlue)
   put('locales/en/ui.json', '{"sample.title":"Changed title"}')
   const dictionary = await compile()
   expect(dictionary.sha).not.toBe(first.sha); expect(dictionary.script).not.toBe(first.script)

@@ -7,6 +7,7 @@ const codes = [
   'provision_invalid_email', 'provision_invalid_webhook', 'provision_invalid_account_id',
   'provision_invalid_dev_mailbox_stage', 'provision_invalid_dev_mailbox_token',
   'provision_config_load_failed', 'provision_invalid_config', 'provision_inputs_unreadable',
+  'provision_console_metadata_invalid', 'provision_console_sha_mismatch',
   'provision_requires_sst', 'provision_requires_command', 'provision_failed',
 ] as const
 export type ProvisionDiagnosticCode = typeof codes[number]
@@ -19,6 +20,8 @@ export class ProvisionDiagnostic extends Error {
   constructor(code: ProvisionDiagnosticCode, detail?: { message: string; secrets: string[] }) {
     const safeCode = codes.includes(code) ? code : 'provision_failed'
     let message: string = safeCode
+    if (safeCode === 'provision_console_metadata_invalid') message += ': console build-meta.json is missing or invalid; run build:console before provisioning'
+    if (safeCode === 'provision_console_sha_mismatch') message += ': console SHA does not match the HTML stamp and emitted artifacts; run build:console before provisioning'
     if (safeCode === 'provision_config_load_failed' && detail) {
       const secrets = Object.fromEntries(detail.secrets.map((value, index) => [`SECRET_${index}`, value]))
       const cause = redactCliOutput(detail.message, { ...process.env, ...secrets })

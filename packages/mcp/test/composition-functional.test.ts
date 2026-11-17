@@ -54,6 +54,7 @@ export default { ...config, plugins: [identity, permissions({ roles: ['admin', '
   // This API suite needs no static console assets/build; the installed smoke covers those bytes.
   const wranglerPath = join(root, 'wrangler.jsonc'), wrangler = JSON.parse(await readFile(wranglerPath, 'utf8'))
   delete wrangler.assets
+  delete wrangler.build
   await writeFile(wranglerPath, JSON.stringify(wrangler))
   await store.init()
   const client = new Client({ name: 'composed-functional-test', version: '1' })

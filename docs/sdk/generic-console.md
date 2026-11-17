@@ -46,22 +46,21 @@ runs `scripts/check-console-public.ts` over every emitted file. The scan rejects
 owner instance IDs, known customer names and private locale keys.  Vendor component source and its
 license/notice headers remain unchanged.
 
-The prebuilt generic assets ship inside `@workbasehq/plugins`. Node deployment
-code resolves them without a browser build or TypeScript loader:
+The separate generic assets ship inside `@workbasehq/plugins`. Node tooling can
+resolve this artifact without a browser build or TypeScript loader:
 
 ```ts
 import { consoleAssetsDir } from '@workbasehq/plugins/console/assets'
 
 const assetsDir = consoleAssetsDir() // absolute installed-package path
-// W32 SST provisioner: provision({ ...applicationOptions, assetsDir })
 ```
 
 This Node-only subpath stays separate from the console plugin/contract and Worker
 runtime imports. It resolves the installed package even when deployment code is
-bundled into `.sst/platform`. W32's `assetsDir` accepts the result directly.
-Consumers install only plugins and its matching core peer; UI, console-generated,
-frontend-console, Vite and a source checkout are unnecessary. There is no install
-hook or consumer compilation.
+bundled into `.sst/platform`. Current standalone Instances build their own Vite
+host into `dist/console` and pass that directory to `provision()`, which verifies
+its SHA metadata, HTML stamp and emitted bytes. Follow the
+[getting-started guide](getting-started.md) for that deployment flow.
 
 Producer `prepack` rebuilds the frontend producer workspace and stages
 `console/assets` in plugins. `bash scripts/sdk-pack.sh` uses the same staging step

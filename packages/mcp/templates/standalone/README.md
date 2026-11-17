@@ -67,8 +67,8 @@ components and dictionaries into `dist/console`, using public SDK renderer,
 auth and CSS exports. This per-Instance delivery follows ADR 0008 and supersedes
 the shared prebuilt scaffold delivery from SDK #45. It needs no private workspace.
 The generated `build-meta.json` identifies the emitted bundle, independently of
-git, `WORKBASE_BUILD_SHA` and schema revision. Page and dictionary edits change
-that SHA; `/build.json` reports the same metadata. Shared auth/CRUD dirty-state
+git, `WORKBASE_BUILD_SHA` and schema revision. Page, dictionary and copied `public/`
+asset edits change that SHA; `/build.json` reports the same metadata. Shared auth/CRUD dirty-state
 tracking defers same-revision SHA reloads until drafts are safe to release.
 V3 boot uses bundled metadata and makes no console-model, console-info,
 bootstrap or schema request.
@@ -92,6 +92,9 @@ network access. `bun run deploy --stage <stage>` checks, then runs SST.
 The SST config rebuilds the console before provisioning, including direct
 `sst deploy` invocations. It passes `assetsDir: './dist/console'` to `provision()`, which sets
 `htmlHandling: 'none'`, `notFoundHandling: 'none'` and `runWorkerFirst: true`.
+Provisioning checks `build-meta.json`, the HTML stamp and the emitted asset bytes
+before registering resources. Missing metadata or a mismatched SHA stops deployment;
+run `bun run build:console` to regenerate the complete output.
 The Worker handles SPA fallback and auth/API routes on the same origin.
 SDK `provision()` applies SDK → plugin → Instance migrations before upload.
 For staging, set `AUTH_BASE_URL` to the canonical origin: native Worker requests

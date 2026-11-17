@@ -256,7 +256,9 @@ and emit `build-meta.json` in the Vite output with `{ sha, builtAt }`.
 The 40-character lowercase SHA is a digest of the emitted bundle before its own
 identity is stamped into HTML. Hashed JS/CSS bytes are never rewritten after
 filenames are assigned. It includes real browser components, bundled dictionaries,
-CSS and HTML, and excludes build time, git and environment SHA overrides. Rebuilding
+CSS, HTML and copied `public/` assets in deterministic path order. The digest
+normalizes the HTML's own SHA stamp and excludes `build-meta.json` (identity and
+build time), git and environment SHA overrides. Rebuilding
 identical assets retains the SHA; independent page/dictionary edits change it
 without changing the schema revision. Development uses `unbuilt`.
 
@@ -268,6 +270,9 @@ shared prebuilt scaffold delivery. The host imports `AuthShell`, `Shell` and
 and the public `@workbasehq/plugins/console/ui/styles.css` external stylesheet.
 No producer UI workspace is imported. Keep explicit server `BUILD_SHA`/`BUILD_AT`
 bindings consistent with this emitted metadata; the Worker reads it from the deployed assets.
+Provisioning requires valid `build-meta.json` and checks its SHA against both the
+HTML stamp and all emitted files before registering resources or uploading.
+Missing metadata or changed assets fail closed; run `bun run build:console` again.
 
 `AuthShell` fetches `/build.json` separately at boot and on visibility. On a valid
 SHA mismatch it records `sessionStorage['workbase.reload.' + serverSHA]` **before**

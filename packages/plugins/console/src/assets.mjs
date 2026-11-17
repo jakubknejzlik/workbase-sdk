@@ -1,6 +1,6 @@
 import { fileURLToPath } from 'node:url'
 
-/** Absolute prebuilt console directory, suitable for provision({ assetsDir }).
+/** Absolute packaged generic-console directory, separate from Instance dist/console.
  * Resolve the installed export so this also works from an SST-bundled program.
  */
 export function consoleAssetsDir() {
