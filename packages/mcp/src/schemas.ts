@@ -65,8 +65,9 @@ const setCatalogEntries = z.strictObject({
   }).pipe(z.record(catalogKey, caption)).refine(entries => Object.keys(entries).length > 0 && Object.keys(entries).length <= 1000, 'Provide 1–1000 entries'),
 })
 export type CatalogChange = z.infer<typeof setCatalogEntries>
-export const isPresentationChange = (change: { kind: string }) => change.kind === 'set_locale' || change.kind === 'set_catalog_entries'
-
+const instanceDisplayName = z.string().trim().min(1).max(1000)
+const setInstanceDisplayName = z.strictObject({ kind: z.literal('set_instance_display_name'), displayName: instanceDisplayName })
+export type PresentationChange = LocaleChange | z.infer<typeof setInstanceDisplayName>
 // Composition inputs remain separate from legacy config proposal records.
 export const identityOptionsSchema = z.strictObject({
   trustedIssuers: z.record(z.string().url(), z.array(z.string().min(1))).optional(),
@@ -103,8 +104,10 @@ export const setRolesSchema = z.strictObject({
   organizationOwnerRole: identifier,
 }).refine(change => change.roles.includes(change.organizationOwnerRole), 'organizationOwnerRole must be in roles')
 export type RolesChange = z.infer<typeof setRolesSchema>
-export const compositionChangeSchema = z.union([runtimeChangeSchema, accessChangeSchema, setRolesSchema, setLocale, setCatalogEntries])
+export const compositionChangeSchema = z.union([runtimeChangeSchema, accessChangeSchema, setRolesSchema, setLocale, setCatalogEntries, setInstanceDisplayName])
 export type CompositionChange = z.infer<typeof compositionChangeSchema>
+export const isPresentationChange = (change: { kind: string }): change is PresentationChange | CatalogChange =>
+  change.kind === 'set_locale' || change.kind === 'set_instance_display_name' || change.kind === 'set_catalog_entries'
 
 export const changeSchema = z.discriminatedUnion('kind', [
   setLabel,
@@ -131,7 +134,7 @@ export const changeSchema = z.discriminatedUnion('kind', [
 export const schemas = {
   initialize_instance: z.strictObject({ instance, mode: z.enum(['preview', 'apply']).default('preview'), planHash: z.string().regex(/^[a-f0-9]{64}$/).optional() })
     .refine(input => input.mode !== 'apply' || input.planHash !== undefined, 'Apply requires the preview planHash'),
-  bootstrap_instance: z.strictObject({ root: z.string().min(1).optional(), id: z.string(), target: z.literal('cloudflare-github').describe('Standalone registry SDK packages, packaged console and SST Cloudflare deployment with GitHub workflows') }),
+  bootstrap_instance: z.strictObject({ root: z.string().min(1).optional(), id: z.string(), displayName: instanceDisplayName.optional(), target: z.literal('cloudflare-github').describe('Standalone registry SDK packages, packaged console and SST Cloudflare deployment with GitHub workflows') }),
   list_versions: z.strictObject({ instance }),
   rollback: z.strictObject({ instance, to: z.string().regex(/^v[1-9][0-9]*$/), expectedRevision: revision, allowDestructive: z.boolean().optional(), preview: z.boolean().optional() }),
   inspect_schema: z.strictObject({ instance }),

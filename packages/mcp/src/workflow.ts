@@ -140,8 +140,8 @@ export class Workflow {
       return await this.store.locked(targetInstance, async () => {
         if (name === 'upgrade_sdk') return proposeSdkUpgrade(this.store, targetInstance, input.baseRevision, input.targetVersion, proposalId!)
         if (name === 'propose_composition') return proposeComposition(this.store, targetInstance, input.baseRevision, input.changes, proposalId!)
-        if (name === 'propose_change' && input.changes.some((change: unknown) => !isPresentationChange(change as { kind: string }) && compositionChangeSchema.safeParse(change).success)) {
-          if (!input.changes.every((change: unknown) => !isPresentationChange(change as { kind: string }) && compositionChangeSchema.safeParse(change).success)) fail('mixed_change_kinds', 'Composition and legacy config changes must be proposed separately')
+        if (name === 'propose_change' && input.changes.some((change: unknown) => (change as { kind: string }).kind !== 'set_locale' && compositionChangeSchema.safeParse(change).success)) {
+          if (!input.changes.every((change: unknown) => compositionChangeSchema.safeParse(change).success)) fail('mixed_change_kinds', 'Composition and legacy config changes must be proposed separately')
           return proposeComposition(this.store, targetInstance, input.baseRevision, input.changes, proposalId!)
         }
         if (name === 'submit_change') {
@@ -182,7 +182,7 @@ export class Workflow {
               dictionaries = { languages: bundle.config.languages, requiredKeys: [], errors: await ui.validateInstance(dir) }
             }
           }
-          return { ok: true, instance: targetInstance, revision: bundle.config.revision, instance_meta: diagnostics.meta, validation: diagnostics.validation,
+          return { ok: true, instance: targetInstance, revision: bundle.config.revision, displayName: bundle.config.displayName, instance_meta: diagnostics.meta, validation: diagnostics.validation,
             entities: bundle.config.entities, roles: bundle.config.roles, organizationOwnerRole: bundle.config.organizationOwnerRole, permissions: bundle.config.permissions,
             ...(dictionaries ? { dictionaries } : {}),
             languages: bundle.config.languages, locale: bundle.config.locale, ui: bundle.config.ui, enumLabels: bundle.config.enumLabels,
