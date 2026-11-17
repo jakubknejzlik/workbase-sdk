@@ -46,7 +46,7 @@ it('creates registry-only files, substitutes ids and resolves the release versio
   expect(pkg.scripts['typecheck']).toContain('generate:ui &&')
   expect(pkg.scripts['build:console']).toBeUndefined()
   expect(pkg.scripts.dev).toBe('bun run dev:worker')
-  expect(pkg.scripts.check).toBe('bun run check:schema && bun run check:access && bun run check:openapi && bun run check:ui')
+  expect(pkg.scripts.check).toBe('bun run check:references && bun run check:schema && bun run check:access && bun run check:openapi && bun run check:ui')
   expect(pkg.scripts.deploy).toBe('bun run check && sst deploy')
   expect(pkg.overrides).toBeUndefined()
   const config = await readFile(join(root, 'config.ts'), 'utf8')

@@ -75,14 +75,21 @@ function canonical(value: unknown): any {
     ? Object.fromEntries(Object.entries(value).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).map(([key, child]) => [key, canonical(child)])) : value
 }
 export const ACCESS_EXPANSION_LIMITS = { depth: 16, size: 512 } as const
-export function compileAccess(config: InstanceConfig, declarations: Record<string, EntityAccess | undefined>, input: AccessInput): EffectiveAccessPolicy {
+/** Build-time observations from the same expansion and entity resolution as authorization. */
+export interface AccessReference {
+  kind: 'policy' | 'predicate' | 'mask' | 'action-condition'
+  entity: string; field?: string; entityContext: string; source: string; useSites: string[]
+}
+export function compileAccess(config: InstanceConfig, declarations: Record<string, EntityAccess | undefined>, input: AccessInput,
+  observe?: (reference: AccessReference) => void): EffectiveAccessPolicy {
   const roles = sorted(config.roles)
   const error = (source: string, message: string): never => { throw new DeclarationError(source.split('.'), message) }
   const known = sorted([...accessEntities, ...Object.keys(config.entities)])
   for (const role of Object.keys(input.roles)) if (!roles.includes(role)) error(`access.roles.${role}`, `Unknown access role: ${role}`)
   for (const entity of Object.keys(input.entities)) if (!accessEntities.includes(entity)) error(`access.entities.${entity}`, `Entity ${entity} must declare access in schema/${entity}.ts`)
   const result: EffectiveAccessPolicy = { version: 1, roles, actions: [], entities: [], system: [], guards: [], opaqueHooks: [] }
-  function expand(value: unknown, source: string, names: Set<string>, stack: string[] = [], depth = 0, budget = { size: 0 }): any {
+  const origins = new WeakMap<object, { source: string; useSites: string[] }>()
+  function expand(value: unknown, source: string, names: Set<string>, stack: string[] = [], depth = 0, budget = { size: 0 }, useSites: string[] = []): any {
     if (depth > ACCESS_EXPANSION_LIMITS.depth || ++budget.size > ACCESS_EXPANSION_LIMITS.size) error(source, 'Predicate expansion exceeds depth/size budget')
     if (value && typeof value === 'object' && !Array.isArray(value) && Object.hasOwn(value, 'use')) {
       const name = (value as { use: unknown }).use
@@ -90,10 +97,45 @@ export function compileAccess(config: InstanceConfig, declarations: Record<strin
       if (Object.keys(value).length !== 1) error(source, 'A predicate use must be its own literal object')
       if (stack.includes(name as string)) error(`access.predicates.${name}`, `Predicate cycle: ${[...stack, name].join(' -> ')}`)
       names.add(name as string)
-      return expand(input.predicates[name as string], `access.predicates.${name}`, names, [...stack, name as string], depth + 1, budget)
+      return expand(input.predicates[name as string], `access.predicates.${name}`, names, [...stack, name as string], depth + 1, budget, [...useSites, `${source}.use`])
     }
-    if (Array.isArray(value)) return value.map(child => expand(child, source, names, stack, depth + 1, budget))
-    return value && typeof value === 'object' ? Object.fromEntries(Object.entries(value).map(([key, child]) => [key, expand(child, source, names, stack, depth + 1, budget)])) : value
+    if (!value || typeof value !== 'object') return value
+    const result = Array.isArray(value) ? value.map((child, i) => expand(child, `${source}.${i}`, names, stack, depth + 1, budget, useSites))
+      : Object.fromEntries(Object.entries(value).map(([key, child]) => [key, expand(child, `${source}.${key}`, names, stack, depth + 1, budget, useSites)]))
+    origins.set(result, { source, useSites })
+    return result
+  }
+  function references(entity: string, filter: Filter, owner: string, kind: 'policy' | 'action-condition' = 'policy') {
+    if (!observe) return
+    const origin = origins.get(filter) ?? { source: owner, useSites: [] }
+    const emit = (target: string, field: string | undefined, source: string) => observe({
+      kind: origin.useSites.length ? 'predicate' : kind, entity: target, field, entityContext: entity, source,
+      useSites: origin.useSites,
+    })
+    if (origin.useSites.length) emit(entity, undefined, origin.source)
+    for (const [key, value] of Object.entries(filter)) {
+      const source = `${origin.source}.${key}`
+      if (key === 'and' || key === 'or') (value as Filter[]).forEach(child => references(entity, child, owner, kind))
+      else if (key === 'not') references(entity, value as Filter, owner, kind)
+      else if (key === 'actorLinkedIn') { emit(value as string, undefined, source); emit(value as string, 'user', source) }
+      else {
+        const relation = config.entities[entity]?.relations[key]
+        if (relation) {
+          emit(relation.entity, undefined, source)
+          emit(relation.many ? relation.entity : entity, relation.field, source)
+          emit(relation.many ? entity : relation.entity, 'id', source)
+          if (relation.through) { emit(relation.through.entity, undefined, source); emit(relation.through.entity, relation.through.field, source) }
+          references(relation.entity, (relation.many ? Object.values(value as object)[0] : value) as Filter, owner, kind)
+        } else {
+          emit(entity, key, source)
+          function actor(value: unknown, path: string) {
+            if (typeof value === 'string' && value.startsWith('$actor.')) emit(config.account?.entity ?? 'users', value.slice(7), path)
+            else if (value && typeof value === 'object') for (const [key, child] of Object.entries(value)) actor(child, `${path}.${key}`)
+          }
+          actor(value, source)
+        }
+      }
+    }
   }
   // Unused named predicates are still authored data, so unknown names/cycles/size fail.
   for (const name of sorted(Object.keys(input.predicates))) expand({ use: name }, `access.predicates.${name}`, new Set())
@@ -110,7 +152,7 @@ export function compileAccess(config: InstanceConfig, declarations: Record<strin
         if (operation !== 'read' && typeof authored === 'object' && authored.fields) error(`${source}.${role}.${operation}`, 'Field masks must be declared on read')
         const names = new Set<string>()
         const path = `${source}.${role}${typeof entry === 'string' ? '' : `.${operation}`}`
-        const where = typeof authored === 'object' ? expand(authored.where, path, names) : {}
+        const where = typeof authored === 'object' ? expand(authored.where, `${path}.where`, names) : {}
         const fields = config.entities[entity] ? [...baseFields, ...Object.keys(config.entities[entity].fields).filter(field => !config.entities[entity].fields[field].sensitive)] : [...baseFields]
         const mask = sorted(typeof authored === 'object' && authored.fields ? authored.fields : fields)
         if (mask.length && !mask.includes('id')) mask.push('id')
@@ -120,6 +162,10 @@ export function compileAccess(config: InstanceConfig, declarations: Record<strin
           try { validatePolicies({ ...config, effectiveAccess: undefined, policies: { [entity]: { [role]: { where, fields: rule.fields ?? undefined } } } }) }
           catch (cause) { error(path, cause instanceof Error ? cause.message : String(cause)) }
         } else if (Object.keys(where).length || typeof authored === 'object' && authored.fields) error(path, `Row predicates and masks require a schema entity: ${entity}`)
+        if (typeof authored === 'object') {
+          references(entity, where, `${path}.where`)
+          authored.fields?.forEach((field, i) => observe?.({ kind: 'mask', entity, field, entityContext: entity, source: `${path}.fields.${i}`, useSites: [] }))
+        }
         function dependencies(name: string, filter: Filter) {
           for (const [key, value] of Object.entries(filter)) {
             if (key === 'actorLinkedIn') rule.dependencies.push(value as string)
@@ -180,10 +226,12 @@ export function compileAccess(config: InstanceConfig, declarations: Record<strin
     }
     const conditions = (action.available ?? []).map((condition, i) => {
       const path = `${source}.available.${i}.when`
-      const when = canonical(expand(condition.when, path, new Set()))
+      const expanded = expand(condition.when, path, new Set())
+      const when = canonical(expanded)
       try { validatePolicies({ ...config, effectiveAccess: undefined, policies: { [entity]: { [roles[0]]: { where: when } } } }) }
       catch (cause) { error(path, cause instanceof Error ? cause.message : String(cause)) }
       fields(entity, when)
+      references(entity, expanded, path, 'action-condition')
       return { when, reason: condition.reason }
     })
     result.actions.push({ entity, name, command: action.command, conditions, dependencies: sorted(dependencies), source })

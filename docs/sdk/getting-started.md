@@ -72,8 +72,8 @@ includes `--write` and accepts the explicit flag too. Commit those files with `a
 `access.lock.md`, `openapi.json` and the install lockfile. Init ships none of these
 artifacts and never overwrites them.
 
-`check` runs `check:schema`, `check:access`, `check:openapi` and `check:ui` in that
-order. UI validation includes dictionary completeness and bare-text checks.
+`check` runs `check:references`, `check:schema`, `check:access`, `check:openapi`
+and `check:ui` in that order. Reference diagnostics run first and are shared with MCP validation. UI validation includes dictionary completeness and bare-text checks.
 `typecheck` runs `generate:ui` before TypeScript. Vite remains a development
 dependency for this authoring check. The served console comes prebuilt from
 `@workbasehq/plugins`, with SDK layout, CSS, cs/en and magic-link sign-in;

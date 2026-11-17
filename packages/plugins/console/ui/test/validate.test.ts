@@ -55,7 +55,9 @@ test.each([
   else if (name === 'unknown omit') edit(f, 'ui/workers/new.ts', s => s.replace("['user']", "['user', 'missing']"))
   else edit(f, 'ui/workers/-detail.layout.ts', s => s.replace("slot('fieldValue', { value: 'user' })", "'user'"))
   const findings = await validateInstance(f.root)
-  expect(findings.every(f => f.code === code)).toBe(true); expect(findings.length).toBeGreaterThan(0)
+  expect(new Set(findings.map(f => f.code))).toEqual(new Set(name === 'unknown omit' ? [code, 'unknown-reference'] : [code]))
+  if (name === 'unknown omit') expect(findings.find(f => f.reference)?.reference).toMatchObject({ code: 'unknown-reference', kind: 'layout', target: { entity: 'worker', field: 'missing' } })
+  expect(findings.length).toBeGreaterThan(0)
 })
 test.each(['xs', 'sm', 'md', 'lg', 'xl'])('row overflow at %s is located and blocking', async bp => {
   const f = setup()
