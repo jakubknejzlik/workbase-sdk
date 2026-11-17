@@ -134,7 +134,9 @@ it('W42 accepts a partial display field repair proposal while other legacy entit
   } finally { await application.server.close() }
 })
 
-it.each([CORE_VERSION.replace(/\d+$/, patch => String(Number(patch) + 1)), '0.3.0', '1.0.0', 'broken'])('W42 upgrade baseline still rejects future or malformed SDK metadata: %s', async version => {
+// A release bump must not turn a future-version rejection case into the current SDK.
+const [sdkMajor, sdkMinor, sdkPatch] = CORE_VERSION.split('.').map(Number)
+it.each([`${sdkMajor}.${sdkMinor}.${sdkPatch + 1}`, `${sdkMajor}.${sdkMinor + 1}.0`, `${sdkMajor + 1}.0.0`, 'broken'])('W42 upgrade baseline still rejects future or malformed SDK metadata: %s', async version => {
   const config = defineInstance({ id: 'version_gate', revision: 1, roles: ['owner'], entities: {}, permissions: {} })
   const sql = initialSchema(config) + `UPDATE instance_meta SET core_version = '${version}';\n`
   await expect(instanceMeta({ config, migrations: [{ name: '0001_initial.sql', sql }], indexes: [], fingerprint: '', guards: {} }))

@@ -12,6 +12,7 @@ import type { BaselineDatabase } from '../sdk-baseline/contract'
 import { permissions } from '../../../../plugins/permissions/src'
 import config from './config'
 import type {} from './provision-setup'
+import { expectLegacyInitialSQL } from '../sdk-baseline/legacy-sql-contract'
 
 const copies: [string, (c: InstanceConfig) => InstanceConfig][] = [
   ['identity', c => c], ['spread', c => ({ ...c })],
@@ -46,8 +47,7 @@ export function eraContract(database: () => BaselineDatabase, freshDatabase = da
       const sql = initialSchema(original)
       expect(initialSchema(copied)).toBe(sql)
       expect(initialSchema(target.config)).toBe(sql)
-      // Captured on main 1f88765 for all three legacy language inputs.
-      if (!sdk) expect(await sha256(sql)).toBe('e9f01a0c333eeac9ae63a449fac1691bad86f1172403dcf797481ebc3f86e544')
+      if (!sdk) await expectLegacyInitialSQL(sql)
       const expected = await expectedPluginMigrations(kernel.plugins, kernel.config)
       expect(await expectedPluginMigrations(target.plugins, copied)).toEqual(expected)
       expect(await expectedPluginMigrations(target.plugins, target.config)).toEqual(expected)
