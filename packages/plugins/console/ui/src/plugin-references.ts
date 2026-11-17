@@ -15,7 +15,8 @@ export function pluginReferences(root: string) {
   const gap = (node: ts.Node, message: string) => uncovered.push({ code: 'opaque-plugin-reference', kind: 'plugin', source: nodeSpan(node), message,
     repairHint: 'Declare literal schemaReferences metadata on the plugin and review its executable dependencies.' })
   const unwrapped = (node: ts.Expression): ts.Expression => ts.isAsExpression(node) || ts.isSatisfiesExpression(node) || ts.isParenthesizedExpression(node) || ts.isTypeAssertionExpression(node) ? unwrapped(node.expression) : node
-  const property = (object: ts.ObjectLiteralExpression, key: string) => object.properties.find((p): p is ts.PropertyAssignment => ts.isPropertyAssignment(p) && p.name.getText().replace(/^['"]|['"]$/g, '') === key)
+  const plainKey = (name: ts.PropertyName): string | undefined => ts.isIdentifier(name) || ts.isStringLiteral(name) ? name.text : undefined
+  const property = (object: ts.ObjectLiteralExpression, key: string) => object.properties.find((p): p is ts.PropertyAssignment => ts.isPropertyAssignment(p) && plainKey(p.name) === key)
   function symbol(tree: ts.SourceFile, name: string): ts.Expression | ts.FunctionDeclaration | undefined {
     for (const statement of tree.statements) {
       if (ts.isExportAssignment(statement) && name === 'default') return statement.expression
@@ -41,6 +42,7 @@ export function pluginReferences(root: string) {
     }
     node = unwrapped(node)
     if (ts.isConditionalExpression(node)) {
+      gap(node, `Conditional plugin metadata: ${name}`)
       inspect(node.whenTrue, registration, name, trusted, seen)
       inspect(node.whenFalse, registration, name, trusted, seen)
       return
@@ -70,7 +72,12 @@ export function pluginReferences(root: string) {
     const pluginName = property(node, 'name')?.initializer
     if (pluginName && ts.isStringLiteralLike(pluginName)) name = pluginName.text
     const spreads = node.properties.filter(ts.isSpreadAssignment)
-    for (const spread of spreads) inspect(spread.expression, registration, name, trusted, seen)
+    for (const spread of spreads) {
+      gap(spread, `Spread plugin metadata: ${name}`)
+      inspect(spread.expression, registration, name, trusted, seen)
+    }
+    // Any computed member can replace schemaReferences, even beside a literal declaration.
+    for (const member of node.properties) if (member.name && ts.isComputedPropertyName(member.name)) gap(member, `Computed plugin metadata key: ${name}`)
     for (const key of ['requires', 'optionalRequires'] as const) {
       const value = property(node, key)?.initializer
       if (!value) continue
@@ -81,16 +88,31 @@ export function pluginReferences(root: string) {
         contracts.push({ plugin: name, contract: p.name.getText().replace(/^['"]|['"]$/g, ''), range: p.initializer.text, optional: key === 'optionalRequires', source: nodeSpan(p.name) })
       }
     }
-    const metadata = property(node, 'schemaReferences')?.initializer
-    if (!metadata) { if (!trusted) gap(node, `Plugin ${name} has no declared schema reference inventory.`); return }
-    const array = unwrapped(metadata)
-    if (!ts.isArrayLiteralExpression(array)) { gap(metadata, `Computed schema references on ${name}`); return }
-    for (const item of array.elements) {
-      if (!ts.isObjectLiteralExpression(item)) { gap(item, `Computed schema reference on ${name}`); continue }
-      const entity = property(item, 'entity')?.initializer, field = property(item, 'field')?.initializer
-      if (!entity || !ts.isStringLiteralLike(entity) || field && !ts.isStringLiteralLike(field)) { gap(item, `Invalid schema reference on ${name}`); continue }
-      references.push({ kind: 'plugin', target: { entity: entity.text, ...(field && ts.isStringLiteralLike(field) ? { field: field.text } : {}) }, entityContext: entity.text,
-        owner: `plugin:${name}`, source: nodeSpan(field ?? entity), useSites: [{ owner: `plugin:${name}`, entityContext: entity.text, source: nodeSpan(registration) }] })
+    // Inspect every declaration, not just the first/effective one. Unsupported syntax
+    // must never look like an omitted optional field or an empty inventory.
+    const declarations = node.properties.filter(p => p.name && plainKey(p.name) === 'schemaReferences')
+    if (!declarations.length) { if (!trusted) gap(node, `Plugin ${name} has no declared schema reference inventory.`); return }
+    if (declarations.length > 1) gap(node, `Duplicate schema reference metadata on ${name}`)
+    for (const declaration of declarations) {
+      if (!ts.isPropertyAssignment(declaration) || !ts.isArrayLiteralExpression(declaration.initializer)) {
+        gap(declaration, `Non-literal schema references on ${name}`); continue
+      }
+      for (const item of declaration.initializer.elements) {
+        // This is an allowlist for the entire item: no ignored properties, spreads,
+        // computed keys, duplicate keys, accessors, shorthand or evaluated values.
+        const values = new Map<string, ts.StringLiteral>()
+        const canonical = ts.isObjectLiteralExpression(item) && item.properties.every(p => {
+          if (!ts.isPropertyAssignment(p)) return false
+          const key = plainKey(p.name)
+          if ((key !== 'entity' && key !== 'field') || values.has(key) || !ts.isStringLiteral(p.initializer)) return false
+          values.set(key, p.initializer)
+          return true
+        })
+        const entity = values.get('entity'), field = values.get('field')
+        if (!canonical || !entity) { gap(item, `Non-canonical schema reference on ${name}`); continue }
+        references.push({ kind: 'plugin', target: { entity: entity.text, ...(field ? { field: field.text } : {}) }, entityContext: entity.text,
+          owner: `plugin:${name}`, source: nodeSpan(field ?? entity), useSites: [{ owner: `plugin:${name}`, entityContext: entity.text, source: nodeSpan(registration) }] })
+      }
     }
   }
   const file = resolve(root, 'runtime.ts')
