@@ -398,6 +398,7 @@ it.each([
       { kind: 'set_locale', languages: ['en', 'cs'] },
       { kind: 'set_catalog_entries', language: 'en', namespace: 'domain', entries: { 'field.worker.name': 'Name' } },
       { kind: 'set_instance_display_name', displayName: 'Cleaning' },
+      { kind: 'set_instance_display_name', displayName: 'Field Ops' },
       { kind: 'set_roles', roles: ['owner', 'viewer'], organizationOwnerRole: 'owner' },
     ] : []),
   ]

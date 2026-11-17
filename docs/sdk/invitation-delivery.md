@@ -19,6 +19,40 @@ record access dialog does the same; the SDK access card can also copy the
 unsigned value returned by its invite action. None receives the delivered
 selector or proof. The copied value is absent from the delivered message.
 
+Anonymous copied links show **Sign in to accept** and ask the recipient to sign
+in with the invited e-mail address. This navigation preserves the invitation's
+opaque ID in `returnTo` and makes no acceptance request. After sign-in and any
+required profile completion, **Accept invitation** explicitly confirms membership.
+Delivered links show the organization, inviter, role and optional target entity
+before the first click, and retain their one-click mailbox-proof session and
+confirmation flow (including any required profile completion).
+
+Anonymous preflight without a valid mailbox proof returns only
+`{ id, account_match: null }`. This includes copied or stripped selectors and
+tampered, forged, truncated, other-invitation or rotated-secret proofs, with
+byte-identical responses across pending, expired, revoked, declined and accepted
+states. A signed-in different account receives
+only `{ id, account_match: false }`; ID-based preview returns 404 for that account.
+The opaque invitation ID is needed for safe `returnTo` after sign-in. No
+organization, inviter, role, expiry/state or target identifiers cross that boundary.
+The public card uses the existing instance `displayName` from `/console-info`
+(`packages/core/src/app.ts`), with the console's standard Workbase fallback.
+It shows the generic localized invitation title, invited-email guidance and sign-in
+CTA only. A different account gets account-switch recovery without confirmation.
+
+An anonymous delivered token whose HMAC mailbox proof validates server-side also
+receives organization ID/name, inviter display name, role, expiry, state and
+optional target entity/row, with `account_match: null`. Proof holders are treated
+as recipients for read-only preview even in terminal states: the real state is
+returned and the card shows the corresponding unavailable/declined message.
+Preflight establishes no session, binds no account and grants no membership.
+A verified matching recipient receives the same metadata with `account_match: true`.
+Recipient preview also carries navigation, return target, profile completeness,
+next step and actions. The target row remains an API selector; the card displays
+its entity context without printing that internal ID. Preflight's two disjoint
+response shapes and recipient-only preview are curated in
+`packages/core/src/openapi/public-paths.ts` and the frontend invitation types.
+
 Outbox rows store template inputs in `body`: display metadata,
 locale, timezone, expiry, configured origin and the unsigned delivered selector.
 `delivery_html` and `delivery_text` are empty placeholders. On each send/retry,

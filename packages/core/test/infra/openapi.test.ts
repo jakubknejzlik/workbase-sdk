@@ -118,7 +118,7 @@ it('validates 3.1, rejects broken documents, and round-trips exact canonical byt
     '/api/users', '/api/users/{id}', '/api/worker', '/api/worker/{id}',
     ...['invite', 'cancel_invite', 'link_account', 'unlink_account'].map(action => `/api/worker/{id}/actions/${action}`),
     ...fixture().config.commands.map(name => `/commands/${name}`),
-    '/query', '/o/{org}/capabilities', '/me', '/orgs/{orgId}/members', '/orgs/{orgId}/invitations', '/me/invitations', '/invitations/preflight', '/invitations/resolve', '/invitations/{id}/resolve', '/invitations/{id}/accept', '/invitations/{id}/decline', '/me/profile', '/auth/providers', '/auth/logout', '/auth/sign-in/magic-link', '/build.json', '/health', '/openapi.json',
+    '/query', '/o/{org}/capabilities', '/me', '/orgs/{orgId}/members', '/orgs/{orgId}/invitations', '/me/invitations', '/invitations/preflight', '/invitations/resolve', '/invitations/{id}/resolve', '/invitations/{id}/preview', '/invitations/{id}/accept', '/invitations/{id}/decline', '/me/profile', '/auth/providers', '/auth/logout', '/auth/sign-in/magic-link', '/build.json', '/health', '/openapi.json',
   ].sort())
 })
 it('validates recorded detail fixtures and rejects malformed or leaking responses', async () => {
@@ -289,4 +289,34 @@ it('detects transforms inside function arguments and returns without evaluating 
     expect(() => publicSchema(config, options)).not.toThrow()
     expect((await schemaResponse(config, options)).status).toBe(200)
   }
+})
+
+it('preflight permits minimal entry or full mailbox/recipient metadata; ID preview requires the matching recipient', () => {
+  const doc = JSON.parse(bytes())
+  const schema = doc.paths['/invitations/preflight'].post.responses['200'].content['application/json'].schema
+  const entry = { id: 'synthetic-invitation', account_match: null }
+  const check = validate(doc, schema, entry)
+  expect(check({ ...entry, account_match: false })).toBe(true)
+  expect(check({ ...entry, account_match: true })).toBe(false)
+  const privateFields = { organization: { id: 'synthetic-org', name: 'Private organization' }, inviter: { display_name: 'Private inviter' }, role: 'staff', target: { entity: 'worker', row: 'synthetic-row' }, state: 'pending', expires_at: '2099-01-01' }
+  for (const match of [null, false]) {
+    for (const [key, value] of Object.entries({ ...privateFields, email: 'recipient@example.test', user_id: 'private-user' })) expect(check({ ...entry, account_match: match, [key]: value })).toBe(false)
+  }
+  const full = { ...entry, ...privateFields, account_match: true }
+  expect(check(full)).toBe(true)
+  expect(check({ ...full, account_match: null })).toBe(true)
+  expect(check({ ...full, account_match: false })).toBe(false)
+  expect(check({ ...full, account_match: null, email: 'recipient@example.test' })).toBe(false)
+  const { target: _target, ...withoutTarget } = full
+  expect(check({ ...withoutTarget, account_match: null })).toBe(true)
+  for (const state of ['pending', 'expired', 'revoked', 'declined', 'accepted']) expect(check({ ...full, account_match: null, state })).toBe(true)
+  const input = doc.paths['/invitations/preflight'].post.requestBody.content['application/json'].schema
+  const token = 'a'.repeat(64)
+  const validInput = validate(doc, input, { token })
+  for (const suffix of ['', '.', '.b', `.${'b'.repeat(64)}`]) expect(validInput({ token: token + suffix })).toBe(true)
+  for (const invalid of [token.slice(1), `${token}.${'b'.repeat(65)}`, `${token}.forged`]) expect(validInput({ token: invalid })).toBe(false)
+  const preview = { ...full, navigation_target: '/invitation?id=synthetic-invitation', return_to: '/o/synthetic-org', profile_complete: true, next: 'preview', actions: ['accept', 'decline'] }
+  const recipient = validate(doc, doc.paths['/invitations/{id}/preview'].get.responses['200'].content['application/json'].schema, preview)
+  for (const match of [null, false]) expect(recipient({ ...preview, account_match: match })).toBe(false)
+  expect(recipient(entry)).toBe(false)
 })
