@@ -739,13 +739,6 @@
       "lineNumber": 17
     },
     {
-      "path": "packages/mcp/templates/standalone/wrangler.jsonc",
-      "value": "00000000000000000000000000000091",
-      "reason": "Synthetic local-only database identifier in neutral runtime/template fixtures; not an account ID.",
-      "line": "      \"id\": \"00000000000000000000000000000091\"",
-      "lineNumber": 19
-    },
-    {
       "path": "packages/mcp/test/data/fixture.ts",
       "value": "00000000000000000000000000000001",
       "reason": "Synthetic local-only database identifier in neutral runtime/template fixtures; not an account ID.",
@@ -769,15 +762,7 @@
       "lineNumber": 189
     }
   ],
-  "encoded": [
-    {
-      "path": "scripts/check-console-public.test.ts",
-      "payload": "%ZZ",
-      "reason": "Exact malformed-URI acceptance fixture; no decodable bytes.",
-      "line": "    writeFileSync(resolve(directory, 'index.js'), `const assets = [${JSON.stringify(uri)}, \"data:text/plain,%ZZ\"]`)",
-      "lineNumber": 37
-    }
-  ],
+  "encoded": [],
   "hosts": [
     {
       "value": "www.apache.org",
@@ -855,20 +840,6 @@
       "value": "webhook.internal",
       "reason": "Synthetic Service Binding destination; local runtime health probe, not a deployed host.",
       "lineNumber": 28
-    },
-    {
-      "path": "scripts/smoke-mcp-template.ts",
-      "line": "assert.equal(config.app({ stage: 'production' }).protect, true)",
-      "value": "config.app",
-      "reason": "Dotted SST config method in an embedded smoke script; not a network host.",
-      "lineNumber": 243
-    },
-    {
-      "path": "scripts/smoke-mcp-template.ts",
-      "line": "assert.equal(config.app({ stage: 'trial' }).removal, 'remove')",
-      "value": "config.app",
-      "reason": "Dotted SST config method in an embedded smoke script; not a network host.",
-      "lineNumber": 244
     },
     {
       "path": "packages/mcp/test/ops/contract.test.ts",
