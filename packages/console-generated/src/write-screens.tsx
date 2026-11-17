@@ -8,7 +8,7 @@ import { editableManyRelations, memberships, syncMemberships } from './many-to-m
 import { ManyRelationField } from './many-relation-field'
 import type { ComponentProps, ReactNode } from 'react'
 import { createDataTableQueryKey } from '@workbasehq/ui'
-import { useEffect, useRef, useState } from 'react'
+import { createContext, useContext, useEffect, useRef, useState } from 'react'
 import { useIsMutating, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
 import { useTranslation } from 'react-i18next'
@@ -20,6 +20,9 @@ import { commandError, commandLabel, commandFormSchema, writeCodes as codes, com
 import { usePickerSearch } from './use-picker-search'
 import { selectedReferenceRow, useSelectedReferences } from './use-selected-references'
 import { breadcrumbRecordLabel, usePublishRecordBreadcrumb } from './breadcrumbs'
+// Scoped to the detail action host; a replacement read must authorize writes
+// before any existing or newly granted action can use its retained row seed.
+export const DetailReadPending = createContext(false)
 export type WriteRequest = (path: string, method: string, body?: unknown, key?: string) => Promise<any>
 interface Context { initialValues?: Record<string, string>; lockedValues?: Record<string, string>; onDenied?: () => void; model: Model; caps: Capabilities; orgId: string; entity: string; request: (query: ReadQuery) => Promise<Result>; write: WriteRequest }
 interface WriteFailure { code?: string; status?: number; details?: { field?: unknown; path?: unknown; paths?: unknown } }
@@ -71,18 +74,20 @@ function CreateCommandDialog({ command, ...props }: Context & { command: NonNull
 }
 export function GeneratedActions(props: Context & { row?: Record<string, any> }) {
   const { t, i18n } = useEntityTranslation(props.entity); const { model, caps, entity, row } = props
+  const readPending = useContext(DetailReadPending)
+  const disabledReason = readPending ? t('loading') : undefined
   if (!visibleEntities(model, caps).includes(entity)) return null
   const operations = caps.entities[entity].operations
   const createLabel = resourceCreateLabel(model, entity, i18n.language, t, caps)
   const createCommand = !row ? listCommandActions(model, entity, caps).create : undefined
   return <div className="wb-write-actions">
     {createCommand && <CreateCommandDialog {...props} command={createCommand} />}
-    {(!row ? ['create'] : ['update']).filter(operation => operations.includes(operation) && (operation !== 'update' || caps.entities[entity].readable.includes('version'))).map(operation => <ResourceFormDialog entity={entity} outcome={row ? 'updated' : 'created'} schema={writeSchema(model, entity, caps, row ? 'edit' : 'create')} compact={!!row} key={operation} trigger={operation === 'create' ? createLabel : t('edit', { context: '' })} triggerIcon={row ? 'edit' : undefined} triggerVariant={row ? 'secondary' : undefined} title={t(operation === 'create' ? 'createEntity' : 'editEntity', { entity: operation === 'create' ? entityObjectName(entity, t) : t(`entitySingular_${entity}`) })} description={t(operation === 'create' ? 'createEntityDescription' : 'editEntityDescription', { entity: operation === 'create' ? entityObjectName(entity, t) : t(`entitySingular_${entity}`) })} cancelLabel={t('cancel')}>{controls => <EntityMutation {...props} row={row} controls={controls} />}</ResourceFormDialog>)}
-    {row && operations.includes('delete') && <ResourceDeleteDialog entity={entity} entityType={t(`entity_${entity}`, { defaultValue: entity })} entityName={recordLabel(model, entity, row, caps, i18n.language, t)} targetDescription={t('deleteTarget')} warningMessage={t('deleteDescription')} confirmText={t('delete')} compact trigger={t('delete', { context: '' })} triggerIcon="delete" triggerVariant="destructive" title={t('deleteRecord')} description={t('deleteDescription')} cancelLabel={t('cancel')} destructive>{controls => <DeleteMutation {...props} row={row} close={controls.close} />}</ResourceDeleteDialog>}
+    {(!row ? ['create'] : ['update']).filter(operation => operations.includes(operation) && (operation !== 'update' || caps.entities[entity].readable.includes('version'))).map(operation => <ResourceFormDialog disabledReason={disabledReason} entity={entity} outcome={row ? 'updated' : 'created'} schema={writeSchema(model, entity, caps, row ? 'edit' : 'create')} compact={!!row} key={operation} trigger={operation === 'create' ? createLabel : t('edit', { context: '' })} triggerIcon={row ? 'edit' : undefined} triggerVariant={row ? 'secondary' : undefined} title={t(operation === 'create' ? 'createEntity' : 'editEntity', { entity: operation === 'create' ? entityObjectName(entity, t) : t(`entitySingular_${entity}`) })} description={t(operation === 'create' ? 'createEntityDescription' : 'editEntityDescription', { entity: operation === 'create' ? entityObjectName(entity, t) : t(`entitySingular_${entity}`) })} cancelLabel={t('cancel')}>{controls => <EntityMutation {...props} row={row} controls={controls} />}</ResourceFormDialog>)}
+    {row && operations.includes('delete') && <ResourceDeleteDialog disabledReason={disabledReason} entity={entity} entityType={t(`entity_${entity}`, { defaultValue: entity })} entityName={recordLabel(model, entity, row, caps, i18n.language, t)} targetDescription={t('deleteTarget')} warningMessage={t('deleteDescription')} confirmText={t('delete')} compact trigger={t('delete', { context: '' })} triggerIcon="delete" triggerVariant="destructive" title={t('deleteRecord')} description={t('deleteDescription')} cancelLabel={t('cancel')} destructive>{controls => <DeleteMutation {...props} row={row} close={controls.close} />}</ResourceDeleteDialog>}
     {row ? commandDefinitions(model, entity, caps).filter(command => !!commandRowField(command, entity)).map(command => {
       const replacement = command.ui?.replacesCrud
       const label = commandLabel(command, i18n.language, t)
-      return <ResourceFormDialog entity={command.permission.entity} outcome={command.name.endsWith('/create') ? 'created' : command.name.endsWith('/delete') ? 'deleted' : undefined} schema={commandFormSchema(command.inputSchema)} compact key={command.name}
+      return <ResourceFormDialog disabledReason={disabledReason} entity={command.permission.entity} outcome={command.name.endsWith('/create') ? 'created' : command.name.endsWith('/delete') ? 'deleted' : undefined} schema={commandFormSchema(command.inputSchema)} compact key={command.name}
         trigger={label} triggerLabel={label}
         triggerIcon={replacement === 'update' ? 'edit' : replacement === 'delete' ? 'delete' : undefined} triggerVariant={replacement === 'update' ? 'secondary' : replacement === 'delete' ? 'destructive' : undefined}
         title={label} description={t('commandDescription', { context: command.name.replace('/', '_') })} cancelLabel={t('cancel')}>{controls => <CommandMutation {...props} schema={command.inputSchema} name={command.name} values={{ [commandRowField(command, entity)!]: row.id }} controls={controls} />}</ResourceFormDialog>
@@ -136,10 +141,14 @@ interface InlineField { field: string; label: string; value: ReactNode; refresh:
 function EntityMutation(props: Context & { row?: Record<string, any>; controls: { close: () => void; submissionKey: string }; inline?: InlineField }) {
   const { t, i18n } = useEntityTranslation(props.entity); const { model, caps, entity, row, controls, write, request, inline } = props; const refreshAll = useRefresh()
   const refresh = inline?.refresh ?? refreshAll
-  const [current, setCurrent] = useState(row); const [generation, setGeneration] = useState(0)
+  const readPending = useContext(DetailReadPending)
   const needsEditRead = !inline && !!row && !!model.entities[entity].detail?.groups
+  const [current, setCurrent] = useState(needsEditRead ? undefined : row); const [generation, setGeneration] = useState(0)
   const editRecord = useQuery({ queryKey: ['read', model.instance, props.orgId, caps, entity, row?.id, 'edit-record'], enabled: needsEditRead, queryFn: () => request(readQuery(model, entity, caps, { id: row!.id, purpose: 'edit' })) })
-  const editingRow = current !== row ? current : needsEditRead ? editRecord.data?.data[0] : current
+  // The first authorized edit read establishes the concurrency baseline. Only
+  // explicit conflict reload may replace it; background reads must not rebase it.
+  if (needsEditRead && !current && editRecord.isSuccess && editRecord.data.data[0]) setCurrent(editRecord.data.data[0])
+  const editingRow = current ?? (needsEditRead ? editRecord.data?.data[0] : undefined)
   const orgId = props.orgId
   const client = useQueryClient()
   const accountForm = !inline && !!model.entities[entity].accountLink
@@ -166,6 +175,15 @@ function EntityMutation(props: Context & { row?: Record<string, any>; controls: 
   const schema = inline ? { ...fullSchema, properties: { [inline.field]: { ...fullSchema.properties[inline.field], 'x-ui': { ...fullSchema.properties[inline.field]['x-ui'], span: 'full', section: undefined } } }, required: fullSchema.required.filter((name: string) => name === inline.field) } : fullSchema
   const relations = editableManyRelations(model, entity, caps).filter(([name]) => Object.hasOwn(schema.properties, name))
   const initial = useQuery({ queryKey: ['read', model.instance, orgId, caps, entity, row?.id, 'form-memberships', generation], enabled: !!row && !!relations.length, queryFn: async () => Object.fromEntries(await Promise.all(relations.map(async ([name, relation]) => [name, row ? [...new Set((await memberships(model, relation, row.id, request)).map(item => item[relation.through!.field]))] : []]))) })
+  const [membershipSeed, setMembershipSeed] = useState<{ generation: number; values: Record<string, any> }>()
+  if (initial.isSuccess && membershipSeed?.generation !== generation) setMembershipSeed({ generation, values: initial.data })
+  const membershipValues = membershipSeed?.generation === generation ? membershipSeed.values : initial.data
+  const waitingForSeed = needsEditRead && !editingRow || !!row && !!relations.length && !membershipValues
+  const [formInitialized, setFormInitialized] = useState(false)
+  if (!formInitialized && !waitingForSeed) setFormInitialized(true)
+  const readFailed = needsEditRead && (!!editRecord.error || editRecord.isSuccess && !editRecord.data.data.length) || !!relations.length && !!initial.error
+  const readBlocked = readPending || needsEditRead && editRecord.isFetching || !!row && !!relations.length && initial.isFetching || readFailed
+  useEffect(() => { if (readFailed) controls.close() }, [readFailed])
   const saved = useRef<{ row?: Record<string, any>; fields?: string }>({ row })
   const accessVersion = useRef(false)
   const reconcileVersion = async () => {
@@ -178,9 +196,11 @@ function EntityMutation(props: Context & { row?: Record<string, any>; controls: 
     } catch (error) { setVersionError(error); throw error }
   }
   const mutation = useMutation({ mutationKey: accountForm ? ['account-access', orgId, entity] : undefined, mutationFn: async (data: Record<string, any>) => {
+    if (readBlocked) throw { code: 'action_unavailable' }
     if (versionError) throw versionError
     if (savedRow && createAccess.blocked) throw { code: 'action_unavailable' }
-    const fields = Object.fromEntries(Object.entries({ ...data, ...props.lockedValues }).filter(([name]) => !relations.some(([key]) => key === name)))
+    const writable = writableFields(model, entity, caps)
+    const fields = Object.fromEntries(Object.entries({ ...data, ...props.lockedValues }).filter(([name]) => writable.includes(name) && !relations.some(([key]) => key === name)))
     const fingerprint = JSON.stringify(fields)
     if (!saved.current.row || Object.keys(fields).length && saved.current.fields !== fingerprint) {
       const parent = saved.current.fields || accessVersion.current ? saved.current.row : editingRow ?? saved.current.row
@@ -218,29 +238,28 @@ function EntityMutation(props: Context & { row?: Record<string, any>; controls: 
     // Keep the refused draft frozen, but immediately show the current detail value.
     if (inline && error.code === 'version_conflict') await inline.refresh().catch(() => {})
   } })
-  const reload = useMutation({ mutationFn: () => inline ? inline.refresh() : request(readQuery(model, entity, caps, { id: (current ?? saved.current.row)!.id, purpose: 'edit' })), onSuccess: result => { if (!result.data[0]) return; setCurrent(result.data[0]); setContactEmail(undefined); contactSeed.current = undefined; saved.current = { row: result.data[0] }; setGeneration(value => value + 1); mutation.reset() } })
+  const reload = useMutation({ mutationFn: () => inline ? inline.refresh() : request(readQuery(model, entity, caps, { id: (current ?? saved.current.row)!.id, purpose: 'edit' })), onSuccess: result => { if (!result.data[0]) return; setCurrent(result.data[0]); setContactEmail(undefined); contactSeed.current = undefined; saved.current = { row: result.data[0] }; setGeneration(value => value + 1); setFormInitialized(false); mutation.reset() } })
   const breadcrumbDenied = !visibleEntities(model, caps).includes(entity) || [403, 404].includes((mutation.error as WriteFailure | null)?.status ?? 0) || !!reload.error
   usePublishRecordBreadcrumb(!inline && row && current ? { orgId, entity, id: String(current.id), status: breadcrumbDenied ? 'unavailable' : 'ready', label: breadcrumbDenied ? undefined : breadcrumbRecordLabel(model, entity, current, caps, i18n.language, t) } : undefined, 'edit')
   const conflict = (mutation.error as { code?: string } | null)?.code === 'version_conflict'
   const values = Object.fromEntries(writableFields(model, entity, caps).filter(field => editingRow?.[field] !== undefined).map(field => [field, editingRow![field]]))
-  if (needsEditRead && editRecord.isPending || row && relations.length && initial.isPending) return <p role="status">{t('loading')}</p>
-  if (needsEditRead && (editRecord.error && !editRecord.data || !editingRow)) return <><WriteError error={editRecord.error ?? { code: 'entity_not_found' }} /><Button onClick={() => { void editRecord.refetch() }}>{t('reloadRetry')}</Button></>
-  if (initial.error && !initial.data) return <><WriteError error={initial.error} /><Button onClick={() => { void initial.refetch() }}>{t('reloadRetry')}</Button></>
+  if (readFailed) return <WriteError error={editRecord.error ?? initial.error ?? { code: 'entity_not_found' }} />
+  if (!formInitialized && waitingForSeed) return <p role="status">{t('loading')}</p>
   return <><WriteError error={mutation.error ?? reload.error ?? versionError ?? editRecord.error ?? initial.error} schema={schema} />
     {versionError != null && <Button type="button" onClick={() => { void reconcileVersion().catch(() => {}) }}>{t('reloadRetry')}</Button>}
-    {canInviteAtCreate && <fieldset disabled={mutation.isPending || !!savedRow && createAccess.blocked} className="mb-4 space-y-4">
+    {canInviteAtCreate && <fieldset disabled={readBlocked || mutation.isPending || !!savedRow && createAccess.blocked} className="mb-4 space-y-4">
       <label className="flex items-center gap-2 text-sm font-medium"><input type="checkbox" checked={inviteNow} onChange={event => { setInviteNow(event.target.checked); invitationForm.clearErrors('email') }} /> {t('rowInviteNow')}</label>
       {inviteNow && <FormProvider {...invitationForm}><FormFieldWrapper name="email" label={t('rowInviteEmail')}>{field => <Input {...field} type="email" value={email} onChange={event => { field.onChange(event); invitationForm.clearErrors('email') }} />}</FormFieldWrapper></FormProvider>}
     </fieldset>}
     {inviteFailed && (mutation.error as WriteFailure)?.code !== 'invitation_delivery_failed' && <p role="alert">{t('rowInviteSavedFailed')}</p>}
-    {accountForm && (row || savedRow) && <ApplicationAccessCard {...props} row={row ?? savedRow!} email={liveEmail} onChanged={reconcileVersion} />}
+    {accountForm && (row || savedRow) && <ApplicationAccessCard {...props} disabled={readBlocked} row={row ?? savedRow!} email={liveEmail} onChanged={reconcileVersion} />}
 
     {conflict && inline && <p role="status">{t('inlineFreshValue')}: {inline.value}</p>}
-    {conflict && <Button type="button" disabled={reload.isPending} onClick={() => reload.mutate()}>{t('reloadRetry')}</Button>}
+    {conflict && <Button type="button" disabled={readBlocked || reload.isPending} onClick={() => reload.mutate()}>{t('reloadRetry')}</Button>}
     <div onChange={event => {
       const input = event.target as HTMLInputElement
       if (contactField && input.closest('[data-write-field]')?.getAttribute('data-write-field') === contactField) setContactEmail(input.value)
-    }}><RegistryForm secondaryAction={inline && <Button data-inline-cancel type="button" variant="outline" disabled={mutation.isPending || reload.isPending} onClick={controls.close}>{t('cancel')}</Button>} optionLabel={value => t(`value_${value}`, { defaultValue: value })} key={generation} requireDirty={!!current} partial={!!current} schema={schema} lockedValues={props.lockedValues} values={{ ...props.initialValues, ...values, ...initial.data }} label={name => inline?.label ?? formLabel(model, entity, name, t)} submitLabel={inviteFailed ? t('rowInviteRetry') : inline ? t('save', { context: '' }) : t(current ? 'save' : 'create')} invalidLabel={t('invalidField')} pending={mutation.isPending || reload.isPending} disabled={conflict || versionError != null || !!savedRow && createAccess.blocked} serverErrors={translatedFieldErrors(mutation.error, schema, t)} onSubmit={data => {
+    }}><RegistryForm secondaryAction={inline && <Button data-inline-cancel type="button" variant="outline" disabled={mutation.isPending || reload.isPending} onClick={controls.close}>{t('cancel')}</Button>} optionLabel={value => t(`value_${value}`, { defaultValue: value })} key={generation} requireDirty={!!current} partial={!!current} schema={schema} lockedValues={props.lockedValues} values={{ ...props.initialValues, ...values, ...membershipValues }} label={name => inline?.label ?? formLabel(model, entity, name, t)} submitLabel={inviteFailed ? t('rowInviteRetry') : inline ? t('save', { context: '' }) : t(current ? 'save' : 'create')} invalidLabel={t('invalidField')} pending={mutation.isPending || reload.isPending} disabled={readBlocked || conflict || versionError != null || !!savedRow && createAccess.blocked} serverErrors={translatedFieldErrors(mutation.error, schema, t)} onSubmit={data => {
       if (canInviteAtCreate && inviteNow && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
         invitationForm.setError('email', { type: 'validate', message: t('rowInviteEmailInvalid') }, { shouldFocus: true })
         return Promise.reject({ code: 'validation_failed' })
@@ -248,7 +267,7 @@ function EntityMutation(props: Context & { row?: Record<string, any>; controls: 
       return mutation.mutateAsync(data)
     }} relation={(name, value, change, error) => {
       const relation = relations.find(([key]) => key === name)?.[1]
-      if (relation?.through) return <ManyRelationField {...props} name={name} target={relation.through.entity} value={value} onChange={change} error={error} />
+      if (relation?.through) return <ManyRelationField {...props} name={name} target={relation.through.entity} value={value || JSON.stringify(membershipValues?.[name] ?? [])} onChange={change} error={error} />
       const field = model.entities[entity].fields[name]
       if (field?.type !== 'ref' || !field.entity) return undefined
       return <RelationPicker {...props} allowCreate={inline ? false : undefined} label={inline?.label} target={field.entity} field={name} value={value} selectedRow={selectedReferenceRow(model, entity, name, current)} onChange={change} error={error} />
@@ -261,6 +280,7 @@ export function GeneratedInlineEdit(props: Context & InlineField & { row: Record
   const { t } = useEntityTranslation(props.entity)
   const [open, setOpen] = useState(false)
   const trigger = useRef<HTMLButtonElement>(null); const editor = useRef<HTMLDivElement>(null)
+  const readPending = useContext(DetailReadPending)
   const allowed = inlineEditableField(props.model, props.entity, props.caps, props.field)
   const close = () => { setOpen(false); requestAnimationFrame(() => trigger.current?.focus()) }
   useEffect(() => {
@@ -269,7 +289,7 @@ export function GeneratedInlineEdit(props: Context & InlineField & { row: Record
   useEffect(() => { if (!allowed) setOpen(false) }, [allowed])
   if (!allowed) return props.children
   return <div className="group space-y-2" data-inline-field={props.field}>
-    <div className={open ? 'hidden' : 'flex items-start gap-2'}>{props.children}<Button ref={trigger} type="button" variant="ghost" size="icon" className="size-7 shrink-0 sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100 focus:opacity-100" aria-label={t('inlineEditField', { field: props.label })} onClick={() => setOpen(true)}><svg className="size-4" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m16 3 5 5-13 13H3v-5L16 3ZM14 5l5 5" /></svg></Button></div>
+    <div className={open ? 'hidden' : 'flex items-start gap-2'}>{props.children}<Button ref={trigger} type="button" variant="ghost" size="icon" className="size-7 shrink-0 sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100 focus:opacity-100" aria-label={t('inlineEditField', { field: props.label })} disabled={readPending} onClick={() => setOpen(true)}><svg className="size-4" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m16 3 5 5-13 13H3v-5L16 3ZM14 5l5 5" /></svg></Button></div>
     {open && <div ref={editor} className="space-y-3" onKeyDown={event => {
       if (event.defaultPrevented || event.nativeEvent.isComposing) return
       if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); editor.current?.querySelector<HTMLButtonElement>('button[data-inline-cancel]')?.click() }
@@ -279,18 +299,20 @@ export function GeneratedInlineEdit(props: Context & InlineField & { row: Record
 }
 function DeleteMutation({ row, close, ...props }: Context & { row: Record<string, any>; close: () => void }) {
   const { t } = useEntityTranslation(props.entity); const refresh = useRefresh(); const navigate = useNavigate(); const submit = useMutationSubmit()
-  const mutation = useMutation({ mutationFn: () => props.write(`/api/${props.entity}/${encodeURIComponent(row.id)}`, 'DELETE'), onSuccess: async () => { close(); await navigate({ to: '/o/$orgId/e/$entity', params: { orgId: props.orgId, entity: props.entity } }); await refresh() } })
-  return <form onSubmit={event => { event.preventDefault(); void submit(() => mutation.mutateAsync()) }}><WriteError error={mutation.error} /><MutationSubmitButton type="submit" variant="destructive" pending={mutation.isPending}>{t('delete')}</MutationSubmitButton></form>
+  const readPending = useContext(DetailReadPending)
+  const mutation = useMutation({ mutationFn: () => readPending ? Promise.reject({ code: 'action_unavailable' }) : props.write(`/api/${props.entity}/${encodeURIComponent(row.id)}`, 'DELETE'), onSuccess: async () => { close(); await navigate({ to: '/o/$orgId/e/$entity', params: { orgId: props.orgId, entity: props.entity } }); await refresh() } })
+  return <form onSubmit={event => { event.preventDefault(); void submit(() => mutation.mutateAsync()) }}><WriteError error={mutation.error} /><MutationSubmitButton type="submit" variant="destructive" disabled={readPending} pending={mutation.isPending}>{t('delete')}</MutationSubmitButton></form>
 }
 function CommandMutation({ schema, name, values, controls, row, ...props }: Context & { row?: Record<string, any>; schema: Record<string, any>; name: string; values?: Record<string, any>; controls: { close: () => void; submissionKey: string } }) {
   const { t, i18n } = useEntityTranslation(props.entity)
+  const readPending = useContext(DetailReadPending)
   const command = props.model.commands?.find(command => command.name === name)
   const mutation = useCommandMutation(props, name, controls)
   const editing = row && command?.ui?.replacesCrud === 'update'
   const breadcrumbDenied = !visibleEntities(props.model, props.caps).includes(props.entity) || [403, 404].includes((mutation.error as WriteFailure | null)?.status ?? 0)
   usePublishRecordBreadcrumb(editing ? { orgId: props.orgId, entity: props.entity, id: String(row.id), status: breadcrumbDenied ? 'unavailable' : 'ready', label: breadcrumbDenied ? undefined : breadcrumbRecordLabel(props.model, props.entity, row, props.caps, i18n.language, t) } : undefined, 'edit')
   const label = (field: string) => t(`command_${field}`, { defaultValue: field })
-  return <><WriteError error={mutation.error} command context={name.replace('/', '_')} /><RegistryForm optionLabel={value => t(`value_${value}`, { defaultValue: value })} schema={commandFormSchema(schema)} lockedValues={props.lockedValues} values={values} label={label} submitLabel={command ? commandLabel(command, i18n.language, t) : t('runCommand')} invalidLabel={t('invalidField')} pending={mutation.isPending} onSubmit={data => mutation.mutateAsync({ ...data, ...props.lockedValues })} relation={(field, value, change, error) => {
+  return <><WriteError error={mutation.error} command context={name.replace('/', '_')} /><RegistryForm optionLabel={value => t(`value_${value}`, { defaultValue: value })} schema={commandFormSchema(schema)} disabled={readPending} lockedValues={props.lockedValues} values={values} label={label} submitLabel={command ? commandLabel(command, i18n.language, t) : t('runCommand')} invalidLabel={t('invalidField')} pending={mutation.isPending} onSubmit={data => mutation.mutateAsync({ ...data, ...props.lockedValues })} relation={(field, value, change, error) => {
     // Command inputs carry their own references, including immutable entity fields.
     const target = schema.properties?.[field]?.referenceEntity
     if (typeof target !== 'string') return undefined
@@ -300,7 +322,8 @@ function CommandMutation({ schema, name, values, controls, row, ...props }: Cont
 /** Instance command forms share writes and refreshes. */
 export function useCommandMutation(props: Pick<Context, 'write' | 'onDenied'>, name: string, controls: { close: () => void; submissionKey: string }) {
   const refresh = useRefresh()
-  return useMutation({ mutationFn: (data: Record<string, any>) => props.write(`/commands/${name}`, 'POST', { ...data, idempotencyKey: controls.submissionKey }), onSuccess: async () => { await refresh(); controls.close() }, onError: (error: WriteFailure) => { if (commandError(error).denied) props.onDenied?.() } })
+  const readPending = useContext(DetailReadPending)
+  return useMutation({ mutationFn: (data: Record<string, any>) => readPending ? Promise.reject({ code: 'action_unavailable' }) : props.write(`/commands/${name}`, 'POST', { ...data, idempotencyKey: controls.submissionKey }), onSuccess: async () => { await refresh(); controls.close() }, onError: (error: WriteFailure) => { if (commandError(error).denied) props.onDenied?.() } })
 }
 export function RelationPicker(props: Context & { allowCreate?: boolean; target: string; field: string; label?: string; value: string; selectedRow?: Record<string, any>; onChange: (value: string) => void; error?: string }) {
   const { t, i18n } = useEntityTranslation(props.entity); const { model, caps, orgId, target, field, value, onChange, request } = props
@@ -372,6 +395,7 @@ function accessGuard(data?: AccessStatus) {
   return { multiple, valid: !!data && !multiple && ['no_account', 'invited', 'expired', 'signed_in'].includes(data.state) && data.inconsistency == null }
 }
 function useApplicationAccess(props: Omit<AccessContext, 'row'> & { row?: Record<string, any> }) {
+  const readPending = useContext(DetailReadPending)
   const pending = useIsMutating({ mutationKey: ['account-access', props.orgId, props.entity] }) > 0
   const definition = props.model.entities[props.entity]
   const supported = hasRecordAccess(props.model, props.entity) || !!(definition?.rowAccess ?? definition?.rowInvitations)
@@ -399,7 +423,7 @@ function useApplicationAccess(props: Omit<AccessContext, 'row'> & { row?: Record
   if (explicit && props.caps.resources?.['members.read'] === true && props.caps.resources?.['members.search_link_account'] !== false && (v3 ? granted('access_link_account') && data?.recordActions?.link_account?.enabled : granted('link_account'))) actions.push('link')
   if (explicit && (v3 ? granted('access_unlink_account') && data?.recordActions?.unlink_account?.enabled : granted('remove_access'))) actions.push('remove')
   if (valid && data!.state === 'signed_in' && inviteGranted && actions.includes('remove')) actions.push('change')
-  return { enabled, supported, status, multiple, valid, explicitOnly, actions, blocked: pending || !!props.disabled || !props.write || !props.row || supported && ((!valid && !explicitOnly) || status.isFetching || !!status.error) }
+  return { enabled, supported, status, multiple, valid, explicitOnly, actions, blocked: readPending || pending || !!props.disabled || !props.write || !props.row || supported && ((!valid && !explicitOnly) || status.isFetching || !!status.error) }
 }
 
 /** All account action entry points use this controller, including nested edit dialogs. */

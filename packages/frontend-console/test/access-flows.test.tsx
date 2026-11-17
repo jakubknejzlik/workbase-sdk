@@ -361,15 +361,14 @@ for (const surface of ['detail', 'menu', 'edit', 'create'] as const) {
     if (state === 'expired') expect(screen.queryByRole('button', { name: 'Copy link' })).toBeNull()
   })
 }
-it('grouped edit preserves its cached form and unsaved fields when an access refresh read fails', async () => {
+it('grouped edit closes privileged UI when an access refresh read fails despite cached form data', async () => {
   const { user, request, write } = await mount('edit', { grouped: true })
   await user.type(await screen.findByLabelText('Name'), ' draft')
   request.mockRejectedValueOnce({ status: 500 })
   await confirmAction(user, 'Invite to application', ['Email', 'recipient@example.test'])
-  await waitFor(() => expect(screen.getAllByRole('dialog')).toHaveLength(1))
-  expect((screen.getByLabelText('Name') as HTMLInputElement).value).toBe('Original draft')
-  await user.click(screen.getByRole('button', { name: 'Save' }))
-  await waitFor(() => expect(write).toHaveBeenCalledWith('/api/entries/one', 'PATCH', { name: 'Original draft', version: 2 }, undefined))
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+  expect(screen.queryByLabelText('Name')).toBeNull()
+  expect(write.mock.calls.filter(([, method]) => method === 'PATCH')).toHaveLength(0)
 })
 it('edit changes an expired invitation directly after verifying live invite availability', async () => {
   const { user, write } = await mount('edit', { state: 'expired' })

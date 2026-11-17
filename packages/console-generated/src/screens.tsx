@@ -2,7 +2,7 @@ import { accountLinkField, accountLinkRelation } from './account-link'
 import { EntityCalendar } from './calendar'
 import { availableCalendar } from './calendar-model'
 import { relationEmptyKey } from './many-to-many'
-import { useState, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { useQuery, useInfiniteQuery } from '@tanstack/react-query'
 import { Link, useNavigate } from '@tanstack/react-router'
 import { useEntityTranslation } from './entity-translation'
@@ -23,7 +23,7 @@ import { detailPlan, detailReadableField } from './detail-plan'
 import { selectedReferenceRow } from './use-selected-references'
 import { shortRecordId } from './labels'
 import { useScopeHome } from './scope-home'
-import { ApplicationAccessCard, GeneratedRowInvitation, GeneratedInlineEdit, type WriteRequest } from './write-screens'
+import { ApplicationAccessCard, GeneratedRowInvitation, GeneratedInlineEdit, DetailReadPending, type WriteRequest } from './write-screens'
 const queryCodes = ['query_invalid', 'field_forbidden', 'relation_forbidden', 'query_too_expensive', 'entity_not_found', 'policy_violation'] as const
 export { formatValue } from './labels'
 export function signedValue(row: Record<string, any>, field: Field, value: ReactNode, locale: string): ReactNode {
@@ -34,15 +34,19 @@ export function signedValue(row: Record<string, any>, field: Field, value: React
   return <span className={delta < 0 ? 'text-red-700 tabular-nums font-medium' : 'text-green-700 tabular-nums font-medium'}>{new Intl.NumberFormat(locale, { signDisplay: 'always' }).format(delta)}</span>
 }
 interface ReadPageProps { calendarCreate?: (values: Record<string, string>) => void; write?: WriteRequest; onDenied?: () => void; contextList?: ReadQuery['contextList']; title?: string; embeddedCreate?: (entity: string, values: Record<string, string>) => ReactNode; model: Model; caps: Capabilities; orgId: string; entity: string; id?: string; request: (input: ReadQuery) => Promise<Result>; primaryAction?: { label: string; onAction: () => void }; actions?: (row?: Record<string, any>) => ReactNode; rowActions?: (row: Record<string, any>, disabled: boolean) => ReactNode }
-export function GeneratedReadPage(props: ReadPageProps) { return props.id ? <GeneratedDetailPage {...props} /> : <GeneratedListPage {...props} /> }
+export function GeneratedReadPage(props: ReadPageProps) { return props.id ? <GeneratedDetailPage key={JSON.stringify([props.model.instance, props.orgId, props.entity, props.id])} {...props} /> : <GeneratedListPage {...props} /> }
 function GeneratedDetailPage({ model, caps, orgId, entity, id, request, actions, embeddedCreate, write, onDenied }: ReadPageProps) {
   const home = useScopeHome()
   const { t, i18n } = useEntityTranslation(entity); const definition = model.entities[entity]
   const plan = detailPlan(model, entity, caps)
   const allowed = visibleEntities(model, caps).includes(entity)
   const query = allowed ? readQuery(model, entity, caps, { id }) : { entity, limit: 1, select: ['id'], where: { id: { eq: id } } }
-  const result = useQuery({ queryKey: ['read', model.instance, orgId, caps.revision, entity, query, caps], queryFn: () => request(query), enabled: true })
+  const result = useQuery({ queryKey: ['read', model.instance, orgId, caps.revision, entity, query, caps], queryFn: () => request(query), enabled: allowed })
   const record = result.data?.data[0]
+  // Keep only the row seed local to this record host. Authority always comes from
+  // current props, and errors take precedence over both cached data and this seed.
+  const [actionRow, setActionRow] = useState<Record<string, any>>()
+  useEffect(() => { if (result.isSuccess && record) setActionRow(record) }, [result.isSuccess, record])
   const breadcrumbStatus = !allowed || result.error ? 'unavailable' : result.isPending || result.isFetching ? 'pending' : record?.id === id ? 'ready' : 'unavailable'
   usePublishRecordBreadcrumb({ orgId, entity, id: id!, status: breadcrumbStatus, label: breadcrumbStatus === 'ready' ? breadcrumbRecordLabel(model, entity, record!, caps, i18n.language, t) : undefined })
   const includedFields = Object.keys(query.include ?? {}).map(name => definition.relations[name].field)
@@ -69,8 +73,8 @@ function GeneratedDetailPage({ model, caps, orgId, entity, id, request, actions,
     return formatValue(row[field], definition.fields[field], i18n.language, t('yes'), t('no'), t('nullValue'))
   }
   const notFound = () => <ResourcePage title={t('notFound')}><p>{t('notFoundDescription')}</p><Link to={home}>{t(home === '/organizations' ? 'organizations' : 'overview')}</Link></ResourcePage>
-  if ((result.error as { status?: number } | null)?.status === 403) return <ResourcePage title={t('forbidden')}><p>{t('resourceForbidden', { resource: t(`entity_${entity}`).toLocaleLowerCase(i18n.language) })}</p></ResourcePage>
-  if (id && result.data && !result.data.data.length) return notFound()
+  if (!allowed || (result.error as { status?: number } | null)?.status === 403) return <ResourcePage title={t('forbidden')}><p>{t('resourceForbidden', { resource: t(`entity_${entity}`).toLocaleLowerCase(i18n.language) })}</p></ResourcePage>
+  if ((result.error as { status?: number } | null)?.status === 404 || id && result.data && !result.data.data.length) return notFound()
   const code = (result.error as { code?: string } | null)?.code
   const error = result.error ? new Error(t(queryCodes.includes(code as any) ? `query_${code}` : 'requestFailed')) : null
   const readable = projection(model, entity, caps).filter(field => !accountLinkField(model, entity, field))
@@ -83,7 +87,7 @@ function GeneratedDetailPage({ model, caps, orgId, entity, id, request, actions,
     }}>{content}</GeneratedInlineEdit> : content
     const informationTitle = t('detailInformation', { defaultValue: '', fallbackLng: false })
     const information = row && (plan ? <DetailGroups plan={plan} row={row} label={fieldLabel} value={field => value(row, field)} edit={edit} translate={key => t(key, { defaultValue: key })} /> : <DetailFields className="c2-detail border-0 p-0" fields={(definition.detail?.fields ?? readable.filter(field => !definition.fields[field].ui?.hidden)).filter(field => readable.includes(field) && !['id', 'organization_id'].includes(field)).map(field => ({ name: field, label: fieldLabel(field), value: edit(field, value(row, field), fieldLabel(field)) }))} />)
-    return <DetailPage title={row ? rowName(entity, row) : t('loading')} backLink={<Button asChild variant="ghost" size="sm"><Link to="/o/$orgId/e/$entity" params={{ orgId, entity }}><svg aria-hidden="true" className="mr-2 size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m12 19-7-7 7-7M5 12h14" /></svg>{t('backToList')}</Link></Button>} actions={row && actions?.(row)}>
+    return <DetailReadPending.Provider value={result.isFetching || result.isPending}><DetailPage title={row ? rowName(entity, row) : t('loading')} backLink={<Button asChild variant="ghost" size="sm"><Link to="/o/$orgId/e/$entity" params={{ orgId, entity }}><svg aria-hidden="true" className="mr-2 size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m12 19-7-7 7-7M5 12h14" /></svg>{t('backToList')}</Link></Button>} actions={!error && (row ?? actionRow) && actions?.(row ?? actionRow)}>
       <QueryBoundary pending={result.isPending} error={error} loadingLabel={t('loading')}>{row && <>
         {readable.includes('id') && <dl className="generated-technical mb-4 text-sm text-muted-foreground"><dt>{fieldLabel('id')}</dt><dd className="break-all font-mono">{String(row.id)}</dd></dl>}
         {definition.detail?.metrics && <dl className="generated-metrics">{(plan?.metrics ?? definition.detail.metrics.filter(metric => readable.includes(metric.field))).map(metric => <div key={metric.field}>
@@ -98,7 +102,7 @@ function GeneratedDetailPage({ model, caps, orgId, entity, id, request, actions,
           return { key: name, content: <Card className="c2-relations"><CardHeader><CardTitle className="flex flex-wrap items-center gap-2"><h2>{t(`relation_${name}`)}</h2><Badge variant="secondary">{rows.length}{relation.cardinality === '1:n' && rows.length >= (selection.limit ?? Infinity) ? '+' : ''}</Badge></CardTitle></CardHeader><CardContent className="space-y-3">{rows.length ? <ul>{rows.map((related: Record<string, any>) => <li key={related.id}>{rowLink(relation.entity, related)}</li>)}</ul> : <p>{relationEmptyText(entity, name, relation.through?.entity ?? relation.entity, t)}</p>}{relation.cardinality === '1:n' && <p>{t('relatedLimit', { count: selection.limit })}</p>}</CardContent></Card> }
         })]} />
       </>}</QueryBoundary>
-    </DetailPage>
+    </DetailPage></DetailReadPending.Provider>
   }
   return notFound()
 }
