@@ -165,6 +165,32 @@ For a fresh scaffold, call `initialize_instance` with the Instance selector and
 `planHash`. Preview writes nothing; apply publishes the initial schema, migration,
 OpenAPI and access artifacts locally. Shell generation remains an alternative.
 
+Initialization requires physical SDK packages inside the selected Instance by
+default. It checks the real paths of every SDK entrypoint, package directory and
+manifest before importing any entrypoint. Ancestor-only installs and symlinks
+escaping the Instance fail with `dependencies_missing` (422), including mixed
+local/ancestor installs. Install the SDK archives into the Instance's own
+`node_modules` to use the default policy.
+
+For trusted workspace or hoisted packages, the server operator can explicitly
+configure additional directories through the server constructor:
+
+```ts
+import { createServer } from '@workbasehq/mcp'
+
+const app = await createServer({
+  root: '/srv/workspace/instances/example',
+  dependencyRoots: ['/srv/workspace/packages'],
+})
+```
+
+`dependencyRoots` is trusted server startup configuration, never an Instance
+setting or MCP tool argument. Use the actual package directories or their parent
+directories; symlinks must resolve inside the Instance or these declared roots.
+Roots are canonicalized and validated on every preflight, including apply and
+publication. A policy change requires a new preview. This checks SDK entrypoint
+provenance; it does not confine transitive imports or sandbox package execution.
+
 Use `inspect_schema` with the Instance selector, then `propose_composition` with
 `instance`, the inspected `baseRevision`, and `changes`. Use `set_plugin` to add a
 built-in plugin or replace its options (including plugin `console` to enable the

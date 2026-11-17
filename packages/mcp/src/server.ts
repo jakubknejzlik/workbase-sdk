@@ -25,8 +25,8 @@ const descriptions = {
   submit_change: 'Open or return one GitHub PR for a verified, promoted change at expectedBaseSha. Requires operator-configured GitHub access. Returns head SHA and preview/check status without waiting. Never merges, tags or deploys.',
   discard: 'Close an unpromoted proposal. Does not remove or revert an already promoted migration.',
 }
-export async function createServer(options: { root: string; allowed?: string[]; github?: GitHubConfiguration }) {
-  const store = new Store(options.root, options.allowed ? new Set(options.allowed) : undefined)
+export async function createServer(options: { root: string; allowed?: string[]; github?: GitHubConfiguration; dependencyRoots?: string[] }) {
+  const store = new Store(options.root, options.allowed ? new Set(options.allowed) : undefined, options.dependencyRoots)
   await store.init(true)
   const workflow = new Workflow(store, options.github)
   const inFlight = new Set<Promise<unknown>>()

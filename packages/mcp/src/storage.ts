@@ -348,8 +348,11 @@ export class Store {
   private instanceDirectories = new Map<string, string>()
   private standalone = false
   public allowed: Set<string>
-  constructor(public root: string, private requestedAllowed?: Set<string>) {
+  /** Trusted startup policy only; never populated from instance declarations. */
+  readonly dependencyRoots: readonly string[]
+  constructor(public root: string, private requestedAllowed?: Set<string>, dependencyRoots: string[] = []) {
     this.allowed = requestedAllowed ?? new Set(devFixtures?.allowed ?? [])
+    this.dependencyRoots = Object.freeze(dependencyRoots.map(path => resolve(path)))
   }
   async init(allowEmpty = false, readOnly = false) {
     this.configCache.clear()

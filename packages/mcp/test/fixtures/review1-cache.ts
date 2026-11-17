@@ -23,7 +23,7 @@ await writeFile(join(dir, 'access.ts'), `import {defineAccess} from ${core}; exp
 await writeFile(join(dir, 'schema/record.ts'), model('first'))
 await writeFile(join(dir, 'config.ts'), source())
 await writeFile(join(dir, 'runtime.ts'), "import config from './config.ts'; export default {...config,plugins:[]};")
-const store = new Store(root, new Set(['probe'])); await store.init()
+const store = new Store(root, new Set(['probe']), [resolve('packages')]); await store.init()
 const workflow = new Workflow(store)
 const preview = await workflow.call('initialize_instance', { instance: 'probe', mode: 'preview' })
 assert.equal(preview.ok, true, JSON.stringify(preview))

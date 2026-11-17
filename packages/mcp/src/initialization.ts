@@ -44,7 +44,7 @@ export async function assertInitialized(root: string, instance: string) {
 
 /** Check the installed consumer graph without importing authored config or installing.
  * Resolve and import in a fresh process: Bun caches consumer resolution as well as modules. */
-async function dependencies(root: string, model: RuntimeModel) {
+async function dependencies(root: string, model: RuntimeModel, dependencyRoots: readonly string[]) {
   const packages = [
     ['@workbasehq/core', ['schema', 'kernel/registry']],
     ['@workbasehq/plugins', model.plugins.map(({ plugin }) => plugin)],
@@ -57,33 +57,63 @@ async function dependencies(root: string, model: RuntimeModel) {
   const script = `import { createRequire } from 'node:module';
   import { createHash } from 'node:crypto';
   import { constants } from 'node:fs';
-  import { lstat, readFile } from 'node:fs/promises';
-  import { dirname, join } from 'node:path';
+  import { readFile, realpath, stat } from 'node:fs/promises';
+  import { isAbsolute, join, relative, sep } from 'node:path';
   import { pathToFileURL } from 'node:url';
   const write = process.stdout.write.bind(process.stdout);
   const emit = result => write(JSON.stringify({ nonce: ${JSON.stringify(nonce)}, ...result }));
   const require = createRequire(join(process.cwd(), 'package.json'));
   const hash = data => createHash('sha256').update(data.toString('base64')).digest('hex');
+  const inside = (root, path) => { const part = relative(root, path); return part === '' || (part !== '..' && !part.startsWith('..' + sep) && !isAbsolute(part)) };
+  const extraRoots = ${JSON.stringify(dependencyRoots)};
+  const reason = extraRoots.length ? 'outside_dependency_roots' : 'outside_instance_root';
+  let roots, policyHash;
+  try {
+    const instanceRoot = await realpath(process.cwd());
+    const trusted = [...new Set(await Promise.all(extraRoots.map(root => realpath(root))))].sort();
+    const identities = [];
+    for (const root of trusted) {
+      const info = await stat(root, { bigint: true });
+      if (!info.isDirectory()) throw new Error('Invalid dependency root');
+      identities.push({ kind: 'trusted_directory', dev: info.dev.toString(), ino: info.ino.toString() });
+    }
+    roots = [instanceRoot, ...trusted];
+    // Bind policy changes and root relinks without putting machine paths in plans.
+    policyHash = hash(Buffer.from(JSON.stringify({ mode: extraRoots.length ? 'trusted_roots' : 'instance', roots: identities })));
+  } catch {
+    emit({ status: 'origin_failed', package: '@workbasehq/core', reason });
+    process.exit(1);
+  }
   const resolved = [];
   for (const [packageName, entries] of ${JSON.stringify(packages)}) {
     try {
       for (const entry of [...new Set(entries)].sort()) {
         const entrypoint = packageName + '/' + entry;
-        const path = require.resolve(entrypoint);
-        let directory = dirname(path), manifest;
-        while (true) {
-          const candidate = join(directory, 'package.json');
-          try {
-            if ((await lstat(candidate)).isSymbolicLink()) throw new Error('Unsafe package metadata');
-            const data = await readFile(candidate, { flag: constants.O_RDONLY | constants.O_NOFOLLOW });
-            if (JSON.parse(data.toString()).name === packageName) { manifest = data; break }
-          } catch (error) { if (error.code !== 'ENOENT') throw error }
-          const parent = dirname(directory);
-          if (parent === directory) throw new Error('Package metadata missing');
-          directory = parent;
+        const path = await realpath(require.resolve(entrypoint));
+        if (!roots.some(root => inside(root, path))) {
+          emit({ status: 'origin_failed', package: packageName, reason }); process.exit(1);
         }
-        if (JSON.parse(manifest.toString()).version !== ${JSON.stringify(metadata.version)}) throw new Error('Incompatible package version');
-        resolved.push({ entrypoint, path, manifestHash: hash(manifest), hash: hash(await readFile(path)) });
+        let packageRoot, manifestPath;
+        // Locate the selected installation independently of the canonical entry:
+        // a file symlink must not substitute another package's matching metadata.
+        for (const location of require.resolve.paths(entrypoint) ?? []) {
+          try {
+            packageRoot = await realpath(join(location, packageName));
+            manifestPath = await realpath(join(packageRoot, 'package.json'));
+            break;
+          } catch (error) { if (error.code !== 'ENOENT') throw error }
+        }
+        if (!packageRoot || !manifestPath) throw new Error('Package metadata missing');
+        if (!roots.some(root => inside(root, packageRoot)) || !inside(packageRoot, path) || !inside(packageRoot, manifestPath)) {
+          emit({ status: 'origin_failed', package: packageName, reason }); process.exit(1);
+        }
+        const manifest = await readFile(manifestPath, { flag: constants.O_RDONLY | constants.O_NOFOLLOW });
+        const info = JSON.parse(manifest.toString());
+        if (info.name !== packageName || info.version !== ${JSON.stringify(metadata.version)}) throw new Error('Incompatible package version');
+        const rootIndex = roots.findIndex(root => inside(root, packageRoot));
+        const originHash = hash(Buffer.from(JSON.stringify({ rootIndex, package: relative(roots[rootIndex], packageRoot),
+          entry: relative(packageRoot, path), manifest: relative(packageRoot, manifestPath) })));
+        resolved.push({ entrypoint, path, originHash, manifestHash: hash(manifest), hash: hash(await readFile(path)) });
       }
     } catch {
       emit({ status: 'resolution_failed', package: packageName });
@@ -104,7 +134,7 @@ async function dependencies(root: string, model: RuntimeModel) {
       break;
     }
   }
-  if (!process.exitCode) emit({ status: 'complete', entrypoints: resolved });`
+  if (!process.exitCode) emit({ status: 'complete', policyHash, entrypoints: resolved });`
   try {
     const runtime = process.versions.bun ? ['--no-install'] : ['--import', createRequire(import.meta.url).resolve('tsx')]
     const checked = await execute([process.execPath, ...runtime, '--input-type=module', '--eval', script], root,
@@ -119,23 +149,31 @@ async function dependencies(root: string, model: RuntimeModel) {
     const verified = outcome?.nonce === nonce ? outcome : undefined
     const result: Record<string, string> = {}
     const completed = verified?.status === 'complete' &&
-      Object.keys(verified).sort().join(',') === 'entrypoints,nonce,status' &&
+      Object.keys(verified).sort().join(',') === 'entrypoints,nonce,policyHash,status' &&
+      typeof verified.policyHash === 'string' && /^[a-f0-9]{64}$/.test(verified.policyHash) &&
       Array.isArray(verified.entrypoints) && verified.entrypoints.length === entrypoints.length &&
       verified.entrypoints.every((entry: unknown, index: number) => {
         if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return false
         const resolved = entry as Record<string, unknown>
-        if (Object.keys(resolved).sort().join(',') !== 'entrypoint,hash,manifestHash,path' ||
+        if (Object.keys(resolved).sort().join(',') !== 'entrypoint,hash,manifestHash,originHash,path' ||
           resolved.entrypoint !== entrypoints[index] || typeof resolved.path !== 'string' || !isAbsolute(resolved.path) ||
           typeof resolved.hash !== 'string' || !/^[a-f0-9]{64}$/.test(resolved.hash) ||
+          typeof resolved.originHash !== 'string' || !/^[a-f0-9]{64}$/.test(resolved.originHash) ||
           typeof resolved.manifestHash !== 'string' || !/^[a-f0-9]{64}$/.test(resolved.manifestHash)) return false
         const packageName = packages.find(([name]) => entrypoints[index].startsWith(name + '/'))![0]
         const manifestKey = `${packageName}/package.json`
         if (result[manifestKey] !== undefined && result[manifestKey] !== resolved.manifestHash) return false
         result[manifestKey] = resolved.manifestHash
-        result[entrypoints[index]] = resolved.hash
+        result[entrypoints[index]] = hash({ content: resolved.hash, origin: resolved.originHash })
         return true
       })
     if (checked.rc !== 0 || !completed) {
+      const originPackage = verified?.status === 'origin_failed' && Object.keys(verified).sort().join(',') === 'nonce,package,reason,status'
+        ? packages.find(([name]) => name === verified.package)?.[0] : undefined
+      const originReason = dependencyRoots.length ? 'outside_dependency_roots' : 'outside_instance_root'
+      if (originPackage && verified?.reason === originReason) throw new WorkflowError('dependencies_missing', 'SDK dependency origin is outside the permitted roots', 422,
+        { reason: originReason, package: originPackage,
+          remedy: "Provision physical SDK packages in this instance's node_modules, or have the server operator configure dependencyRoots for trusted workspace packages; retry initialize_instance preview." })
       const packageName = verified?.status === 'resolution_failed' ? packages.find(([name]) => name === verified.package)?.[0] : undefined
       if (packageName) throw new WorkflowError('dependencies_missing', `${packageName}@${metadata.version} must be available from the instance root`, 422,
         { package: packageName, supportedVersion: metadata.version, remedy: `Provision ${packageName}@${metadata.version} in this instance's node_modules, then retry initialize_instance preview. No packages were installed.` })
@@ -146,7 +184,7 @@ async function dependencies(root: string, model: RuntimeModel) {
           ...(entrypoint ? { entrypoint } : {}), ...(missingDependency ? { missingDependency } : {}), supportedVersion: metadata.version,
           remedy: `Provision the complete dependencies of @workbasehq/core@${metadata.version} and @workbasehq/plugins@${metadata.version}, including transitive dependencies, in this instance's node_modules; retry initialize_instance preview. No packages were installed.` })
     }
-    return result
+    return { policy: verified!.policyHash as string, ...result }
   } catch (error) {
     if (error instanceof WorkflowError) throw error
     throw new WorkflowError('dependencies_missing', 'Unable to verify the installed SDK runtime dependency graph', 422,
@@ -181,7 +219,7 @@ export async function initializeInstance(store: Store, instance: string, input: 
     const runtimeSource = before.inputs['runtime.ts']
     if (!runtimeSource) fail('runtime_not_canonical', 'Fresh initialization requires canonical runtime.ts', 422)
     const model = parseRuntimeSource(runtimeSource.toString('utf8'))
-    const dependencyGuards = await dependencies(root, model)
+    const dependencyGuards = await dependencies(root, model, store.dependencyRoots)
     const schema = await plan({ config: loaded.config, sources: loaded.sources, baseMigrations: {} })
     if (!schema.bundle || schema.bundle.filename !== '0001_r1.sql') fail('initialization_unsupported', 'Fresh initialization requires the first domain revision', 422)
     bindSchemaLock(loaded.config, JSON.parse(schema.lock))
@@ -206,7 +244,7 @@ export async function initializeInstance(store: Store, instance: string, input: 
     if (conflicts.length) throw new WorkflowError('initialization_conflict', 'Partial or differing artifacts already exist; preserve and review them before retrying fresh initialization', 409, { conflicts })
     // Also fence installed dependencies throughout the guarded publication.
     const verify = async () => {
-      if (hash(await dependencies(root, model)) !== hash(dependencyGuards)) fail('stale_plan', 'SDK dependencies changed during initialization; preview again', 409)
+      if (hash(await dependencies(root, model, store.dependencyRoots)) !== hash(dependencyGuards)) fail('stale_plan', 'SDK dependencies changed during initialization; preview again', 409)
     }
     await verify()
     if (existing.length === files.length) return { ...report, mode: 'apply', status: 'unchanged' }
@@ -215,6 +253,6 @@ export async function initializeInstance(store: Store, instance: string, input: 
   }
   if (input.mode === 'preview') return run()
   // Fail before creating even lock metadata when the consumer graph is broken.
-  await dependencies(root, parseRuntimeSource((await bytes(root, 'runtime.ts'))?.toString('utf8') ?? ''))
+  await dependencies(root, parseRuntimeSource((await bytes(root, 'runtime.ts'))?.toString('utf8') ?? ''), store.dependencyRoots)
   return store.locked(instance, run)
 }

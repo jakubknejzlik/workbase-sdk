@@ -22,13 +22,24 @@ const digest = (data: string) => createHash('sha256').update(data).digest('hex')
 const artifacts = (root: string) => Promise.all(initializationPaths.map(path => readFile(join(root, path), 'utf8')))
 async function provision(root: string) {
   // Dependencies are supplied by the test harness; the MCP tool never installs them.
-  await symlink(resolve('node_modules'), join(root, 'node_modules'))
+  await isolatedSdk(root)
+  for (const owner of ['core', 'plugins']) {
+    const manifest = JSON.parse(await readFile(resolve('packages', owner, 'package.json'), 'utf8'))
+    for (const name of Object.keys(manifest.dependencies)) {
+      const destination = join(root, 'node_modules', name)
+      await mkdir(dirname(destination), { recursive: true })
+      await symlink(await realpath(resolve('packages', owner, 'node_modules', name)), destination).catch(error => {
+        if (error.code !== 'EEXIST') throw error
+      })
+    }
+  }
 }
-async function stdio(root: string, runtime = 'bun', env?: Record<string, string>) {
+async function stdio(root: string, runtime = 'bun', env?: Record<string, string>, dependencyRoots?: string[]) {
   const client = new Client({ name: 'initialization-contract', version: '1' })
   const transport = new StdioClientTransport({ command: runtime, args: [
     ...(runtime === 'bun' ? ['--no-install'] : ['--import', resolve('packages/mcp/node_modules/tsx/dist/loader.mjs')]),
-    resolve('packages/mcp/src/stdio.ts'), '--root', root,
+    ...(dependencyRoots ? [resolve('packages/mcp/test/fixtures/dependency-roots-server.ts'), root, ...dependencyRoots]
+      : [resolve('packages/mcp/src/stdio.ts'), '--root', root]),
   ], stderr: 'pipe', env: {
     ...(env ? { ...process.env, ...env } as Record<string, string> : {}),
     TMPDIR: tmpdir(),
@@ -75,6 +86,152 @@ async function tree(root: string): Promise<unknown> {
   }
   return entries
 }
+
+// Inert SDK-shaped packages keep origin tests independent of transitive imports.
+// Every entry writes the same marker, including otherwise permitted local core.
+async function originSdk(root: string, marker: string, names = ['core', 'plugins']) {
+  const { version } = JSON.parse(await readFile(resolve('packages/mcp/package.json'), 'utf8'))
+  for (const name of names) {
+    const directory = join(root, 'node_modules/@workbasehq', name)
+    await mkdir(directory, { recursive: true })
+    const entries = name === 'core' ? ['schema', 'kernel/registry']
+      : Object.keys(JSON.parse(await readFile(resolve('packages/plugins/package.json'), 'utf8')).exports).map(entry => entry.slice(2))
+    await writeFile(join(directory, 'package.json'), JSON.stringify({ name: `@workbasehq/${name}`, version, type: 'module',
+      exports: Object.fromEntries(entries.map(entry => [`./${entry}`, './entry.js'])) }))
+    await writeFile(join(directory, 'entry.js'), `import { writeFileSync } from 'node:fs'; writeFileSync(${JSON.stringify(marker)}, 'executed');`)
+  }
+}
+
+const origins = ['ancestor', 'mixed', 'node_modules', 'package', 'file', 'file-in-instance', 'manifest', 'prefix', 'trusted-escape', 'trusted-file']
+it.each(['bun', 'node'].flatMap(runtime => origins.map(origin => [runtime, origin])))
+('rejects %s %s origins in preview and apply before any SDK execution', async (runtime, origin) => {
+  const workspace = await empty(), root = join(workspace, 'instance'), external = join(workspace, 'external')
+  const marker = join(workspace, 'executed'), trusted = join(workspace, 'trusted')
+  await bootstrapInstance(root, bootstrap)
+  await mkdir(trusted)
+  if (origin === 'ancestor' || origin === 'mixed') {
+    await originSdk(workspace, marker)
+    if (origin === 'mixed') await originSdk(root, marker, ['core'])
+  } else if (origin === 'node_modules') {
+    await originSdk(external, marker)
+    await symlink(join(external, 'node_modules'), join(root, 'node_modules'))
+  } else if (origin === 'package' || origin === 'prefix' || origin === 'trusted-escape') {
+    const destination = origin === 'prefix' ? root + '-evil' : external
+    await originSdk(destination, marker)
+    await mkdir(join(root, 'node_modules/@workbasehq'), { recursive: true })
+    for (const name of ['core', 'plugins']) await symlink(join(destination, 'node_modules/@workbasehq', name), join(root, 'node_modules/@workbasehq', name))
+  } else {
+    await originSdk(root, marker)
+    // Matching metadata at the file target must not replace the selected package.
+    const destination = origin === 'file-in-instance' ? join(root, 'other-package') : external
+    await originSdk(destination, marker)
+    const name = origin === 'manifest' ? 'package.json' : 'entry.js'
+    const path = join(root, 'node_modules/@workbasehq/plugins', name)
+    await rm(path)
+    await symlink(join(destination, 'node_modules/@workbasehq/plugins', name), path)
+  }
+  const explicit = origin === 'trusted-escape' || origin === 'trusted-file'
+  const session = await stdio(root, runtime, undefined, explicit ? [origin === 'trusted-file' ? external : trusted] : undefined)
+  try {
+    const before = await tree(root)
+    for (const mode of ['preview', 'apply']) {
+      const result = await session.call('initialize_instance', { instance, mode, ...(mode === 'apply' ? { planHash: '0'.repeat(64) } : {}) })
+      expect(result).toMatchObject({ ok: false, error: { code: 'dependencies_missing', status: 422, details: {
+        reason: explicit ? 'outside_dependency_roots' : 'outside_instance_root',
+        package: ['mixed', 'file', 'file-in-instance', 'manifest', 'trusted-file'].includes(origin) ? '@workbasehq/plugins' : '@workbasehq/core',
+        remedy: expect.stringContaining('dependencyRoots'),
+      } } })
+      expect(Object.keys(result.error.details).sort()).toEqual(['package', 'reason', 'remedy'])
+      expect(JSON.stringify(session.responses).includes(workspace)).toBe(false)
+      await expect(readFile(marker)).rejects.toMatchObject({ code: 'ENOENT' })
+      expect(await tree(root)).toEqual(before)
+    }
+  } finally { await session.close() }
+})
+
+it.each(['bun', 'node'])('accepts explicitly trusted workspace links under %s, then rejects their relink outside the policy at apply', async runtime => {
+  const workspace = await empty(), root = join(workspace, 'instance'), trusted = join(workspace, 'trusted'), external = join(workspace, 'external')
+  const marker = join(workspace, 'executed')
+  await bootstrapInstance(root, bootstrap)
+  await originSdk(trusted, marker)
+  await originSdk(external, marker)
+  await mkdir(join(root, 'node_modules/@workbasehq'), { recursive: true })
+  for (const name of ['core', 'plugins']) await symlink(join(trusted, 'node_modules/@workbasehq', name), join(root, 'node_modules/@workbasehq', name))
+  // The declared root itself can be a link; canonicalize it on every check.
+  const policyRoot = join(workspace, 'policy-root')
+  await symlink(trusted, policyRoot)
+  const session = await stdio(root, runtime, undefined, [policyRoot])
+  try {
+    const first = await session.call('initialize_instance', { instance, mode: 'preview' })
+    expect(first, JSON.stringify(first)).toMatchObject({ ok: true })
+    expect(await session.call('initialize_instance', { instance, mode: 'apply', planHash: first.planHash })).toMatchObject({ ok: true })
+    // Switch the declared root without switching the packages: they are now outside.
+    await rm(marker)
+    await rm(policyRoot); await symlink(external, policyRoot)
+    expect(await session.call('initialize_instance', { instance, mode: 'apply', planHash: first.planHash }))
+      .toMatchObject({ ok: false, error: { code: 'dependencies_missing', status: 422, details: { reason: 'outside_dependency_roots' } } })
+    await expect(readFile(marker)).rejects.toMatchObject({ code: 'ENOENT' })
+    await rm(policyRoot); await symlink(trusted, policyRoot)
+    const link = join(root, 'node_modules/@workbasehq/plugins')
+    await rm(link); await symlink(join(external, 'node_modules/@workbasehq/plugins'), link)
+    expect(await session.call('initialize_instance', { instance, mode: 'apply', planHash: first.planHash }))
+      .toMatchObject({ ok: false, error: { code: 'dependencies_missing', status: 422, details: { reason: 'outside_dependency_roots', package: '@workbasehq/plugins' } } })
+    await expect(readFile(marker)).rejects.toMatchObject({ code: 'ENOENT' })
+  } finally { await session.close() }
+})
+
+it.each(['bun', 'node'].flatMap(runtime => ['inside', 'outside'].map(location => [runtime, location])))
+('rejects physical local dependencies relocated under %s %s the instance between preview and apply', async (runtime, location) => {
+  const workspace = await empty(), root = join(workspace, 'instance')
+  const relocated = join(location === 'inside' ? root : workspace, 'relocated')
+  const marker = join(workspace, 'executed')
+  await bootstrapInstance(root, bootstrap)
+  await originSdk(root, marker)
+  const session = await stdio(root, runtime)
+  try {
+    const first = await session.call('initialize_instance', { instance, mode: 'preview' })
+    expect(first, JSON.stringify(first)).toMatchObject({ ok: true })
+    await cp(join(root, 'node_modules'), relocated, { recursive: true })
+    await rm(join(root, 'node_modules'), { recursive: true }); await symlink(relocated, join(root, 'node_modules'))
+    await rm(marker)
+    expect(await session.call('initialize_instance', { instance, mode: 'apply', planHash: first.planHash }))
+      .toMatchObject({ ok: false, error: location === 'inside' ? { code: 'stale_plan', status: 409 }
+        : { code: 'dependencies_missing', status: 422, details: { reason: 'outside_instance_root' } } })
+    if (location === 'outside') await expect(readFile(marker)).rejects.toMatchObject({ code: 'ENOENT' })
+    for (const path of initializationPaths) await expect(readFile(join(root, path))).rejects.toMatchObject({ code: 'ENOENT' })
+  } finally { await session.close() }
+})
+
+it.each(['bun', 'node'])('binds policy mode and same-count trusted root changes into the %s plan', async runtime => {
+  const root = await empty(), a = await empty(), b = await empty()
+  await bootstrapInstance(root, bootstrap)
+  await originSdk(root, join(root, 'executed'))
+  const hashes: string[] = []
+  for (const dependencyRoots of [undefined, [a], [b]]) {
+    const session = await stdio(root, runtime, undefined, dependencyRoots)
+    try {
+      const preview = await session.call('initialize_instance', { instance, mode: 'preview' })
+      expect(preview, JSON.stringify(preview)).toMatchObject({ ok: true })
+      if (hashes.length) expect(await session.call('initialize_instance', { instance, mode: 'apply', planHash: hashes.at(-1) }))
+        .toMatchObject({ ok: false, error: { code: 'stale_plan', status: 409 } })
+      hashes.push(preview.planHash)
+    } finally { await session.close() }
+  }
+  expect(new Set(hashes).size).toBe(3)
+})
+
+it.each(['bun', 'node'])('uses the selected instance boundary rather than the %s server discovery root', async runtime => {
+  const workspace = await empty(), root = join(workspace, 'instances', instance), marker = join(workspace, 'executed')
+  await bootstrapInstance(root, bootstrap)
+  await originSdk(workspace, marker)
+  const session = await stdio(workspace, runtime, undefined, [])
+  try {
+    for (const mode of ['preview', 'apply']) expect(await session.call('initialize_instance', { instance, mode, ...(mode === 'apply' ? { planHash: '0'.repeat(64) } : {}) }))
+      .toMatchObject({ ok: false, error: { code: 'dependencies_missing', details: { reason: 'outside_instance_root' } } })
+    await expect(readFile(marker)).rejects.toMatchObject({ code: 'ENOENT' })
+  } finally { await session.close() }
+})
+
 it.each(['bun', 'node'])('keeps the entire instance tree identical across first, repeated and initialized %s previews', async runtime => {
   const root = await empty(), session = await stdio(root, runtime)
   try {
@@ -100,7 +257,7 @@ it.each(['bun', 'node'].flatMap(runtime => ['core', 'plugins'].map(packageName =
   await bootstrapInstance(root, bootstrap)
   await mkdir(join(root, 'node_modules/@workbasehq'), { recursive: true })
   for (const name of ['core', 'plugins']) await symlink(resolve('packages', name), join(root, 'node_modules/@workbasehq', name))
-  const session = await stdio(root, runtime)
+  const session = await stdio(root, runtime, undefined, [resolve('packages')])
   try {
     const first = await session.call('initialize_instance', { instance, mode: 'preview' })
     expect(first, JSON.stringify(first)).toMatchObject({ ok: true })
@@ -261,7 +418,9 @@ it.each(['bun', 'node'].flatMap(runtime => ['@workbasehq/core', '@workbasehq/plu
   await bootstrapInstance(root, bootstrap)
   if (packageName === '@workbasehq/plugins') {
     await mkdir(join(root, 'node_modules/@workbasehq'), { recursive: true })
-    await symlink(resolve('packages/core'), join(root, 'node_modules/@workbasehq/core'))
+    await cp(resolve('packages/core'), join(root, 'node_modules/@workbasehq/core'), {
+      recursive: true, filter: path => !['node_modules', 'test'].includes(path.split('/').at(-1)!),
+    })
   }
   const session = await stdio(root, runtime)
   try {
@@ -341,14 +500,17 @@ await app.workflow.call('initialize_instance', {instance:${JSON.stringify(instan
     } finally { await restarted.server.close() }
   } finally { await app.server.close() }
 })
-it.each(['source', 'dependencies'])('rolls back all artifacts when %s change during guarded publication', async change => {
+it.each(['source', 'dependencies', 'origin'])('rolls back all artifacts when %s change during guarded publication', async change => {
   const { root, app, preview, apply } = await fixture()
   try {
     const first = await preview()
     const commit = app.store.commit.bind(app.store)
     app.store.commit = (instance, files, guards, verify) => commit(instance, files, guards, async () => {
       if (change === 'source') await writeFile(join(root, 'config.ts'), await readFile(join(root, 'config.ts'), 'utf8') + '\n// concurrent author\n')
-      else await rm(join(root, 'node_modules'))
+      else {
+        await rm(join(root, 'node_modules'), { recursive: true })
+        if (change === 'origin') await symlink(resolve('node_modules'), join(root, 'node_modules'))
+      }
       await verify?.()
     })
     expect(await apply(first.planHash)).toMatchObject({ ok: false, error: { code: change === 'source' ? 'concurrent_modification' : 'dependencies_missing' } })
