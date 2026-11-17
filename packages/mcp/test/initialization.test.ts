@@ -29,7 +29,11 @@ async function stdio(root: string, runtime = 'bun', env?: Record<string, string>
   const transport = new StdioClientTransport({ command: runtime, args: [
     ...(runtime === 'bun' ? ['--no-install'] : ['--import', resolve('packages/mcp/node_modules/tsx/dist/loader.mjs')]),
     resolve('packages/mcp/src/stdio.ts'), '--root', root,
-  ], stderr: 'pipe', ...(env ? { env: { ...process.env, ...env } as Record<string, string> } : {}) })
+  ], stderr: 'pipe', env: {
+    ...(env ? { ...process.env, ...env } as Record<string, string> : {}),
+    TMPDIR: tmpdir(),
+    ...(process.env.WORKBASE_MCP_STATE_ROOT === undefined ? {} : { WORKBASE_MCP_STATE_ROOT: process.env.WORKBASE_MCP_STATE_ROOT }),
+  } })
   let stderr = ''
   const responses: unknown[] = []
   transport.stderr?.on('data', data => { stderr += data.toString() })
@@ -88,6 +92,31 @@ it.each(['bun', 'node'])('keeps the entire instance tree identical across first,
     const initialized = await tree(root)
     expect(await session.call('initialize_instance', { instance, mode: 'preview' })).toMatchObject({ ok: true })
     expect(await tree(root)).toEqual(initialized)
+  } finally { await session.close() }
+})
+it.each(['bun', 'node'].flatMap(runtime => ['core', 'plugins'].map(packageName => [runtime, packageName])))
+('rejects warm consumer %s resolution after removing the %s link and restores the original plan after relinking', async (runtime, packageName) => {
+  const root = await empty()
+  await bootstrapInstance(root, bootstrap)
+  await mkdir(join(root, 'node_modules/@workbasehq'), { recursive: true })
+  for (const name of ['core', 'plugins']) await symlink(resolve('packages', name), join(root, 'node_modules/@workbasehq', name))
+  const session = await stdio(root, runtime)
+  try {
+    const first = await session.call('initialize_instance', { instance, mode: 'preview' })
+    expect(first, JSON.stringify(first)).toMatchObject({ ok: true })
+    const link = join(root, 'node_modules/@workbasehq', packageName)
+    await rm(link)
+    const removed = await tree(root)
+    for (const mode of ['preview', 'apply']) {
+      expect(await session.call('initialize_instance', { instance, mode, ...(mode === 'apply' ? { planHash: first.planHash } : {}) }))
+        .toMatchObject({ ok: false, error: { code: 'dependencies_missing', status: 422, details: { package: `@workbasehq/${packageName}` } } })
+      expect(await tree(root)).toEqual(removed)
+    }
+    await symlink(resolve('packages', packageName), link)
+    const restored = await session.call('initialize_instance', { instance, mode: 'preview' })
+    // The plan binds the dependency guards; relinking the same bytes must restore it.
+    expect(restored).toMatchObject({ ok: true, planHash: first.planHash, files: first.files })
+    expect(await session.call('initialize_instance', { instance, mode: 'apply', planHash: first.planHash })).toMatchObject({ ok: true, status: 'initialized' })
   } finally { await session.close() }
 })
 it.each(['bun', 'node'])('fails closed without writes for a missing transitive zod dependency under %s', async runtime => {
