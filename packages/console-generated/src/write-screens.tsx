@@ -176,13 +176,17 @@ function EntityMutation(props: Context & { row?: Record<string, any>; controls: 
   const relations = editableManyRelations(model, entity, caps).filter(([name]) => Object.hasOwn(schema.properties, name))
   const initial = useQuery({ queryKey: ['read', model.instance, orgId, caps, entity, row?.id, 'form-memberships', generation], enabled: !!row && !!relations.length, queryFn: async () => Object.fromEntries(await Promise.all(relations.map(async ([name, relation]) => [name, row ? [...new Set((await memberships(model, relation, row.id, request)).map(item => item[relation.through!.field]))] : []]))) })
   const [membershipSeed, setMembershipSeed] = useState<{ generation: number; values: Record<string, any> }>()
-  if (initial.isSuccess && membershipSeed?.generation !== generation) setMembershipSeed({ generation, values: initial.data })
-  const membershipValues = membershipSeed?.generation === generation ? membershipSeed.values : initial.data
-  const waitingForSeed = needsEditRead && !editingRow || !!row && !!relations.length && !membershipValues
+  // Preserve each initialized relation's baseline across refreshes, while newly
+  // authorized names must get their own successful read before they can be edited.
+  const seededMemberships = membershipSeed?.generation === generation ? membershipSeed.values : {}
+  const newMemberships = initial.isSuccess ? Object.fromEntries(relations.filter(([name]) => !Object.hasOwn(seededMemberships, name) && Object.hasOwn(initial.data, name)).map(([name]) => [name, initial.data[name]])) : {}
+  const membershipValues = { ...seededMemberships, ...newMemberships }
+  if (Object.keys(newMemberships).length) setMembershipSeed({ generation, values: membershipValues })
+  const waitingForSeed = needsEditRead && !editingRow || !!row && relations.some(([name]) => !Object.hasOwn(membershipValues, name))
   const [formInitialized, setFormInitialized] = useState(false)
   if (!formInitialized && !waitingForSeed) setFormInitialized(true)
   const readFailed = needsEditRead && (!!editRecord.error || editRecord.isSuccess && !editRecord.data.data.length) || !!relations.length && !!initial.error
-  const readBlocked = readPending || needsEditRead && editRecord.isFetching || !!row && !!relations.length && initial.isFetching || readFailed
+  const readBlocked = readPending || waitingForSeed || needsEditRead && editRecord.isFetching || !!row && !!relations.length && initial.isFetching || readFailed
   useEffect(() => { if (readFailed) controls.close() }, [readFailed])
   const saved = useRef<{ row?: Record<string, any>; fields?: string }>({ row })
   const accessVersion = useRef(false)
@@ -267,7 +271,10 @@ function EntityMutation(props: Context & { row?: Record<string, any>; controls: 
       return mutation.mutateAsync(data)
     }} relation={(name, value, change, error) => {
       const relation = relations.find(([key]) => key === name)?.[1]
-      if (relation?.through) return <ManyRelationField {...props} name={name} target={relation.through.entity} value={value || JSON.stringify(membershipValues?.[name] ?? [])} onChange={change} error={error} />
+      if (relation?.through) {
+        if (row && !Object.hasOwn(membershipValues, name)) return <p role="status">{t('loading')}</p>
+        return <ManyRelationField {...props} name={name} target={relation.through.entity} value={value || JSON.stringify(row ? membershipValues[name] : [])} onChange={change} error={error} />
+      }
       const field = model.entities[entity].fields[name]
       if (field?.type !== 'ref' || !field.entity) return undefined
       return <RelationPicker {...props} allowCreate={inline ? false : undefined} label={inline?.label} target={field.entity} field={name} value={value} selectedRow={selectedReferenceRow(model, entity, name, current)} onChange={change} error={error} />

@@ -41,6 +41,12 @@ function fixture(revision = 1, layout: Layout = 'simple') {
       next.model.entities[entity] = { displayField: entity === 'tags' ? 'name' : undefined, fields, columns: Object.keys(fields), relations: {}, routes: {} } as unknown as typeof entry
       next.capabilities.entities[entity] = { operations: ['read'], readable: Object.keys(fields), writable: [] }
     }
+    // Both definitions exist before the refresh; only category command grants change.
+    entry.relations.categories = { entity: 'entry_categories', field: 'entry_id', cardinality: '1:n', through: { entity: 'categories', field: 'category_id', createCommand: 'entry_categories/create', deleteCommand: 'entry_categories/delete' } }
+    next.model.entities.categories = { ...next.model.entities.tags }
+    next.model.entities.entry_categories = { ...next.model.entities.entry_tags, fields: { id: { type: 'string' }, entry_id: { type: 'ref', entity: 'entries' }, category_id: { type: 'ref', entity: 'categories' } } } as unknown as typeof entry
+    next.capabilities.entities.categories = { operations: ['read'], readable: ['id', 'name'], writable: [] }
+    next.capabilities.entities.entry_categories = { operations: ['read'], readable: ['id', 'entry_id', 'category_id'], writable: [] }
     next.capabilities.commands = ['entry_tags/create', 'entry_tags/delete']
   }
   return next
@@ -65,18 +71,19 @@ async function setup(id?: string, layout: Layout = 'simple') {
     if (path.endsWith('/console-model')) return Response.json(status === 200 ? next : { error: 'permission_denied' }, { status })
     if (path === '/query') {
       const query = JSON.parse(init!.body as string)
-      const kind = query.entity === 'entry_tags' ? 'membership' : ['entries', 'other'].includes(query.entity) && layout === 'grouped' && query.select.includes('note') ? 'edit' : ['entries', 'other'].includes(query.entity) ? 'detail' : 'picker'
+      const kind = query.entity === 'entry_categories' ? 'category-membership' : query.entity === 'entry_tags' ? 'membership' : ['entries', 'other'].includes(query.entity) && layout === 'grouped' && query.select.includes('note') ? 'edit' : ['entries', 'other'].includes(query.entity) ? 'detail' : 'picker'
       await (gates.get(kind) ?? gates.get('all'))?.promise
       const code = queryStatus.get(kind) ?? (kind === 'detail' ? detailStatus : 200)
       if (code !== 200) return Response.json({ error: 'permission_denied' }, { status: code })
-      const data = kind === 'membership' ? [{ id: 'join', entry_id: row.id, tag_id: 'tag' }] : kind === 'picker' ? [{ id: 'tag', name: 'Tag' }] : missing ? [] : [row]
+      const data = kind === 'category-membership' ? [{ id: 'category-join', entry_id: row.id, category_id: 'category' }] : query.entity === 'categories' ? [{ id: 'category', name: 'Category' }, { id: 'other-category', name: 'Other category' }] : kind === 'membership' ? [{ id: 'join', entry_id: row.id, tag_id: 'tag' }] : kind === 'picker' ? [{ id: 'tag', name: 'Tag' }] : missing ? [] : [row]
       return Response.json({ data, next_cursor: null })
     }
+    if (path.startsWith('/commands/')) return Response.json({ id: 'created-join' })
     if (path.startsWith('/api/')) return Response.json(writeStatus === 200 ? { ...row, ...JSON.parse(init!.body as string) } : { error: 'version_conflict' }, { status: writeStatus })
     throw new Error(`Unexpected path ${path}`)
   }); vi.stubGlobal('fetch', fetcher)
   const refreshBuild = vi.spyOn(buildReload, 'refresh').mockImplementation(coordinator.refresh)
-  const i18n = i18next.createInstance(); await i18n.use(initReactI18next).init({ lng: 'en', resources: { en: { translation: { ...en, field_name: 'Name', field_note: 'Note', relation_tags: 'Tags', entity_entries: 'Entries', entitySingular_entries: 'Entry' } } } })
+  const i18n = i18next.createInstance(); await i18n.use(initReactI18next).init({ lng: 'en', resources: { en: { translation: { ...en, field_name: 'Name', field_note: 'Note', relation_tags: 'Tags', relation_categories: 'Categories', entity_entries: 'Entries', entitySingular_entries: 'Entry' } } } })
   const tree = (route: { orgId: string; entity: string; id?: string }) => <I18nextProvider i18n={i18n}><QueryClientProvider client={client}><ReadPage {...route} /></QueryClientProvider></I18nextProvider>
   const view = render(tree({ orgId: 'org', entity: 'entries', id }))
   const cleanup = () => { gates.forEach(gate => gate.release()); view.unmount(); client.clear() }; dispose.push(cleanup)
@@ -290,4 +297,70 @@ it('newly granted memberships do not replace an already initialized edit form wi
   await act(async () => test.releaseQueries('membership'))
   await waitFor(() => expect(within(test.dialog).getByRole('button', { name: 'Save' })).toHaveProperty('disabled', false)); expectDraft(test)
   await screen.findByRole('button', { name: 'Remove Tag' })
+})
+
+function categoryGrant(revision = 2) {
+  const next = fixture(revision, 'membership')
+  next.capabilities.commands.push('entry_categories/create', 'entry_categories/delete')
+  return next
+}
+const commands = (test: Awaited<ReturnType<typeof setup>>) => test.fetcher.mock.calls.filter(([path]) => path.startsWith('/commands/')).map(([path, init]) => ({ path, body: JSON.parse(init!.body as string) }))
+
+it('a newly granted second membership seeds existing members without replacing the dirty scalar draft', async () => {
+  const test = await setup('one', 'membership')
+  await screen.findByRole('button', { name: 'Remove Tag' })
+  await refresh(test, categoryGrant())
+  await screen.findByRole('button', { name: 'Remove Category' })
+  expectDraft(test)
+  const query = test.client.getQueryCache().findAll().find(query => query.queryKey.includes('form-memberships') && query.state.data && Object.hasOwn(query.state.data, 'categories'))!
+  expect(query.state.data).toEqual({ tags: ['tag'], categories: ['category'] })
+})
+it('adding a newly granted category creates only the addition and retains existing memberships', async () => {
+  const test = await setup('one', 'membership')
+  await screen.findByRole('button', { name: 'Remove Tag' })
+  await refresh(test, categoryGrant())
+  await waitFor(() => expect(within(test.dialog).getByRole('button', { name: 'Save' })).toHaveProperty('disabled', false))
+  fireEvent.focus(screen.getByRole('combobox', { name: 'Categories' }))
+  fireEvent.click(await screen.findByRole('option', { name: 'Other category' }))
+  expectDraft(test)
+  fireEvent.click(within(test.dialog).getByRole('button', { name: 'Save' }))
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+  expect(commands(test)).toEqual([{ path: '/commands/entry_categories/create', body: { entry_id: 'one', category_id: 'other-category' } }])
+  expect(JSON.parse(writes(test)[0][1]!.body as string)).toEqual({ name: 'Grace', version: 1 })
+})
+it('a dirty existing membership selection survives revision refresh', async () => {
+  const test = await setup('one', 'membership')
+  fireEvent.click(await screen.findByRole('button', { name: 'Remove Tag' }))
+  await refresh(test, fixture(2, 'membership'))
+  await waitFor(() => expect(within(test.dialog).getByRole('button', { name: 'Save' })).toHaveProperty('disabled', false))
+  expect(screen.queryByRole('button', { name: 'Remove Tag' })).toBeNull()
+  expectDraft(test)
+  fireEvent.click(within(test.dialog).getByRole('button', { name: 'Save' }))
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+  expect(commands(test)).toEqual([{ path: '/commands/entry_tags/delete', body: { id: 'join' } }])
+})
+it('a pending newly granted relation cannot submit or imply an empty selection', async () => {
+  const test = await setup('one', 'membership')
+  test.holdQueries('category-membership')
+  await refresh(test, categoryGrant())
+  await waitFor(() => expect(test.client.isFetching({ predicate: query => query.queryKey.includes('form-memberships') })).toBe(1))
+  expectDraft(test)
+  expect(within(test.dialog).getByRole('button', { name: 'Save' })).toHaveProperty('disabled', true)
+  expect(screen.queryByRole('combobox', { name: 'Categories' })).toBeNull()
+  await act(async () => { fireEvent.submit(test.form) })
+  expect(writes(test)).toHaveLength(0); expect(commands(test)).toHaveLength(0)
+  await act(async () => test.releaseQueries('category-membership'))
+  await screen.findByRole('button', { name: 'Remove Category' })
+  await waitFor(() => expect(within(test.dialog).getByRole('button', { name: 'Save' })).toHaveProperty('disabled', false))
+  expectDraft(test)
+})
+it.each([403, 500])('a failed newly granted membership read (%s) fails closed', async status => {
+  const test = await setup('one', 'membership')
+  test.holdQueries('category-membership'); test.queryStatus('category-membership', status)
+  await refresh(test, categoryGrant())
+  await act(async () => { fireEvent.submit(test.form) })
+  expect(writes(test)).toHaveLength(0); expect(commands(test)).toHaveLength(0)
+  await act(async () => test.releaseQueries('category-membership'))
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+  expect(writes(test)).toHaveLength(0); expect(commands(test)).toHaveLength(0)
 })
