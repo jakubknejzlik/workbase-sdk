@@ -14,9 +14,9 @@ Only generic EN/CS interface copy and shared role labels ship in the assets.
 
 Organization routes load public `/console-info` (instance ID, display name, roles
 and default language), `/me`, `/build.json` and `/o/:org/console-model` in parallel
-with the profile gate. The browser no longer requests the broad `/schema`,
-`/bootstrap` or standalone `/console-registry` documents. Public branding contains
-no field definitions, enum values, defaults, domain hints or records.
+with the profile gate. The browser does not request the broad `/schema` document.
+Public branding contains no field definitions, enum values, defaults, domain hints
+or records.
 
 The organization model is held only in the session QueryClient. Focus, a 30-second
 refresh, capability changes and refused writes refresh it. Changed authority

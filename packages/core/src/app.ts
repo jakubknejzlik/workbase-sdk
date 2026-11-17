@@ -1,5 +1,4 @@
 import { eventDeliveryContext } from './event-delivery'
-import { bootstrapRoutes } from './bootstrap'
 import { capabilityRoutes } from './capabilities'
 import { consoleModelRoutes } from './console-model'
 import { queryRoutes } from './query/routes'
@@ -109,7 +108,6 @@ function buildApp(input: InstanceInput, env: RuntimeEnv, options: RuntimeOptions
   workflowRoutes(app, config, env, options.workflows ?? new Map())
   kernel.mount(app, env)
   options.extend?.(app, config, env)
-  bootstrapRoutes(app, kernel, env, options)
   capabilityRoutes(app, kernel, env)
   consoleModelRoutes(app, kernel, env)
   queryRoutes(app, kernel, env)

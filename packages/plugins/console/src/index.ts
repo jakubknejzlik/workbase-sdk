@@ -131,9 +131,6 @@ export function consoleUI(options: { history?: readonly ConfigVersion[] } = {}):
           'Cache-Control': 'private, no-store', Vary: 'Cookie, Authorization, X-Organization-Id',
         })
       })
-      app.get('/o/:org/console-registry', scopeMiddleware(env, config, kernelFor(config)), c => c.json(consoleRegistry(config, c.get('scope')), 200, {
-        'Cache-Control': 'private, no-store', Vary: 'Cookie, Authorization, X-Organization-Id',
-      }))
     },
   })
 }
