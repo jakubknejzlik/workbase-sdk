@@ -1,4 +1,5 @@
 import { constants } from 'node:fs'
+import { randomUUID } from 'node:crypto'
 import { createRequire } from 'node:module'
 import { readFile, readdir } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
@@ -75,26 +76,54 @@ async function dependencies(root: string, model: RuntimeModel) {
         { package: packageName, supportedVersion: metadata.version, remedy: `Provision ${packageName}@${metadata.version} in this instance's node_modules, then retry initialize_instance preview. No packages were installed.` })
     }
   }
-  const script = `for (const [entrypoint, url] of Object.entries(${JSON.stringify(imports)})) {
+  const nonce = randomUUID()
+  // Only this closed vocabulary can cross the process boundary. A dependency
+  // can put arbitrary data (including credentials) in its exception or output.
+  const dependencyNames = ['zod', 'hono', 'typescript', '@jakub.knejzlik/ts-query', 'better-auth'] as const
+  const script = `const write = process.stdout.write.bind(process.stdout);
+  const emit = result => write(JSON.stringify({ nonce: ${JSON.stringify(nonce)}, ...result }));
+  const names = ${JSON.stringify(dependencyNames)};
+  for (const [entrypoint, url] of Object.entries(${JSON.stringify(imports)})) {
     try { await import(url) }
-    catch (error) { console.log(JSON.stringify({ entrypoint, diagnostic: String(error) })); process.exit(1) }
-  }`
+    catch (error) {
+      let missingDependency;
+      if (error?.code === 'ERR_MODULE_NOT_FOUND' || error?.code === 'MODULE_NOT_FOUND') {
+        const match = typeof error.message === 'string' && /^(?:Cannot find (?:package|module)|Cannot resolve (?:package|module)) ['"]([^'"]+)['"]/.exec(error.message);
+        missingDependency = names.find(name => name === match?.[1]);
+      }
+      emit({ status: 'import_failed', entrypoint, ...(missingDependency ? { missingDependency } : {}) });
+      process.exitCode = 1;
+      break;
+    }
+  }
+  if (!process.exitCode) emit({ status: 'complete', entrypoints: ${JSON.stringify(Object.keys(imports))} });`
   try {
     const runtime = process.versions.bun ? ['--no-install'] : ['--import', createRequire(import.meta.url).resolve('tsx')]
     const checked = await execute([process.execPath, ...runtime, '--input-type=module', '--eval', script], root,
-      { timeoutMs: 30000, maxOutputBytes: 65536, env: { ...process.env, TSX_DISABLE_CACHE: '1' } })
-    if (checked.rc !== 0) {
-      let diagnostic: Record<string, unknown>
-      try { diagnostic = JSON.parse(checked.stdout) }
-      catch { diagnostic = { diagnostic: checked.timedOut ? 'Dependency import timed out' : checked.stderr.slice(0, 4000) } }
+      { timeoutMs: 30000, maxOutputBytes: 65536, env: { ...process.env, TSX_DISABLE_CACHE: '1' }, onStderr: () => {} })
+    // Treat stdout as untrusted, including syntactically valid JSON. Never
+    // spread it into a response, and require proof that every import finished.
+    let outcome: Record<string, unknown> | undefined
+    try {
+      const parsed: unknown = JSON.parse(checked.stdout)
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) outcome = parsed as Record<string, unknown>
+    } catch { /* missing/malformed result fails closed */ }
+    const verified = outcome?.nonce === nonce ? outcome : undefined
+    const completed = verified?.status === 'complete' &&
+      JSON.stringify(verified.entrypoints) === JSON.stringify(Object.keys(imports)) &&
+      Object.keys(verified).sort().join(',') === 'entrypoints,nonce,status'
+    if (checked.rc !== 0 || !completed) {
+      const entrypoint = verified?.status === 'import_failed' ? Object.keys(imports).find(name => name === verified.entrypoint) : undefined
+      const missingDependency = entrypoint ? dependencyNames.find(name => name === verified?.missingDependency) : undefined
       throw new WorkflowError('dependencies_missing', 'The installed SDK runtime dependency graph cannot be imported', 422,
-        { ...diagnostic, supportedVersion: metadata.version,
-          remedy: `Provision the complete dependencies of @workbasehq/core@${metadata.version} and @workbasehq/plugins@${metadata.version}, including transitive packages named in the diagnostic, in this instance's node_modules; retry initialize_instance preview. No packages were installed.` })
+        { reason: checked.timedOut ? 'preflight_timeout' : entrypoint ? 'import_failed' : 'preflight_incomplete',
+          ...(entrypoint ? { entrypoint } : {}), ...(missingDependency ? { missingDependency } : {}), supportedVersion: metadata.version,
+          remedy: `Provision the complete dependencies of @workbasehq/core@${metadata.version} and @workbasehq/plugins@${metadata.version}, including transitive dependencies, in this instance's node_modules; retry initialize_instance preview. No packages were installed.` })
     }
   } catch (error) {
     if (error instanceof WorkflowError) throw error
     throw new WorkflowError('dependencies_missing', 'Unable to verify the installed SDK runtime dependency graph', 422,
-      { diagnostic: String(error), remedy: 'Ensure the local runtime and the complete SDK dependencies are available, then retry initialize_instance preview. No packages were installed.' })
+      { reason: 'preflight_failed', remedy: 'Ensure the local runtime and the complete SDK dependencies are available, then retry initialize_instance preview. No packages were installed.' })
   }
   return result
 }

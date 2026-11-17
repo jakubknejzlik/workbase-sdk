@@ -1,7 +1,7 @@
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { cp, lstat, mkdir, mkdtemp, readFile, readdir, readlink, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { afterEach, expect, it } from 'vitest'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
@@ -24,21 +24,31 @@ async function provision(root: string) {
   // Dependencies are supplied by the test harness; the MCP tool never installs them.
   await symlink(resolve('node_modules'), join(root, 'node_modules'))
 }
-async function stdio(root: string, runtime = 'bun') {
+async function stdio(root: string, runtime = 'bun', env?: Record<string, string>) {
   const client = new Client({ name: 'initialization-contract', version: '1' })
   const transport = new StdioClientTransport({ command: runtime, args: [
     ...(runtime === 'bun' ? ['--no-install'] : ['--import', resolve('packages/mcp/node_modules/tsx/dist/loader.mjs')]),
     resolve('packages/mcp/src/stdio.ts'), '--root', root,
-  ], stderr: 'pipe' })
+  ], stderr: 'pipe', ...(env ? { env: { ...process.env, ...env } as Record<string, string> } : {}) })
   let stderr = ''
+  const responses: unknown[] = []
   transport.stderr?.on('data', data => { stderr += data.toString() })
   await client.connect(transport)
-  return { client, call: async (name: string, args: Record<string, unknown>) => {
+  return { client, responses, stderr: () => stderr, call: async (name: string, args: Record<string, unknown>) => {
     const response = await client.callTool({ name, arguments: args }, undefined, { timeout: 120000 })
+    responses.push(response)
     const result = response.structuredContent as any
-    expect(result, stderr).toBeDefined()
+    expect(result, env ? undefined : stderr).toBeDefined()
     return result
   }, close: async () => { await client.close(); await transport.close() } }
+}
+async function isolatedSdk(root: string) {
+  // Consumer sources have no producer node_modules fallback (review2 fixture).
+  for (const name of ['core', 'plugins']) {
+    await cp(resolve('packages', name), join(root, 'node_modules/@workbasehq', name), {
+      recursive: true, filter: path => !['node_modules', 'test', 'ui'].includes(path.split('/').at(-1)!),
+    })
+  }
 }
 async function fixture() {
   const root = await empty()
@@ -83,21 +93,60 @@ it.each(['bun', 'node'])('keeps the entire instance tree identical across first,
 it.each(['bun', 'node'])('fails closed without writes for a missing transitive zod dependency under %s', async runtime => {
   const root = await empty()
   await bootstrapInstance(root, bootstrap)
-  // Reuse review1's isolated consumer: SDK sources copied without their own
-  // node_modules, so they cannot fall back to the producer's installed zod.
-  for (const name of ['core', 'plugins']) {
-    await cp(resolve('packages', name), join(root, 'node_modules/@workbasehq', name), {
-      recursive: true, filter: path => !['node_modules', 'test', 'ui'].includes(path.split('/').at(-1)!),
-    })
-  }
+  await isolatedSdk(root)
   const session = await stdio(root, runtime)
   try {
     const before = await tree(root)
     for (const mode of ['preview', 'apply']) {
       const result = await session.call('initialize_instance', { instance, mode, ...(mode === 'apply' ? { planHash: '0'.repeat(64) } : {}) })
       expect(result).toMatchObject({ ok: false, error: { code: 'dependencies_missing', status: 422, details: {
-        entrypoint: '@workbasehq/core/kernel/registry', diagnostic: expect.stringContaining('zod'), remedy: expect.stringContaining('transitive'),
+        reason: 'import_failed', entrypoint: '@workbasehq/core/kernel/registry', missingDependency: 'zod', remedy: expect.stringContaining('transitive'),
       } } })
+      expect(await tree(root)).toEqual(before)
+    }
+  } finally { await session.close() }
+})
+it.each(['bun', 'node'].flatMap(runtime => ['early-exit', 'throw-secret', 'stderr-secret', 'forged-result', 'forged-missing', 'overflow'].map(failure => [runtime, failure])))
+('fails closed without writes or secret output under %s with %s', async (runtime, failure) => {
+  const root = await empty()
+  await bootstrapInstance(root, bootstrap)
+  await isolatedSdk(root)
+  // A real SDK transitive import exits before the rest of the graph runs.
+  // Supply the rest of the graph so missing modules cannot mask this fixture.
+  for (const [owner, name] of [['core', 'hono'], ['core', 'typescript'], ['core', '@jakub.knejzlik/ts-query'], ['plugins', 'better-auth']]) {
+    const destination = join(root, 'node_modules', name)
+    await mkdir(dirname(destination), { recursive: true })
+    await symlink(await realpath(resolve('packages', owner, 'node_modules', name)), destination)
+  }
+  const zod = join(root, 'node_modules/zod')
+  await mkdir(zod, { recursive: true })
+  await writeFile(join(zod, 'package.json'), JSON.stringify({ name: 'zod', type: 'module', exports: './index.js' }))
+  const source: Record<string, string> = {
+    'early-exit': 'process.exit(0)',
+    'throw-secret': 'throw new Error(process.env.WB_PREFLIGHT_TEST_SECRET)',
+    'stderr-secret': 'console.error(process.env.WB_PREFLIGHT_TEST_SECRET); process.exit(1)',
+    'forged-result': `console.log(JSON.stringify({ status: 'complete', diagnostic: process.env.WB_PREFLIGHT_TEST_SECRET })); process.exit(0)`,
+    'forged-missing': `throw Object.assign(new Error("Cannot find package '" + process.env.WB_PREFLIGHT_TEST_SECRET + "' imported from fixture"), { code: 'ERR_MODULE_NOT_FOUND' })`,
+    'overflow': `await new Promise(resolve => process.stdout.write(process.env.WB_PREFLIGHT_TEST_SECRET.repeat(70000), resolve)); process.exit(1)`,
+  }
+  await writeFile(join(zod, 'index.js'), `export const z = {}; export class ZodError extends Error {}\n${source[failure]};\n`)
+  const secret = 'wb166f2-synthetic-secret-' + randomUUID()
+  const session = await stdio(root, runtime, { WB_PREFLIGHT_TEST_SECRET: secret })
+  try {
+    const before = await tree(root)
+    for (const mode of ['preview', 'apply']) {
+      const result = await session.call('initialize_instance', { instance, mode, ...(mode === 'apply' ? { planHash: '0'.repeat(64) } : {}) })
+      // Check the entire MCP envelope (text content as well as structuredContent).
+      // Boolean assertions keep the synthetic secret out of failure logs too.
+      expect(JSON.stringify(session.responses).includes(secret)).toBe(false)
+      expect(session.stderr().includes(secret)).toBe(false)
+      expect(result).toMatchObject({ ok: false, error: { code: 'dependencies_missing', status: 422, details: {
+        reason: failure === 'throw-secret' || failure === 'forged-missing' ? 'import_failed' : failure === 'overflow' ? 'preflight_failed' : 'preflight_incomplete',
+      } } })
+      const details = result.error.details
+      expect(Object.keys(details).sort()).toEqual(failure === 'throw-secret' || failure === 'forged-missing'
+        ? ['entrypoint', 'reason', 'remedy', 'supportedVersion']
+        : failure === 'overflow' ? ['reason', 'remedy'] : ['reason', 'remedy', 'supportedVersion'])
       expect(await tree(root)).toEqual(before)
     }
   } finally { await session.close() }
@@ -175,14 +224,14 @@ it.each(['config.ts', 'schema/worker.ts', 'access.ts', 'runtime.ts', 'package.js
     expect(await readdir(join(root, 'migrations'))).toEqual(['.gitkeep'])
   } finally { await app.server.close() }
 })
-it.each(['@workbasehq/core', '@workbasehq/plugins'])('returns actionable missing %s diagnostics after restarting an incomplete scaffold', async packageName => {
+it.each(['bun', 'node'].flatMap(runtime => ['@workbasehq/core', '@workbasehq/plugins'].map(packageName => [runtime, packageName])))('returns actionable missing diagnostics under %s for %s after restarting an incomplete scaffold', async (runtime, packageName) => {
   const root = await empty()
   await bootstrapInstance(root, bootstrap)
   if (packageName === '@workbasehq/plugins') {
     await mkdir(join(root, 'node_modules/@workbasehq'), { recursive: true })
     await symlink(resolve('packages/core'), join(root, 'node_modules/@workbasehq/core'))
   }
-  const session = await stdio(root)
+  const session = await stdio(root, runtime)
   try {
     const before = await tree(root)
     for (const mode of ['preview', 'apply']) {
