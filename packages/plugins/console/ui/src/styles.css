@@ -1,0 +1,18 @@
+/* Public V3 host styles; served as an external asset under the Worker CSP. */
+.wb-console { color: #18212f; background: #fff; font: 1rem/1.5 system-ui, sans-serif; padding: 1rem; max-width: 80rem; margin: auto; overflow-wrap: anywhere; }
+.wb-console *, .wb-shell * { box-sizing: border-box; min-width: 0; }
+.wb-console input, .wb-console select, .wb-console textarea { font: inherit; max-width: 100%; padding: .5rem; border: 1px solid #667085; border-radius: .25rem; }
+.wb-console button { font: inherit; padding: .5rem .75rem; margin: .25rem; cursor: pointer; }
+.wb-console label { display: block; margin-top: .5rem; }
+.wb-console a { color: #1849a9; }
+.wb-console :focus-visible { outline: 3px solid #1849a9; outline-offset: 2px; }
+.wb-console [role="alert"] { color: #a01818; }
+.wb-shell { max-width: 100%; min-width: 0; overflow-wrap: anywhere; }
+.wb-shell input, .wb-shell select { max-width: 100%; }
+.wb-shell nav a { display: block; padding: .6rem; }
+.wb-menu { display: none; }
+@media (max-width: 500px) {
+  .wb-console { padding: .5rem; }
+  .wb-menu { display: block; }
+  .wb-shell nav[data-open="false"] { display: none; }
+}

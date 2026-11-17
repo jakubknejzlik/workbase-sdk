@@ -49,6 +49,7 @@ bun run openapi:write
 bun run access:lock --write
 bun run check
 bun run typecheck
+bun run build:console
 ```
 
 Commit `schema.lock.json`, `migrations/0001_r1.sql`, `access.lock.json`,
@@ -60,19 +61,24 @@ also accept `--base <git-ref>` to check migration linkage.
 flag above is accepted too. `check` runs schema, access, OpenAPI and UI validation.
 UI generation runs before typecheck. The shipped `.gitignore` uses `.workbase-ui*`
 to ignore both the `.workbase-ui` symlink and its `.workbase-ui.generation-*/`
-sibling directories; `dist/` and `.sst/` are also ignored. Existing Instances must
-replace `.workbase-ui/` with `.workbase-ui*` before generating or staging files.
-The console is prebuilt in `@workbasehq/plugins`; no Instance console build or
-`WORKBASE_BUILD_SHA` is needed. UI authoring sources remain available for validation
-and typecheck; the served SDK console uses its own layout, CSS, cs/en translations
-and magic-link sign-in rather than bundling the Instance's `ui/*` pages.
+sibling directories; `dist/` and `.sst/` are also ignored.
+`build:console` validates UI sources and builds the Instance's routes, browser
+components and dictionaries into `dist/console`, using public SDK renderer,
+auth and CSS exports. This per-Instance delivery follows ADR 0008 and supersedes
+the shared prebuilt scaffold delivery from SDK #45. It needs no private workspace.
+The generated `build-meta.json` identifies the emitted bundle, independently of
+git, `WORKBASE_BUILD_SHA` and schema revision. Page and dictionary edits change
+that SHA; `/build.json` reports the same metadata. Shared auth/CRUD dirty-state
+tracking defers same-revision SHA reloads until drafts are safe to release.
+V3 boot uses bundled metadata and makes no console-model, console-info,
+bootstrap or schema request.
 
 ## Run and deploy
 
 `bun run dev` (or `bun run dev:worker`) starts the local Worker at
-`http://127.0.0.1:9290`. Wrangler serves the prebuilt SDK console directly from
-`node_modules/@workbasehq/plugins/console/assets` with the API on the same origin.
-No Vite server or console build is needed. Unauthenticated `/me` returns JSON 401.
+`http://127.0.0.1:9290`. Wrangler checks and rebuilds `dist/console` through its custom build command,
+then serves it with the API on the same origin. After editing UI sources, restart
+Wrangler or run `bun run build:console` to rebuild the browser assets. Unauthenticated `/me` returns JSON 401.
 A fresh, unconfigured magic-link sign-in returns 503; the template supplies no
 complete local database/auth bootstrap flow. Use a configured deployed origin
 for end-to-end login acceptance.
@@ -83,8 +89,8 @@ There are no seeded accounts. Configure credentials privately from the env examp
 For deployment copy `deploy.env.example` to `.env`, configure the environment,
 then run `bun x --no-install sst install` to fetch providers and generate SST types. This step needs
 network access. `bun run deploy --stage <stage>` checks, then runs SST.
-The SST config passes `assetsDir: consoleAssetsDir()` from
-`@workbasehq/plugins/console/assets` to `provision()`, which sets
+The SST config rebuilds the console before provisioning, including direct
+`sst deploy` invocations. It passes `assetsDir: './dist/console'` to `provision()`, which sets
 `htmlHandling: 'none'`, `notFoundHandling: 'none'` and `runWorkerFirst: true`.
 The Worker handles SPA fallback and auth/API routes on the same origin.
 SDK `provision()` applies SDK → plugin → Instance migrations before upload.

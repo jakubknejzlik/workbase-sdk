@@ -33,3 +33,13 @@ test('late metadata from a stopped watcher cannot reload', async () => {
   f.fetch.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
   const watch = watchBuild(f.options); watch.stop(); finish(Response.json({ sha: server })); await settled(); expect(f.reload).not.toHaveBeenCalled()
 })
+
+test('the running document supplies its bundle identity without another boot request', async () => {
+  const querySelector = vi.fn(() => ({ getAttribute: () => bundle }))
+  vi.stubGlobal('document', { querySelector })
+  try {
+    vi.resetModules()
+    expect((await import('../src/build-reload')).buildSHA).toBe(bundle)
+    expect(querySelector).toHaveBeenCalledWith('meta[name="workbase-build-sha"]')
+  } finally { vi.unstubAllGlobals(); vi.resetModules() }
+})

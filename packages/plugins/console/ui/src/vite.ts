@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { statSync, existsSync, readFileSync } from 'node:fs'
 import { mergeCatalogs, type Catalogs } from './catalogs'
 import { writeFile, mkdir, rm, rename, symlink, readlink } from 'node:fs/promises'
@@ -149,16 +149,35 @@ export function assertCleanDeploy(root: string): void {
 export interface UIOptions { directory?: string }
 export type UIPlugin = Plugin & { idle(): Promise<void>; generation?: Generation; error?: Error }
 export function consoleUI(options: UIOptions = {}): UIPlugin {
-  let sha: string | undefined
+  const marker = 'WORKBASE_BUNDLE_SHA_' + 'X'.repeat(21)
+  let production = false
   let root: string, output: string, server: ViteDevServer | undefined
   let requested = 0, completed = 0, running: Promise<void> | undefined, closed = false
   const plugin: UIPlugin = {
     name: 'workbase-console-ui', enforce: 'pre',
-    config(config, environment) {
-      sha = environment.command === 'build' ? resolveBuildSHA(resolve(config.root ?? process.cwd())) : undefined
-      return { define: { __WORKBASE_BUILD_SHA__: JSON.stringify(sha ?? 'unbuilt') } }
+    config(_config, environment) {
+      production = environment.command === 'build'
+      return { define: { __WORKBASE_BUILD_SHA__: JSON.stringify('unbuilt') } }
     },
-    generateBundle() { if (sha) this.emitFile({ type: 'asset', fileName: 'build-meta.json', source: JSON.stringify({ sha, builtAt: new Date().toISOString() }) + '\n' }) },
+    generateBundle: { order: 'post', handler(_options, bundle) {
+      if (!production) return
+      // Hash the emitted application before stamping HTML with its own identity.
+      // Never mutate hashed JS/CSS after Rollup assigns their cacheable filenames.
+      const hash = createHash('sha1')
+      for (const name of Object.keys(bundle).sort()) {
+        const output = bundle[name]
+        hash.update(JSON.stringify(name) + '\0')
+        hash.update(output.type === 'chunk' ? output.code : output.source)
+        hash.update('\0')
+      }
+      const sha = hash.digest('hex')
+      for (const output of Object.values(bundle)) {
+        if (output.type === 'asset' && output.fileName.endsWith('.html') && typeof output.source === 'string') {
+          output.source = output.source.replaceAll(marker, sha)
+        }
+      }
+      this.emitFile({ type: 'asset', fileName: 'build-meta.json', source: JSON.stringify({ sha, builtAt: new Date().toISOString() }) + '\n' })
+    } },
     // Keep generated IDs at the stable pointer. Vite's module graph otherwise
     // retains realpaths into deleted generations even after invalidateAll().
     resolveId(id, importer) {
@@ -173,7 +192,10 @@ export function consoleUI(options: UIOptions = {}): UIPlugin {
         try { if (statSync(file).isFile()) return file + query } catch { /* Let Vite report a missing generated import. */ }
       }
     },
-    transformIndexHtml() { return [{ tag: 'meta', attrs: { name: 'referrer', content: 'no-referrer' }, injectTo: 'head-prepend' }] },
+    transformIndexHtml() { return [
+      { tag: 'meta', attrs: { name: 'referrer', content: 'no-referrer' }, injectTo: 'head-prepend' as const },
+      ...(production ? [{ tag: 'meta', attrs: { name: 'workbase-build-sha', content: marker }, injectTo: 'head-prepend' as const }] : []),
+    ] },
     configResolved(config) { root = config.root; output = resolve(root, options.directory ?? '.workbase-ui') },
     async buildStart() { if (!requested) request(); await plugin.idle(); if (plugin.error && !server) throw plugin.error },
     configureServer(value) {

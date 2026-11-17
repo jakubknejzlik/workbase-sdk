@@ -1,10 +1,10 @@
 # Legacy generic browser console
 
 This guide describes the retained runtime-model console and its prebuilt assets.
-The V3 standalone template also serves the installed SDK's prebuilt console,
-passing `assetsDir: consoleAssetsDir()` to SDK `provision()`. Follow the
-[V3 getting-started guide](getting-started.md) for that template's generation,
-checks and deployment commands. The legacy APIs and assets below still ship.
+The V3 standalone template builds its own console into `dist/console`, following
+ADR 0008 and superseding #45's shared prebuilt scaffold delivery. See the
+[V3 getting-started guide](getting-started.md). The generic assets described below
+remain a separate SDK artifact and are not the standalone template's console.
 
 The public browser build consumes the authenticated version 1
 [console-model contract](console-model.md). An instance ID or entity is never a

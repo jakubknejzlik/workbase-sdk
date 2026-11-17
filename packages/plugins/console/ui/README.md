@@ -251,32 +251,23 @@ Sign-out POSTs JSON, accepts 204/401, clears the org, and replaces the location
 with `/sign-in`. Language persists across accounts on the same browser by design;
 no identity or profile data is stored alongside either preference.
 
-`consoleUI()` production builds define `__WORKBASE_BUILD_SHA__` in the browser
-bundle and emit `dist/build-meta.json` with `{ sha, builtAt }`. SHA precedence is
-`WORKBASE_BUILD_SHA`, then `GITHUB_SHA`, then `git rev-parse HEAD` from the
-**consumer root**. A supplied invalid value fails the build instead of silently
-falling back. SHAs must be exactly 40 hex characters and are emitted lowercase.
-Development builds use `unbuilt`. For a custom Instance console, run
-`bun --bun vite build`, then pass `assetsDir: './dist'` to provision (or match a
-customized Vite outDir). The V3 standalone template serves the installed SDK's
-prebuilt console using `assetsDir: consoleAssetsDir()` from
-`@workbasehq/plugins/console/assets`; it requires checks and typecheck before
-review, with no Instance console build.
+`consoleUI()` production builds stamp the browser identity in an HTML meta tag
+and emit `build-meta.json` in the Vite output with `{ sha, builtAt }`.
+The 40-character lowercase SHA is a digest of the emitted bundle before its own
+identity is stamped into HTML. Hashed JS/CSS bytes are never rewritten after
+filenames are assigned. It includes real browser components, bundled dictionaries,
+CSS and HTML, and excludes build time, git and environment SHA overrides. Rebuilding
+identical assets retains the SHA; independent page/dictionary edits change it
+without changing the schema revision. Development uses `unbuilt`.
 
-The Instance deployment wrapper must refuse a dirty repository before building:
-
-```ts
-import { assertCleanDeploy } from '@workbasehq/plugins/console/ui/vite'
-assertCleanDeploy(process.cwd())
-// Run vite build, then provision/deploy the resulting dist/.
-```
-
-The guard includes untracked files. Ignore `node_modules/`, `dist/` and
-`.workbase-ui*`; commit authored layout changes before deployment so they get a
-new SHA even when schema revision is unchanged. The V3 standalone template runs
-checks before SST deployment and does not call this optional guard in its deploy
-script; ensure the worktree is clean before deploying. Keep any explicit
-server BUILD_SHA/BUILD_AT bindings consistent with the emitted metadata.
+The standalone template's `build:console` validates UI then runs Vite into
+`dist/console`. Both Wrangler's custom build and SST's `run()` rebuild it before
+serving/provisioning that directory. This follows ADR 0008 and supersedes #45's
+shared prebuilt scaffold delivery. The host imports `AuthShell`, `Shell` and
+`createAuthI18n` from `/react`, the generated routes/catalogs from `.workbase-ui`,
+and the public `@workbasehq/plugins/console/ui/styles.css` external stylesheet.
+No producer UI workspace is imported. Keep explicit server `BUILD_SHA`/`BUILD_AT`
+bindings consistent with this emitted metadata; the Worker reads it from the deployed assets.
 
 `AuthShell` fetches `/build.json` separately at boot and on visibility. On a valid
 SHA mismatch it records `sessionStorage['workbase.reload.' + serverSHA]` **before**
