@@ -52,7 +52,8 @@ function entry(): Entry {
 }
 type Membership = { organization_id: string; organization_name?: string }
 type Me = { actor: { id: string }; memberships: Membership[] }
-type Invitation = { id: string; state?: string; account_match: boolean | null; next?: string; navigation_target?: string }
+type Invitation = { id: string; state?: string; account_match: boolean | null; next?: string; navigation_target?: string;
+  organization?: { name: string | null }; inviter?: { display_name: string | null }; role?: string; target?: { entity: string } }
 type Profile = { firstName: string | null; lastName: string | null; capabilities: { canEditNames: boolean }; completeness: { complete: boolean } }
 type Auth = { request: Request; i18n: I18n; signOut: () => Promise<void> }
 function status(i18n: I18n, key: string) { return h('p', { role: 'status' }, i18n.t('sdk:auth.' + key)) }
@@ -98,7 +99,7 @@ function ActorGate({ auth, children }: { auth: Auth; children?: ReactNode }) {
   const { identity } = useRuntime()
   return h(ProfileGate, { key: identity.actorId, auth }, children)
 }
-function InvitationFlow({ auth, initial, go, select }: { auth: Auth; initial: Entry; go: (path: string) => Promise<void>; select: (org: string) => void }) {
+function InvitationFlow({ auth, initial, go, select, displayName }: { auth: Auth; initial: Entry; displayName: string; go: (path: string) => Promise<void>; select: (org: string) => void }) {
   const [invitation, setInvitation] = useState<Invitation>(), [resolved, setResolved] = useState(false), [login, setLogin] = useState(false), [failure, setFailure] = useState<string>()
   const [pending, setPending] = useState(false), busy = useRef(false)
   const mismatch = invitation?.account_match === false || failure === 'invitation_not_for_this_account'
@@ -107,7 +108,13 @@ function InvitationFlow({ auth, initial, go, select }: { auth: Auth; initial: En
     let active = true
     const path = initial.token ? '/invitations/preflight' : initial.id ? '/invitations/' + encodeURIComponent(initial.id) + '/resolve' : undefined
     if (!path) { setFailure('invitation_not_found'); return }
-    void auth.request<Invitation>(path, initial.token ? { token: initial.token } : {}).then(value => { if (active) { setInvitation(value); setResolved(!initial.token) } }, error => { if (active) { if (error instanceof ApiFailure && error.status === 401) setLogin(true); else fail(error) } })
+    void auth.request<Invitation>(path, initial.token ? { token: initial.token } : {}).then(value => { if (active) { setInvitation(value); setResolved(!initial.token) } }, error => {
+      if (!active) return
+      if (error instanceof ApiFailure && error.status === 401) {
+        if (initial.id) setInvitation({ id: initial.id, account_match: null })
+        else setLogin(true)
+      } else fail(error)
+    })
     return () => { active = false }
   }, [auth.request, initial])
   async function resolve() {
@@ -131,13 +138,24 @@ function InvitationFlow({ auth, initial, go, select }: { auth: Auth; initial: En
   const terminal = failure || invitation?.state && invitation.state !== 'pending'
   if (terminal) return status(auth.i18n, /expired/.test(String(terminal)) || invitation?.state === 'expired' ? 'expired' : /revoked/.test(String(terminal)) || invitation?.state === 'revoked' ? 'revoked' : 'invitationUnavailable')
   if (!invitation) return status(auth.i18n, 'loading')
-  if (!resolved) return h('button', { type: 'button', disabled: pending, onClick: () => { void resolve() } }, auth.i18n.t('sdk:auth.continue'))
+  // Only the server's proof/recipient-authorized response contains state and metadata.
+  // A copied selector or rejected proof goes straight to separate sign-in, never resolve.
+  if (invitation.account_match === null && !invitation.state) return h('div', null,
+    h('h1', null, auth.i18n.t('sdk:auth.publicInvitation', { instance: displayName })),
+    h('p', null, auth.i18n.t('sdk:auth.invitedEmail')),
+    h('button', { type: 'button', onClick: () => setLogin(true) }, auth.i18n.t('sdk:auth.signInToAccept')))
+  const preview = h('div', null,
+    h('dl', null, ...([
+      ['organization', invitation.organization?.name], ['inviter', invitation.inviter?.display_name], ['role', invitation.role],
+    ] as const).filter(([, value]) => value).map(([key, value]) => h('div', { key }, h('dt', null, auth.i18n.t('sdk:auth.' + key)), h('dd', null, value)))),
+    invitation.target && h('p', null, auth.i18n.t('sdk:auth.target', { entity: invitation.target.entity })))
+  if (!resolved) return h('div', null, preview, h('button', { type: 'button', disabled: pending, onClick: () => { void resolve() } }, auth.i18n.t('sdk:auth.continue')))
   const acceptButton = h('button', { type: 'button', disabled: pending, onClick: () => { void accept() } }, auth.i18n.t('sdk:auth.accept'))
-  return h(ProfileGate, { auth, required: true }, acceptButton)
+  return h(ProfileGate, { auth, required: true }, h('div', null, preview, acceptButton))
 }
-export type AuthShellProps = { manifest: Manifest; i18n: I18n; children?: ReactNode; fetch?: Transport; navigate: (path: string) => void | Promise<unknown> }
+export type AuthShellProps = { manifest: Manifest; i18n: I18n; displayName?: string; children?: ReactNode; fetch?: Transport; navigate: (path: string) => void | Promise<unknown> }
 /** Mount outside RouterProvider so reserved auth paths never mount Instance data. */
-export function AuthShell({ manifest, i18n, children, fetch: transport = globalThis.fetch, navigate }: AuthShellProps) {
+export function AuthShell({ manifest, i18n, displayName, children, fetch: transport = globalThis.fetch, navigate }: AuthShellProps) {
   const [initial, setEntry] = useState(entry), [org, setOrg] = useState(() => authStorage.org.read()), [memberships, setMemberships] = useState<Membership[]>(), [inbox, setInbox] = useState<Invitation[]>(), [failed, setFailed] = useState(false), [retry, setRetry] = useState(0)
   const [suspended, setSuspended] = useState(false), [boot, setBoot] = useState(0)
   // Set while this document is being left or frozen: unmount cleanup must not release a deferred build reload here.
@@ -214,7 +232,7 @@ export function AuthShell({ manifest, i18n, children, fetch: transport = globalT
   if (suspended) return status(i18n, 'loading')
   let content: ReactNode
   if (initial.path === '/sign-in') content = h(SignIn, { auth, returnTo: authReturnTo(authStorage.returnTo.read(), manifest.routes) })
-  else if (initial.path === '/invitation') content = h(InvitationFlow, { key: initial.key, auth, initial, go, select })
+  else if (initial.path === '/invitation') content = h(InvitationFlow, { key: initial.key, auth, initial, go, select, displayName: displayName?.trim() || 'Workbase' })
   else if (initial.path === '/auth/complete') content = status(i18n, 'loading')
   else if (org) content = h(Session, { orgId: org, t: i18n.t, i18n, fetch: transport, onState: sessionState }, h(ActorGate, { auth }, children))
   else if (memberships?.length) content = h('div', null, status(i18n, 'chooseOrg'), ...memberships.map(value => h('button', { key: value.organization_id, type: 'button', onClick: () => select(value.organization_id) }, value.organization_name ?? value.organization_id)))
