@@ -28,7 +28,7 @@ function template(extra: Record<string, string | undefined>, stage = 'prefix-pr-
 }
 
 it.each([
-  { env: { WORKBASE_PUBLIC_HOSTNAME: ' APP.Example.Test ', AUTH_BASE_URL: '  ' }, origin: 'https://app.example.test', hostname: 'app.example.test' },
+  { env: { WORKBASE_PUBLIC_HOSTNAME: 'app.example.test', AUTH_BASE_URL: '  ' }, origin: 'https://app.example.test', hostname: 'app.example.test' },
   { env: { WORKBASE_PUBLIC_HOSTNAME: '  ', AUTH_BASE_URL: ' https://worker-{stage}.example.test ' }, origin: 'https://worker-prefix-pr-123.example.test', hostname: undefined },
 ])('treats blank env as unset and resolves the generated config (#%#)', async ({ env, origin, hostname }) => {
   const config = template(env)
@@ -41,6 +41,9 @@ it.each([
 it.each([
   { env: {}, code: 'provision_missing_public_origin' },
   { env: { WORKBASE_PUBLIC_HOSTNAME: ' ', AUTH_BASE_URL: '\t' }, code: 'provision_missing_public_origin' },
+  ...['App.Example.test', '\u212A.example.test', 'caf\u00e9.example.test', '\uff4b.example.test', ' app.example.test '].map(publicHostname => ({
+    env: { WORKBASE_PUBLIC_HOSTNAME: publicHostname, AUTH_BASE_URL: 'https://fallback.example.test' }, code: 'provision_invalid_public_hostname',
+  })),
   { env: { WORKBASE_PUBLIC_HOSTNAME: 'app-{stage}.example.test', AUTH_BASE_URL: 'https://fallback.example.test' }, code: 'provision_invalid_public_hostname' },
   { env: { WORKBASE_DOMAIN: 'old.example.test' }, code: 'provision_legacy_domain_env' },
   { env: { WORKBASE_DOMAIN: '', WORKBASE_PUBLIC_HOSTNAME: 'app.example.test' }, code: 'provision_legacy_domain_env' },

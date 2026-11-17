@@ -19,18 +19,20 @@ export interface ResolvedPublicOrigin {
 }
 
 function hostname(value: string): string {
-  const normalized = typeof value === 'string' ? value.trim().toLowerCase() : ''
-  const labels = normalized.split('.')
-  if (normalized.length > 253 || labels.length < 2 || labels.some(label =>
+  if (typeof value !== 'string' || !value || /[^a-z0-9.-]/.test(value)) {
+    throw new ProvisionDiagnostic('provision_invalid_public_hostname')
+  }
+  const labels = value.split('.')
+  if (value.length > 253 || labels.length < 2 || labels.some(label =>
     label.length > 63 || !/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/.test(label))) {
     throw new ProvisionDiagnostic('provision_invalid_public_hostname')
   }
   try {
     // Also reject URL-parser IP shorthands (127.1, numeric/hex IPv4) and invalid punycode.
-    const parsed = new URL(`https://${normalized}`).hostname
-    if (parsed !== normalized || isIP(parsed)) throw 0
+    const parsed = new URL(`https://${value}`).hostname
+    if (parsed !== value || isIP(parsed)) throw 0
   } catch { throw new ProvisionDiagnostic('provision_invalid_public_hostname') }
-  return normalized
+  return value
 }
 
 function httpsOrigin(value: string): string {

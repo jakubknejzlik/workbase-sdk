@@ -25,7 +25,8 @@ export default $config({
     const mailboxToken = process.env.WORKBASE_DEV_MAILBOX_TOKEN
     if (emailFrom && mailboxToken) throw new Error('EMAIL_FROM cannot be combined with WORKBASE_DEV_MAILBOX_TOKEN')
     if (mailboxToken && !['dev', 'test'].includes($app.stage)) throw new Error('WORKBASE_DEV_MAILBOX_TOKEN requires dev or test stage')
-    const publicHostname = optional('WORKBASE_PUBLIC_HOSTNAME')
+    // Blank means unset; preserve nonblank input for strict hostname validation.
+    const publicHostname = optional('WORKBASE_PUBLIC_HOSTNAME') ? process.env.WORKBASE_PUBLIC_HOSTNAME : undefined
     const authBaseUrl = optional('AUTH_BASE_URL')?.replaceAll('{stage}', $app.stage)
     // Also build for direct `sst deploy`, so stale assets cannot be uploaded.
     execFileSync('bun', ['run', 'build:console'], { stdio: 'inherit' })

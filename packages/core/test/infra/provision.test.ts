@@ -97,7 +97,6 @@ it.each([
   { name: 'equal parsed origins', publicHostname: 'neutral.example.test', authBaseUrl: 'https://NEUTRAL.example.test:443/', warning: undefined },
   { name: 'different origins', publicHostname: 'neutral.example.test', authBaseUrl: 'https://stale.example.test', warning: 'provision_auth_origin_overridden' },
   { name: 'malformed unused fallback', publicHostname: 'neutral.example.test', authBaseUrl: 'https://user:private@example.test/path', warning: 'provision_auth_fallback_ignored' },
-  { name: 'trim and lowercase', publicHostname: '  NEUTRAL.Example.Test  ', authBaseUrl: undefined, warning: undefined },
   { name: 'punycode TLD', publicHostname: 'app.xn--p1ai', authBaseUrl: undefined, warning: undefined },
 ])('resolves $name identically for dry planning, auth binding and Custom Domain', async ({ name: _name, warning, ...inputs }) => {
   const warn = vi.spyOn(console, 'warn').mockImplementation(() => { expect(records).toEqual([]) })
@@ -123,6 +122,8 @@ it.each([
 })
 
 it.each([
+  'App.Example.test', '\u212A.example.test', 'caf\u00e9.example.test', '\uff4b.example.test',
+  ' app.example.test ',
   '', '   ', 'https://app.example.test', 'app.example.test:443', 'app.example.test/path',
   'app.example.test.', 'app .example.test', 'app\n.example.test', 'user@app.example.test',
   'app.example.test?query', 'app.example.test#fragment', '*.example.test', 'app-{stage}.example.test',
@@ -135,7 +136,7 @@ it.each([
     try { await action(); throw Error('expected_failure') }
     catch (error) {
       expect(error).toBeInstanceOf(ProvisionDiagnostic)
-      expect(provisionErrorMessage(error)).toBe('provision_invalid_public_hostname')
+      expect(provisionErrorMessage(error)).toBe('provision_invalid_public_hostname: publicHostname must be a lowercase ASCII bare hostname')
     }
   }
   expect(records).toEqual([])

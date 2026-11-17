@@ -21,6 +21,7 @@ export class ProvisionDiagnostic extends Error {
   constructor(code: ProvisionDiagnosticCode, detail?: { message: string; secrets: string[] }) {
     const safeCode = codes.includes(code) ? code : 'provision_failed'
     let message: string = safeCode
+    if (safeCode === 'provision_invalid_public_hostname') message += ': publicHostname must be a lowercase ASCII bare hostname'
     if (safeCode === 'provision_missing_public_origin') message += ': set publicHostname or authBaseUrl (WORKBASE_PUBLIC_HOSTNAME or AUTH_BASE_URL in the standalone template)'
     if (safeCode === 'provision_legacy_domain') message += ': domain was removed; use publicHostname instead'
     if (safeCode === 'provision_legacy_domain_env') message += ': WORKBASE_DOMAIN was removed; use WORKBASE_PUBLIC_HOSTNAME instead'
