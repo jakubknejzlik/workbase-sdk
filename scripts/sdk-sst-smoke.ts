@@ -55,10 +55,18 @@ export default { id: 'packed', revision, interactive: false, roles: ['owner'], e
   app() { return { name: 'workbase-packed-runtime', home: 'local', providers: { cloudflare: '6.19.0' }, removal: 'remove' } },
   async run() {
     const { provision } = await import('@workbasehq/core/infra/provision')
-    const { consoleAssetsDir } = await import('@workbasehq/plugins/console/assets')
+    // This smoke tests SST runtime isolation, using a valid local upload fixture.
+    const { CONSOLE_SHA_MARKER, consoleArtifactsSHA, readConsoleArtifacts } = await import('@workbasehq/core/console-build')
+    const { mkdir, writeFile } = await import('node:fs/promises')
+    await mkdir('dist/console', { recursive: true })
+    const html = '<meta name="workbase-build-sha" content="' + CONSOLE_SHA_MARKER + '">'
+    await writeFile('dist/console/index.html', html)
+    const sha = consoleArtifactsSHA(await readConsoleArtifacts('dist/console'))
+    await writeFile('dist/console/index.html', html.replace(CONSOLE_SHA_MARKER, sha))
+    await writeFile('dist/console/build-meta.json', JSON.stringify({ sha, builtAt: '2026-11-17T00:00:00.000Z' }))
     const result = await provision({ configPath: './config.ts', handler: './worker.ts', migrationsDir: './migrations',
       resourcePrefix: 'packed-runtime', stage: $app.stage, authSecret: $util.secret('synthetic-stable-auth-secret-at-least-32-characters'),
-      authBaseUrl: 'https://packed.example.test', domain: 'packed.example.test', assetsDir: consoleAssetsDir(), email: { from: 'auth@example.test' } })
+      authBaseUrl: 'https://packed.example.test', domain: 'packed.example.test', assetsDir: './dist/console', email: { from: 'auth@example.test' } })
     const { createRequire } = await import('node:module')
     const require = createRequire(import.meta.url)
     const loaded = Object.keys(require.cache).filter(path => /[/]node_modules[/]@pulumi[/](pulumi|command)[/]/.test(path))

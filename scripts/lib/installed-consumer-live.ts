@@ -307,7 +307,7 @@ export default { ...worker, fetch(request, env, ctx) {
       await context.route('**/*', async route => {
         const url = new URL(route.request().url())
         if (url.origin !== origin) { forbidden.push('non-consumer origin'); await route.abort(); return }
-        if (/(?:^|\/)schema(?:\/|$)/.test(url.pathname)) forbidden.push(url.pathname)
+        if (/(?:^|\/)(schema|console-model|console-info|bootstrap)(?:\/|$)/.test(url.pathname)) forbidden.push(url.pathname)
         await route.continue()
       })
       context.on('page', page => { page.setDefaultTimeout(10000); page.on('pageerror', error => pageErrors.push(error.message)) })
@@ -414,50 +414,47 @@ export default { ...worker, fetch(request, env, ctx) {
     console.log('Step 8: local Worker/D1; mailbox handler magic links + invite/accept; allowCreate=false, ops-provisioned organizations; cross-org denial; restart persistence; omitted/null/conflict; 26-row cursor + display search')
 
     // Hash the HTTP responses, including the SPA fallback, against the installed
-    // SDK bytes already compared to the archive in step 4. No consumer build exists.
-    const assets = join(consumer, 'node_modules/@workbasehq/plugins/console/assets')
+    // Instance bundle built from candidate SDK sources in step 4.
+    const assets = join(consumer, 'dist/console')
     const html = readFileSync(join(assets, 'index.html'), 'utf8')
     const references = [...html.matchAll(/(?:src|href)=["']([^"']+\.(?:js|css)(?:[?#][^"']*)?)["']/g)].map(match => match[1])
     assert(references.some(path => path.endsWith('.js')) && references.some(path => path.endsWith('.css')))
     const hash = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex')
     const hashes: Record<string, string> = {}
-    for (const path of ['/sign-in', '/organizations', ...references, '/locales/cs.json', '/locales/en.json']) {
+    for (const path of ['/sign-in', '/workers', ...references, '/build-meta.json']) {
       const response = await fetch(origin + path)
       assert.equal(response.status, 200, `Console asset ${path}`)
-      const expected = readFileSync(join(assets, ['/sign-in', '/organizations'].includes(path) ? 'index.html' : path.split('?')[0]))
+      const expected = readFileSync(join(assets, ['/sign-in', '/workers'].includes(path) ? 'index.html' : path.split('?')[0]))
       hashes[path] = hash(new Uint8Array(await response.arrayBuffer()))
-      assert.equal(hashes[path], hash(expected), `Served console differs from SDK package: ${path}`)
+      assert.equal(hashes[path], hash(expected), `Served console differs from Instance build: ${path}`)
     }
-    console.log('Served SDK console SHA-256:', JSON.stringify(hashes))
+    console.log('Served Instance console SHA-256:', JSON.stringify(hashes))
     if (evidence) writeFileSync(join(evidence, 'console-assets.json'), JSON.stringify(hashes, null, 2) + '\n')
     const fits = async (page: Page) => assert(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), 'Horizontal overflow')
     for (const language of ['cs', 'en']) {
-      const titles = json(join(assets, `locales/${language}.json`))
+      const titles = json(join(consumer, '.workbase-ui/locales.json'))[language].sdk
       for (const width of [1280, 390]) {
         const guest = await newContext(), signInPage = await guest.newPage()
         await signInPage.setViewportSize({ width, height: 900 })
-        await signInPage.addInitScript(language => localStorage.setItem('console-language', language), language)
+        await signInPage.addInitScript(language => localStorage.setItem('workbase:language', language), language)
         try {
           await signInPage.goto(origin + '/sign-in')
-          await signInPage.getByRole('heading', { name: titles.signIn, exact: true }).waitFor()
-          await signInPage.getByLabel(titles.email, { exact: true }).waitFor()
-          await signInPage.getByRole('button', { name: titles.sendLink, exact: true }).waitFor()
-          assert(await signInPage.locator('link[rel="stylesheet"]').count() > 0, 'SDK console CSS missing')
+          await signInPage.getByLabel(titles['auth.email'], { exact: true }).waitFor()
+          await signInPage.getByRole('button', { name: titles['auth.signIn'], exact: true }).waitFor()
+          assert(await signInPage.locator('link[rel="stylesheet"]').count() > 0, 'Instance console CSS missing')
           await fits(signInPage)
           if (evidence) await signInPage.screenshot({ path: join(evidence, `${language}-${width}-sign-in.png`), fullPage: true })
         } finally { await signInPage.close() }
         const page = await admin.newPage()
         await page.setViewportSize({ width, height: 900 })
-        await page.addInitScript(language => localStorage.setItem('console-language', language), language)
+        await page.addInitScript(({ language, org }) => { localStorage.setItem('workbase:language', language); localStorage.setItem('workbase:org', org) }, { language, org: orgA.id })
         try {
           for (const [name, path] of [
-            ['organizations', '/organizations'], ['overview', `/o/${orgA.id}`],
-            ['list', `/o/${orgA.id}/e/worker`], ['detail', `/o/${orgA.id}/e/worker/${row.id}`],
+            ['list', '/workers'], ['detail', `/workers/${row.id}`],
+            ['new', '/workers/new'], ['edit', `/workers/${row.id}/edit`],
           ]) {
             await page.goto(origin + path)
             await page.getByRole('heading', { level: 1 }).first().waitFor()
-            if (name === 'organizations') await page.getByRole('heading', { name: titles.organizations, exact: true }).waitFor()
-            if (name === 'overview') await page.getByRole('heading', { name: 'Organization A', exact: true }).waitFor()
             if (name === 'list' || name === 'detail') await page.getByText('Persistent renamed', { exact: true }).first().waitFor()
             await fits(page)
             if (evidence) await page.screenshot({ path: join(evidence, `${language}-${width}-${name}.png`), fullPage: true })
@@ -477,7 +474,7 @@ export default { ...worker, fetch(request, env, ctx) {
     await new Promise<void>((resolve, reject) => { const socket = connect(port, '127.0.0.1', () => { socket.write('GET /workers HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n'); socket.destroy(); resolve() }); socket.on('error', reject) })
     await call(admin, '/health')
     assert.deepEqual(forbidden, []); assert.deepEqual(pageErrors, [])
-    console.log('Step 9: 20 prebuilt console route/viewport/language renders; magic-link form, CSS, headings, overflow, page errors; served hashes equal SDK package; unlink denies staff; delete/read-404; negative artifacts and browser requests verified')
+    console.log('Step 9: 20 Instance console route/viewport/language renders; magic-link form, CSS, headings, overflow, page errors; served hashes equal Instance build; unlink denies staff; delete/read-404; negative artifacts and browser requests verified')
     const timing = { event: 'installed_consumer_timing', os: platform(), os_release: release(), node: process.version, bun: execFileSync('bun', ['--version'], { encoding: 'utf8' }).trim(), ...timings, live_ms: Math.round(performance.now() - started) }
     const line = JSON.stringify(timing)
     console.log(line)

@@ -37,10 +37,13 @@
     ]
   },
   "assets": {
-    "directory": "./node_modules/@workbasehq/plugins/console/assets",
+    "directory": "./dist/console",
     "binding": "ASSETS",
     "html_handling": "none",
     "not_found_handling": "none",
     "run_worker_first": true
+  },
+  "build": {
+    "command": "bun run build:console"
   }
 }

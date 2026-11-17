@@ -12,13 +12,13 @@ stage and the deployment inputs in [getting-started.md](getting-started.md).
   [consumption](consumption.md), [inventory](inventory.md),
   [integrity assertions](../../scripts/smoke-template.ts).
 - [ ] 2. Deploy `pr-N` by hand with configured Cloudflare/auth/email inputs:
-  `WORKBASE_BUILD_SHA=$(git rev-parse HEAD) bun run deploy --stage pr-N` from a
+  `bun run deploy --stage pr-N` from a
   clean PR head. Record the URL and deployment result. Preview automation is
   deferred (slice 19). Source:
   [standalone deployment scripts](../../packages/mcp/templates/standalone/package.json).
-- [ ] 3. Fetch live `/build.json` and verify its `sha` equals the full PR head
-  SHA. Attach the response and commit identity. The local smoke uses a synthetic
-  40-zero SHA instead of proving a remote head. Sources:
+- [ ] 3. Fetch live `/build.json` and verify its `sha` and `builtAt` match the
+  deployed `dist/console/build-meta.json`. Attach the bundle metadata and PR head
+  identity separately: the bundle digest is independent of the git commit. Sources:
   [public build response](../../packages/core/src/console.ts),
   [local build assertion](../../scripts/smoke-template.ts).
 - [ ] 4. Fetch live `/openapi.json`; compare its sha256 with committed

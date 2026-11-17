@@ -623,25 +623,25 @@
     {
       "pathDigest": "31aa36cf687fe2d5a590cddf304be798fb4a42fdd3a9f367c277b75fc47bf853",
       "lineDigest": "0f2547e960229e72c59de250641eaa1222fde52383888163c36f4eab1ae1e33b",
-      "lineNumber": 47,
+      "lineNumber": 49,
       "reason": "Required public npm dependency/import; exact package identity, not an owner deployment."
     },
     {
       "pathDigest": "31aa36cf687fe2d5a590cddf304be798fb4a42fdd3a9f367c277b75fc47bf853",
       "lineDigest": "86bf7c56d5374a156088ad84ea3e1823a1a0276f3582c476e922cc3e02dc6d45",
-      "lineNumber": 1851,
+      "lineNumber": 1853,
       "reason": "Required public npm dependency/import; exact package identity, not an owner deployment."
     },
     {
       "pathDigest": "31aa36cf687fe2d5a590cddf304be798fb4a42fdd3a9f367c277b75fc47bf853",
       "lineDigest": "b9540f355daf10044f1b61506226f04a5228478133772ae53fe0b761c99d1bde",
-      "lineNumber": 1852,
+      "lineNumber": 1854,
       "reason": "Required public npm dependency/import; exact package identity, not an owner deployment."
     },
     {
       "pathDigest": "616e9a931a0c7bea02752f9e4b81381f577c1cdd03da8446ff2678f5303fe79c",
       "lineDigest": "287d257e475c66b73fa7c092cc997054530b79ddfc76103475c89b53ed04e6ef",
-      "lineNumber": 53,
+      "lineNumber": 54,
       "reason": "Required public npm dependency/import; exact package identity, not an owner deployment."
     },
     {
@@ -739,13 +739,6 @@
       "lineNumber": 17
     },
     {
-      "path": "packages/mcp/templates/standalone/wrangler.jsonc",
-      "value": "00000000000000000000000000000091",
-      "reason": "Synthetic local-only database identifier in neutral runtime/template fixtures; not an account ID.",
-      "line": "      \"id\": \"00000000000000000000000000000091\"",
-      "lineNumber": 19
-    },
-    {
       "path": "packages/mcp/test/data/fixture.ts",
       "value": "00000000000000000000000000000001",
       "reason": "Synthetic local-only database identifier in neutral runtime/template fixtures; not an account ID.",
@@ -769,15 +762,7 @@
       "lineNumber": 189
     }
   ],
-  "encoded": [
-    {
-      "path": "scripts/check-console-public.test.ts",
-      "payload": "%ZZ",
-      "reason": "Exact malformed-URI acceptance fixture; no decodable bytes.",
-      "line": "    writeFileSync(resolve(directory, 'index.js'), `const assets = [${JSON.stringify(uri)}, \"data:text/plain,%ZZ\"]`)",
-      "lineNumber": 37
-    }
-  ],
+  "encoded": [],
   "hosts": [
     {
       "value": "www.apache.org",
@@ -855,20 +840,6 @@
       "value": "webhook.internal",
       "reason": "Synthetic Service Binding destination; local runtime health probe, not a deployed host.",
       "lineNumber": 28
-    },
-    {
-      "path": "scripts/smoke-mcp-template.ts",
-      "line": "assert.equal(config.app({ stage: 'production' }).protect, true)",
-      "value": "config.app",
-      "reason": "Dotted SST config method in an embedded smoke script; not a network host.",
-      "lineNumber": 243
-    },
-    {
-      "path": "scripts/smoke-mcp-template.ts",
-      "line": "assert.equal(config.app({ stage: 'trial' }).removal, 'remove')",
-      "value": "config.app",
-      "reason": "Dotted SST config method in an embedded smoke script; not a network host.",
-      "lineNumber": 244
     },
     {
       "path": "packages/mcp/test/ops/contract.test.ts",

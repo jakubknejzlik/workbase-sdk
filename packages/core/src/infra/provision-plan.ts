@@ -8,6 +8,7 @@ import { migrationHash, readMigrationFiles, sha256 } from './migration-files'
 import { ProvisionDiagnostic, provisionFailure } from './provision-diagnostics'
 import { installedInfraDirectory } from './package-tools'
 import { provisionConfigSchema } from './provision-config'
+import { consoleArtifactsSHA, consoleHTMLStamps, readConsoleArtifacts } from '../console-build'
 
 export interface ProvisionOptions {
   /** Trusted application module, default-exporting an InstanceConfig. Paths resolve from projectRoot. */
@@ -16,7 +17,7 @@ export interface ProvisionOptions {
   migrationsDir: string
   resourcePrefix: string
   stage: string
-  /** Prebuilt console directory. Omit for an API-only Worker. */
+  /** Built Instance console directory with verified SHA metadata. Omit for an API-only Worker. */
   assetsDir?: string
   /** Stable, operator-supplied secret, e.g. new sst.Secret('AuthSecret').value. Never generated per deploy. */
   authSecret: Input<string>
@@ -123,6 +124,20 @@ export async function createProvisionPlan(options: ProvisionOptions): Promise<Pr
   try {
     if (!(await stat(handler)).isFile() || !(await stat(configPath)).isFile() || !(await stat(migrationsDir)).isDirectory() || (assetsDir && !(await stat(assetsDir)).isDirectory())) throw 0
   } catch { throw new ProvisionDiagnostic('provision_inputs_unreadable') }
+  if (assetsDir) {
+    let files: Map<string, Buffer>, metadata: { sha?: unknown; builtAt?: unknown }
+    try {
+      files = await readConsoleArtifacts(assetsDir)
+      metadata = JSON.parse(files.get('build-meta.json')!.toString('utf8'))
+      if (!metadata || typeof metadata.sha !== 'string' || !/^[a-f0-9]{40}$/.test(metadata.sha)
+        || typeof metadata.builtAt !== 'string' || !Number.isFinite(Date.parse(metadata.builtAt))) throw 0
+    } catch { throw new ProvisionDiagnostic('provision_console_metadata_invalid') }
+    const stamps = consoleHTMLStamps(files.get('index.html')?.toString('utf8') ?? '')
+    if (stamps.length !== 1 || stamps[0] !== metadata.sha || consoleArtifactsSHA(files) !== metadata.sha
+      || [...files].some(([name, bytes]) => name.endsWith('.html') && consoleHTMLStamps(bytes.toString('utf8')).some(sha => sha !== metadata.sha))) {
+      throw new ProvisionDiagnostic('provision_console_sha_mismatch')
+    }
+  }
   const secrets = [options.authSecret, options.internalToken, options.opsToken, options.devMailbox?.token, options.webhook?.url, options.webhook?.allowedHosts, options.webhook?.service]
     .filter((value): value is string => typeof value === 'string' && value.length > 0)
   const schema = await provisionConfigSchema(root, configPath, migrationsDir, secrets)

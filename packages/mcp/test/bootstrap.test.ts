@@ -44,7 +44,7 @@ it('creates registry-only files, substitutes ids and resolves the release versio
   expect(pkg.dependencies.react).toBe('19.2.8')
   expect(pkg.devDependencies.sst).toBe('4.17.1')
   expect(pkg.scripts['typecheck']).toContain('generate:ui &&')
-  expect(pkg.scripts['build:console']).toBeUndefined()
+  expect(pkg.scripts['build:console']).toBe('bun run check:ui && bun --bun vite build')
   expect(pkg.scripts.dev).toBe('bun run dev:worker')
   expect(pkg.scripts.check).toBe('bun run check:schema && bun run check:access && bun run check:openapi && bun run check:ui')
   expect(pkg.scripts.deploy).toBe('bun run check && sst deploy')
@@ -58,9 +58,9 @@ it('creates registry-only files, substitutes ids and resolves the release versio
   expect(config).not.toContain('assets:')
   const sst = await readFile(join(root, 'sst.config.ts'), 'utf8')
   expect(sst).toContain('@workbasehq/core/infra/provision')
-  expect(sst).toContain("assetsDir: consoleAssetsDir()")
+  expect(sst).toContain("assetsDir: './dist/console'")
   expect(sst).toContain("configPath: './runtime.ts'")
-  expect(sst).toContain('@workbasehq/plugins/console/assets')
+  expect(sst).toContain("execFileSync('bun', ['run', 'build:console']")
   for (const path of files) expect(await readFile(join(root, path), 'utf8')).not.toMatch(/workspace:|link:|\{\{(?:SDK_VERSION|INSTANCE_ID|INSTANCE_SELECTOR)\}\}/)
   expect(JSON.parse(await readFile(join(root, 'tsconfig.json'), 'utf8')).compilerOptions.paths).toBeUndefined()
   expect(JSON.parse(await readFile(join(root, 'package.json'), 'utf8')).name).toBe('workbase-demo-sandbox')
@@ -68,8 +68,9 @@ it('creates registry-only files, substitutes ids and resolves the release versio
   expect(wrangler.name).toBe('workbase-demo-sandbox')
   expect(wrangler.d1_databases[0]).toMatchObject({ database_name: wrangler.name, database_id: '0'.repeat(32) })
   expect(wrangler.kv_namespaces[0].id).toBe('0'.repeat(32))
-  expect(wrangler.assets).toEqual({ directory: './node_modules/@workbasehq/plugins/console/assets',
+  expect(wrangler.assets).toEqual({ directory: './dist/console',
     binding: 'ASSETS', html_handling: 'none', not_found_handling: 'none', run_worker_first: true })
+  expect(wrangler.build.command).toBe('bun run build:console')
   expect(wrangler.queues.producers[0].queue).toBe('workbase-demo-sandbox-events')
   expect(wrangler.queues.consumers[0].dead_letter_queue).toBe('workbase-demo-sandbox-events-dlq')
   expect((await bootstrapInstance(root, input)).files).toEqual(files.map(path => ({ path, status: 'unchanged' })))
@@ -86,8 +87,11 @@ it.each([
   const root = await empty()
   await bootstrapInstance(root, input)
   await symlink(resolve('node_modules'), join(root, 'node_modules'))
+  await mkdir(join(root, '.test-bin'))
+  await writeFile(join(root, '.test-bin/bun'), '#!/bin/sh\nprintf "%s\\n" "$*" > build-command.txt\n')
+  await chmod(join(root, '.test-bin/bun'), 0o755)
   const script = `import { mock } from 'bun:test'
-import { consoleAssetsDir } from '@workbasehq/plugins/console/assets'
+process.env.PATH = ${JSON.stringify(join(root, '.test-bin'))} + ':' + process.env.PATH
 let options
 mock.module('@workbasehq/core/infra/provision', () => ({ provision: async value => {
   options = value
@@ -98,7 +102,7 @@ globalThis.$app = { stage: ${JSON.stringify(stage)} }
 const { default: config } = await import('./sst.config.ts')
 try {
   const result = await config.run()
-  console.log(JSON.stringify({ options, expected: consoleAssetsDir(), result }))
+  console.log(JSON.stringify({ options, expected: './dist/console', result }))
 } catch (error) { console.log(JSON.stringify({ error: error.message, called: Boolean(options) })) }`
   const result = spawnSync('bun', ['--no-install', '--eval', script], { cwd: root, encoding: 'utf8', env: {
     ...process.env, WORKBASE_RESOURCE_PREFIX: 'test-instance', BETTER_AUTH_SECRET: 'test-secret',
@@ -111,6 +115,7 @@ try {
     return
   }
   const { options, expected, result: deployed } = JSON.parse(result.stdout)
+  expect((await readFile(join(root, 'build-command.txt'), 'utf8')).trim()).toBe('run build:console')
   expect(options.assetsDir).toBe(expected)
   expect(options.configPath).toBe('./runtime.ts')
   expect(options.authBaseUrl).toBe(`https://${stage}.example.test`)
@@ -126,9 +131,8 @@ it('ships authored V3 sources and excludes Instance-generated artifacts', async 
   const paths = files.map(file => file.path)
   for (const path of ['runtime.ts', 'access.ts', 'schema/worker.ts', 'ui/nav.ts', 'ui/-slots.ts',
     'ui/workers/index.ts', 'ui/workers/new.ts', 'ui/workers/$workerId/index.ts', 'ui/workers/$workerId/edit.ts',
-    'locales/en/domain.json', 'locales/en/ui.json', 'src/worker.ts', 'scripts/check-ui.ts', 'scripts/generate-ui.ts', 'migrations/.gitkeep']) expect(paths).toContain(path)
+    'locales/en/domain.json', 'locales/en/ui.json', 'src/console.tsx', 'vite.config.ts', 'index.html', 'src/worker.ts', 'scripts/check-ui.ts', 'scripts/generate-ui.ts', 'migrations/.gitkeep']) expect(paths).toContain(path)
   for (const path of ['schema.lock.json', 'migrations/0001_r1.sql', 'access.lock.json', 'access.lock.md', 'openapi.json',
-    'src/console.tsx', 'vite.config.ts', 'index.html',
     'scripts/initial-migrations.ts', 'scripts/check-migrations.ts', 'scripts/ci-config.ts', 'scripts/deploy.ts']) expect(paths).not.toContain(path)
   const servers = JSON.parse(await readFile(join(root, '.mcp.json'), 'utf8')).mcpServers
   expect(Object.keys(servers)).toEqual(['workbase_data', 'workbase_ops', 'workbase_config'])

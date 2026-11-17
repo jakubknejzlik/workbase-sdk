@@ -9,9 +9,9 @@ access rules in `access.ts`, pages in `ui/*` and translations in `locales/*`.
 Generate schema lock and migration, then OpenAPI, then access locks; run
 `bun run check` and `bun run typecheck` before review. Never hand-edit generated
 artifacts.
-The console uses the installed SDK's prebuilt assets from `@workbasehq/plugins`;
-pass `assetsDir: consoleAssetsDir()` from `@workbasehq/plugins/console/assets` to
-SDK `provision()`. No Instance console build is needed. Do not add seeded accounts.
+Run `bun run build:console` to validate and bundle the Instance UI into
+`dist/console`. Both Wrangler and SST rebuild and serve that directory using
+public SDK renderer/auth/style exports, following ADR 0008 (superseding SDK #45). Do not add seeded accounts.
 
 Managers operating this Instance later must use the approved MCP/PR workflow and
 must not edit code directly. The template registers `workbase_config` for local V3 authoring,
