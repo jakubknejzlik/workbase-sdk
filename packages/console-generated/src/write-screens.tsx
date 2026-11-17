@@ -566,10 +566,11 @@ function FindMemberOrInvite(props: Omit<InvitationMutationProps, 'action'>) {
   const loading = search.trim() !== query || members.isFetching
   // Recheck authority before using cached data, including after a role change.
   const choices = canSearch && !loading && !members.error ? (members.data?.data ?? []).map(member => member.user_id === rejected ? { ...member, linkable: false, link_reason: 'account_already_linked' as const } : member) : []
+  const unavailable = selected?.linkable === false ? selected : choices.find(member => member.linkable === false && member.email?.toLocaleLowerCase() === query.toLocaleLowerCase())
   const mutation = useInvitationMutation({ ...props, action: selected ? 'link' : access.actions.includes('change') ? 'change' : 'invite', onLinkConflict: async id => { setRejected(id); setSelected(undefined); await members.refetch() } }, access)
   const conflict = (mutation.error as WriteFailure | null)?.code === 'account_already_linked'
   const invite = (access.actions.includes('invite') || access.actions.includes('change')) && !selected && !!query && !loading && (!canSearch || members.isSuccess) && !members.error && !choices.length && !conflict && rowInviteValidator.safeParse({ email: search.trim() }).success
-  const reason = selected?.linkable === false ? t(selected.link_reason === 'account_already_linked' ? 'write_account_already_linked' : 'rowAccountNotLinkable') : conflict ? t('write_account_already_linked') : !selected && !invite ? t('rowFindRequired') : t('rowLinkPickerHint')
+  const reason = unavailable ? t(unavailable.link_reason === 'account_already_linked' ? 'write_account_already_linked' : 'rowAccountNotLinkable') : conflict ? t('write_account_already_linked') : !selected && !invite ? t('rowFindRequired') : t('rowLinkPickerHint')
   const disabled = access.blocked || loading || !!members.error || selected?.linkable === false || !selected && !invite
   return <div className="grid gap-3 [&_button]:min-h-11 [&_button]:min-w-11 [&_input]:min-h-11 [&_input]:pr-20 [&_[role=option]]:min-h-11">
     <EntityPicker remote label={t('rowFindQuery')} placeholder={t('rowFindQuery')} value={selected?.user_id ?? ''} selectedLabel={selected ? memberLabel(selected) : search} search={search}

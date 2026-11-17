@@ -99,6 +99,7 @@ it('176 acceptance uniqueness 409 rolls back invitation claim and membership cre
   await env.DB.prepare("DELETE FROM memberships WHERE user_id='member-a'").run()
   const response = await accept(i.id)
   expect(response.status, await response.clone().text()).toBe(409)
+  expect(await json(response)).toEqual({ error: 'account_already_linked' })
   expect(await linked()).toBeNull()
   expect(await env.DB.prepare('SELECT accepted_at FROM invitations WHERE id=?').bind(i.id).first('accepted_at')).toBeNull()
   expect(await env.DB.prepare("SELECT count(*) n FROM memberships WHERE user_id='member-a'").first('n')).toBe(0)
@@ -198,8 +199,8 @@ it.each(['role', 'issuer', 'operations', 'revoked', 'expired'])('176 delegated t
   expect(await linked()).toBeNull()
 })
 it('176 removal revokes outstanding invitations for the account before clearing every link', async () => {
-  const i = await invitation(); expect((await accept(i.id)).status).toBe(201)
   const other = await invitation(undefined, 'p2')
+  expect((await request(app, '/commands/people/link_account', 'POST', { rowId: 'p1', userId: 'member-a' })).status).toBe(200)
   expect((await request(app, '/commands/people/remove_access', 'POST', { rowId: 'p1' })).status).toBe(200)
   expect((await accept(other.id)).status).toBe(409)
   expect(await env.DB.prepare("SELECT user FROM people WHERE id='p2'").first('user')).toBeNull()
@@ -468,4 +469,67 @@ it('178 searched linked account explains ineligibility without changing the elig
   const searched = await json(response)
   expect(responseContract('/orgs/{orgId}/members').safeParse(searched).success).toBe(true)
   expect(searched.data).toEqual([expect.objectContaining({ user_id: 'member-a', linkable: false, link_reason: 'account_already_linked' })])
+})
+
+it.each([true, false])('178 direct create rejects a known linked account (membership=%s) without invitation or mail', async membership => {
+  await env.DB.exec("UPDATE people SET user='member-a' WHERE id='p2'")
+  if (!membership) await env.DB.exec("DELETE FROM memberships WHERE user_id='member-a'")
+  const response = await invite(' MEMBER-A@EXAMPLE.TEST ')
+  const body = await json(response)
+  expect([response.status, body]).toEqual([409, { error: 'account_already_linked' }])
+  expect(responseContract('/orgs/{orgId}/invitations', 'post', '409').safeParse(body).success).toBe(true)
+  expect(await env.DB.prepare('SELECT count(*) n FROM invitations').first('n')).toBe(0)
+  expect(await env.DB.prepare('SELECT count(*) n FROM email_outbox').first('n')).toBe(0)
+  expect(await linked()).toBeNull()
+})
+
+it('178 create uniqueness is scoped to the same entity and organization, with unknown addresses allowed', async () => {
+  await env.DB.exec("INSERT INTO users (id,organization_id,email,name,created_at,updated_at) VALUES ('foreign-member','org-b','foreign@example.test','Foreign','now','now'); UPDATE teams SET user='member-a' WHERE id='t1'; UPDATE people SET user='foreign-member' WHERE id='foreign'")
+  const i = await invitation()
+  expect(responseContract('/orgs/{orgId}/invitations', 'post', '201').safeParse(i).success).toBe(true)
+  await invitation('foreign@example.test', 'p2')
+  await env.DB.exec("INSERT INTO people (id,organization_id,name,created_at,updated_at) VALUES ('p3','org-a','Unknown','now','now')")
+  await invitation('unknown@example.test', 'p3')
+  expect(await linked()).toBeNull()
+})
+
+it.each(['members.read', 'invitations.create', 'read', 'update', 'policy'])('178 searched linked identity is withheld without %s authority', async gate => {
+  const config = configuration()
+  if (gate === 'members.read' || gate === 'invitations.create') config.organizationPermissions.owner = config.organizationPermissions.owner!.filter(action => action !== gate)
+  else if (gate === 'policy') config.policies.people.owner = 'none'
+  else config.permissions.owner.people = config.permissions.owner.people.filter(operation => operation !== gate)
+  app = createApp(config, runtime())
+  await env.DB.exec("UPDATE people SET user='member-a' WHERE id='p2'")
+  const path = '/orgs/org-a/members?eligible=link_account&target_entity=people&target_row=p1&q=member-a@example.test'
+  const response = gate === 'members.read'
+    ? await (await agentToken('owner', ['people.read', 'people.update', 'invitations.create']))(path, 'GET')
+    : await request(app, path)
+  expect(response.status).toBe(gate === 'members.read' ? 403 : 400)
+  expect(await json(response)).toEqual({ error: gate === 'members.read' ? 'operation_forbidden' : 'invalid_link_target' })
+})
+
+it('178 a link committed after create preflight rejects the atomic insert and its mail intent', async () => {
+  const batch = env.DB.batch.bind(env.DB)
+  const spy = vi.spyOn(env.DB, 'batch').mockImplementationOnce(async statements => {
+    await env.DB.prepare("UPDATE people SET user='member-a' WHERE id='p2'").run()
+    return batch(statements)
+  })
+  try {
+    const response = await invite()
+    expect([response.status, await json(response)]).toEqual([409, { error: 'account_already_linked' }])
+    expect(spy).toHaveBeenCalled()
+    expect(await env.DB.prepare('SELECT count(*) n FROM invitations').first('n')).toBe(0)
+    expect(await env.DB.prepare('SELECT count(*) n FROM email_outbox').first('n')).toBe(0)
+  } finally { spy.mockRestore() }
+})
+
+it('178 concurrent accepts of an earlier invitation all reject the linked account and roll back membership creation', async () => {
+  const i = await invitation()
+  await env.DB.exec("UPDATE people SET user='member-a' WHERE id='p2'; DELETE FROM memberships WHERE user_id='member-a'")
+  const responses = await Promise.all(Array.from({ length: 6 }, () => accept(i.id)))
+  for (const response of responses) expect([response.status, await json(response)]).toEqual([409, { error: 'account_already_linked' }])
+  expect(await linked()).toBeNull()
+  expect(await env.DB.prepare("SELECT count(*) n FROM people WHERE organization_id='org-a' AND user='member-a'").first('n')).toBe(1)
+  expect(await env.DB.prepare("SELECT count(*) n FROM memberships WHERE user_id='member-a'").first('n')).toBe(0)
+  expect(await env.DB.prepare('SELECT accepted_at FROM invitations WHERE id=?').bind(i.id).first('accepted_at')).toBeNull()
 })

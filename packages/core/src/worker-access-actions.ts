@@ -7,6 +7,7 @@ import { userLinkCommands, registerUserLinkAction } from './user-links'
 import { kernelFor } from './kernel/registry'
 import { accountCommand } from './account-action-conditions'
 import { rowInvitationGuard } from './row-invitations'
+import { invitationAccountUnique } from './user-link-eligibility'
 import { invitationRole } from './worker-access'
 import { issuerGuard } from './organization-rules'
 import { actorAccountId } from './policies'
@@ -45,6 +46,8 @@ export function workerAccessCommands(config: InstanceConfig, env?: RuntimeEnv): 
     }, 'invitations.revoke')
     const invite = registerPostCommit(registerUserLinkAction({ name: accountCommand(entity, 'invite'), permission: { entity, operation: 'create' }, input: z.strictObject({ id, email: z.string().trim().pipe(z.email()).transform(email => email.toLowerCase()) }),
       async prepare(ctx, input) {
+        const unique = invitationAccountUnique(ctx.config, ctx.scope.organizationId, { entity, row: input.id }, input.email)
+        if (!await ctx.reader.first({ sql: `SELECT 1 WHERE ${unique.sql}`, bindings: unique.bindings })) throw new ApiError(409, 'account_already_linked')
         // Prepare the unsigned selector and mail metadata outside config/locks.
         const role = invitationRole(ctx.config, entity)
         const token = randomToken(), deliveryToken = randomToken(), invitationId = ulid(), outboxId = ulid()
@@ -61,11 +64,13 @@ export function workerAccessCommands(config: InstanceConfig, env?: RuntimeEnv): 
       plan(ctx, input) {
         const p = ctx.prepared
         const guard = rowInvitationGuard(ctx.config, ctx.scope, { entity, row: input.id })
+        const unique = invitationAccountUnique(ctx.config, ctx.scope.organizationId, { entity, row: input.id }, input.email)
         return { rules: [{ name: 'invite', statements: [{
           // Migration 004's BEFORE INSERT trigger expires the stale row before
           // its partial unique index is checked, within this same D1 batch.
-          sql: `INSERT INTO invitations (id,organization_id,email,role,token_hash,delivery_token_hash,expires_at,inviter_id,created_at,delivery_outbox_id,target_entity,target_row) SELECT ?,?,?,?,?,?,?,?,?,?,?,? WHERE ${guard.sql}`,
-          bindings: [p.invitationId, ctx.scope.organizationId, input.email, p.role, p.hash, p.deliveryHash, p.expires, actorAccountId(ctx.scope), ctx.now, p.outboxId, entity, input.id, ...guard.values], expectRows: 1,
+          sql: `INSERT INTO invitations (id,organization_id,email,role,token_hash,delivery_token_hash,expires_at,inviter_id,created_at,delivery_outbox_id,target_entity,target_row) SELECT ?,?,?,?,?,?,?,?,?,?,?,? WHERE ${guard.sql} AND ${unique.sql}`,
+          bindings: [p.invitationId, ctx.scope.organizationId, input.email, p.role, p.hash, p.deliveryHash, p.expires, actorAccountId(ctx.scope), ctx.now, p.outboxId, entity, input.id, ...guard.values, ...(unique.bindings ?? [])], expectRows: 1,
+          diagnose: { sql: `SELECT ${unique.sql} AS ok`, bindings: unique.bindings }, failureCode: 'account_already_linked',
         }, p.mail.intent(p.expires)] }], event: { operation: 'invitation.created', entity: 'invitations', entityId: p.invitationId },
           result: { status: 201, body: { invitation_id: p.invitationId, expires_at: p.expires, accept_url: p.url,
             delivery: { status: 'unknown', attempts: 0, sent_at: null, error: 'email_delivery_unknown' } } } }

@@ -1,4 +1,4 @@
-import { linkableMembers } from '../../../core/src/user-link-eligibility'
+import { invitationAccountUnique, linkableMembers } from '../../../core/src/user-link-eligibility'
 import { buildInvitationAcceptUrl } from './invitation-url'
 import { memberIdentities, canReadMembers } from '../../../core/src/member-identities'
 import type { RowAccessStatus } from '../../../core/src/row-access'
@@ -184,12 +184,14 @@ export function memberRoutes(app: App, config: InstanceConfig, env: RuntimeEnv) 
     const parsed = z.strictObject({ email: z.string().trim().pipe(emailSchema), role: roleSchema.optional(), target: rowTargetSchema.optional(), profile_prefill: profileNamesSchema.optional() }).parse(await c.req.json())
     if (parsed.target && parsed.role !== undefined && parsed.role !== invitationRole(config, parsed.target.entity)) throw new ApiError(400, 'invalid_invitation_role')
     const body = { ...parsed, role: parsed.target ? invitationRole(config, parsed.target.entity) : roleSchema.parse(parsed.role) }
+    const unique = body.target ? invitationAccountUnique(config, scope.organizationId, body.target, body.email) : { sql: '1', bindings: [] }
     if (body.target) {
       const link = rowLink(config, body.target)
       kernelFor(config).permission(scope, body.target.entity, 'create')
       const guard = rowInvitationGuard(config, scope, body.target, false)
       if (!await env.DB.prepare(`SELECT 1 WHERE ${guard.sql}`).bind(...guard.values).first()) throw new ApiError(404, 'not_found')
       if (await env.DB.prepare(`SELECT 1 FROM ${quote(link.entity)} WHERE organization_id=? AND id=? AND ${quote(link.field)} IS NOT NULL`).bind(scope.organizationId, body.target.row).first()) throw new ApiError(409, 'account_already_linked')
+      if (!await env.DB.prepare(`SELECT 1 WHERE ${unique.sql}`).bind(...(unique.bindings ?? [])).first()) throw new ApiError(409, 'account_already_linked')
     }
     if (!canGrantRole(config, scope.role, body.role)) throw new ApiError(403, 'role_escalation')
     const member = await env.DB.prepare('SELECT m.user_id FROM memberships m JOIN users u ON u.id=m.user_id WHERE m.organization_id=? AND lower(u.email)=?').bind(scope.organizationId, body.email).first()
@@ -201,17 +203,18 @@ export function memberRoutes(app: App, config: InstanceConfig, env: RuntimeEnv) 
     const guard = body.target ? rowInvitationGuard(config, scope, body.target) : issuerGuard(config, scope, 'invitations.create', body.role)
     try {
       await execute(scope, 'invitations/create', 'invitations.create', {
-        rules: [organizationRule('invitation_create', {
+        rules: [{ name: 'invitation_create', statements: [{
           sql: `INSERT INTO invitations (id,organization_id,email,role,token_hash,delivery_token_hash,expires_at,inviter_id,created_at,delivery_outbox_id,name_first,name_last,target_entity,target_row)
-            SELECT ?,?,?,?,?,?,?,?,?,?,?,?,?,? WHERE ${guard.sql} AND (?=1 OR NOT EXISTS (SELECT 1 FROM memberships m JOIN users u ON u.id=m.user_id WHERE m.organization_id=? AND lower(u.email)=?))`,
-          bindings: [id, scope.organizationId, body.email, body.role, await sha256(token), await sha256(deliveryToken), expires, actorAccountId(scope), now, outboxId, body.profile_prefill?.firstName ?? null, body.profile_prefill?.lastName ?? null, body.target?.entity ?? null, body.target?.row ?? null, ...guard.values, body.target ? 1 : 0, scope.organizationId, body.email],
-        }, mail.intent(expires))],
+            SELECT ?,?,?,?,?,?,?,?,?,?,?,?,?,? WHERE ${guard.sql} AND ${unique.sql} AND (?=1 OR NOT EXISTS (SELECT 1 FROM memberships m JOIN users u ON u.id=m.user_id WHERE m.organization_id=? AND lower(u.email)=?))`,
+          bindings: [id, scope.organizationId, body.email, body.role, await sha256(token), await sha256(deliveryToken), expires, actorAccountId(scope), now, outboxId, body.profile_prefill?.firstName ?? null, body.profile_prefill?.lastName ?? null, body.target?.entity ?? null, body.target?.row ?? null, ...guard.values, ...(unique.bindings ?? []), body.target ? 1 : 0, scope.organizationId, body.email],
+          expectRows: 1, diagnose: { sql: `SELECT ${unique.sql} AS ok`, bindings: unique.bindings }, failureCode: 'account_already_linked',
+        }, { ...mail.intent(expires), expectRows: 1 }] }],
         event: { operation: 'invitation.created', entity: 'invitations', entityId: id },
         result: { status: 201, body: { id, email: body.email, role: body.role, expires_at: expires } },
       })
     } catch (error) {
       if (/UNIQUE constraint failed: (index 'invitations_one_pending_email'|invitations.organization_id, invitations.target_entity, invitations.target_row)/i.test(String(error))) throw new ApiError(409, 'invitation_pending')
-      if (error instanceof RuleFailed) throw new ApiError(409, 'invitation_conflict')
+      if (error instanceof RuleFailed) throw new ApiError(409, error.code === 'account_already_linked' ? error.code : 'invitation_conflict')
       throw error
     }
     await mail.deliver()

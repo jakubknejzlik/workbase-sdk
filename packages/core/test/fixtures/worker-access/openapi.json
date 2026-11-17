@@ -6609,6 +6609,216 @@
         "security": []
       }
     },
+    "/orgs/{orgId}/invitations": {
+      "parameters": [
+        {
+          "in": "path",
+          "name": "orgId",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "post": {
+        "description": "Creates an invitation. A row target derives its role from the configured entity. Returns 409 account_already_linked if the target is occupied or the known invitee is already linked to another row of the same entity in this organization. The uniqueness check is repeated atomically when inserting the invitation; unknown addresses and links to different entities or organizations are allowed.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "email": {
+                    "format": "email",
+                    "type": "string"
+                  },
+                  "profile_prefill": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "firstName": {
+                        "type": "string"
+                      },
+                      "lastName": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [],
+                    "type": "object"
+                  },
+                  "role": {
+                    "type": "string"
+                  },
+                  "target": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "entity": {
+                        "pattern": "^[a-z][a-z0-9_]*$",
+                        "type": "string"
+                      },
+                      "row": {
+                        "maxLength": 200,
+                        "minLength": 1,
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "entity",
+                      "row"
+                    ],
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "email"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "message": {
+                      "enum": [
+                        "already_member"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "message"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "accept_url": {
+                      "type": "string"
+                    },
+                    "delivery": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "attempts": {
+                          "type": "integer"
+                        },
+                        "error": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "sent_at": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "status": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "attempts",
+                        "error",
+                        "sent_at",
+                        "status"
+                      ],
+                      "type": "object"
+                    },
+                    "email": {
+                      "type": "string"
+                    },
+                    "expires_at": {
+                      "type": "string"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "role": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "accept_url",
+                    "delivery",
+                    "email",
+                    "expires_at",
+                    "id",
+                    "role"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "error": {
+                      "enum": [
+                        "account_already_linked",
+                        "invitation_pending",
+                        "invitation_conflict"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Invitation conflict"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "API error"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
     "/orgs/{orgId}/members": {
       "get": {
         "description": "Link eligibility requires an administrator with members.read, target_entity and target_row plus Link authority. Missing, malformed or inaccessible targets return 400 invalid_link_target. Without q, results exclude accounts linked to another row of that entity in this organization. With q, matching members include linkable and, when unavailable, link_reason; unavailable accounts cannot be linked.",
