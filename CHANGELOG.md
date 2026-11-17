@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Remove the unused bootstrap and standalone console-registry HTTP handlers.
+  Their former paths follow normal SPA handling. The internal registry provider
+  and supported metadata endpoints remain available. (#153)
+
 - Standalone dev/test onboarding can use the development mailbox instead of
   `EMAIL_FROM`, with mutually exclusive mail inputs and a separate ops MCP server.
   Open registration establishes identities; `allowCreate: false` reserves org
@@ -42,10 +46,10 @@
   `scripts/lib/installed-consumer-supervisor.cjs`,
   `scripts/lib/installed-consumer-processes.cjs`,
   `scripts/lib/installed-consumer-live.ts`).
-- **Legacy endpoints still mounted:** `/schema`, `/console-info`, bootstrap and
-  console-model routes remain in `packages/core/src/app.ts`; the smoke asserts
-  `/schema` returns 200. Its browser checks absence of legacy requests, not endpoint
-  retirement or 404s (`scripts/smoke-template.ts`,
+- **Supported metadata endpoints:** `/schema`, `/console-info` and console-model
+  routes remain in `packages/core/src/app.ts`; the smoke asserts `/schema` returns
+  200. Its browser checks absence of legacy requests, not unknown-path 404s
+  (`scripts/smoke-template.ts`,
   `scripts/lib/installed-consumer-live.ts`).
 - Deferred slices and the narrower local substitutes are recorded below. These
   probes are implemented in `scripts/lib/installed-consumer-live.ts` and

@@ -50,11 +50,7 @@ it('F11: unknown accounts email signs in without a domain account, role or works
   expect(response.status).toBe(200)
   const me = await response.json() as any
   expect(me.memberships).toEqual([])
-  const bootstrap = await call('/bootstrap', undefined, bearer)
-  expect(bootstrap.status).toBe(200)
-  expect(bootstrap.headers.get('Cache-Control')).toBe('private, no-store')
-  expect(await bootstrap.json()).toMatchObject({ me })
-  expect((await call('/o/org-a/bootstrap', undefined, bearer)).status).toBe(403)
+  for (const endpoint of ['console-model', 'capabilities']) expect((await call(`/o/org-a/${endpoint}`, undefined, bearer)).status).toBe(403)
   expect(await env.DB.prepare('SELECT id FROM users WHERE id=?').bind(me.user.id).first()).toBeNull()
   expect((await call('/query', { entity: 'records', limit: 10, select: ['id'] }, bearer)).status).toBe(403)
   expect((await call('/orgs/org-a/members', undefined, bearer)).status).toBe(403)
@@ -66,12 +62,12 @@ it('invitation signs in before profile completion and atomically accepts with th
   expect(bearer).toBeTruthy()
   const me = await (await call('/me', undefined, bearer)).json() as any
   expect(me.memberships).toEqual([{ organization_id: 'org-a', name: 'Organization A', role: 'reviewer' }])
-  const bootstrap = await call('/o/org-a/bootstrap', undefined, bearer)
-  expect(bootstrap.status).toBe(200)
-  const boot = await bootstrap.json() as any
-  expect(boot.me).toEqual(me)
-  expect(boot.capabilities).toEqual(await (await call('/o/org-a/capabilities', undefined, bearer)).json())
-  expect((await call('/o/other-org/bootstrap', undefined, bearer, 'other-org')).status).toBe(403)
+  const responseModel = await call('/o/org-a/console-model', undefined, bearer)
+  expect(responseModel.status).toBe(200)
+  expect(responseModel.headers.get('Cache-Control')).toBe('private, no-store')
+  const model = await responseModel.json() as any
+  expect(model.capabilities).toEqual(await (await call('/o/org-a/capabilities', undefined, bearer)).json())
+  for (const endpoint of ['console-model', 'capabilities']) expect((await call(`/o/other-org/${endpoint}`, undefined, bearer, 'other-org')).status).toBe(403)
   expect(await env.DB.prepare('SELECT organization_id,role,name FROM users WHERE id=?').bind(me.user.id).first()).toMatchObject({ organization_id: 'org-a', role: 'reviewer' })
   expect((await call('/query', { entity: 'records', limit: 10, select: ['id'] }, bearer, 'other-org')).status).toBe(403)
   expect((await call('/invitations/accept', { token: invitation.token }, bearer)).status).toBe(200)

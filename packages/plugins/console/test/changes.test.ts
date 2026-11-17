@@ -1,13 +1,14 @@
-import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import { assert, afterEach, beforeEach, expect, it, vi } from 'vitest'
 import sample from '../../../core/test/fixtures/sample/config'
 import { createApp } from '@workbasehq/core/app'
 import { request, runtime, setup } from '@workbasehq/test-support/helpers'
-import { consoleRegistry } from '../src/index'
+import type { ConsoleModelContract } from '@workbasehq/core/console-contract'
 beforeEach(async () => { await setup() })
 afterEach(() => vi.restoreAllMocks())
 it('SR-85 Changes is registry-owned in Operations, admin-only, and endpoints recheck scope/grants', async () => {
   const app = createApp(sample, runtime())
-  const registry = await (await request(app, '/o/org-a/console-registry')).json() as ReturnType<typeof consoleRegistry>
+  const { console: registry } = await (await request(app, '/o/org-a/console-model')).json() as ConsoleModelContract
+  assert(registry)
   expect(registry.navigation.find(item => item.page === 'console.changes')).toMatchObject({ placement: 'settings', group: { id: 'operations' } })
   for (const action of ['propose', 'apply']) {
     const path = `/o/org-a/config-changes/${action}`
@@ -16,7 +17,8 @@ it('SR-85 Changes is registry-owned in Operations, admin-only, and endpoints rec
     expect((await app.request(path, { method: 'POST' })).status).toBe(401)
     expect((await request(app, path, 'POST', action === 'propose' ? { prompt: 'add status field with filter to jobs' } : { proposalId: crypto.randomUUID() })).status).toBe(503)
   }
-  const viewer = await (await request(app, '/o/org-a/console-registry', 'GET', undefined, 'viewer-a')).json() as ReturnType<typeof consoleRegistry>
+  const { console: viewer } = await (await request(app, '/o/org-a/console-model', 'GET', undefined, 'viewer-a')).json() as ConsoleModelContract
+  assert(viewer)
   expect(viewer.pages.some(page => page.id === 'console.changes')).toBe(false)
   const headless = createApp({ ...sample, plugins: sample.plugins!.filter(p => !['console', 'audit'].includes(p.name)) }, runtime())
   expect((await request(headless, '/o/org-a/config-changes/propose', 'POST', {})).status).toBe(404)

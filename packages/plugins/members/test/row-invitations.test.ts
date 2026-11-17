@@ -5,10 +5,11 @@ import { defineInstance } from '@workbasehq/core/config'
 import { createApp } from '@workbasehq/core/app'
 import { initialSchema } from '../../../core/src/migrations/schema'
 import { KernelRegistry } from '@workbasehq/core/kernel/registry'
+import { requireScope } from '../../../core/src/authorization'
 import { sha256 } from '@workbasehq/core/crypto'
 import { createIdentity } from '@workbasehq/plugins/identity'
 import { createLocalAuth } from '@workbasehq/plugins/local-auth'
-import { consoleUI } from '@workbasehq/plugins/console'
+import { consoleUI, consoleRegistry } from '@workbasehq/plugins/console'
 import { createMembers } from '@workbasehq/plugins/members'
 import { createOrganizations } from '@workbasehq/plugins/organizations'
 import { permissions } from '@workbasehq/plugins/permissions'
@@ -280,8 +281,10 @@ it('176b member navigation contains only policy-readable entities and no setting
   const body = await json(response)
   expect(body.console.navigation.length).toBeGreaterThan(0)
   expect(body.console.navigation.every((item: { entity?: string; placement: string }) => !!item.entity && item.placement === 'sidebar' && item.entity !== 'teams')).toBe(true)
-  const legacy = await json(await request(app, '/o/org-a/console-registry', 'GET', undefined, 'member-a'))
-  expect(legacy.navigation.every((item: { entity?: string; placement: string }) => !!item.entity && item.placement === 'sidebar' && item.entity !== 'teams')).toBe(true)
+  const kernel = new KernelRegistry(c)
+  const actor = await kernel.requireActor(new Request('http://localhost', { headers: { Authorization: 'Bearer synthetic-member-a' } }), runtime())
+  const registry = consoleRegistry(kernel.config, await requireScope(actor, 'org-a', kernel.config))
+  expect(registry.navigation.every(item => !!item.entity && item.placement === 'sidebar' && item.entity !== 'teams')).toBe(true)
 })
 
 it.each([
