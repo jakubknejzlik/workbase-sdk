@@ -60,7 +60,15 @@ export function AcceptInvitation() {
       await client.invalidateQueries({ queryKey: profileOptions.queryKey })
     }
   } })
+  // A proof-shaped delivered link retains mailbox entry; the server verifies the proof.
+  // Copied selectors only identify the invitation and require a separate sign-in.
+  const signInRequired = summary?.account_match === null && selector !== null
+    && ('id' in selector || !selector.token.includes('.'))
   const run = async (kind: 'accept' | 'decline') => {
+    if (kind === 'accept' && signInRequired && summary) {
+      window.location.assign(signInLocation(`/invitation?id=${summary.id}`))
+      return
+    }
     if (latch.current) return
     latch.current = true
     try { await action.mutateAsync(kind) } catch (error) {
@@ -70,7 +78,7 @@ export function AcceptInvitation() {
     finally { latch.current = false }
   }
   useEffect(() => {
-    // Resume only the explicitly confirmed anonymous acceptance, after the profile gate.
+    // Resume only explicitly confirmed delivered-mail acceptance, after the profile gate.
     if (confirmed && !action.isPending && !profile.isFetching && profile.data?.completeness.complete) {
       setConfirmed(false); void run('accept')
     }
@@ -111,9 +119,9 @@ export function AcceptInvitation() {
     <CardDescription className="text-center">{t('p10PreviewDescription')}</CardDescription>
     {wrongAccount && <div role="alert" className="space-y-2 rounded-lg border border-destructive p-4 text-sm text-destructive"><p className="font-medium">{t('p10WrongAccountTitle')}</p><p>{t('p10WrongAccountDescription')}</p>{profile.data && <p className="break-all">{profile.data.email}</p>}<Button variant="outline" disabled={busy} onClick={() => logout.mutate()}>{t('p10SwitchAccount')}</Button></div>}
     <dl className="space-y-2 rounded-lg border p-4 text-sm">{[[t('p10Organization'), organization], [t('p10InvitedBy'), summary.inviter.display_name ?? t('p10InviterUnavailable')], [t('role'), t(`role_${summary.role}`, { defaultValue: summary.role })]].map(([label, value]) => <div key={label} className="flex justify-between gap-4"><dt className="text-muted-foreground">{label}</dt><dd className="min-w-0 break-words text-right font-medium">{value}</dd></div>)}</dl>
-    {summary.target && <p>{t('rowInvitationTarget', { entity: t(`entitySingular_${summary.target.entity}`, { defaultValue: summary.target.entity }), row: summary.target.row })}</p>}
-    {summary.account_match === null && <p className="text-sm text-muted-foreground">{t('p10AnonymousDescription')}</p>}
+    {summary.target && <p>{t('rowInvitationTarget', { entity: t(`entitySingular_${summary.target.entity}`, { defaultValue: summary.target.entity }) })}</p>}
+    {summary.account_match === null && <p className="text-sm text-muted-foreground">{t(signInRequired ? 'p10CopiedSignInDescription' : 'p10AnonymousDescription')}</p>}
     {(action.error || logout.error) && !wrongAccount && <p role="alert" className="text-sm text-destructive">{t('p10ActionFailed')}</p>}
     {logout.error && wrongAccount && <p role="alert">{t('requestFailed')}</p>}
-  </>, wrongAccount ? null : <><Button className="flex-1" variant="outline" disabled={busy} onClick={() => void run('decline')}>{t(action.isPending && action.variables === 'decline' ? 'p10Declining' : 'p10Decline')}</Button><Button className="flex-1" disabled={busy || confirmed} onClick={() => void run('accept')}>{t(action.isPending && action.variables === 'accept' || confirmed ? 'p10Accepting' : 'acceptInvitation')}</Button></>)
+  </>, wrongAccount ? null : <><Button className="flex-1" variant="outline" disabled={busy} onClick={() => void run('decline')}>{t(action.isPending && action.variables === 'decline' ? 'p10Declining' : 'p10Decline')}</Button><Button className="flex-1" disabled={busy || confirmed} onClick={() => void run('accept')}>{t(action.isPending && action.variables === 'accept' || confirmed ? 'p10Accepting' : signInRequired ? 'p10SignInToAccept' : 'acceptInvitation')}</Button></>)
 }

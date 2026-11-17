@@ -1,4 +1,8 @@
 import { test, expect } from '@playwright/test'
+import { mkdirSync } from 'node:fs'
+import { join } from 'node:path'
+import en from '../src/locales/en.json' with { type: 'json' }
+import cs from '../src/locales/cs.json' with { type: 'json' }
 import setup, { origin } from './runtime/setup'
 let stop: (() => Promise<void>) | undefined
 test.beforeAll(async () => { stop = await setup({ worker: 'worker-invitation-worker.ts', seed: 'worker-invitation-seed.ts' }) })
@@ -49,5 +53,75 @@ test('V3 worker invite retries failed transport and its delivered link reaches a
     await expect(page.getByRole('button', { name: 'Open organization', exact: true })).toBeVisible()
     const row = await request.get('/api/worker/one', { headers })
     expect((await row.json()).user).toBe('recipient')
+  } finally { await recipient.close() }
+})
+
+for (const language of ['en', 'cs'] as const) test(`${language} copied invitation signs in first and joins only after explicit acceptance`, async ({ browser, request }) => {
+  const copy = language === 'en' ? en : cs
+  const email = `copied-${language}@example.test`
+  const headers = { Authorization: 'Bearer worker-admin-session', 'X-Organization-Id': 'org-a' }
+  const created = await request.post('/orgs/org-a/invitations', { headers, data: { email, role: 'staff' } })
+  expect(created.status()).toBe(201)
+  const invitation = await created.json()
+  const copied = await request.post(`/orgs/org-a/invitations/${invitation.id}/copy-link`, { headers, data: {} })
+  expect(copied.status()).toBe(200)
+  const copiedUrl = (await copied.json()).accept_url
+  const recipient = await browser.newContext({ baseURL: origin, viewport: { width: 1440, height: 900 } })
+  try {
+    await recipient.addInitScript(locale => localStorage.setItem('console-language', locale), language)
+    expect(await recipient.cookies()).toEqual([])
+    const page = await recipient.newPage()
+    const accepts: string[] = []
+    page.on('request', incoming => {
+      const path = new URL(incoming.url()).pathname
+      if (incoming.method() === 'POST' && /^\/invitations\/(?:[^/]+\/)?accept$/.test(path)) accepts.push(path)
+    })
+    const screenshot = async (step: string) => {
+      if (!process.env.WORKER_INVITATION_SCREENSHOTS) return
+      mkdirSync(process.env.WORKER_INVITATION_SCREENSHOTS, { recursive: true })
+      expect(new URL(page.url()).search).toBe('')
+      await page.screenshot({ path: join(process.env.WORKER_INVITATION_SCREENSHOTS, `${language}-${step}.png`), fullPage: true })
+    }
+    await page.goto(copiedUrl)
+    await expect(page.getByRole('button', { name: copy.p10SignInToAccept, exact: true })).toBeVisible()
+    await expect(page.getByText(copy.p10CopiedSignInDescription, { exact: true })).toBeVisible()
+    await expect(page).toHaveURL(`${origin}/invitation`)
+    await screenshot('anonymous')
+    await page.getByRole('button', { name: copy.p10SignInToAccept, exact: true }).click()
+    await expect(page).toHaveURL(`${origin}/sign-in?returnTo=${encodeURIComponent(`/invitation?id=${invitation.id}`)}`)
+    expect(accepts).toEqual([])
+    await page.getByLabel(copy.email, { exact: true }).fill(email)
+    const signIn = page.waitForResponse(response => new URL(response.url()).pathname === '/auth/sign-in/magic-link' && response.request().method() === 'POST')
+    await page.getByRole('button', { name: copy.sendLink, exact: true }).click()
+    expect((await signIn).status()).toBe(200)
+    const mailbox = await request.get('/__test/mail', { headers: { Authorization: 'Bearer worker-local-control' } })
+    const { messages } = await mailbox.json()
+    const message = messages.filter((value: { to: string; text: string }) => value.to === email && value.text.includes('/auth/magic-link/verify')).at(-1)
+    const loginUrl = message?.text.match(/https?:\/\/[^\s]+/)?.[0]
+    expect(Boolean(loginUrl), 'synthetic mailbox contains a magic link').toBe(true)
+    await page.goto(loginUrl)
+    await expect(page.getByRole('heading', { name: copy.profileSetupTitle, exact: true })).toBeVisible()
+    expect(accepts).toEqual([])
+    await page.getByLabel(copy.firstName, { exact: true }).fill('Copied')
+    await page.getByLabel(copy.lastName, { exact: true }).fill('Synthetic')
+    await page.getByRole('button', { name: copy.profileContinue, exact: true }).click()
+    await expect(page.getByRole('button', { name: copy.acceptInvitation, exact: true })).toBeVisible()
+    await expect(page).toHaveURL(`${origin}/invitation`)
+    expect(accepts).toEqual([])
+    // Chromium honors secure loopback cookies; the separate API client does not.
+    const memberships = () => page.evaluate(async () => {
+      const response = await fetch('/me', { credentials: 'same-origin' })
+      if (!response.ok) throw new Error(`Membership read failed: ${response.status}`)
+      return (await response.json()).memberships
+    })
+    expect(await memberships()).toEqual([])
+    await screenshot('authenticated')
+    const acceptance = page.waitForResponse(response => new URL(response.url()).pathname === `/invitations/${invitation.id}/accept` && response.request().method() === 'POST')
+    await page.getByRole('button', { name: copy.acceptInvitation, exact: true }).click()
+    expect((await acceptance).status()).toBe(201)
+    await expect(page.getByRole('heading', { name: copy.p10JoinedTitle, exact: true })).toBeVisible()
+    expect(accepts).toEqual([`/invitations/${invitation.id}/accept`])
+    expect(await memberships()).toEqual([expect.objectContaining({ organization_id: 'org-a', role: 'staff' })])
+    await screenshot('joined')
   } finally { await recipient.close() }
 })

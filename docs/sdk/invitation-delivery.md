@@ -19,6 +19,21 @@ record access dialog does the same; the SDK access card can also copy the
 unsigned value returned by its invite action. None receives the delivered
 selector or proof. The copied value is absent from the delivered message.
 
+Anonymous copied links show **Sign in to accept** and ask the recipient to sign
+in with the invited e-mail address. This navigation preserves the invitation's
+opaque ID in `returnTo` and makes no acceptance request. After sign-in and any
+required profile completion, **Accept invitation** explicitly confirms membership.
+Delivered links retain their mailbox-proof session and confirmation flow.
+
+The public preflight metadata contract is curated in
+`packages/core/src/openapi/public-paths.ts`: invitation ID, organization ID/name,
+inviter display name, role, expiry, state, account match, and optional target
+entity/row selectors. Recipient preview also carries navigation, return target,
+profile completeness, next step and actions. The target row is an API selector;
+the invitation card displays the entity context without printing that internal ID.
+Recipient e-mail, credentials, hashes and profile data are outside preflight's
+contract. The response field set is unchanged.
+
 Outbox rows store template inputs in `body`: display metadata,
 locale, timezone, expiry, configured origin and the unsigned delivered selector.
 `delivery_html` and `delivery_text` are empty placeholders. On each send/retry,
