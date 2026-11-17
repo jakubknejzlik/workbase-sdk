@@ -1,5 +1,5 @@
 import type { InstanceConfig } from '../config'
-import type { SourceMap } from '../schema/load'
+import type { SourceMap } from '../schema/source-location'
 import { sha256 } from '../crypto'
 import { checkBundle, hasManual, manualEvidence, parseBundle, renderBundle } from './schema-bundle'
 import { diffSpecs, lockBytes, parseLock, schemaLock, type SchemaLock } from './schema-lock'

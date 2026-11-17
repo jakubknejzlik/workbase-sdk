@@ -5,7 +5,7 @@ import { afterEach, expect, it } from 'vitest'
 import { checkSchema, lockBytes, parseLock, schemaLock } from '../../src/migrations/schema-lock'
 import { checkLinkage, plan } from '../../src/migrations/schema-plan'
 import { createPhysicalNameResolver } from '../../src/schema/physical-names'
-import { bindSchemaLock, defineEntity } from '../../src/schema'
+import { bindSchemaLock, defineConfig, defineEntity } from '../../src/schema'
 import { loadConfig } from '../../src/schema/load'
 import { runSchemaCli } from '../../src/migrations/schema-cli'
 import { plan as legacyPlan } from '../../src/migrations/planner'
@@ -115,6 +115,72 @@ it('retains contracted history while allowing a later intent; refuses history ed
   const initial = schemaLock(fixture), tampered = structuredClone(initial)
   tampered.entities[0].fields[0].id = 'fld_reassigned'
   await expect(checkLinkage(lockBytes(initial), {}, lockBytes(tampered), {})).rejects.toThrow('immutable')
+})
+
+it.each(['field', 'entity'] as const)('assigns deterministic unique IDs after a completed %s rename cycle', kind => {
+  const initial = parseLock(v1)
+  const entityId = initial.entities[0].id
+  const fieldId = initial.entities[0].fields.find(f => f.logicalName === 'name')!.id
+  let config = structuredClone(fixture), base = initial
+  const names = kind === 'field' ? ['name', 'full_name', 'name', 'full_name'] : ['worker', 'staff', 'worker', 'staff']
+  for (let i = 0; i < 3; i++) {
+    const from = names[i], to = names[i + 1]
+    if (kind === 'field') {
+      config.entities.worker.fields[to] = { ...config.entities.worker.fields[from], renameFrom: from }
+      delete config.entities.worker.fields[from]
+    } else {
+      config.entities[to] = { ...config.entities[from], renameFrom: from }
+      delete config.entities[from]
+    }
+    const next = schemaLock(config, base)
+    expect(next).toEqual(schemaLock(config, base))
+    expect(next.transitions.slice(0, i)).toEqual(base.transitions)
+    expect(new Set(next.transitions.map(t => t.id)).size).toBe(i + 1)
+    expect(schemaLock(config, next)).toEqual(next)
+    const prefix = kind === 'field'
+      ? 'tr_776f726b6572_776f726b6572_6e616d65_6e616d65_66756c6c5f6e616d65'
+      : 'tr_776f726b6572_entity_776f726b6572_7374616666'
+    if (i === 2) {
+      expect(next.transitions[0].id).toBe(`${prefix}_1`)
+      expect(next.transitions[2].id).toBe(`${prefix}_3`)
+      break
+    }
+    // Model a future slice's completed mapping; no phase advancement SQL here.
+    next.transitions[i].phase = 'contracted'
+    const entity = next.entities.find(e => e.id === entityId)!
+    const table = next.tables.find(t => t.name === entity.physicalName)!
+    if (kind === 'field') {
+      const field = entity.fields.find(f => f.id === fieldId)!
+      table.columns.find(c => c.name === field.physicalName)!.name = to
+      field.logicalName = to; field.physicalName = to
+      delete config.entities.worker.fields[to].renameFrom
+    } else {
+      entity.logicalName = to; entity.physicalName = to; table.name = to
+      table.indexes = table.indexes.map(index => ({ ...index, name: to + index.name.slice(from.length) }))
+      delete config.entities[to].renameFrom
+    }
+    base = parseLock(lockBytes(next))
+    expect(() => checkSchema(config, base)).not.toThrow()
+  }
+})
+
+it.each(['field', 'entity'] as const)('accepts a canonical %s rename from constructor', kind => {
+  const canonical = (entities: Parameters<typeof defineConfig>[0]['entities']) => defineConfig({
+    id: 'canonical', languages: ['en'], roles: ['admin'], organizationOwnerRole: 'admin', entities,
+  })
+  const original = kind === 'field'
+    ? canonical({ worker: defineEntity({ fields: { name: { type: 'text' }, constructor: { type: 'text' } } }) })
+    : canonical({ constructor: defineEntity({ fields: { name: { type: 'text' } } }) })
+  const config = kind === 'field'
+    ? canonical({ worker: defineEntity({ fields: { name: { type: 'text' }, title: { type: 'text', renameFrom: 'constructor' } } }) })
+    : canonical({ staff: defineEntity({ renameFrom: 'constructor', fields: { name: { type: 'text' } } }) })
+  const base = schemaLock(original)
+  expect(() => checkSchema(original, base)).not.toThrow()
+  const lock = schemaLock(config, base)
+  expect(lock.entities).toEqual(base.entities)
+  expect(lock.tables).toEqual(base.tables)
+  expect(lock.transitions[0]).toMatchObject({ bridge: kind, from: { logical: 'constructor', physical: 'constructor' }, to: { logical: kind === 'field' ? 'title' : 'staff' } })
+  expect(() => checkSchema(config, lock)).not.toThrow()
 })
 
 it('resolves validated logical identities to pinned physical names and rejects cross-entity IDs', () => {

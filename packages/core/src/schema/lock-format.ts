@@ -45,7 +45,7 @@ const format = z.discriminatedUnion('lockVersion', [
 const seed = (value: string) => Array.from(value, c => c.charCodeAt(0).toString(16).padStart(2, '0')).join('')
 export const initialEntityId = (physicalName: string) => `ent_${seed(physicalName)}`
 export const initialFieldId = (entityId: string, physicalName: string) => `fld_${entityId.slice(4)}_${seed(physicalName)}`
-export const transitionId = (entityId: string, fieldId: string | undefined, from: string, to: string) => `tr_${entityId.slice(4)}_${fieldId?.slice(4) ?? 'entity'}_${seed(from)}_${seed(to)}`
+export const transitionId = (entityId: string, fieldId: string | undefined, from: string, to: string, generation: number) => `tr_${entityId.slice(4)}_${fieldId?.slice(4) ?? 'entity'}_${seed(from)}_${seed(to)}_${generation}`
 export function initialLineage(tables: readonly TableSpec[]): EntityLineage[] {
   return tables.map(table => {
     const id = initialEntityId(table.name)

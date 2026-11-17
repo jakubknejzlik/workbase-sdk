@@ -1,6 +1,6 @@
 import type { InstanceConfig } from '../config'
 import { physicalTables, renderTable, renderColumn, quote, type TableSpec } from './schema'
-import type { SourceMap } from '../schema/load'
+import type { SourceMap } from '../schema/source-location'
 import { initialEntityId, initialFieldId, transitionId, validateLock, type EntityLineage, type RenameTransition, type SchemaLock } from '../schema/lock-format'
 export type { SchemaLock, EntityLineage, FieldLineage, RenameTransition } from '../schema/lock-format'
 
@@ -61,7 +61,12 @@ export function schemaLock(config: InstanceConfig, base?: SchemaLock, sources: S
         }
         throw new SpecError(name, field, `second open transition for ${entity.id}; finish transition ${existing.id} first`)
       }
-      const transition: RenameTransition = { id: transitionId(entity.id, fieldId, from.logical, to), entityId: entity.id, ...(fieldId ? { fieldIds: [fieldId] } : {}), from, to: { logical: to, physical: to }, bridge: fieldId ? 'field' : 'entity', phase: 'expanded' }
+      // History is append-only. Include its generation and skip any ID already
+      // present, including IDs assigned by an earlier writer.
+      let generation = transitions.length + 1
+      let id = transitionId(entity.id, fieldId, from.logical, to, generation)
+      while (transitions.some(t => t.id === id)) id = transitionId(entity.id, fieldId, from.logical, to, ++generation)
+      const transition: RenameTransition = { id, entityId: entity.id, ...(fieldId ? { fieldIds: [fieldId] } : {}), from, to: { logical: to, physical: to }, bridge: fieldId ? 'field' : 'entity', phase: 'expanded' }
       transitions.push(transition); intents.push({ name, field, transition })
     }
     // Authoring uses renameFrom at both levels. Expanded locks keep the source
@@ -74,7 +79,7 @@ export function schemaLock(config: InstanceConfig, base?: SchemaLock, sources: S
       }
       const source = input.renameFrom ?? name
       const old = previous?.entities.find(e => e.logicalName === source)
-      if (input.renameFrom && (!old || source === name || config.entities[source] || previous?.entities.some(e => e.logicalName === name || e.physicalName === name))) throw new SpecError(name, undefined, 'ambiguous/missing source or collision for entity renameFrom')
+      if (input.renameFrom && (!old || source === name || Object.hasOwn(config.entities, source) || previous?.entities.some(e => e.logicalName === name || e.physicalName === name))) throw new SpecError(name, undefined, 'ambiguous/missing source or collision for entity renameFrom')
       if (old && usedEntities.has(old.id)) throw new SpecError(name, undefined, 'ambiguous entity renameFrom: source reused')
       if (old) usedEntities.add(old.id)
       const entity: EntityLineage = old ? structuredClone(old) : { id: initialEntityId(name), logicalName: name, physicalName: name, fields: [] }
@@ -92,7 +97,7 @@ export function schemaLock(config: InstanceConfig, base?: SchemaLock, sources: S
         const source = field.renameFrom ?? key
         const oldField = old?.fields.find(f => f.logicalName === source)
         const oldColumn = previous?.tables.find(t => t.name === old?.physicalName)?.columns.find(c => c.name === oldField?.physicalName)
-        if (field.renameFrom && (!oldField || oldColumn?.implicit || source === key || input.fields[source] || old?.fields.some(f => f.logicalName === key || f.physicalName === key))) throw new SpecError(name, key, 'ambiguous/missing source or collision for field renameFrom')
+        if (field.renameFrom && (!oldField || oldColumn?.implicit || source === key || Object.hasOwn(input.fields, source) || old?.fields.some(f => f.logicalName === key || f.physicalName === key))) throw new SpecError(name, key, 'ambiguous/missing source or collision for field renameFrom')
         if (oldField && usedFields.has(oldField.id)) throw new SpecError(name, key, 'ambiguous field renameFrom: source reused')
         if (oldField) usedFields.add(oldField.id)
         const physical = oldField?.physicalName ?? key
