@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import { z } from 'zod'
 import { canonicalJSON, type EntityMeta } from './client'
-export { validateInstance, requiredKeys } from './validate'
+export { validateInstance, requiredKeys, inspectDictionaries } from './validate'
 export type { Finding } from './validate'
 export { canonicalJSON } from './client'
 import { buildPath, type Page, type Node, type Target } from './index'

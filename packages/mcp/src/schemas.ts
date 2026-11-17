@@ -54,6 +54,19 @@ const setLocale = z.strictObject({
   languages: z.array(consoleLocaleSchema).min(1).max(2).refine(values => new Set(values).size === values.length, 'Duplicate languages').optional(),
 }).refine(change => change.locale !== undefined || change.defaultLanguage !== undefined || change.languages !== undefined, 'Provide locale, defaultLanguage and/or languages')
 export type LocaleChange = z.infer<typeof setLocale>
+const catalogKey = z.string().min(1).max(256).regex(/^[a-zA-Z0-9_-]+(?:\.[a-zA-Z0-9_-]+)*$/)
+  .refine(key => !key.split('.').some(part => ['__proto__', 'prototype', 'constructor'].includes(part)), 'Reserved catalog key')
+const setCatalogEntries = z.strictObject({
+  kind: z.literal('set_catalog_entries'), language: consoleLocaleSchema, namespace: z.enum(['domain', 'ui']),
+  entries: z.unknown().superRefine((raw, ctx) => {
+    if (raw && typeof raw === 'object') for (const key of Object.getOwnPropertyNames(raw)) {
+      if (!catalogKey.safeParse(key).success) ctx.addIssue({ code: 'custom', message: 'Invalid catalog key', path: [key] })
+    }
+  }).pipe(z.record(catalogKey, caption)).refine(entries => Object.keys(entries).length > 0 && Object.keys(entries).length <= 1000, 'Provide 1–1000 entries'),
+})
+export type CatalogChange = z.infer<typeof setCatalogEntries>
+export const isPresentationChange = (change: { kind: string }) => change.kind === 'set_locale' || change.kind === 'set_catalog_entries'
+
 // Composition inputs remain separate from legacy config proposal records.
 export const identityOptionsSchema = z.strictObject({
   trustedIssuers: z.record(z.string().url(), z.array(z.string().min(1))).optional(),
@@ -90,7 +103,7 @@ export const setRolesSchema = z.strictObject({
   organizationOwnerRole: identifier,
 }).refine(change => change.roles.includes(change.organizationOwnerRole), 'organizationOwnerRole must be in roles')
 export type RolesChange = z.infer<typeof setRolesSchema>
-export const compositionChangeSchema = z.union([runtimeChangeSchema, accessChangeSchema, setRolesSchema, setLocale])
+export const compositionChangeSchema = z.union([runtimeChangeSchema, accessChangeSchema, setRolesSchema, setLocale, setCatalogEntries])
 export type CompositionChange = z.infer<typeof compositionChangeSchema>
 
 export const changeSchema = z.discriminatedUnion('kind', [

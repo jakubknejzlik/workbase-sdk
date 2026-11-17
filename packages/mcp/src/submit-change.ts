@@ -21,7 +21,7 @@ export function promotionHash(p: Submission) {
 const changeLabels: Record<Change['kind'] | CompositionChange['kind'], string> = {
   set_plugin: 'Úprava pluginu', set_interactive: 'Úprava interactive', set_roles: 'Úprava rolí a vlastníka',
   set_system_access: 'Úprava systémového přístupu', set_entity_access: 'Úprava přístupu k entitě', set_account_link: 'Úprava vazby na účet',
-  set_label: 'Úprava popisku', set_locale: 'Úprava jazyka', add_role: 'Přidání role', remove_role: 'Odebrání role',
+  set_catalog_entries: 'Úprava slovníku', set_label: 'Úprava popisku', set_locale: 'Úprava jazyka', add_role: 'Přidání role', remove_role: 'Odebrání role',
   set_permissions: 'Úprava oprávnění', set_organization_permissions: 'Úprava oprávnění organizace',
   add_entity: 'Přidání entity', set_policy: 'Úprava pravidla přístupu', set_display_field: 'Úprava zobrazeného názvu',
   add_field: 'Přidání pole', add_computed_field: 'Přidání vypočteného pole', set_computed_field: 'Úprava výpočtu pole',
@@ -45,6 +45,7 @@ export async function submitChange(directory: string, p: Submission, expectedBas
   const roleSources = rolesChanged ? Object.keys(await replaySources(directory)).filter(path => /^schema\/[a-z][a-z0-9_]*\.ts$/.test(path)) : []
   const allowed = new Set(p.kind === 'composition_change' ? [...(rolesChanged || p.changes.some(change => change.kind === 'set_locale') ? ['config.ts'] : []), 'runtime.ts', 'access.lock.json', 'access.lock.md',
     ...(rolesChanged || accessChanges.length ? ['access.ts'] : []), ...roleSources,
+    ...p.changes.flatMap(change => change.kind === 'set_catalog_entries' ? [`locales/${change.language}/${change.namespace}.json`] : []),
     ...(rolesChanged || accessChanges.length || p.changes.some(change => change.kind === 'set_locale') ? ['openapi.json'] : []),
     ...accessChanges.flatMap(change => change.kind === 'set_entity_access' ? [`schema/${change.entity}.ts`] : [])] : ['config.ts', 'config.indexes.json', 'config.versions.json', `config.v${p.baseRevision}.ts`, `config.v${p.promotedRevision}.ts`, `migrations/${p.migration}`])
   const paths = new Set<string>()

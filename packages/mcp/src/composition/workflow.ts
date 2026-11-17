@@ -1,6 +1,7 @@
+import { catalogPlan, validatePresentation } from './presentation.ts'
 import { join } from 'node:path'
 import { durableAtomic, json, type Bundle, type Store } from '../storage.ts'
-import { fail, identifier, type AccessChange, type CompositionChange, type RolesChange, type RuntimeChange } from '../schemas.ts'
+import { fail, identifier, isPresentationChange, type AccessChange, type CompositionChange, type RolesChange, type RuntimeChange } from '../schemas.ts'
 import { z } from 'zod'
 import { accessEntities } from '@workbasehq/core/schema'
 import { loadConfig } from '@workbasehq/core/schema/load'
@@ -35,7 +36,7 @@ async function load(store: Store, instance: string, changes: CompositionChange[]
   return store.load(instance, { canonicalRuntime: true })
 }
 async function prepare(bundle: Bundle, changes: CompositionChange[], root: string) {
-  if (changes.some(change => change.kind === 'set_locale') && !changes.every(change => change.kind === 'set_locale')) {
+  if (changes.some(isPresentationChange) && !changes.every(isPresentationChange)) {
     fail('mixed_change_kinds', 'Propose V3 language changes separately from runtime and access changes')
   }
   if (bundle.config.baseline !== 'workbase-sdk') fail('composition_requires_v3', 'Composition authoring requires a V3 instance', 409)
@@ -43,6 +44,7 @@ async function prepare(bundle: Bundle, changes: CompositionChange[], root: strin
   const accessChanges = changes.filter(isAccess)
   const access = accessChanges.length ? await accessPlan(root, accessChanges) : { config: bundle.config, files: [] }
   const locales = await localePlan(root, changes.filter(change => change.kind === 'set_locale'))
+  const catalogs = await catalogPlan(root, changes.filter(change => change.kind === 'set_catalog_entries'))
   const config = locales?.config ?? access.config
   const model = applyRuntimeChanges(parseRuntimeSource(bundle.runtimeSource!), runtimeChanges, config)
   const source = runtimeChanges.length ? rewriteRuntimeSource(bundle.runtimeSource!, model, config)
@@ -51,7 +53,7 @@ async function prepare(bundle: Bundle, changes: CompositionChange[], root: strin
   const target = { ...bundle, config, runtime }
   try { replayEngine(target.config, runtime) }
   catch { fail('invalid_composition', 'The target plugin composition is invalid; check required providers and interactive login', 400) }
-  return { target, source, files: [...(source !== bundle.runtimeSource ? [{ path: 'runtime.ts', data: source }] : []), ...access.files, ...(locales?.files ?? [])], model,
+  return { target, source, files: [...(source !== bundle.runtimeSource ? [{ path: 'runtime.ts', data: source }] : []), ...access.files, ...(locales?.files ?? []), ...catalogs], model,
     roleDiff: 'roleDiff' in access ? access.roleDiff : undefined }
 }
 function proof(bundle: Bundle, prepared: Awaited<ReturnType<typeof prepare>> & Awaited<ReturnType<typeof compositionPlan>>, changes: CompositionChange[], requirementGuards: Bundle['guards']) {
@@ -103,7 +105,13 @@ export async function executeComposition(store: Store, proposal: CompositionProp
   revision(bundle, proposal.baseRevision)
   if (name === 'promote' && proposal.validation && proposal.validation.fingerprint !== bundle.fingerprint) fail('stale_revision', 'Instance files changed since validation', 409)
   const target = await prepare(bundle, proposal.changes, root)
-  const prepared = { ...target, ...await compositionPlan(bundle, target.target, target.source, root, target.files) }
+  const presentation = proposal.changes.every(isPresentationChange)
+  if (presentation) await validatePresentation(root, target.files, bundle.guards)
+  const plan = await compositionPlan(bundle, target.target, target.source, root, target.files)
+  // Catalog bytes do not change access provenance. Retain existing artifacts and
+  // never introduce access artifacts for a dictionary-only publication.
+  if (presentation && proposal.changes.every(change => change.kind === 'set_catalog_entries')) plan.files = target.files
+  const prepared = { ...target, ...plan }
   const { requirements, guards: requirementGuards } = await compositionRequirements(await store.directory(proposal.instance), prepared.model)
   assertCompositionRequirements(requirements)
   const currentProof = proof(bundle, prepared, proposal.changes, requirementGuards)

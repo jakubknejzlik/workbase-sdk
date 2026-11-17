@@ -55,9 +55,9 @@ function componentStubs(sources: Sources): Plugin {
     },
   }
 }
-export async function extractManifest(root: string): Promise<Manifest> {
+export async function extractManifest(root: string, options: { sdkResolutionRoot?: string } = {}): Promise<Manifest> {
   root = resolve(root)
-  const loaded = await loadConfig(resolve(root, 'config.ts'))
+  const loaded = await loadConfig(resolve(root, 'config.ts'), options)
   const sources = checkSources(root)
   // The server does not exist until the complete source graph has passed.
   const server = await createServer({

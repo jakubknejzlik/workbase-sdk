@@ -396,12 +396,16 @@ it.each([
     { kind: 'set_account_link', entity: 'worker', invitationRole: 'staff' },
     ...(path === 'docs/sdk/mcp-composition.md' ? [
       { kind: 'set_locale', languages: ['en', 'cs'] },
+      { kind: 'set_catalog_entries', language: 'en', namespace: 'domain', entries: { 'field.worker.name': 'Name' } },
       { kind: 'set_roles', roles: ['owner', 'viewer'], organizationOwnerRole: 'owner' },
     ] : []),
   ]
   const kinds = examples.map(change => compositionChangeSchema.parse(change).kind)
   for (const kind of kinds) expect(guide, kind).toContain('`' + kind + '`')
-  for (const [kind] of guide.matchAll(/\b(?:set|add|remove)_[a-z_]+\b/g)) expect(kinds).toContain(kind)
+  for (const [kind] of guide.matchAll(/\b(?:set|add|remove)_[a-z_]+\b/g)) {
+    if (kind === 'set_label' && path === 'docs/sdk/mcp-composition.md') expect(guide).toContain('remain slice 2')
+    else expect(kinds).toContain(kind)
+  }
   const workflow = ['inspect_schema', 'propose_composition', 'validate', 'preview_migration', 'apply_to_disposable', 'promote']
   for (const tool of workflow) {
     expect(schemas).toHaveProperty(tool)

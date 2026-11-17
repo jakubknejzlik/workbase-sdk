@@ -1,3 +1,4 @@
+import { csCatalogChanges } from './presentation-fixture.ts'
 import { afterEach, expect, it } from 'vitest'
 import { mkdtemp, realpath, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -45,7 +46,7 @@ it.each([
   const client = new Client({ name: 'v3-languages', version: '1' })
   const [a, b] = InMemoryTransport.createLinkedPair()
   // Exercise the installed workbase config stdio path under Bun as consumers do.
-  const transport = settings.languages?.[0] === 'en' ? new StdioClientTransport({ command: 'bun', args: ['--no-install', resolve('packages/mcp/src/stdio.ts'), '--root', root], stderr: 'pipe' }) : a
+  const transport = settings.languages?.[0] === 'en' ? new StdioClientTransport({ command: 'bun', args: ['--no-install', resolve('packages/mcp/src/stdio.ts'), '--root', root], stderr: 'pipe', env: { ...process.env, TMPDIR: tmpdir() } as Record<string, string> }) : a
   if (transport instanceof StdioClientTransport) transport.stderr?.on('data', () => {})
   else await app.server.connect(b)
   await client.connect(transport)
@@ -55,7 +56,7 @@ it.each([
   const expected = { ...rest, ...(defaultLanguage === undefined ? {} : { ui: { defaultLanguage } }) }
   try {
     expect(await call('propose_change', { instance: 'demo', baseRevision: 1, changes: [{ kind: 'set_locale', languages: ['en', 'cs'] }, { kind: 'set_plugin', plugin: 'console' }] })).toMatchObject({ ok: false, error: { code: 'mixed_change_kinds' } })
-    const proposal = await call('propose_change', { instance: 'demo', baseRevision: 1, changes: [{ kind: 'set_locale', ...settings }] })
+    const proposal = await call('propose_change', { instance: 'demo', baseRevision: 1, changes: [{ kind: 'set_locale', ...settings }, ...csCatalogChanges] })
     expect(proposal, JSON.stringify(proposal)).toMatchObject({ ok: true })
     const args = { proposalId: proposal.proposalId }
     expect(await call('promote', { ...args, expectedRevision: 1 })).toMatchObject({ ok: false, error: { code: 'validation_required' } })

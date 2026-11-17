@@ -13,7 +13,7 @@ const replacements: Partial<Record<Change['kind'], string>> = {
 /** Legacy publication serializes defineInstance and would destroy V3 authored sources. */
 export function guardV3LegacyWrite(config: InstanceConfig, operation: 'propose' | 'promote' | 'rollback' | 'apply', changes: readonly Change[] = []) {
   if (config.baseline !== 'workbase-sdk') return
-  if (operation !== 'propose') fail(`v3_${operation}_unsupported`, `Legacy ${operation} cannot write a V3 instance. V3 domain publication requires a separately reviewed capability.`, 409)
+  if (operation !== 'propose') fail(`v3_${operation}_unsupported`, `Legacy ${operation} cannot write a V3 instance. Recreate legacy caption proposals using set_catalog_entries and the V3 keys from inspect_schema; V3 domain publication requires a separately reviewed capability.`, 409)
   for (const change of changes) {
     const replacement = replacements[change.kind]
     if (replacement) fail('v3_unsupported_change', `${change.kind} is unsupported on V3 instances; use ${replacement}.`, 409)
