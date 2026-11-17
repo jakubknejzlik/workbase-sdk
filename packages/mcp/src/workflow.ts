@@ -4,6 +4,7 @@ import { submitChange, promotionHash } from './submit-change.ts'
 import type { GitHubConfiguration } from './github.ts'
 import { bootstrapInstance } from './bootstrap.ts'
 import { appendFile, readFile, readdir } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { z } from 'zod'
 import { atomic, configSource, json, noLink, Store, type Bundle } from './storage.ts'
@@ -17,6 +18,7 @@ import { assertRemovedRolesUnused } from './role-usage'
 import { readVersions, rollback, versionFiles } from './versions'
 import { versionHistory } from '@workbasehq/core/migrations/versions'
 import { inspectInstance, isDisplayFieldError } from '@workbasehq/core/config'
+import { validateReferenceSources } from './reference-validation'
 import { parseProposal, proposalRecord, type Proposal, type ConfigChangeProposal, type LegacyConfigProposal } from './proposals.ts'
 import { executeSdkUpgrade, proposeSdkUpgrade, sdkWorkflowError } from './sdk-upgrade.ts'
 import { executeComposition, proposeComposition } from './composition/workflow.ts'
@@ -135,6 +137,15 @@ export class Workflow {
           if (p.instance !== targetInstance || p.proposalId !== input.proposalId) fail('invalid_proposal', 'Proposal identity mismatch', 409)
           requireConfigChange(p)
           return await submitChange(await this.store.directory(targetInstance), p, input.expectedBaseSha, this.github, () => this.store.dependencyDigest(targetInstance))
+        }
+        // Canonical reference diagnostics must precede trusted runtime imports:
+        // otherwise an invalid declaration would bypass the shared CI result.
+        if (name === 'validate' && input.instance) {
+          const root = await this.store.directory(targetInstance)
+          if (existsSync(join(root, 'schema.lock.json'))) {
+            const references = await validateReferenceSources(root)
+            if (!references.ok) return { ok: false, errors: references.diagnostics }
+          }
         }
         const bundle = await this.store.load(targetInstance)
         const diagnose = async () => {

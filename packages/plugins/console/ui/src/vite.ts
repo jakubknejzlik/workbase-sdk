@@ -54,9 +54,9 @@ function componentStubs(sources: Sources): Plugin {
     },
   }
 }
-export async function extractManifest(root: string): Promise<Manifest> {
+export async function extractUI(root: string, loaded?: Awaited<ReturnType<typeof loadConfig>>) {
   root = resolve(root)
-  const loaded = await loadConfig(resolve(root, 'config.ts'))
+  loaded ??= await loadConfig(resolve(root, 'config.ts'))
   const sources = checkSources(root)
   // The server does not exist until the complete source graph has passed.
   const server = await createServer({
@@ -72,9 +72,10 @@ export async function extractManifest(root: string): Promise<Manifest> {
       try { values[entry.source] = (await server.ssrLoadModule(entry.file)).default }
       catch (error) { throw new SourceError(entry.location, error instanceof Error ? error.message : String(error)) }
     }
-    return normalise(sources, values, loaded.config.entities, loaded.configHash)
+    return { manifest: normalise(sources, values, loaded.config.entities, loaded.configHash), sources, values, loaded }
   } finally { await server.close() }
 }
+export async function extractManifest(root: string): Promise<Manifest> { return (await extractUI(root)).manifest }
 export type Generation = { manifest: Manifest; manifestHash: string; paths: string[] }
 export async function generateRoutes(root: string, directory: string, manifest: Manifest): Promise<string[]> {
   const routes = resolve(directory, 'routes')

@@ -7,6 +7,7 @@ import { quote } from '@workbasehq/core/migrations/schema'
 import { changeSchema, fail, WorkflowError, type Change, type Index } from './schemas.ts'
 import { effectivePolicies } from './policies.ts'
 import { roleNamePrivileges } from '@workbasehq/core/organization-permissions'
+export { validateReferenceSources } from './reference-validation'
 
 export const hash = (value: unknown) => createHash('sha256').update(typeof value === 'string' ? value : JSON.stringify(value)).digest('hex')
 // Only complete engine constraint names may supply detail. Everything else in

@@ -10,8 +10,10 @@ import { checkSources, type Sources } from './sources'
 import type { Node, Span } from './index'
 import { checkDictionaries, type Catalogs } from './dictionaries'
 import { sdkCatalogs } from './catalogs'
+import { validateInstanceReferences } from './references'
+import type { ReferenceDiagnostic } from '@workbasehq/core/references'
 export type Location = { file: string; line: number; col: number }
-export type Finding = Location & { code: string; key?: string; lang?: string; message?: string }
+export type Finding = Location & { code: string; key?: string; lang?: string; message?: string; reference?: ReferenceDiagnostic }
 export type KeySource = Location & { plural?: boolean }
 export type Scan = { keys: Map<string, KeySource[]>; families: Set<string>; findings: Finding[] }
 export const breakpoints = ['xs', 'sm', 'md', 'lg', 'xl'] as const
@@ -110,6 +112,9 @@ export async function validateInstance(root: string): Promise<Finding[]> {
     const loc = error instanceof SourceError ? error.location : { file: resolve(root, 'config.ts'), line: 1, column: 1 }
     findings.push({ code: 'source', file: loc.file, line: loc.line, col: loc.column, message: String(error) })
   }
+  const references = await validateInstanceReferences(root)
+  findings.push(...references.diagnostics.map(reference => ({ file: reference.source.file, line: reference.source.line, col: reference.source.column,
+    code: reference.code, message: `${reference.message} Fix: ${reference.repairHint}`, reference })))
   let loaded: Awaited<ReturnType<typeof loadConfig>>, sources: Sources, manifest: Manifest
   try { loaded = await loadConfig(resolve(root, 'config.ts')); sources = checkSources(root) }
   catch (error) { caught(error); return findings }

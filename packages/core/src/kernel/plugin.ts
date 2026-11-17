@@ -63,6 +63,8 @@ export interface WorkbasePlugin {
   provides?: Readonly<Record<string, `${number}.x`>>
   requires?: Readonly<Record<string, `^${number}`>>
   optionalRequires?: Readonly<Record<string, `^${number}`>>
+  /** Build-time domain dependencies. requires/optionalRequires remain contracts. */
+  schemaReferences?: readonly { entity: string; field?: string }[]
   /** Only the single permissions contract provider can enable authorization. */
   authorization?: boolean
   /** Stable local profile/mapping port, supplied by Identity only. */

@@ -303,7 +303,7 @@ export interface LoadConfigOptions {
  * default or named defineEntity({...}) exports from schema/<entity>.ts.
  * Legacy defineInstance remains available through its existing runtime entry.
  */
-export async function loadConfig(file: string, options: LoadConfigOptions = {}): Promise<{ config: InstanceConfig; sources: SourceMap; configHash: string; authoredAccess: { shared?: AccessInput; entities: Record<string, EntityAccess | undefined> } }> {
+export async function loadConfig(file: string, options: LoadConfigOptions = {}): Promise<{ config: InstanceConfig; sources: SourceMap; sourceTexts: Record<string, string>; configHash: string; authoredAccess: { shared?: AccessInput; entities: Record<string, EntityAccess | undefined> } }> {
   const entry = realpathSync(resolve(file))
   const isSdk: typeof sdkBinding = (binding, file, name, ...args) => sdkBinding(binding,
     options.sdkResolutionRoot ? resolve(options.sdkResolutionRoot, relative(dirname(entry), file)) : file, name, ...args)
@@ -407,7 +407,7 @@ export async function loadConfig(file: string, options: LoadConfigOptions = {}):
     }
     const lockPath = resolve(dirname(entry), 'schema.lock.json')
     if (existsSync(lockPath)) bindSchemaLock(config, parseLock(readFileSync(lockPath, 'utf8')))
-    return { config, sources, configHash: hash.digest('hex'), authoredAccess: {
+    return { config, sources, sourceTexts: Object.fromEntries(readSet), configHash: hash.digest('hex'), authoredAccess: {
       ...(data.access ? { shared: data.access as AccessInput } : {}),
       entities: Object.fromEntries(Object.entries(entities).map(([name, entity]) => [name, entity.access])),
     } }
