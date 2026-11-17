@@ -1,5 +1,6 @@
 import type { ConsoleContribution, ConsoleRegistry } from '../console-contract'
 import type { IdentityPort, ProfileSynchronization } from './identity-port'
+import type { InvitationMailPort } from './invitation-mail-port'
 import type { MailOutboxPort } from './mail-outbox-port'
 import type { AuditPort } from './audit-port'
 import type { ZodType } from 'zod'
@@ -69,6 +70,7 @@ export interface WorkbasePlugin {
   /** Profile synchronization policy declared by an external login adapter. */
   profileAuthority?: { provider: string; synchronization: ProfileSynchronization }
   mailOutbox?: MailOutboxPort
+  invitationMail?: InvitationMailPort
   audit?: AuditPort
   contributes?: { console?: ConsoleContribution }
   /** Console provider owns registry validation and actor projection. */

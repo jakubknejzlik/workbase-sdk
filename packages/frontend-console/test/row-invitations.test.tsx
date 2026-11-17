@@ -9,7 +9,7 @@ import { GeneratedRowInvitation } from '../../console-generated/src/write-screen
 import type { Model, Capabilities } from '../../console-generated/src/read'
 
 const model = { entities: { people: { rowInvitations: true } } } as unknown as Model
-const caps = { revision: 1, commands: ['people/remove_access'], entities: {} } as Capabilities
+const caps = { resources: { 'invitations.read': true }, revision: 1, commands: ['people/remove_access'], entities: {} } as Capabilities
 async function mount(state: string, canInvite = true) {
   const i18n = i18next.createInstance()
   await i18n.use(initReactI18next).init({ lng: 'cs', resources: { cs: { translation: cs } } })
@@ -26,17 +26,17 @@ async function mount(state: string, canInvite = true) {
 }
 it('176 rendered row state invites an email without submitting the protected link or caching a credential', async () => {
   const { write, client, user } = await mount('no_account')
-  await screen.findByText('Bez účtu')
-  await user.click(screen.getByRole('button', { name: 'Pozvat do aplikace' }))
-  await user.type(screen.getByLabelText('E-mail'), 'one@example.test')
-  await user.click(screen.getAllByRole('button', { name: 'Pozvat do aplikace' }).at(-1)!)
+  await screen.findByText('Bez přístupu')
+  await user.click(screen.getByRole('button', { name: cs.rowAccessActions })); await user.click(screen.getByRole('menuitem', { name: cs.rowFindMember }))
+  await user.type(screen.getByRole('combobox'), 'one@example.test')
+  await waitFor(() => expect(screen.getByRole('button', { name: cs.rowFindSend })).toHaveProperty('disabled', false)); await user.click(screen.getByRole('button', { name: cs.rowFindSend }))
   await screen.findByText('Pozváno')
   expect(write).toHaveBeenCalledWith('/orgs/org/invitations', 'POST', { email: 'one@example.test', target: { entity: 'people', row: 'person' } })
   expect(JSON.stringify(client.getMutationCache().getAll().map(entry => entry.state.data))).not.toContain('credential')
 })
 it.each(['no_account', 'invited', 'expired', 'signed_in'])('176 renders Czech state %s and hides invitation actions without live authority', async state => {
   await mount(state, false)
-  await screen.findByText({ no_account: 'Bez účtu', invited: 'Pozváno', expired: 'Vypršela', signed_in: 'Přihlášen' }[state]!)
+  await screen.findByText({ no_account: 'Bez přístupu', invited: 'Pozváno', expired: 'Vypršela', signed_in: 'Přihlášen' }[state]!)
   expect(screen.queryByRole('button', { name: 'Pozvat do aplikace' })).toBeNull()
   expect(screen.queryByRole('button', { name: 'Znovu odeslat' })).toBeNull()
   expect(screen.queryByRole('button', { name: 'Kopírovat odkaz' })).toBeNull()
@@ -44,23 +44,29 @@ it.each(['no_account', 'invited', 'expired', 'signed_in'])('176 renders Czech st
 it('176 cancellation refreshes the row so another email can be invited', async () => {
   const { write, user } = await mount('invited')
   await screen.findByText('Pozváno')
-  await user.click(screen.getByRole('button', { name: 'Zrušit pozvánku' }))
+  await user.click(screen.getByRole('button', { name: cs.rowAccessActions }))
+  await user.click(screen.getByRole('menuitem', { name: 'Zrušit pozvánku' }))
   await user.click(screen.getAllByRole('button', { name: 'Zrušit pozvánku' }).at(-1)!)
   await waitFor(() => expect(write).toHaveBeenCalledWith('/orgs/org/invitations/pending', 'DELETE'))
-  await screen.findByText('Bez účtu')
-  expect(screen.getByRole('button', { name: 'Pozvat do aplikace' })).toBeTruthy()
+  await screen.findByText('Bez přístupu')
+  expect(screen.getByRole('button', { name: cs.rowAccessActions })).toBeTruthy()
+  await user.click(screen.getByRole('button', { name: cs.rowAccessActions })); await user.click(screen.getByRole('menuitem', { name: cs.rowFindMember }))
+  await user.type(screen.getByRole('combobox'), 'two@example.test')
+  await waitFor(() => expect(screen.getByRole('button', { name: cs.rowFindSend })).toHaveProperty('disabled', false)); await user.click(screen.getByRole('button', { name: cs.rowFindSend }))
+  await screen.findByText('Pozváno')
+  expect(write).toHaveBeenCalledWith('/orgs/org/invitations', 'POST', { email: 'two@example.test', target: { entity: 'people', row: 'person' } })
 })
 
 it('176b expired row offers resend and hides copy-link', async () => {
   await mount('expired')
   await screen.findByText('Vypršela')
-  expect(screen.getByRole('button', { name: 'Znovu odeslat' })).toBeTruthy()
+  await userEvent.setup().click(screen.getByRole('button', { name: cs.rowAccessActions })); expect(screen.getByRole('menuitem', { name: 'Znovu odeslat' })).toBeTruthy()
   expect(screen.queryByRole('button', { name: 'Kopírovat odkaz' })).toBeNull()
 })
 it('176b pending row copies a link only on demand without caching the credential', async () => {
   const { write, client, user } = await mount('invited')
   const clipboard = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue()
-  await user.click(await screen.findByRole('button', { name: 'Kopírovat odkaz' }))
+  await user.click(await screen.findByRole('button', { name: cs.rowAccessActions })); await user.click(screen.getByRole('menuitem', { name: 'Kopírovat odkaz' }))
   await user.click(screen.getAllByRole('button', { name: 'Kopírovat odkaz' }).at(-1)!)
   await waitFor(() => expect(clipboard).toHaveBeenCalledWith('credential-must-not-be-cached'))
   expect(write).toHaveBeenCalledWith('/orgs/org/invitations/pending/copy-link', 'POST', {})
@@ -70,11 +76,16 @@ it('176b pending row copies a link only on demand without caching the credential
 it.each(['no_account', 'invited', 'expired', 'signed_in'])('176b access filter %s round-trips URL state into the server query', async rowAccess => {
   const { validateListSearch, stateFromSearch, searchFromState, toQueryDocument } = await import('../../console-generated/src/list-model')
   const listModel = { instance: 'test', limits: { root: 100 }, entities: { people: { rowInvitations: true, fields: { id: { type: 'string' } }, columns: ['id'], relations: {} } } } as unknown as Model
-  const listCaps = { revision: 1, entities: { people: { readable: ['id'], writable: [], operations: ['read'] } } } as Capabilities
+  const listCaps = { resources: { 'invitations.read': true }, revision: 1, entities: { people: { readable: ['id'], writable: [], operations: ['read'] } } } as Capabilities
   const { state, dropped } = stateFromSearch(validateListSearch({ rowAccess }), listModel, 'people', listCaps)
   expect(dropped).toBe(false)
   expect(searchFromState(state).rowAccess).toBe(rowAccess)
   expect(toQueryDocument(state, listModel, 'people', listCaps)).toMatchObject({ rowAccess })
+  listCaps.resources!['invitations.read'] = false
+  const unreadable = stateFromSearch(validateListSearch({ rowAccess }), listModel, 'people', listCaps)
+  expect(unreadable.dropped).toBe(true)
+  expect(toQueryDocument({ ...state, rowAccess: rowAccess as any }, listModel, 'people', listCaps).rowAccess).toBeUndefined()
+  listCaps.resources!['invitations.read'] = true
   listModel.entities.people.rowInvitations = false
   const denied = stateFromSearch(validateListSearch({ rowAccess }), listModel, 'people', listCaps)
   expect(denied.dropped).toBe(true)

@@ -124,12 +124,12 @@ it('review: policy CREATE refuses another team without domain/audit side effects
     expect(await env.DB.prepare('SELECT count(*) AS n FROM records').first('n')).toBe(before)
     expect(await env.DB.prepare('SELECT count(*) AS n FROM audit_outbox').first('n')).toBe(0)
 })
-it('review: SQLite expression depth failure is sanitized to query_invalid', async () => {
+it('review: 130-branch root policy succeeds on native D1 with the correct tenant rows', async () => {
     const config = defineInstance({ ...policyGraph, policies: { ...policyGraph.policies, records: { ...policyGraph.policies.records, reviewer: { where: { or: Array.from({ length: 130 }, () => ({ name: { isNull: false } })) } } } } })
     const a = createApp(config, runtime())
     const r = await request(a, '/query', 'POST', { entity: 'records', limit: 10, select: ['id'] }, 'reviewer')
-    expect(r.status).toBe(400)
-    expect(await json(r)).toEqual({ error: 'query_invalid', path: [] })
+    expect(r.status).toBe(200)
+    expect((await json(r)).data).toEqual([{ id: 'record-CANARY_ROW' }, { id: 'record-colleague' }, { id: 'record-own' }])
 })
 it.each([
     { assignable_to_job: { eq: true } }, { assignable_to_job: { ne: false } }, { assignable_to_job: { in: [true, null] } }, { assignable_to_job: { isNull: false } },

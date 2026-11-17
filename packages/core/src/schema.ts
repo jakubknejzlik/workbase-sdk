@@ -1,5 +1,9 @@
 import { assertSchemaLockBound } from './schema/revision'
 export { bindSchemaLock } from './schema/revision'
+export { createPhysicalNameResolver } from './schema/physical-names'
+export { bindOpenApi } from './openapi/routes'
+import { recordActionsSchema, type ActionWhen } from './record-actions-data'
+export { actionReasonKeys } from './record-actions-data'
 import { effectiveSystemGrant } from './access-evaluator'
 import { entityAccessSchema, compileAccess, defineAccess, type AccessInput } from './access'
 import { validatePolicies } from './policies'
@@ -18,12 +22,14 @@ const relationSchema = z.strictObject({
 // Field validation and normalized field types are shared with the kernel.
 // Strict objects prevent inline labels and plugin lifecycle hooks from being silently stripped.
 export const declarationSchema = z.strictObject({
+  renameFrom: identifier.optional(),
   fields: z.record(identifier, fieldSchema.strict()),
   relations: z.record(identifier, relationSchema).optional(),
   displayField: z.union([serializedExpressionSchema, z.literal(false)]).optional(),
   checks: z.array(z.strictObject({ left: identifier, op: z.enum(['<=', '>=']), right: identifier })).optional(),
   commandsOnly: z.boolean().optional(),
   access: entityAccessSchema.optional(),
+  actions: recordActionsSchema.optional(),
 })
 export type EntityInput = z.input<typeof declarationSchema>
 declare const entityBrand: unique symbol
@@ -41,7 +47,7 @@ type LiteralFields<T extends EntityInput> = {
   [K in keyof T['fields']]: T['fields'][K] & Record<Exclude<keyof T['fields'][K], keyof EntityInput['fields'][string]>, never>
 }
 /** Data declaration only. loadConfig additionally enforces the literal source boundary. */
-export function defineEntity<const T extends EntityInput>(input: T & Record<Exclude<keyof T, keyof EntityInput>, never> & { fields: LiteralFields<T> }): EntityDeclaration<T> {
+export function defineEntity<const T extends EntityInput>(input: T & Record<Exclude<keyof T, keyof EntityInput>, never> & { fields: LiteralFields<T>; actions?: { [K in keyof T['actions']]: T['actions'][K] & { available?: { when: ActionWhen<T>; reason: string }[] } } }): EntityDeclaration<T> {
   const entity = parse(declarationSchema, input)
   const relations = { ...entity.relations }
   for (const [name, field] of Object.entries(entity.fields)) {
@@ -62,7 +68,7 @@ export function accountLink() {
   return { type: 'ref', entity: 'users', userLink: true, readOnly: true } as const
 }
 
-export type ConfigInput = Omit<InstanceInput, 'entities' | 'roles' | 'organizationOwnerRole' | 'permissions' | 'account' | 'languages' | 'enumLabels' | 'locale' | 'baseline' | 'revision'> & {
+export type ConfigInput = Omit<InstanceInput, 'entities' | 'roles' | 'organizationOwnerRole' | 'permissions' | 'account' | 'languages' | 'enumLabels' | 'baseline' | 'revision'> & {
   entities: Record<string, EntityDeclaration>
   roles: string[]
   organizationOwnerRole: string
@@ -95,6 +101,8 @@ export function defineConfig(input: ConfigInput): SchemaConfig {
   if ('account' in input || 'enumLabels' in input) throw new DeclarationError([], 'Account ownership and labels are SDK/dictionary concerns')
   // effectiveAccess is compiler output only; an authored literal would bypass compileAccess.
   if ('effectiveAccess' in input) throw new DeclarationError(['effectiveAccess'], 'effectiveAccess is compiled from access.ts and entity access; it cannot be authored')
+  // openapi is generated output bound by bindOpenApi(config, ./openapi.json); an authored literal would desync served bytes from the committed hash.
+  if ('openapi' in input) throw new DeclarationError(['openapi'], 'openapi is generated into openapi.json and bound with bindOpenApi; it cannot be authored')
   const domain: InstanceInput['entities'] = {}
   for (const [name, entity] of Object.entries(input.entities)) {
     if (name === 'users') throw new DeclarationError(['entities', name], 'users is SDK-owned; use accountLink()')
@@ -115,10 +123,10 @@ export function defineConfig(input: ConfigInput): SchemaConfig {
   }
   let config: SchemaConfig
   try {
-    config = normalizeInstance({ ...input, revision: undefined as never, roles, languages,
+    config = normalizeInstance({ ...input, revision: undefined as never, baseline: 'workbase-sdk', roles, languages,
       entities: { ...domain, users: accountEntity(roles) }, account: { entity: 'users' },
       permissions: input.permissions ?? {},
-    }, true, (error, path) => { throw new DeclarationError(path, error instanceof Error ? error.message : String(error)) }) as SchemaConfig
+    } as Parameters<typeof normalizeInstance>[0], true, (error, path) => { throw new DeclarationError(path, error instanceof Error ? error.message : String(error)) }) as SchemaConfig
   } catch (error) {
     if (error instanceof DeclarationError) throw error
     if (error instanceof z.ZodError) {

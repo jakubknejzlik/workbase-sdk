@@ -1,4 +1,10 @@
-# Generic browser console
+# Legacy generic browser console
+
+This guide describes the retained runtime-model console and its prebuilt assets.
+The V3 standalone template builds its own console into `dist/console`, following
+ADR 0008 and superseding #45's shared prebuilt scaffold delivery. See the
+[V3 getting-started guide](getting-started.md). The generic assets described below
+remain a separate SDK artifact and are not the standalone template's console.
 
 The public browser build consumes the authenticated version 1
 [console-model contract](console-model.md). An instance ID or entity is never a
@@ -8,9 +14,9 @@ Only generic EN/CS interface copy and shared role labels ship in the assets.
 
 Organization routes load public `/console-info` (instance ID, display name, roles
 and default language), `/me`, `/build.json` and `/o/:org/console-model` in parallel
-with the profile gate. The browser no longer requests the broad `/schema`,
-`/bootstrap` or standalone `/console-registry` documents. Public branding contains
-no field definitions, enum values, defaults, domain hints or records.
+with the profile gate. The browser does not request the broad `/schema` document.
+Public branding contains no field definitions, enum values, defaults, domain hints
+or records.
 
 The organization model is held only in the session QueryClient. Focus, a 30-second
 refresh, capability changes and refused writes refresh it. Changed authority
@@ -30,7 +36,7 @@ widgets need the console provider and its live page endpoint.
 
 `packages/console-generated/src` now contains reusable rendering code and types.
 Its historical name is producer-internal, not another published npm package.
-All instances use the runtime browser path; transaction commands use the generic
+Legacy generic-console instances use the runtime browser path; transaction commands use the generic
 command form. Custom domain grammar/copy requires runtime-supported localization
 or a future instance-owned extension. Missing copy falls back to identifiers;
 the browser never restores it from private catalogs.
@@ -40,22 +46,21 @@ runs `scripts/check-console-public.ts` over every emitted file. The scan rejects
 owner instance IDs, known customer names and private locale keys.  Vendor component source and its
 license/notice headers remain unchanged.
 
-The prebuilt generic assets ship inside `@workbasehq/plugins`. Node deployment
-code resolves them without a browser build or TypeScript loader:
+The separate generic assets ship inside `@workbasehq/plugins`. Node tooling can
+resolve this artifact without a browser build or TypeScript loader:
 
 ```ts
 import { consoleAssetsDir } from '@workbasehq/plugins/console/assets'
 
 const assetsDir = consoleAssetsDir() // absolute installed-package path
-// W32 SST provisioner: provision({ ...applicationOptions, assetsDir })
 ```
 
 This Node-only subpath stays separate from the console plugin/contract and Worker
 runtime imports. It resolves the installed package even when deployment code is
-bundled into `.sst/platform`. W32's `assetsDir` accepts the result directly.
-Consumers install only plugins and its matching core peer; UI, console-generated,
-frontend-console, Vite and a source checkout are unnecessary. There is no install
-hook or consumer compilation.
+bundled into `.sst/platform`. Current standalone Instances build their own Vite
+host into `dist/console` and pass that directory to `provision()`, which verifies
+its SHA metadata, HTML stamp and emitted bytes. Follow the
+[getting-started guide](getting-started.md) for that deployment flow.
 
 Producer `prepack` rebuilds the frontend producer workspace and stages
 `console/assets` in plugins. `bash scripts/sdk-pack.sh` uses the same staging step

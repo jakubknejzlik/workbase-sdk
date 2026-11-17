@@ -1,3 +1,4 @@
+import operationalEvidence from './003-operational-evidence'
 import adoptOutbox from './001-adopt-outbox'
 import deliveryBackoff from './002-delivery-backoff'
 
@@ -5,4 +6,5 @@ import deliveryBackoff from './002-delivery-backoff'
 export const migrations = [
   adoptOutbox,
   deliveryBackoff,
+  operationalEvidence,
 ]

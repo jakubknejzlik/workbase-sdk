@@ -1,10 +1,11 @@
 import { registerTempDir, cleanupTempDir } from '../../../../scripts/lib/test-temp-dir.mjs'
-import { mkdtemp, mkdir, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { isSecret, output, secret, type Output } from '@pulumi/pulumi'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { sha256 } from '../../src/infra'
+import { CONSOLE_SHA_MARKER, consoleArtifactsSHA, readConsoleArtifacts } from '../../src/console-build'
 import { createProvisionPlan, provision, ProvisionDiagnostic, provisionErrorMessage, validateProvisionOptions, type ProvisionOptions } from '../../src/infra/provision'
 
 const records = vi.hoisted(() => [] as { type: string; name: string; args: any; opts: any; resource: any; child?: any }[])
@@ -21,12 +22,19 @@ beforeEach(async () => {
   await mkdir(join(root, 'application inputs'))
   await mkdir(join(root, 'sql'))
   await mkdir(join(root, 'console assets'))
+  const assets = join(root, 'console assets')
+  const html = `<html><head><meta name="workbase-build-sha" content="${CONSOLE_SHA_MARKER}"></head></html>`
+  await writeFile(join(assets, 'index.html'), html)
+  await writeFile(join(assets, 'banner.svg'), '<svg>public asset</svg>')
+  const sha = consoleArtifactsSHA(await readConsoleArtifacts(assets))
+  await writeFile(join(assets, 'index.html'), html.replace(CONSOLE_SHA_MARKER, sha))
+  await writeFile(join(assets, 'build-meta.json'), JSON.stringify({ sha, builtAt: '2026-11-17T00:00:00.000Z' }))
   await writeFile(join(root, 'package.json'), '{"type":"module"}\n')
   await writeFile(join(root, 'application inputs/config.ts'), `export default { id: 'unfamiliar', revision: 1, roles: ['owner'], entities: {}, plugins: [] }\n`)
   await writeFile(join(root, 'worker.ts'), 'export default { fetch() { return new Response("ok") } }\n')
   await writeFile(join(root, 'sql/0001_initial.sql'), 'CREATE TABLE records (id TEXT PRIMARY KEY);\n')
   options = { projectRoot: root, configPath: 'application inputs/config.ts', handler: 'worker.ts', migrationsDir: 'sql',
-    resourcePrefix: 'neutral-app', stage: 'preview', authSecret, authBaseUrl: 'https://neutral.example.test', accountId: 'a'.repeat(32) }
+    resourcePrefix: 'neutral-app', stage: 'preview', authSecret, authBaseUrl: 'https://neutral.example.test', accountId: '0'.repeat(32) }
 })
 afterEach(async () => { records.length = 0; vi.unstubAllGlobals(); vi.unstubAllEnvs(); cleanupTempDir(root) })
 
@@ -82,6 +90,37 @@ function mockSst() {
     },
   })
 }
+
+it.each(['missing-file', 'missing-sha', 'invalid-json', 'invalid-sha', 'missing-builtAt'])('rejects %s console metadata before resource registration/upload', async kind => {
+  mockSst()
+  const file = join(root, 'console assets/build-meta.json')
+  if (kind === 'missing-file') await rm(file)
+  else await writeFile(file, kind === 'invalid-json' ? '{' : JSON.stringify({
+    ...(kind !== 'missing-builtAt' ? { builtAt: '2026-11-17T00:00:00.000Z' } : {}),
+    ...(kind !== 'missing-sha' ? { sha: kind === 'invalid-sha' ? 'unbuilt' : '0'.repeat(40) } : {}),
+  }))
+  await expect(provision({ ...options, assetsDir: 'console assets' })).rejects.toMatchObject({ code: 'provision_console_metadata_invalid' })
+  expect(records).toEqual([])
+})
+
+it.each(['metadata-sha', 'html-stamp', 'missing-stamp', 'missing-html', 'public-asset', 'added-asset', 'removed-asset', 'restamped-html'])('rejects mismatched console artifacts: %s, before resource registration/upload', async kind => {
+  mockSst()
+  const assets = join(root, 'console assets')
+  if (kind === 'metadata-sha') await writeFile(join(assets, 'build-meta.json'), JSON.stringify({ sha: '0'.repeat(40), builtAt: '2026-11-17T00:00:00.000Z' }))
+  if (kind === 'html-stamp') await writeFile(join(assets, 'index.html'), `<meta name="workbase-build-sha" content="${'0'.repeat(40)}">`)
+  if (kind === 'missing-stamp') await writeFile(join(assets, 'index.html'), '<html>no stamp</html>')
+  if (kind === 'missing-html') await rm(join(assets, 'index.html'))
+  if (kind === 'public-asset') await writeFile(join(assets, 'banner.svg'), '<svg>changed</svg>')
+  if (kind === 'added-asset') await writeFile(join(assets, 'extra.txt'), 'unexpected')
+  if (kind === 'removed-asset') await rm(join(assets, 'banner.svg'))
+  if (kind === 'restamped-html') {
+    // Matching HTML/metadata alone is insufficient: verify the emitted bytes too.
+    await writeFile(join(assets, 'index.html'), `<meta name="workbase-build-sha" content="${'0'.repeat(40)}">`)
+    await writeFile(join(assets, 'build-meta.json'), JSON.stringify({ sha: '0'.repeat(40), builtAt: '2026-11-17T00:00:00.000Z' }))
+  }
+  await expect(provision({ ...options, assetsDir: 'console assets' })).rejects.toMatchObject({ code: 'provision_console_sha_mismatch' })
+  expect(records).toEqual([])
+})
 
 it.each([
   ['stage', undefined, 'provision_invalid_stage'], ['resourcePrefix', undefined, 'provision_invalid_prefix'],
@@ -278,7 +317,7 @@ it.each([false, true])('binds opsToken as secret_text with legacy binding=%s and
   const tokenOptions = { ...options, opsToken: secret('synthetic-ops-token'),
     ...(legacy ? { internalToken: secret('synthetic-internal-token') } : {}) }
   const plan = await createProvisionPlan(tokenOptions)
-  expect(plan.bindingNames).toEqual(['DB', 'AUDIT_KV', 'EVENTS_QUEUE', 'BETTER_AUTH_SECRET', 'AUTH_BASE_URL', 'STAGE', 'SCHEMA_EXPECTED',
+  expect(plan.bindingNames).toEqual(['DB', 'AUDIT_KV', 'EVENTS_QUEUE', 'BETTER_AUTH_SECRET', 'AUTH_BASE_URL', 'STAGE', 'SCHEMA_EXPECTED', 'OPENAPI_SHA256',
     ...(legacy ? ['INTERNAL_TOKEN'] : []), 'OPS_TOKEN'])
   expect(JSON.stringify(plan)).not.toContain('synthetic-ops-token')
   expect(await createProvisionPlan(tokenOptions)).toEqual(plan)
@@ -300,4 +339,81 @@ it('requires SST only when provisioning, while dry planning works without SST or
   await expect(provision(options)).rejects.toMatchObject({ code: 'provision_requires_sst' })
   expect(records).toEqual([])
   validateProvisionOptions(options)
+})
+
+
+it('hashes the exact artifact beside config independently of bundle contents', async () => {
+  const path = join(root, 'application inputs/openapi.json')
+  const original = '{"openapi":"3.1.0"}\n'
+  await writeFile(path, original)
+  const plan = await createProvisionPlan(options)
+  expect(plan.environment.OPENAPI_SHA256).toBe(sha256(original))
+  await writeFile(path, original + '\n')
+  expect((await createProvisionPlan(options)).environment.OPENAPI_SHA256).toBe(sha256(original + '\n'))
+  await rm(path)
+  expect((await createProvisionPlan(options)).environment.OPENAPI_SHA256).toBe('unbuilt')
+})
+
+it.each(['production', 'prod', 'staging', 'preview'])('rejects an opted-in dev mailbox in stage %s before registering any resources', async stage => {
+  mockSst()
+  await expect(provision({ ...options, stage, devMailbox: { token: secret('synthetic-mailbox-token-at-least-32-characters') } })).rejects.toMatchObject({ code: 'provision_invalid_dev_mailbox_stage' })
+  expect(records).toEqual([])
+})
+
+it.each(['dev', 'test'])('provisions a separate dev mailbox with only D1, stage and its own secret in %s', async stage => {
+  mockSst()
+  const token = 'synthetic-mailbox-token-at-least-32-characters'
+  const mailboxOptions = { ...options, stage, devMailbox: { token: secret(token) } }
+  const plan = await createProvisionPlan(mailboxOptions)
+  expect(plan.devMailbox).toMatchObject({ handler: expect.stringMatching(/\/core\/src\/dev-mailbox.ts$/), bindingNames: ['DB', 'STAGE', 'DEV_MAILBOX_TOKEN'] })
+  expect(JSON.stringify(plan)).not.toContain(token)
+  expect(plan.devMailbox!.name.length).toBeLessThanOrEqual(54)
+  expect(plan.bindingNames).not.toContain('DEV_MAILBOX_TOKEN')
+  const result = await provision(mailboxOptions)
+  const workers = records.filter(record => record.type === 'worker')
+  expect(workers).toHaveLength(2)
+  const sidecar = workers.find(record => record.args.handler === plan.devMailbox!.handler)!
+  const app = workers.find(record => record !== sidecar)!
+  expect(sidecar.child.args.scriptName).toBe(plan.devMailbox!.name)
+  expect(sidecar.child.args.keepBindings).toEqual([])
+  expect(sidecar.child.args.observability.logs.invocationLogs).toBe(false)
+  expect(sidecar.args.environment).toEqual({ STAGE: stage })
+  expect(sidecar.args.assets).toBeUndefined()
+  expect(sidecar.args.domain).toBeUndefined()
+  const bindings = await sidecar.child.args.bindings.promise()
+  expect(bindings).toEqual([
+    { name: 'STAGE', type: 'plain_text', text: stage },
+    { name: 'DB', type: 'd1', id: await outputValue(result.databaseId) },
+    { name: 'DEV_MAILBOX_TOKEN', type: 'secret_text', text: token },
+  ])
+  expect(await isSecret(sidecar.child.args.bindings)).toBe(true)
+  expect((await app.child.args.bindings.promise()).map((binding: any) => binding.name)).not.toContain('DEV_MAILBOX_TOKEN')
+  const migration = records.find(record => record.type === 'migration')!
+  expect(sidecar.opts.dependsOn).toContain(migration.resource)
+  expect(sidecar.child.opts.dependsOn).toContain(migration.resource)
+  expect(result.resources.devMailbox).toBe(sidecar.resource)
+  expect(result.devMailboxUrl).toBe(sidecar.resource.url)
+})
+
+it('omits the sidecar entirely by default, including production and its returned outputs', async () => {
+  mockSst()
+  const plan = await createProvisionPlan({ ...options, stage: 'production' })
+  expect(plan).not.toHaveProperty('devMailbox')
+  const result = await provision({ ...options, stage: 'production' })
+  expect(result).not.toHaveProperty('devMailboxUrl')
+  expect(result.resources).not.toHaveProperty('devMailbox')
+  expect(records.filter(record => record.type === 'worker')).toHaveLength(1)
+})
+
+it('rejects weak plaintext and resolved mailbox secrets', async () => {
+  for (const token of ['', 'short']) {
+    expect(() => validateProvisionOptions({ ...options, stage: 'dev', devMailbox: { token } })).toThrow('provision_invalid_dev_mailbox_token')
+  }
+  mockSst()
+  const weakToken = secret('short')
+  // Resolve this one input synchronously so Pulumi's parallel bookkeeping promises
+  // do not create unhandled rejections while Vitest observes the validation error.
+  vi.stubGlobal('$util', { output: (value: unknown) => value === weakToken
+    ? { apply: (fn: (text: string) => unknown) => fn('short') } : output(value), secret })
+  await expect(provision({ ...options, stage: 'dev', devMailbox: { token: weakToken } })).rejects.toMatchObject({ code: 'provision_invalid_dev_mailbox_token' })
 })

@@ -1,4 +1,4 @@
-import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, realpathSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, realpathSync, cpSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 export const sdk = '@workbasehq/plugins/console/ui'
@@ -36,3 +36,11 @@ export const forbidden: [string, string, string?, string?][] = [
   ...['.ts', '.js', '.mjs', '.cjs', '.jsx', '.mts', '.json'].map(ext => [`React via ${ext}`, `import x from './-dep${ext}'`, `ui/-dep${ext}`, `import React from 'react'; export default React`] as [string, string, string, string]),
   ...['foo.bar.ts', '_layout.ts', '(group)/x.ts', 'route.ts', 'a/route.ts', 'x.tsx'].map(file => [`filename ${file}`, '', `ui/${file}`, declaration] as [string, string, string, string]),
 ]
+
+/** Copy the committed Instance while keeping the isolated SDK module links. */
+export function instanceFixture() {
+  const f = fixture()
+  rmSync(join(f.root, 'ui'), { recursive: true })
+  cpSync(resolve('packages/plugins/console/ui/fixture'), f.root, { recursive: true })
+  return f
+}

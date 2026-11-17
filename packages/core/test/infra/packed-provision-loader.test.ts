@@ -39,6 +39,39 @@ it('regression: packed config and plugin imports load inside an SST bundle with 
     if (!usePreparedConsumerDependencies(consumer, 'loader', archives)) {
       npm(['install', '--ignore-scripts', '--no-audit', '--no-fund', '--registry=https://registry.npmjs.org'], consumer)
     }
+    cpSync(join(root, 'packages/core/test/fixtures/worker-access'), join(consumer, 'openapi-instance'), { recursive: true })
+    writeFileSync(join(consumer, 'openapi-runtime.ts'), `import config from './openapi-instance/config'
+import { createApp } from '@workbasehq/core/app'
+import { openApiRoutes } from '@workbasehq/core/openapi/routes'
+if (typeof openApiRoutes !== 'function') throw Error('missing_openapi_route_export')
+export default createApp(config, { DB: {} } as any)
+`)
+    writeFileSync(join(consumer, 'mailbox-runtime.ts'), `export { default } from '@workbasehq/core/dev-mailbox'\n`)
+    writeFileSync(join(consumer, 'bundle-openapi.mjs'), `import { build } from 'esbuild'
+await build({ entryPoints: ['openapi-runtime.ts'], outfile: 'openapi-runtime.mjs', bundle: true, platform: 'browser', format: 'esm', external: ['node:*'] })
+await build({ entryPoints: ['mailbox-runtime.ts'], outfile: 'mailbox-runtime.mjs', bundle: true, platform: 'browser', format: 'esm' })
+`)
+    execFileSync(process.execPath, ['bundle-openapi.mjs'], { cwd: consumer, env, stdio: 'pipe' })
+    const applicationBundle = readFileSync(join(consumer, 'openapi-runtime.mjs'), 'utf8')
+    expect(applicationBundle).not.toContain('DEV_MAILBOX_TOKEN')
+    expect(applicationBundle).not.toContain('dev_mailbox_unavailable')
+    writeFileSync(join(consumer, 'verify-openapi.mjs'), `import app from './openapi-runtime.mjs'
+import mailbox from './mailbox-runtime.mjs'
+import { readFileSync } from 'node:fs'
+const response = await app.request('http://localhost/openapi.json')
+if (response.status !== 200 || await response.text() !== readFileSync('openapi-instance/openapi.json', 'utf8')) throw Error('packed_openapi_roundtrip_failed')
+const token = 'synthetic-mailbox-token-at-least-32-characters'
+const request = new Request('https://mailbox.example.test/messages?recipient=first@example.test', { headers: { Authorization: 'Bearer ' + token } })
+const DB = { prepare() { return { bind() { return { async all() { return { results: [{ body: 'synthetic-message' }] } } } } } } }
+const blocked = await mailbox.fetch(request, { DB, STAGE: 'production', DEV_MAILBOX_TOKEN: token })
+if (blocked.status !== 404) throw Error('packed_mailbox_production_not_blocked')
+const mail = await mailbox.fetch(request, { DB, STAGE: 'test', DEV_MAILBOX_TOKEN: token })
+if (mail.status !== 200 || (await mail.json()).messages[0].body !== 'synthetic-message') throw Error('packed_mailbox_roundtrip_failed')
+console.log('Packed OpenAPI: browser bundle serves exact committed bytes anonymously')
+`)
+    const roundtrip = execFileSync(process.execPath, ['verify-openapi.mjs'], { cwd: consumer, env, encoding: 'utf8', stdio: 'pipe' })
+    expect(roundtrip).toContain('browser bundle serves exact committed bytes anonymously')
+    console.log(roundtrip.trim())
     mkdirSync(join(consumer, 'sql'))
     mkdirSync(join(consumer, 'local-migrations'))
     mkdirSync(join(consumer, '.sst/platform'), { recursive: true })
@@ -72,10 +105,13 @@ catch (error) { console.error(error.message); process.exitCode = 1 }
     console.log('Reproducer: plain tsImport succeeds; ts-node 10.9.2 ESM hook rejects a directory import with ERR_UNSUPPORTED_DIR_IMPORT')
 
     writeFileSync(join(consumer, 'plan.ts'), `import { createProvisionPlan } from '@workbasehq/core/infra/provision'
-import { readFileSync } from 'node:fs'
+import { readFileSync, existsSync } from 'node:fs'
 const plan = await createProvisionPlan({ configPath: './config.ts', handler: './worker.ts', migrationsDir: './sql', resourcePrefix: 'packed', stage: 'console', authSecret: 'synthetic-stable-auth-secret-at-least-32-characters', authBaseUrl: 'https://packed.example.test' })
 if (plan.schema.revision !== 7 || !plan.schema.pluginMigrations) throw Error('invalid_schema')
 if (JSON.stringify(plan.schema) !== readFileSync('expected-schema.json', 'utf8')) throw Error('plugin_schema_changed')
+if ('devMailbox' in plan) throw Error('unexpected_mailbox')
+const mailboxPlan = await createProvisionPlan({ configPath: './config.ts', handler: './worker.ts', migrationsDir: './sql', resourcePrefix: 'packed', stage: 'test', authSecret: 'synthetic-stable-auth-secret-at-least-32-characters', authBaseUrl: 'https://packed.example.test', devMailbox: { token: 'synthetic-mailbox-token-at-least-32-characters' } })
+if (!existsSync(mailboxPlan.devMailbox?.handler ?? '') || !mailboxPlan.devMailbox.handler.endsWith('/node_modules/@workbasehq/core/src/dev-mailbox.ts')) throw Error('missing_installed_mailbox_entry')
 console.log('packed config loaded with ts-node hooks active')
 `)
     writeFileSync(join(consumer, 'bundle.mjs'), `import { build } from 'esbuild'

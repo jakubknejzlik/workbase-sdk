@@ -66,6 +66,7 @@ export function RegistryForm({ schema: inputSchema, values = {}, lockedValues = 
     for (const name of Object.keys(form.formState.errors)) if (form.getFieldState(name).error?.type === 'server') form.clearErrors(name)
     for (const [name, message] of Object.entries(serverErrors)) if (Object.hasOwn(schema.properties ?? {}, name)) form.setError(name, { type: 'server', message })
   }, [serverKey])
+  const clearServerError = (name: string) => { if (form.getFieldState(name).error?.type === 'server') form.clearErrors(name) }
   const busy = pending || session?.pending || form.formState.isSubmitting
   // Group adjacent sections only: later unsectioned fields must not jump before an address.
   const groups: { section: string; entries: typeof fields }[] = []
@@ -79,9 +80,9 @@ export function RegistryForm({ schema: inputSchema, values = {}, lockedValues = 
     {section && <legend className="text-sm font-medium">{label(section)}</legend>}
     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">{entries.map(([name, raw]) => {
       const error = form.formState.errors[name]?.message as string | undefined
-      const renderRelation = relation?.(name, form.watch(name) ?? '', value => form.setValue(name, value || '', { shouldValidate: true, shouldDirty: true }), error)
+      const renderRelation = relation?.(name, form.watch(name) ?? '', value => { clearServerError(name); form.setValue(name, value || '', { shouldValidate: true, shouldDirty: true }) }, error)
       return <fieldset disabled={Object.hasOwn(lockedValues, name)} key={name} data-write-field={name} className={fieldUI(raw).span === 'half' ? 'min-w-0' : 'min-w-0 sm:col-span-2'}>
-        {renderRelation ?? <FormFieldWrapper name={name} label={label(name)}>{field => <RegistryField raw={raw} required={schema.required?.includes(name)} field={field} label={label(name)} optionLabel={optionLabel} disabled={disabled || busy} />}</FormFieldWrapper>}
+        {renderRelation ?? <FormFieldWrapper name={name} label={label(name)}>{field => <RegistryField raw={raw} required={schema.required?.includes(name)} field={{ ...field, onChange: (value: unknown) => { clearServerError(name); field.onChange(value) } }} label={label(name)} optionLabel={optionLabel} disabled={disabled || busy} />}</FormFieldWrapper>}
       </fieldset>
     })}</div>
   </fieldset>)}{secondaryAction ? <div className="flex items-center gap-2">{submitButton}{secondaryAction}</div> : submitButton}</>
@@ -97,3 +98,5 @@ export { FormFieldWrapper } from '../components/form/FormFieldWrapper'
 export { FormFieldInput } from '../components/form/FormFieldInput'
 export { FormSubmitButton } from '../components/form/FormSubmitButton'
 export { RegistryLabelsProvider, cs, enUS, type RegistrySchema } from './schema'
+
+export { formValidator } from './validation'

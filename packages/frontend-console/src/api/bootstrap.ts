@@ -1,3 +1,4 @@
+import { buildReload } from '../build-reload'
 import type { ConsoleRegistry } from './console'
 import type { QueryClient } from '@tanstack/react-query'
 import { api, ApiError } from './client'
@@ -15,7 +16,11 @@ export function bootstrapOptions(client: QueryClient, orgId?: string) {
       let data: Bootstrap
       try {
         const [schema, me, build, runtime] = await Promise.all([
-          client.ensureQueryData(instanceOptions), api<Me>('/me', { redirect401: window.location.pathname !== '/' }),
+          client.ensureQueryData(instanceOptions), api<Me>('/me', { redirect401: window.location.pathname !== '/' }).then(me => {
+            // Recovery needs identity even if another bootstrap request fails.
+            client.setQueryData(['me'], me)
+            return me
+          }),
           api<Build>('/build.json'), orgId ? client.fetchQuery(runtimeModelOptions(orgId)) : undefined,
         ])
         data = { schema, me, build, capabilities: runtime?.capabilities, console: runtime?.console }
@@ -35,14 +40,10 @@ export function bootstrapOptions(client: QueryClient, orgId?: string) {
         if (destination) window.location.replace(destination)
         throw error
       }
-      const previousBuild = client.getQueryData<Build>(['build'])
       const previousCaps = orgId ? client.getQueryData<ConsoleCapabilities>(['capabilities', orgId]) : undefined
-      if (previousBuild && previousBuild.revision !== data.build.revision || previousCaps && previousCaps.revision !== data.capabilities?.revision) {
-        window.sessionStorage.setItem('console-schema-reloaded', '1')
-        window.location.reload()
-      }
+      buildReload.observe(data.build)
+      if (previousCaps && previousCaps.revision !== data.capabilities?.revision) void buildReload.refresh()
       client.setQueryData(['instance'], data.schema)
-      client.setQueryData(['me'], data.me)
       client.setQueryData(['build'], data.build)
       if (orgId) client.setQueryData(['console-registry', orgId], data.console ?? { navigation: [], pages: [], entities: {} })
       if (orgId && data.capabilities) client.setQueryData(['capabilities', orgId], data.capabilities)

@@ -11,6 +11,7 @@ import { writeFilter } from './execution/policies'
 import { kernelFor } from './kernel/registry'
 import { organizationPermission } from './organization-permissions'
 import { issuerGuard } from './organization-rules'
+import { accountLinkUnique, linkableMembers } from './user-link-eligibility'
 
 type LinkContext = Pick<PlanningContext, 'config' | 'scope' | 'now'>
 // Frozen statement identity, rather than caller-supplied metadata, grants the exception.
@@ -39,12 +40,13 @@ function linkField(config: InstanceConfig, entity: string) {
  * The invitation caller runs this AFTER its membership insert, in the same plan. */
 export function linkAccountRow(ctx: LinkContext, entity: string, rowId: string, userId: string, invitation = false): AtomicRule {
   const field = linkField(ctx.config, entity); const table = quote(entity)
-  const unique = `NOT EXISTS (SELECT 1 FROM ${table} other WHERE other.organization_id=? AND other.${field}=? AND other.id<>?)`
+  const member = linkableMembers(ctx.scope.organizationId, userId)
+  const unique = accountLinkUnique(ctx.config, ctx.scope.organizationId, { entity, row: rowId }, { userId })
   return { name: 'account_link', statements: [writer({
-    sql: `UPDATE ${table} SET ${field}=?,updated_at=?,version=version+1 WHERE organization_id=? AND id=? AND ${unique}
-      AND EXISTS (SELECT 1 FROM users u JOIN memberships m ON m.user_id=u.id AND m.organization_id=u.organization_id WHERE u.id=? AND u.organization_id=?)`,
-    bindings: [userId, ctx.now, ctx.scope.organizationId, rowId, ctx.scope.organizationId, userId, rowId, userId, ctx.scope.organizationId], expectRows: 1,
-    diagnose: { sql: `SELECT ${unique} AS ok`, bindings: [ctx.scope.organizationId, userId, rowId] }, failureCode: 'account_already_linked',
+    sql: `UPDATE ${table} SET ${field}=?,updated_at=?,version=version+1 WHERE organization_id=? AND id=? AND ${unique.sql}
+      AND EXISTS (${member.sql})`,
+    bindings: [userId, ctx.now, ctx.scope.organizationId, rowId, ...(unique.bindings ?? []), ...(member.bindings ?? [])], expectRows: 1,
+    diagnose: { sql: `SELECT ${unique.sql} AS ok`, bindings: unique.bindings }, failureCode: 'account_already_linked',
   }, invitation ? 'cleanup' : 'link')] }
 }
 function revokeAccountInvitations(scope: Scope, userId: string): GuardedStatement {
@@ -78,14 +80,19 @@ export function invitationAccountLink(ctx: LinkContext, invitation: { entity?: s
   return invitation.entity && invitation.row ? [linkAccountRow(ctx, invitation.entity, invitation.row, userId, true)] : []
 }
 
-const actions = new WeakSet<object>()
+const actions = new WeakMap<object, 'invitations.create' | 'invitations.revoke'>()
+export function registerUserLinkAction<T extends AtomicOperation<any>>(operation: T, permission: 'invitations.create' | 'invitations.revoke' = 'invitations.create'): T {
+  actions.set(operation.plan, permission)
+  return operation
+}
 export function userLinkActionPermission(config: InstanceConfig, scope: Scope, operation: AtomicOperation<any>) {
-  if (!actions.has(operation.plan)) return
-  kernelFor(config).resourcePermission(scope, 'invitations.create')
-  organizationPermission(config, scope, 'invitations.create')
+  const permission = actions.get(operation.plan)
+  if (!permission) return
+  kernelFor(config).resourcePermission(scope, permission)
+  organizationPermission(config, scope, permission)
 }
 interface PreparedIssuer { role: string; filter: SqlStatement }
-export function userLinkCommands(config: InstanceConfig): AtomicOperation<any>[] {
+export function userLinkCommands(config: InstanceConfig, entryPoint: 'legacy' | 'record-action' = 'legacy'): AtomicOperation<any>[] {
   return userLinks(config).flatMap(({ entity }) => (['link_account', 'remove_access'] as const).map(action => {
     const rowId = z.string().min(1).meta({ referenceEntity: entity })
     const inputSchema: z.ZodType<{ rowId: string; userId?: string }> = action === 'link_account'
@@ -98,7 +105,7 @@ export function userLinkCommands(config: InstanceConfig): AtomicOperation<any>[]
         const policy = kernelFor(ctx.config).tableFilter(entity, ctx.scope, 'update')
         if (policy.kind === 'none') throw new ApiError(404, 'not_found')
         if (!await ctx.reader.first({ sql: `SELECT id FROM ${quote(entity)} WHERE organization_id=? AND id=?`, bindings: [ctx.scope.organizationId, input.rowId] })) throw new ApiError(404, 'not_found')
-        if (action === 'link_account' && !await ctx.reader.first({ sql: 'SELECT u.id FROM users u JOIN memberships m ON m.user_id=u.id AND m.organization_id=u.organization_id WHERE u.id=? AND u.organization_id=?', bindings: [input.userId!, ctx.scope.organizationId] })) throw new ApiError(404, 'member_not_found')
+        if (action === 'link_account' && !await ctx.reader.first(linkableMembers(ctx.scope.organizationId, input.userId!))) throw new ApiError(404, 'member_not_found')
         const kernel = kernelFor(ctx.config)
         kernel.atomicPermission(ctx.scope, operation, input)
         return { role: ctx.scope.role, filter: writeFilter(kernel, ctx.scope, entity, entity, 'update') }
@@ -120,12 +127,16 @@ export function userLinkCommands(config: InstanceConfig): AtomicOperation<any>[]
         // Its WHERE checks the live pre-image. Keep the executor's row capture
         // and 403 denial, without checking the cleared source against the policy.
         livePolicies.set(issuer, Object.freeze({ sql: '1=1' }))
-        return { rules: [{ name: 'account_link_issuer', statements: [issuer] }, mutation],
+        return { rules: [{ name: 'account_link_issuer', statements: [issuer] }, mutation, ...(action === 'link_account' && entryPoint === 'record-action' ? [{ name: 'supersede_row_invitation', statements: [writer({
+          // Commit together with the confirmed link, never during discovery.
+          // A failed eligibility/policy check rolls this revocation back too.
+          sql: `UPDATE invitations SET revoked_at=? WHERE organization_id=? AND target_entity=? AND target_row=? AND accepted_at IS NULL AND revoked_at IS NULL AND declined_at IS NULL AND expired_at IS NULL AND expires_at>?`,
+          bindings: [ctx.now, ctx.scope.organizationId, entity, input.rowId, ctx.now],
+        }, 'cleanup')] }] : [])],
         event: { operation: action === 'link_account' ? 'account.linked' : 'account.access_removed', entity, entityId: input.rowId },
         result: { status: 200, body: { id: input.rowId } } }
       },
     }
-    actions.add(operation.plan)
-    return operation
+    return registerUserLinkAction(operation)
   }))
 }

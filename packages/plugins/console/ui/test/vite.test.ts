@@ -2,14 +2,16 @@ import { spawnSync } from 'node:child_process'
 import { readFileSync, rmSync, unlinkSync, readdirSync, symlinkSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { createServer, build, type ViteDevServer } from 'vite'
-import { afterEach, expect, test, vi } from 'vitest'
-import { consoleUI, extractManifest } from '../src/vite'
+import { beforeEach, afterEach, expect, test, vi } from 'vitest'
+import { consoleUI, extractManifest, resolveBuildSHA, assertCleanDeploy } from '../src/vite'
 import { canonicalJSON, manifestHash, SourceError } from '../src/check'
 import * as sourceChecks from '../src/sources'
 import { buildPath } from '../src/index'
 import { fixture, declaration, sdk, forbidden } from './fixture'
+import { consoleArtifactsSHA, readConsoleArtifacts } from '@workbasehq/core/console-build'
 const roots: string[] = [], servers: ViteDevServer[] = []
-afterEach(async () => { await Promise.all(servers.splice(0).map(s => s.close())); roots.splice(0).forEach(root => rmSync(root, { recursive: true, force: true })) })
+beforeEach(() => vi.stubEnv('WORKBASE_BUILD_SHA', 'a'.repeat(40)))
+afterEach(async () => { vi.unstubAllEnvs(); await Promise.all(servers.splice(0).map(s => s.close())); roots.splice(0).forEach(root => rmSync(root, { recursive: true, force: true })) })
 function setup() { const f = fixture(); roots.push(f.root); return f }
 async function start(root: string) {
   const plugin = consoleUI()
@@ -213,3 +215,98 @@ test('generated four-route consumer passes strict TypeScript checking', async ()
   const checked = spawnSync('bun', [resolve('node_modules/typescript/bin/tsc'), '--ignoreConfig', '--strict', '--noEmit', '--skipLibCheck', '--moduleResolution', 'bundler', '--module', 'esnext', '--target', 'es2023', '--allowImportingTsExtensions', '--resolveJsonModule', '--esModuleInterop', '--types', 'node,@cloudflare/workers-types', join(root, 'entry.ts')], { encoding: 'utf8' })
   expect(checked.status, checked.stdout + checked.stderr).toBe(0)
 }, 20000)
+test('build bundles partial SDK overrides with the remaining SDK catalog', async () => {
+  const { root, put } = setup()
+  put('locales/en/sdk.json', '{"save":"Store"}')
+  const { plugin } = await start(root)
+  expect(plugin.error).toBeUndefined()
+  const catalogs = JSON.parse(readFileSync(join(root, '.workbase-ui/locales.json'), 'utf8'))
+  expect(catalogs.en.sdk.save).toBe('Store'); expect(catalogs.en.sdk.cancel).toBe('Cancel')
+})
+
+test('built HTML sets no-referrer and contains no inline script or style', async () => {
+  const { root, put } = setup()
+  put('index.html', '<!doctype html><html><head></head><body><script type="module" src="/entry.ts"></script></body></html>')
+  put('entry.ts', 'console.log("built")')
+  await build({ root, configFile: false, plugins: [consoleUI()], logLevel: 'silent' })
+  const html = readFileSync(join(root, 'dist/index.html'), 'utf8')
+  expect(html).toContain('<meta name="referrer" content="no-referrer">')
+  expect(html).not.toMatch(/<style|style=|<script(?![^>]*src=)/)
+})
+
+test('bundle SHA includes real components and dictionaries independently of schema, git and environment', async () => {
+  const { root, put } = setup()
+  put('index.html', '<html><head></head><body><script type="module" src="/entry.ts"></script></body></html>')
+  put('entry.ts', `import { routeTree } from './.workbase-ui/routeTree.gen'; import catalogs from './.workbase-ui/locales.json'; console.log(routeTree, catalogs, __WORKBASE_BUILD_SHA__)`)
+  put('ui/index.ts', `import { customPage } from '${sdk}'; import Widget from './-components/widget'; export default customPage({ title: 'sample.title', uses: [], component: Widget })`)
+  put('ui/-components/widget.tsx', `if (!('window' in globalThis)) throw new Error('BROWSER_ONLY'); export default function Widget() { return 'REAL_COMPONENT_ONE' }`)
+  put('locales/en/ui.json', '{"sample.title":"Original title"}')
+  const config = readFileSync(join(root, 'config.ts'), 'utf8'), configHash = (await extractManifest(root)).configHash
+  const compile = async () => {
+    await build({ root, configFile: false, plugins: [consoleUI()], logLevel: 'silent', build: { minify: false } })
+    const metadata = JSON.parse(readFileSync(join(root, 'dist/build-meta.json'), 'utf8'))
+    const script = readdirSync(join(root, 'dist/assets')).find(file => file.endsWith('.js'))!
+    const code = readFileSync(join(root, 'dist/assets', script), 'utf8')
+    expect(metadata.sha).toMatch(/^[a-f0-9]{40}$/)
+    expect(metadata.sha).not.toBe('a'.repeat(40))
+    expect(Number.isFinite(Date.parse(metadata.builtAt))).toBe(true)
+    expect(readFileSync(join(root, 'dist/index.html'), 'utf8')).toContain(metadata.sha)
+    expect(consoleArtifactsSHA(await readConsoleArtifacts(join(root, 'dist')))).toBe(metadata.sha)
+    expect(code).not.toContain('WORKBASE_BUNDLE_SHA_')
+    expect(readFileSync(join(root, 'config.ts'), 'utf8')).toBe(config)
+    expect((await extractManifest(root)).configHash).toBe(configHash)
+    return { sha: metadata.sha, script, code }
+  }
+  const first = await compile()
+  expect(await compile()).toEqual(first)
+  put('public/nested/banner.svg', '<svg fill="red"/>')
+  put('public/robots.txt', 'User-agent: *')
+  const publicRed = await compile()
+  expect(publicRed.sha).not.toBe(first.sha)
+  expect(publicRed.script).toBe(first.script)
+  expect(publicRed.code).toBe(first.code)
+  put('public/nested/banner.svg', '<svg fill="blue"/>')
+  const publicBlue = await compile()
+  expect(publicBlue.sha).not.toBe(publicRed.sha)
+  expect(publicBlue.script).toBe(publicRed.script)
+  expect(readFileSync(join(root, 'dist/nested/banner.svg'), 'utf8')).toContain('blue')
+  // Recreate copied files in reverse insertion order; filesystem enumeration is irrelevant.
+  rmSync(join(root, 'public'), { recursive: true })
+  put('public/robots.txt', 'User-agent: *')
+  put('public/nested/banner.svg', '<svg fill="blue"/>')
+  expect(await compile()).toEqual(publicBlue)
+  put('locales/en/ui.json', '{"sample.title":"Changed title"}')
+  const dictionary = await compile()
+  expect(dictionary.sha).not.toBe(first.sha); expect(dictionary.script).not.toBe(first.script)
+  expect(dictionary.code).toContain('Changed title')
+  put('ui/-components/widget.tsx', `export default function Widget() { return 'REAL_COMPONENT_TWO' }`)
+  const component = await compile()
+  expect(component.sha).not.toBe(dictionary.sha); expect(component.script).not.toBe(dictionary.script)
+  expect(component.code).toContain('REAL_COMPONENT_TWO')
+  put('entry.ts', readFileSync(join(root, 'entry.ts'), 'utf8') + "; import './theme.css'")
+  put('theme.css', 'body { color: red }')
+  const red = await compile()
+  put('theme.css', 'body { color: blue }')
+  const blue = await compile()
+  expect(blue.sha).not.toBe(red.sha)
+  // CSS-only edits must not rewrite bytes behind an unchanged JS asset URL.
+  if (blue.script === red.script) expect(blue.code).toBe(red.code)
+}, 60000)
+test.each(['unbuilt', '123', '', 'g'.repeat(40)])('explicit git SHA helper rejects invalid SHA %s', sha => {
+  const { root } = setup(); vi.stubEnv('WORKBASE_BUILD_SHA', sha)
+  expect(() => resolveBuildSHA(root)).toThrow(/40 hex/)
+})
+test('SHA precedence, consumer git fallback, and clean deployment guard', () => {
+  const { root, put } = setup()
+  const git = (...args: string[]) => { const result = spawnSync('git', ['-C', root, ...args], { encoding: 'utf8' }); expect(result.status, result.stderr).toBe(0); return result.stdout.trim() }
+  put('.gitignore', 'node_modules/\n.workbase-ui*\ndist/\n')
+  git('init'); git('add', '.'); git('-c', 'user.name=Synthetic', '-c', 'user.email=synthetic@example.test', 'commit', '-m', 'initial')
+  vi.stubEnv('WORKBASE_BUILD_SHA', undefined); vi.stubEnv('GITHUB_SHA', undefined)
+  const first = resolveBuildSHA(root); expect(first).toBe(git('rev-parse', 'HEAD')); expect(() => assertCleanDeploy(root)).not.toThrow()
+  put('ui/index.ts', declaration.replace('sample.title', 'sample.layout'))
+  expect(() => assertCleanDeploy(root)).toThrow(/clean/)
+  git('add', '.'); git('-c', 'user.name=Synthetic', '-c', 'user.email=synthetic@example.test', 'commit', '-m', 'layout only')
+  const second = resolveBuildSHA(root); expect(second).not.toBe(first); expect(() => assertCleanDeploy(root)).not.toThrow()
+  vi.stubEnv('GITHUB_SHA', 'c'.repeat(40)); expect(resolveBuildSHA(root)).toBe('c'.repeat(40))
+  vi.stubEnv('WORKBASE_BUILD_SHA', 'D'.repeat(40)); expect(resolveBuildSHA(root)).toBe('d'.repeat(40))
+})

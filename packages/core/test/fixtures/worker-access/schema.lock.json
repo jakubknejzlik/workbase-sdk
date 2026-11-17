@@ -1,0 +1,107 @@
+{
+  "lockVersion": 1,
+  "revision": 1,
+  "parent": null,
+  "tables": [
+    {
+      "name": "worker",
+      "columns": [
+        {
+          "name": "id",
+          "sqlType": "TEXT",
+          "notNull": false,
+          "defaultSql": null,
+          "checks": [],
+          "implicit": true,
+          "primaryKey": true
+        },
+        {
+          "name": "organization_id",
+          "sqlType": "TEXT",
+          "notNull": true,
+          "defaultSql": null,
+          "checks": [],
+          "implicit": true,
+          "references": {
+            "table": "organizations",
+            "column": "id"
+          }
+        },
+        {
+          "name": "created_at",
+          "sqlType": "TEXT",
+          "notNull": true,
+          "defaultSql": null,
+          "checks": [],
+          "implicit": true
+        },
+        {
+          "name": "updated_at",
+          "sqlType": "TEXT",
+          "notNull": true,
+          "defaultSql": null,
+          "checks": [],
+          "implicit": true
+        },
+        {
+          "name": "version",
+          "sqlType": "INTEGER",
+          "notNull": true,
+          "defaultSql": "1",
+          "checks": [],
+          "implicit": true
+        },
+        {
+          "name": "name",
+          "sqlType": "TEXT",
+          "notNull": true,
+          "defaultSql": null,
+          "checks": []
+        },
+        {
+          "name": "user",
+          "sqlType": "TEXT",
+          "notNull": false,
+          "defaultSql": null,
+          "checks": []
+        }
+      ],
+      "unique": [
+        [
+          "organization_id",
+          "id"
+        ]
+      ],
+      "checks": [],
+      "foreignKeys": [
+        {
+          "columns": [
+            "organization_id",
+            "user"
+          ],
+          "table": "users",
+          "targetColumns": [
+            "organization_id",
+            "id"
+          ]
+        }
+      ],
+      "indexes": [
+        {
+          "name": "worker_org_idx",
+          "columns": [
+            "organization_id",
+            "id"
+          ]
+        },
+        {
+          "name": "worker_user_idx",
+          "columns": [
+            "organization_id",
+            "user"
+          ]
+        }
+      ]
+    }
+  ]
+}

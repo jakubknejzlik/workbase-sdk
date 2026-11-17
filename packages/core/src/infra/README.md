@@ -68,12 +68,13 @@ The API does not discover the account subdomain or generate an auth secret.
 | `configPath`, `handler`, `migrationsDir` | Required application-owned module, Worker entry and ordered SQL directory |
 | `resourcePrefix`, `stage` | Required lowercase DNS-style names; prefix ≤63, stage ≤32 characters |
 | `authSecret`, `authBaseUrl` | Required stable `Input<string>` secret and explicit HTTPS origin |
-| `assetsDir?` | Existing prebuilt console directory; absent means no `ASSETS` binding |
+| `assetsDir?` | Built Instance console directory (normally `dist/console`) with verified SHA metadata; absent means no `ASSETS` binding |
 | `domain?` | Optional Cloudflare custom hostname matching the auth origin |
 | `email?: { from }` | Native `EMAIL` send binding restricted to this sender, plus `EMAIL_FROM` |
 | `webhook?: { url, allowedHosts, service?, events? }` | Explicit URL/host allowlist, optional existing Worker service name and event filter |
 | `internalToken?` | Optional secret `INTERNAL_TOKEN` for protected operations |
 | `opsToken?` | Optional secret `OPS_TOKEN` for protected operations; takes precedence over `INTERNAL_TOKEN` |
+| `devMailbox?: { token }` | Opt-in separate credential-reading Worker, only for exact `dev`/`test` stages; returns `devMailboxUrl` |
 | `accountId?`, `projectRoot?` | Override account environment value or path root; SST normally runs in the app root |
 | `protect?` | Protect/retain primary resources; defaults to true for `production` |
 | `migrationTriggers?` | Extra fingerprints for imported application/plugin verification code |
@@ -101,6 +102,13 @@ composed with its instance config. This API does not build console assets or cre
 a webhook receiver/landing Worker. All physical names and Pulumi logical names
 include the prefix/stage identity; long names retain a deterministic tuple hash.
 Worker names fit SST's 54-character workers.dev limit; other names fit 63 characters.
+
+Before registering any resources, provisioning requires valid `build-meta.json`
+with a 40-character lowercase SHA and build time. It verifies that SHA against
+the `index.html` stamp and the complete emitted directory, including copied
+`public/` assets. Missing/invalid metadata raises `provision_console_metadata_invalid`;
+disagreeing HTML or file bytes raise `provision_console_sha_mismatch`. Run the
+Instance's `bun run build:console` before retrying.
 
 The packaged `workbase-migrate` entry runs SDK, plugin and domain migrations/verification
 before the Worker component **and** the underlying script upload. Inputs travel
@@ -152,7 +160,11 @@ This provisioner does not change SST state storage.
 
 Email requires an authorized Cloudflare sender. With magic-link login, configure
 working email delivery or another supported transport even on workers.dev. Omitting
-`email` does not provide a substitute login transport. Omitting `assetsDir` leaves
+`email` alone does not provide a substitute login transport. For disposable dev/test
+stages, explicitly opt into the [development mailbox sidecar](../../../../docs/sdk/dev-mailbox.md)
+for operator-authorized outbox retrieval and first-owner onboarding. Its dedicated
+secret is never bound to the application Worker; production cannot provision it.
+Omitting `assetsDir` leaves
 the API available while the runtime reports `console_not_built` for the console.
 
 Offline tests verify the graph, dependency ordering and installed package bytes.

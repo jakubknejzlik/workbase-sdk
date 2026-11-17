@@ -23,13 +23,25 @@ it('source Select page size commits once; loading retains server rows, busy stat
   const view = render(<DataTable {...props} isFetching={false} />)
   await user.click(screen.getByRole('combobox', { name: labels.pageSize })); await user.click(screen.getByRole('option', { name: '100' }))
   expect(change.mock.lastCall).toEqual([{ search: '', sort: null, limit: 100 }, 'limit'])
+  expect(change).toHaveBeenCalledTimes(1)
   view.rerender(<DataTable {...props} isFetching />)
   expect(screen.getByRole('status').textContent).toBe('31–31')
   expect(screen.getByRole('cell').textContent).toBe('a')
   expect(screen.getByRole('button', { name: labels.next }).hasAttribute('disabled')).toBe(true)
+  expect(screen.getByRole('combobox', { name: labels.pageSize }).hasAttribute('disabled')).toBe(true)
   expect(document.querySelector('[aria-busy="true"]')).toBeTruthy()
   expect(screen.getByTestId('data-table-loading')).toBeTruthy()
   expect(createDataTableQueryKey('records', 'org')).toEqual(['data-table', 'records', 'org'])
+})
+it('page size supports keyboard selection and commits one limit change', async () => {
+  const change = vi.fn(); const user = userEvent.setup()
+  render(<DataTable rows={[{ id: 'a' }]} columns={[{ id: 'id', label: 'ID', cell: row => row.id }]} state={{ search: '', sort: null, limit: 30 }} onStateChange={change} page={1} onPage={vi.fn()} nextCursor="opaque" isFetching={false} label="Records" labels={labels} onRowClick={vi.fn()} />)
+  screen.getByRole('combobox', { name: labels.pageSize }).focus()
+  await user.keyboard('{Enter}')
+  await screen.findByRole('option', { name: '30' })
+  await user.keyboard('{ArrowDown}{Enter}')
+  expect(change).toHaveBeenCalledTimes(1)
+  expect(change).toHaveBeenCalledWith({ search: '', sort: null, limit: 50 }, 'limit')
 })
 it('500 ms search debounce clears pending work on clear and external state restoration', () => {
   vi.useFakeTimers()
@@ -193,5 +205,21 @@ it('mobile hidden columns retain keyboard sort, three accessible states and filt
     expect(screen.queryByRole('button', { name: 'Sort and filter' })).toBeNull()
     expect(screen.getByRole('columnheader', { name: 'Date' }).getAttribute('aria-sort')).toBe('descending')
     expect(screen.getAllByRole('cell').map(cell => cell.textContent)).toEqual(['John Doe', '2026-11-05', 'Row actions'])
+  } finally { vi.restoreAllMocks() }
+})
+
+it('178 narrow tables retain opted-in state and identity alongside row actions', () => {
+  vi.spyOn(window, 'matchMedia').mockReturnValue({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() } as any)
+  try {
+    render(<DataTable rows={[{ id: 'one' }]} columns={[
+      { id: 'name', label: 'Name', cell: () => 'Jana' },
+      { id: 'date', label: 'Date', cell: () => '2026-11-17' },
+      { id: 'access', label: 'Application access', keepOnNarrow: true, wrap: true, cell: () => <div>Invited <span>jana@example.test</span><button>Access actions</button></div> },
+      { id: '_actions', label: 'Actions', cell: () => <button>Row actions</button> },
+    ]} state={{ search: '', sort: null, limit: 30 }} onStateChange={vi.fn()} page={0} onPage={vi.fn()} isFetching={false} label="Records" labels={labels} onRowClick={vi.fn()} />)
+    expect(screen.getAllByRole('columnheader').map(cell => cell.textContent)).toEqual(['Name', 'Application access', 'Actions'])
+    expect(screen.getByText('jana@example.test')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Access actions' })).toBeTruthy()
+    expect(screen.queryByText('2026-11-17')).toBeNull()
   } finally { vi.restoreAllMocks() }
 })

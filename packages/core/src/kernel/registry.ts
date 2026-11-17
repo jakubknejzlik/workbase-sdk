@@ -1,4 +1,6 @@
 import { assertSchemaLockBound } from '../schema/revision'
+import { workerAccessCommands } from '../worker-access-actions'
+import { bindActionPolicy } from '../record-actions'
 import { accessGuards } from '../access-guards'
 import { isBuiltinPlugin } from './builtin-source'
 import { baseFields, defineInstance, normalizeInstance, type InstanceConfig, type InstanceInput, type Operation } from '../config'
@@ -23,12 +25,16 @@ import { userLinkCommands, userLinkActionPermission } from '../user-links'
 
 const registries = new WeakMap<InstanceConfig, KernelRegistry>()
 export const lifecyclePhases = ['contribute', 'validate', 'migrations', 'ports', 'mount'] as const
+interface WorkflowRegistration { kind: 'runtime' | 'plugin'; plugin?: string; source: string }
 export class KernelRegistry {
   readonly plugins: readonly WorkbasePlugin[]
   readonly providers: ReadonlyMap<string, readonly WorkbasePlugin[]>
   readonly config: InstanceConfig
   readonly commands: CommandRegistry
   readonly workflows: WorkflowRegistry
+  /** Audit provenance captured during composition, including environment factories.
+   * Kept separate from the command-name guard registry. */
+  readonly workflowRegistrations: ReadonlyMap<string, WorkflowRegistration>
   readonly migrations: readonly PluginMigration[]
   /** True only for a complete permissions provider outside development trust. */
   readonly permissionsActive: boolean
@@ -39,7 +45,8 @@ export class KernelRegistry {
   constructor(config: InstanceInput & Pick<InstanceConfig, 'effectiveAccess'>, options: RuntimeOptions = {}, env?: RuntimeEnv) {
     assertSchemaLockBound(config)
     if (config.baseline === 'workbase-sdk' && !config.effectiveAccess) throw new DeclarationError(['access'], 'Executable schema configurations require explicit entity access and shared access.ts')
-    const resolved = resolvePlugins(options.plugins ?? config.plugins ?? [], config.interactive)
+    const configuredPlugins = options.plugins ?? config.plugins ?? []
+    const resolved = resolvePlugins(configuredPlugins, config.interactive)
     this.plugins = resolved.plugins
     this.providers = resolved.providers
     const names = new Set(this.plugins.map(plugin => plugin.name))
@@ -47,6 +54,8 @@ export class KernelRegistry {
     const entities = { ...config.entities }
     const commands = [...(options.commands?.values() ?? [])]
     const workflows = [...(options.workflows?.values() ?? [])]
+    const workflowRegistrations = new Map<string, WorkflowRegistration>(
+      workflows.map(workflow => [workflow.name, { kind: 'runtime', source: 'workflows' }]))
     const commandNames = [...(config.commands ?? [])]
     for (const plugin of this.plugins) {
       for (const [name, entity] of Object.entries(plugin.entities ?? {})) {
@@ -57,8 +66,18 @@ export class KernelRegistry {
         if (!isBuiltinPlugin(plugin) || !options.commands?.has(command.name)) commands.push(command)
         if (!commandNames.includes(command.name)) commandNames.push(command.name)
       }
-      for (const workflow of [...(plugin.workflows ?? []), ...(env ? plugin.workflowDefinitions?.(env)?.values() ?? [] : [])]) {
-        if (!isBuiltinPlugin(plugin) || !options.workflows?.has(workflow.name)) workflows.push(workflow)
+      // Source-map array positions belong to authored config.plugins, not the
+      // dependency-sorted plugin list. Runtime overrides use the enclosing fallback.
+      const source = options.plugins ? 'plugins' : `plugins.${configuredPlugins.indexOf(plugin)}`
+      const definitions = [
+        ...(plugin.workflows ?? []).map((workflow, index) => ({ workflow, source: `${source}.workflows.${index}` })),
+        ...[...(env ? plugin.workflowDefinitions?.(env)?.values() ?? [] : [])].map(workflow => ({ workflow, source: `${source}.workflowDefinitions` })),
+      ]
+      for (const { workflow, source } of definitions) {
+        if (!isBuiltinPlugin(plugin) || !options.workflows?.has(workflow.name)) {
+          workflows.push(workflow)
+          workflowRegistrations.set(workflow.name, { kind: 'plugin', plugin: plugin.name, source })
+        }
       }
     }
     // validate: whole model, registries, and each plugin-owned section.
@@ -70,13 +89,15 @@ export class KernelRegistry {
       ...(config.pluginConfig || Object.keys(pluginConfig).length ? { pluginConfig } : {}) })
     if (config.effectiveAccess) { this.config.effectiveAccess = config.effectiveAccess; validatePolicies(this.config) }
     this.providers.get('console')?.[0]?.validateConsole?.(this.config)
-    for (const command of userLinkCommands(this.config)) {
+    for (const command of [...userLinkCommands(this.config), ...workerAccessCommands(this.config, env)]) {
       commands.push(command)
       if (!this.config.commands.includes(command.name)) this.config.commands.push(command.name)
     }
     this.commands = createCommandRegistry(commands)
     this.workflows = createWorkflowRegistry(workflows)
+    this.workflowRegistrations = workflowRegistrations
     if (this.config.effectiveAccess) this.config.effectiveAccess = accessGuards(this.config.effectiveAccess, this.config.commands, [...this.commands.values()], this.plugins)
+    if (this.config.effectiveAccess) bindActionPolicy(this.config.effectiveAccess, this.config)
     // migrations: append hooks to the supplied chain. Applying D1 migrations remains an operator action.
     this.migrations = Object.freeze([...(options.migrations ?? []), ...this.plugins.flatMap(plugin => (plugin.migrations ?? []).map(migration => ({ ...migration, name: `${plugin.name}/${migration.name}` })))])
     if (new Set(this.migrations.map(migration => migration.name)).size !== this.migrations.length) throw new Error('Duplicate plugin migration')
@@ -95,6 +116,11 @@ export class KernelRegistry {
   get mailOutbox() {
     const port = this.providers.get('mail-outbox')?.[0]?.mailOutbox
     if (!port) throw new ApiError(503, 'mail_outbox_required')
+    return port
+  }
+  get invitationMail() {
+    const port = this.providers.get('members')?.[0]?.invitationMail
+    if (!port) throw new ApiError(503, 'invitation_mail_required')
     return port
   }
   get audit() { return this.providers.get('audit')?.[0]?.audit }
@@ -179,8 +205,10 @@ export class KernelRegistry {
     return fields
   }
   commandGuard(command: KernelCommand, scope: Scope, input: unknown) {
-    // Only the existing trusted identity writer can use this service permission.
-    const internal = scope.actor.type === 'service' && 'system' in command.permission && command.permission.system === 'identity.write'
+    // Service authority is limited to trusted internal writers, even in trust mode.
+    const servicePermission = 'system' in command.permission && ['identity.write', 'organizations.provision', 'members.bootstrap'].includes(command.permission.system)
+    const internal = scope.actor.type === 'service' && servicePermission
+    if ((scope.actor.type === 'service' || servicePermission) && !internal) throw new ApiError(403, 'permission_denied')
     if (!internal && !this.trust && !this.hasAuthorization) throw new ApiError(403, 'permission_denied')
     // Credential restrictions and entity-scope provenance survive provider removal and trust.
     if (scope.actor.type === 'agent' || command.kind === 'entity') authorizeOperation(scope, operationName(command))

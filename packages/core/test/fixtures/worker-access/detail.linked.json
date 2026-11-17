@@ -1,0 +1,33 @@
+{
+  "id": "wrk_1",
+  "organization_id": "org_a",
+  "name": "Jana",
+  "user": "usr_1",
+  "version": 3,
+  "access": {
+    "state": "linked",
+    "account": {
+      "id": "usr_1",
+      "display_name": "Jana",
+      "email": "jana@example.test"
+    },
+    "invitation": null
+  },
+  "actions": {
+    "invite": {
+      "enabled": false,
+      "reason": "access.already_linked"
+    },
+    "cancel_invite": {
+      "enabled": false,
+      "reason": "access.no_invitation"
+    },
+    "link_account": {
+      "enabled": false,
+      "reason": "access.already_linked"
+    },
+    "unlink_account": {
+      "enabled": true
+    }
+  }
+}

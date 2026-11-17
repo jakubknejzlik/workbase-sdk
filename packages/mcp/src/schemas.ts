@@ -51,7 +51,53 @@ const setLabel = z.strictObject({
 'Provide entity singular/plural/object captions, or field and label; do not mix the targets')
 const setLocale = z.strictObject({
   kind: z.literal('set_locale'), locale: consoleLocaleSchema.optional(), defaultLanguage: consoleLocaleSchema.optional(),
-}).refine(change => change.locale !== undefined || change.defaultLanguage !== undefined, 'Provide locale and/or defaultLanguage')
+  languages: z.array(consoleLocaleSchema).min(1).max(2).refine(values => new Set(values).size === values.length, 'Duplicate languages').optional(),
+}).refine(change => change.locale !== undefined || change.defaultLanguage !== undefined || change.languages !== undefined, 'Provide locale, defaultLanguage and/or languages')
+export type LocaleChange = z.infer<typeof setLocale>
+const instanceDisplayName = z.string().trim().min(1).max(1000)
+const setInstanceDisplayName = z.strictObject({ kind: z.literal('set_instance_display_name'), displayName: instanceDisplayName })
+export type PresentationChange = LocaleChange | z.infer<typeof setInstanceDisplayName>
+// Composition inputs remain separate from legacy config proposal records.
+export const identityOptionsSchema = z.strictObject({
+  trustedIssuers: z.record(z.string().url(), z.array(z.string().min(1))).optional(),
+})
+export const organizationsOptionsSchema = z.strictObject({ allowCreate: z.boolean().optional() })
+export const localAuthOptionsSchema = z.strictObject({ methods: z.tuple([z.literal('magic-link')]) })
+export const setPluginSchema = z.discriminatedUnion('plugin', [
+  z.strictObject({ kind: z.literal('set_plugin'), plugin: z.literal('identity'), options: identityOptionsSchema.optional() }),
+  z.strictObject({ kind: z.literal('set_plugin'), plugin: z.literal('organizations'), options: organizationsOptionsSchema.optional() }),
+  z.strictObject({ kind: z.literal('set_plugin'), plugin: z.literal('local-auth'), options: localAuthOptionsSchema.optional() }),
+  ...(['members', 'mail-outbox', 'audit', 'machine-credentials', 'console'] as const).map(plugin =>
+    z.strictObject({ kind: z.literal('set_plugin'), plugin: z.literal(plugin) })),
+])
+export const setInteractiveSchema = z.strictObject({ kind: z.literal('set_interactive'), interactive: z.boolean() })
+export const runtimeChangeSchema = z.union([setPluginSchema, setInteractiveSchema])
+export type RuntimeChange = z.infer<typeof runtimeChangeSchema>
+const accessDecision = z.enum(['allow', 'deny'])
+const accessGrant = z.union([accessDecision, z.strictObject({ where: z.record(z.string(), z.unknown()), fields: z.array(identifier).optional() })])
+// SDK entity names may have a leading underscore or capitals (e.g. rateLimit).
+// Validate their membership in the composition layer, keeping CLI init core-free.
+const entityTarget = z.string().min(1).max(63).regex(/^_?[a-z][a-zA-Z0-9_]*$/)
+  .refine(s => !['__proto__', 'prototype', 'constructor'].includes(s), 'Reserved identifier')
+export const accessChangeSchema = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('set_system_access'), role: identifier, grants: z.record(z.string(), accessDecision) }),
+  z.strictObject({ kind: z.literal('set_entity_access'), entity: entityTarget, role: identifier, access: z.union([
+    z.literal('deny'), z.strictObject({ read: accessGrant, create: accessGrant, update: accessGrant, delete: accessGrant }),
+  ]) }),
+  z.strictObject({ kind: z.literal('set_account_link'), entity: identifier, invitationRole: identifier }),
+])
+export type AccessChange = z.infer<typeof accessChangeSchema>
+export const setRolesSchema = z.strictObject({
+  kind: z.literal('set_roles'),
+  roles: z.array(identifier).min(1).refine(roles => new Set(roles).size === roles.length, 'Duplicate roles'),
+  organizationOwnerRole: identifier,
+}).refine(change => change.roles.includes(change.organizationOwnerRole), 'organizationOwnerRole must be in roles')
+export type RolesChange = z.infer<typeof setRolesSchema>
+export const compositionChangeSchema = z.union([runtimeChangeSchema, accessChangeSchema, setRolesSchema, setLocale, setInstanceDisplayName])
+export type CompositionChange = z.infer<typeof compositionChangeSchema>
+export const isPresentationChange = (change: { kind: string }): change is PresentationChange =>
+  change.kind === 'set_locale' || change.kind === 'set_instance_display_name'
+
 export const changeSchema = z.discriminatedUnion('kind', [
   setLabel,
   setLocale,
@@ -75,12 +121,15 @@ export const changeSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('add_index'), entity: identifier, name: identifier, fields: z.array(identifier).min(1).max(8) }),
 ])
 export const schemas = {
-  bootstrap_instance: z.strictObject({ root: z.string().min(1).optional(), id: z.string(), target: z.literal('cloudflare-github').describe('Standalone registry SDK packages, packaged console and SST Cloudflare deployment with GitHub workflows') }),
+  initialize_instance: z.strictObject({ instance, mode: z.enum(['preview', 'apply']).default('preview'), planHash: z.string().regex(/^[a-f0-9]{64}$/).optional() })
+    .refine(input => input.mode !== 'apply' || input.planHash !== undefined, 'Apply requires the preview planHash'),
+  bootstrap_instance: z.strictObject({ root: z.string().min(1).optional(), id: z.string(), displayName: instanceDisplayName.optional(), target: z.literal('cloudflare-github').describe('Standalone registry SDK packages, packaged console and SST Cloudflare deployment with GitHub workflows') }),
   list_versions: z.strictObject({ instance }),
   rollback: z.strictObject({ instance, to: z.string().regex(/^v[1-9][0-9]*$/), expectedRevision: revision, allowDestructive: z.boolean().optional(), preview: z.boolean().optional() }),
   inspect_schema: z.strictObject({ instance }),
   upgrade_sdk: z.strictObject({ instance, baseRevision: revision, targetVersion: z.string().regex(exactVersion).refine(value => !/\s/.test(value)) }),
-  propose_change: z.strictObject({ instance, baseRevision: revision, changes: z.array(changeSchema).min(1).max(50) }),
+  propose_change: z.strictObject({ instance, baseRevision: revision, changes: z.array(z.union([changeSchema, compositionChangeSchema])).min(1).max(50) }),
+  propose_composition: z.strictObject({ instance, baseRevision: revision, changes: z.array(compositionChangeSchema).min(1).max(50) }),
   validate: z.strictObject({ proposalId: proposalId.optional(), instance: instance.optional() })
     .refine(input => !!input.proposalId !== !!input.instance, 'Provide exactly one of instance or proposalId'),
   preview_migration: z.strictObject({ proposalId }),

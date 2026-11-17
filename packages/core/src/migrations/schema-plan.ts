@@ -1,5 +1,5 @@
 import type { InstanceConfig } from '../config'
-import type { SourceMap } from '../schema/load'
+import type { SourceMap } from '../schema/source-location'
 import { sha256 } from '../crypto'
 import { checkBundle, hasManual, manualEvidence, parseBundle, renderBundle } from './schema-bundle'
 import { diffSpecs, lockBytes, parseLock, schemaLock, type SchemaLock } from './schema-lock'
@@ -24,11 +24,27 @@ function assertColumnOrder(base: SchemaLock | undefined, lock: SchemaLock) {
     }
   }
 }
+/** This slice records rename intent only; no expansion/switch/contract SQL. */
+export function assertNoRenameSQL(lock: SchemaLock) {
+  const transition = lock.transitions.find(t => t.phase !== 'contracted')
+  if (transition) throw new Error(`schema.lock.json:1: transition ${transition.id} (${transition.bridge} ${transition.from.logical} -> ${transition.to.logical}, ${transition.phase}): expansion SQL is unsupported in this slice`)
+}
+function assertLineage(base: SchemaLock | undefined, lock: SchemaLock) {
+  if (!base) return
+  for (const entity of base.entities) {
+    const current = lock.entities.find(e => e.id === entity.id)
+    if (!current || current.logicalName !== entity.logicalName || current.physicalName !== entity.physicalName) throw new Error(`schema.lock.json:1: immutable entity identity/mapping changed: ${entity.id}`)
+    for (const field of entity.fields) if (!current.fields.some(f => f.id === field.id && f.logicalName === field.logicalName && f.physicalName === field.physicalName)) throw new Error(`schema.lock.json:1: immutable field identity/mapping changed: ${field.id}`)
+  }
+  if (lock.transitions.length < base.transitions.length || base.transitions.some((t, i) => JSON.stringify(t) !== JSON.stringify(lock.transitions[i]))) throw new Error('schema.lock.json:1: transition history is immutable in this slice')
+}
 /** Checks the single permitted transition from the ref tip, never a merge-base. */
 export async function checkLinkage(baseLock: string | undefined, baseMigrations: MigrationFiles, currentLock: string, migrations: MigrationFiles) {
   if (baseLock === undefined && Object.keys(baseMigrations).length) throw new Error('Missing schema.lock.json in base with domain migrations; unsupported base history')
   assertBaseFiles(baseMigrations, migrations)
   const lock = parseLock(currentLock), base = baseLock === undefined ? undefined : parseLock(baseLock)
+  assertLineage(base, lock)
+  assertNoRenameSQL(lock)
   assertColumnOrder(base, lock)
   const added = Object.keys(migrations).filter(file => !(file in baseMigrations))
   for (const [file, sql] of Object.entries(migrations)) {
@@ -36,6 +52,9 @@ export async function checkLinkage(baseLock: string | undefined, baseMigrations:
     if (fileRevision(file) !== bundle.revision) throw new Error(`${file}:1: header revision differs from filename`)
   }
   if (currentLock === baseLock && added.length === 0) return
+  // A byte-only, deterministic v1 bootstrap has no SQL/revision transition.
+  // The exact original parent and all migration bytes stay pinned.
+  if (baseLock !== undefined && JSON.parse(baseLock).lockVersion === 1 && added.length === 0 && currentLock === lockBytes(base!)) return
   if (lock.parent !== (baseLock === undefined ? null : await sha256(baseLock))) throw new Error('schema.lock.json:1: wrong parent or stale base; regenerate against --base <ref> tip')
   if (lock.revision !== (base?.revision ?? 0) + 1) throw new Error('schema.lock.json:1: revision skip or stale base; expected base.revision + 1')
   if (added.length !== 1) throw new Error(`Expected exactly one new migration file; found ${added.length}`)
@@ -54,12 +73,14 @@ export async function plan(input: {
   const { baseLock, baseMigrations, config, existingBundle, confirmManual, sources } = input
   const base = baseLock === undefined ? undefined : parseLock(baseLock)
   const lock = schemaLock(config, base, sources)
+  assertLineage(base, lock)
+  assertNoRenameSQL(lock)
   assertColumnOrder(base, lock)
   const generated = diffSpecs(base?.tables ?? [], lock.tables)
   const previous = existingBundle && parseBundle(existingBundle.filename, existingBundle.sql)
   if (!generated && base) {
     if (previous && hasManual(previous)) throw new Error(`${existingBundle!.filename}:1: empty schema diff has manual SQL; refusing to delete manual regions`)
-    return { lock: baseLock!, bundle: undefined }
+    return { lock: JSON.parse(baseLock!).lockVersion === 1 ? lockBytes(base) : baseLock!, bundle: undefined }
   }
   lock.parent = baseLock === undefined ? null : await sha256(baseLock)
   const bundle = { revision: lock.revision, parent: lock.parent, manual: 'none', pre: previous?.pre ?? '', generated, post: previous?.post ?? '' }

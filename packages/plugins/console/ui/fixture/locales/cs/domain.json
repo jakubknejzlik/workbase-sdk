@@ -1,0 +1,12 @@
+{
+  "entity.worker_one": "{{count}} pracovník",
+  "entity.worker_few": "{{count}} pracovník",
+  "entity.worker_many": "{{count}} pracovník",
+  "entity.worker_other": "{{count}} pracovník",
+  "field.worker.name": "Jméno",
+  "field.worker.status": "Stav",
+  "field.worker.user": "Uživatel",
+  "field.worker.locked": "Zamčeno",
+  "enum.worker.status.active": "Aktivní",
+  "enum.worker.status.off": "Vypnuto"
+}

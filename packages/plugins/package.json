@@ -28,8 +28,14 @@
     "./console/ui": "./console/ui/src/index.ts",
     "./console/ui/check": "./console/ui/src/check.ts",
     "./console/ui/vite": "./console/ui/src/vite.ts",
+    "./console/ui/saved-views": "./console/ui/src/saved-views-storage.ts",
     "./console/ui/client": "./console/ui/src/client.ts",
-    "./console/ui/react": "./console/ui/src/react/index.ts"
+    "./console/ui/react": "./console/ui/src/react/index.ts",
+    "./console/ui/i18n": "./console/ui/src/i18n.ts",
+    "./console/ui/styles.css": {
+      "types": "./console/ui/src/styles.d.ts",
+      "default": "./console/ui/src/styles.css"
+    }
   },
   "dependencies": {
     "zod": "4.6.7",
@@ -42,8 +48,10 @@
     "@tanstack/router-generator": "^1.146.2",
     "es-module-lexer": "^2.3.2",
     "react": "^19.2.8",
+    "react-dom": "^19.2.8",
     "@tanstack/react-query": "^5.90.21",
-    "@tanstack/react-router": "^1.170.41"
+    "@tanstack/react-router": "^1.170.41",
+    "i18next": "^25.10.10"
   },
   "devDependencies": {
     "@workbasehq/test-support": "workspace:*",
@@ -54,10 +62,12 @@
     "react": "19.2.8",
     "react-dom": "19.2.8",
     "@types/react": "19.2.18",
+    "@types/react-dom": "19.2.4",
     "@tanstack/react-query": "5.90.21",
     "@tanstack/react-router": "1.170.41",
     "@testing-library/react": "16.3.3",
-    "jsdom": "30.1.2"
+    "jsdom": "30.1.2",
+    "i18next": "25.10.10"
   },
   "files": [
     "*/src/**",
@@ -96,10 +106,16 @@
     "react": {
       "optional": true
     },
+    "react-dom": {
+      "optional": true
+    },
     "@tanstack/react-query": {
       "optional": true
     },
     "@tanstack/react-router": {
+      "optional": true
+    },
+    "i18next": {
       "optional": true
     }
   }

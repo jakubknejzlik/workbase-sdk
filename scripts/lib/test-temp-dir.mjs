@@ -3,6 +3,7 @@ import { constants } from 'node:os'
 
 // Test/proof processes own only the directories explicitly registered here.
 const owned = new Map()
+let shutdownDeferrals = 0
 function cleanupRegisteredDirs() {
   for (const directory of owned.keys()) cleanupTempDir(directory)
 }
@@ -10,6 +11,7 @@ process.once('exit', cleanupRegisteredDirs)
 const signalHandlers = new Map()
 for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
   const handler = () => {
+    if (shutdownDeferrals) return
     try { cleanupRegisteredDirs() }
     finally {
       // Other listeners own shutdown; leave the exit cleanup active for any new dirs.
@@ -23,6 +25,13 @@ for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
   }
   signalHandlers.set(signal, handler)
   process.on(signal, handler)
+}
+
+// A process supervisor must finish terminating users of these directories first.
+export function deferTempDirCleanup() {
+  shutdownDeferrals++
+  let released = false
+  return () => { if (!released) { released = true; shutdownDeferrals-- } }
 }
 
 export function registerTempDir(directory) {

@@ -4,19 +4,15 @@ import { realpathSync } from 'node:fs'
 import { readFile, writeFile } from 'node:fs/promises'
 import { isAbsolute, relative, resolve, sep } from 'node:path'
 import { enforcementInputs, type AccessKernel } from './access-inputs'
-import type { SourceMap } from './schema/load'
+import type { SourceMap } from './schema/source-location'
 
 export interface AccessLockOptions {
   root: string
   sources: SourceMap
 }
 export interface AccessLockFiles { json: string; md: string }
-function canonical(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(canonical)
-  if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value)
-    .sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).map(([key, child]) => [key, canonical(child)]))
-  return value
-}
+import { canonical } from './canonical'
+export { canonical } from './canonical'
 const json = (value: unknown) => JSON.stringify(canonical(value))
 const cell = (value: string) => value.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('|', '&#124;').replaceAll('`', '&#96;').replaceAll('\n', '<br>')
 
@@ -55,8 +51,36 @@ export function serializeAccessLock(kernel: AccessKernel, options: AccessLockOpt
   }
   lines.push('', '## System and account privileges', '', '| Role | Action | Decision | Target | Source |', '| --- | --- | --- | --- | --- |')
   for (const rule of policy.system) lines.push(`| ${cell(rule.role)} | ${cell(rule.action)} | ${rule.decision} | ${cell(json(rule.target))} | ${cell(locate(rule.source))} |`)
+  if (policy.accountLinks) {
+    lines.push('', '## Account link invitation roles', '')
+    for (const [entity, mapping] of Object.entries(policy.accountLinks)) lines.push(`- ${cell(entity)}: ${cell(mapping.invitationRole)} (${cell(locate(`access.accountLinks.${entity}.invitationRole`))})`)
+  }
+  lines.push('', '## Record actions', '', '| Entity | Action | Command | Conditions | Dependencies | Source |', '| --- | --- | --- | --- | --- | --- |')
+  for (const action of policy.actions) lines.push(`| ${cell(action.entity)} | ${cell(action.name)} | ${cell(action.command)} | ${cell(json(action.conditions))} | ${cell(json(action.dependencies))} | ${cell(locate(action.source))} |`)
   lines.push('', '## Registered command guards', '', '| Command | Permission | Additional permissions | Executable checks | Registration source |', '| --- | --- | --- | --- | --- |')
   for (const guard of policy.guards) lines.push(`| ${cell(guard.name)} | ${cell(json(guard.permission))} | ${cell(json(guard.additionalPermissions))} | opaque | ${cell(locate(`guards.${guard.name}`, 'commands'))} |`)
+  lines.push('', '## Workflow operation occurrences', '', '| Workflow | Step (in execution order) | Role | Operation | Permission | Additional permissions | Executable checks | Registration source |', '| --- | --- | --- | --- | --- | --- | --- | --- |')
+  for (const [name, workflow] of Object.entries(canonical(inputs.workflows) as typeof inputs.workflows)) {
+    const registration = kernel.workflowRegistrations.get(name)!
+    const source = (key: string, fallback: string) => {
+      // Explicit occurrence/workflow mappings override enclosing registrations.
+      let mapped = key
+      while (mapped.startsWith('workflows.') && !options.sources[mapped]) mapped = mapped.split('.').slice(0, -1).join('.')
+      return locate(key, options.sources[mapped] ? mapped : fallback)
+    }
+    const registrationLocation = source(`workflows.${name}`, registration.source)
+    lines.push(`| ${cell(name)} (v${cell(workflow.version)}; ${cell(json(workflow.registration))}) | | | | | | | ${cell(registrationLocation)} |`)
+    workflow.stepOrder.forEach((id, index) => {
+      for (const role of ['forward', 'compensation'] as const) {
+        const operation = workflow.steps[id][role]
+        if (!operation) continue
+        const location = source(`workflows.${name}.steps.${id}.${role}`,
+          `${registration.source}.steps.${index}.${role === 'forward' ? 'operation' : 'compensate.operation'}`)
+        lines.push(`| ${cell(name)} | ${index + 1}. ${cell(id)} | ${role} | ${cell(operation.name)} | ${cell(json(operation.permission))} | ${cell(json(operation.additionalPermissions))} | opaque | ${cell(location)} |`)
+      }
+    })
+  }
+  if (!Object.keys(inputs.workflows).length) lines.push('None registered.')
   lines.push('', '## Opaque executable hooks', '')
   for (const hook of policy.opaqueHooks) lines.push(`- ${cell(hook)}: opaque (${cell(locate(`hooks.${hook}`, 'plugins'))})`)
   if (!policy.opaqueHooks.length) lines.push('None registered.')
@@ -67,8 +91,18 @@ export function serializeAccessLock(kernel: AccessKernel, options: AccessLockOpt
   lines.push('', '## Enforcement inputs', '', 'Selected resolved kernel/config inputs used alongside the compiled grants (curated, not exhaustive; see docs/sdk/access-lock.md § Scope). Executable bodies remain opaque.', '', '| Input | Resolved value |', '| --- | --- |')
   for (const [key, value] of Object.entries(canonical(inputs) as Record<string, unknown>)) {
     if (key === 'entities') for (const [entity, definition] of Object.entries(value as Record<string, Record<string, unknown>>)) {
-      for (const [part, data] of Object.entries(definition)) lines.push(`| ${cell(`${entity} / ${part}`)} | ${cell(json(data))} |`)
-    } else lines.push(`| ${cell(key)} | ${cell(json(value))} |`)
+      for (const [part, data] of Object.entries(definition)) {
+        const source = part === 'displayField' || part === 'label' ? ` (${cell(locate(`entities.${entity}.${part}`))})` : ''
+        lines.push(`| ${cell(`${entity} / ${part}`)} | ${cell(json(data))}${source} |`)
+      }
+    } else if (key === 'ui') {
+      for (const [entity, ui] of Object.entries(canonical(inputs.ui.entities) as typeof inputs.ui.entities)) {
+        for (const [column, binding] of Object.entries(canonical(ui.list.relatedColumns) as typeof ui.list.relatedColumns)) {
+          const path = `ui.entities.${entity}.list.relatedColumns.${column}`
+          lines.push(`| ${cell(path)} | ${cell(json(binding))} (${cell(locate(path))}) |`)
+        }
+      }
+    } else if (key !== 'workflows') lines.push(`| ${cell(key)} | ${cell(json(value))} |`)
   }
   // Compact JSON keeps the full normalized representation together; no derived grants.
   return { json: json({ effectiveAccess: policy, enforcementInputs: inputs, sources: locations }) + '\n', md: lines.join('\n') + '\n' }
@@ -78,25 +112,41 @@ function diff(previous: string, current: string): string[] {
   try {
     const before = JSON.parse(previous); const after = JSON.parse(current)
     const changes: string[] = []
+    const inputSource = (path: string) => {
+      let key = path.replace(/^enforcement inputs \/ /, '').split(' / ').join('.')
+      while (!after.sources[key] && !before.sources[key] && key) key = key.split('.').slice(0, -1).join('.')
+      const source = after.sources[key] ?? before.sources[key]
+      return source ? ` (${source.file}:${source.line})` : ''
+    }
     function inputs(old: any, next: any, path: string) {
       if (json(old) === json(next)) return
+      if (path === 'enforcement inputs / workflows') {
+        for (const name of [...new Set([...Object.keys(old ?? {}), ...Object.keys(next ?? {})])].sort()) {
+          const child = `${path} / ${name}`
+          if (!old?.[name] || !next?.[name]) changes.push(`${next?.[name] ? '+' : '-'} workflow ${name}${inputSource(child)}`)
+          else inputs(old[name], next[name], child)
+        }
+        return
+      }
       if (old && next && typeof old === 'object' && typeof next === 'object' && !Array.isArray(old) && !Array.isArray(next)) {
         for (const key of [...new Set([...Object.keys(old), ...Object.keys(next)])].sort()) inputs(old[key], next[key], `${path} / ${key}`)
-      } else changes.push(`~ ${path}: ${json(old) ?? 'missing'} -> ${json(next) ?? 'missing'}`)
+      } else changes.push(`~ ${path}: ${json(old) ?? 'missing'} -> ${json(next) ?? 'missing'}${inputSource(path)}`)
     }
     for (const [section, key] of [
       ['entities', (r: any) => `${r.role} / ${r.entity} / ${r.operation}`],
       ['system', (r: any) => `${r.role} / ${r.target.entity} / ${r.target.operation} (${r.action})`],
+      ['actions', (r: any) => `action ${r.entity} / ${r.name}`],
       ['guards', (r: any) => `command ${r.name}`],
     ] as const) {
-      const old = new Map<string, unknown>(before.effectiveAccess[section].map((r: any) => [key(r), r]))
-      const next = new Map<string, unknown>(after.effectiveAccess[section].map((r: any) => [key(r), r]))
+      const old = new Map<string, unknown>((before.effectiveAccess[section] ?? []).map((r: any) => [key(r), r]))
+      const next = new Map<string, unknown>((after.effectiveAccess[section] ?? []).map((r: any) => [key(r), r]))
       for (const id of [...new Set([...old.keys(), ...next.keys()])].sort()) {
         if (json(old.get(id)) !== json(next.get(id))) changes.push(`${old.has(id) ? next.has(id) ? '~' : '-' : '+'} ${id}`)
       }
     }
     if (json(before.effectiveAccess.opaqueHooks) !== json(after.effectiveAccess.opaqueHooks)) changes.push('~ opaque executable hooks')
     if (json(before.effectiveAccess.roles) !== json(after.effectiveAccess.roles)) changes.push('~ configured roles')
+    inputs(before.effectiveAccess.accountLinks, after.effectiveAccess.accountLinks, 'account link invitation roles')
     inputs(before.enforcementInputs, after.enforcementInputs, 'enforcement inputs')
     if (json(before.sources) !== json(after.sources)) changes.push('~ source locations')
     return changes.slice(0, 12).concat(changes.length > 12 ? [`… ${changes.length - 12} more changes`] : [])

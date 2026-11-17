@@ -5,6 +5,7 @@ import { ApiError } from './errors'
 import { writableFields } from './policies'
 import { hasOwnerRole } from './policies'
 import { organizationPermission } from './execution/permissions'
+import { isOrganizationAdministrator } from './organization-permissions'
 
 /** Projection of the live authorization ports; never serialize their predicates. */
 export function capabilities(kernel: KernelRegistry, scope: Scope) {
@@ -24,6 +25,7 @@ export function capabilities(kernel: KernelRegistry, scope: Scope) {
   // Match the read routes' complete gates, including their identity/owner checks.
   // Navigation needs grants, not whole member/token/workflow/audit collections.
   const resources = {
+    'members.search_link_account': isOrganizationAdministrator(kernel.config, scope.role) && permits(() => { kernel.resourcePermission(scope, 'members.read'); organizationPermission(kernel.config, scope, 'members.read') }),
     'organizations.update': kernel.providers.has('organizations') && kernel.permissionsActive && permits(() => kernel.resourcePermission(scope, 'organizations.update')),
     ...Object.fromEntries((['members.read', 'members.update', 'members.remove', 'invitations.read', 'invitations.create', 'invitations.revoke', 'tokens.read'] as const).map(action => [action,
       permits(() => { kernel.resourcePermission(scope, action); organizationPermission(kernel.config, scope, action) }),
@@ -37,5 +39,5 @@ export function capabilities(kernel: KernelRegistry, scope: Scope) {
   return { revision: kernel.config.revision, entities, commands, workflows, resources, organization: { role: scope.role } }
 }
 export function capabilityRoutes(app: App, kernel: KernelRegistry, env: RuntimeEnv) {
-  app.get('/o/:org/capabilities', scopeMiddleware(env, kernel.config, kernel), c => c.json(capabilities(kernel, c.get('scope'))))
+  app.get('/o/:org/capabilities', scopeMiddleware(env, kernel.config, kernel), c => { c.header('Cache-Control', 'no-store'); return c.json(capabilities(kernel, c.get('scope'))) })
 }

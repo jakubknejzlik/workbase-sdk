@@ -9,5 +9,6 @@ it('pins the append-only migration names, order and SQL checksums', async () => 
   expect(actual).toEqual([
     { name: '001_adopt_delivery', sha256: '07070358c21ec24a0487a4b5e943f30d356b75a6349847192a6d302d693e07cd' },
     { name: '002_sender_name', sha256: '0a8fb93647ccf7d0fc72eecf803b453a701cbf6dd3f3d925ca1a6690738d4c09' },
+    { name: '003_operational_evidence', sha256: '037234c459ce211ae394f51f5989c15b70f6707ef16ffb4f500927a0a36ffabb' },
   ])
 })

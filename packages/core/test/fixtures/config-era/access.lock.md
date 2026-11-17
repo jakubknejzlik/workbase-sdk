@@ -112,12 +112,23 @@ Source locations identify the rule or its enclosing registration declaration. Ex
 | staff | workflows.read | deny | {"entity":"workflow_runs","operation":"read"} | packages/core/test/fixtures/config-era/access.ts:40 |
 | staff | workflows.resume | deny | {"entity":"workflow_runs","operation":"update"} | packages/core/test/fixtures/config-era/access.ts:41 |
 
+## Record actions
+
+| Entity | Action | Command | Conditions | Dependencies | Source |
+| --- | --- | --- | --- | --- | --- |
+
 ## Registered command guards
 
 | Command | Permission | Additional permissions | Executable checks | Registration source |
 | --- | --- | --- | --- | --- |
 | worker/link_account | {"entity":"worker","operation":"update"} | [] | opaque | packages/core/test/fixtures/config-era/config.ts:5 |
 | worker/remove_access | {"entity":"worker","operation":"update"} | [] | opaque | packages/core/test/fixtures/config-era/config.ts:5 |
+
+## Workflow operation occurrences
+
+| Workflow | Step (in execution order) | Role | Operation | Permission | Additional permissions | Executable checks | Registration source |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+None registered.
 
 ## Opaque executable hooks
 
@@ -136,9 +147,11 @@ Selected resolved kernel/config inputs used alongside the compiled grants (curat
 | account | {"entity":"users"} |
 | authorization | {"permissionsActive":false,"providers":{},"trust":false} |
 | users / commandsOnly | false |
+| users / displayField | "name" (packages/core/test/fixtures/config-era/config.ts:7) |
 | users / fields | {"name":{"readOnly":false,"sensitive":false,"type":"string","userLink":false},"role":{"readOnly":false,"sensitive":false,"type":"enum","userLink":false,"values":["admin","staff"]}} |
 | users / relations | {} |
 | worker / commandsOnly | false |
+| worker / displayField | "name" (packages/core/test/fixtures/config-era/schema/worker.ts:2) |
 | worker / fields | {"name":{"readOnly":false,"sensitive":false,"type":"text","userLink":false},"user":{"entity":"users","readOnly":true,"sensitive":false,"type":"ref","userLink":true}} |
 | worker / relations | {"user_account":{"entity":"users","field":"user"}} |
 | organizationOwnerRole | "admin" |

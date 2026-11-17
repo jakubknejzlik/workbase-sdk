@@ -5,6 +5,7 @@ import { keepPreviousData, useQueries, useQuery, useQueryClient } from '@tanstac
 import { useLocation, useNavigate } from '@tanstack/react-router'
 import { createDataTableQueryKey, type DataTableState } from '@workbasehq/ui'
 import { searchFromState, stateFromSearch, toQueryDocument, validateListSearch, type ListSearch, type ListState } from './list-model'
+import { restoreSavedView } from './saved-views'
 import { selectedReferenceOptions, selectedReferenceRow } from './use-selected-references'
 import type { Capabilities, Model, ReadQuery, Result } from './read'
 type ListNotice = 'listStateDropped' | 'listCursorRestarted'
@@ -66,7 +67,12 @@ export function useGeneratedList({ model, caps, orgId, entity, request, contextL
     else if (data?.next_cursor) void go(searchFromState(state), [...cursors, data.next_cursor])
   }
   const undo = () => { const target = previous.current; if (target?.scope === scope) { previous.current = undefined; void go(target.search, target.cursors, true) } }
-  return { stale: failure?.code === 'query_too_expensive' && !!data, state, document, result, data, notice, onStateChange, onPage, page: cursors.length, range: lastGood.current?.scope === scope ? { page: lastGood.current.page, limit: lastGood.current.limit } : { page: 0, limit: state.limit }, undo: previous.current?.scope === scope ? undo : undefined }
+  const applySavedView = (search: unknown) => {
+    const restored = restoreSavedView(search, model, entity, caps)
+    previous.current = undefined
+    void go(restored.search, [], false, restored.dropped ? 'listStateDropped' : undefined)
+  }
+  return { applySavedView, stale: failure?.code === 'query_too_expensive' && !!data, state, document, result, data, notice, onStateChange, onPage, page: cursors.length, range: lastGood.current?.scope === scope ? { page: lastGood.current.page, limit: lastGood.current.limit } : { page: 0, limit: state.limit }, undo: previous.current?.scope === scope ? undo : undefined }
 }
 /** Detail and picker labels only. Lists receive their labels in the content response. */
 export function useRelationLabels(model: Model, entity: string, caps: Capabilities, orgId: string, columns: string[], rows: Record<string, any>[], request: (query: ReadQuery) => Promise<Result>) {

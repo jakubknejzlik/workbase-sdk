@@ -7,7 +7,7 @@ async function main() {
   const args = parseArgs(process.argv.slice(2))
   if ('command' in args && args.command === 'init') {
     const { bootstrapInstance } = await import('./bootstrap.ts')
-    console.log(JSON.stringify(await bootstrapInstance(args.root, { id: args.id, target: args.target })))
+    console.log(JSON.stringify(await bootstrapInstance(args.root, { id: args.id, displayName: args.displayName, target: args.target })))
     return
   }
   const { StdioServerTransport } = await import('@modelcontextprotocol/sdk/server/stdio.js')

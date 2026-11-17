@@ -134,11 +134,11 @@ it('W42 accepts a partial display field repair proposal while other legacy entit
   } finally { await application.server.close() }
 })
 
-it.each([CORE_VERSION.replace(/\d+$/, patch => String(Number(patch) + 1)), '0.3.0', '1.0.0', 'broken'])('W42 upgrade baseline still rejects future or malformed SDK metadata: %s', version => {
+it.each([CORE_VERSION.replace(/\d+$/, patch => String(Number(patch) + 1)), '0.3.0', '1.0.0', 'broken'])('W42 upgrade baseline still rejects future or malformed SDK metadata: %s', async version => {
   const config = defineInstance({ id: 'version_gate', revision: 1, roles: ['owner'], entities: {}, permissions: {} })
   const sql = initialSchema(config) + `UPDATE instance_meta SET core_version = '${version}';\n`
-  expect(() => instanceMeta({ config, migrations: [{ name: '0001_initial.sql', sql }], indexes: [], fingerprint: '', guards: {} }))
-    .toThrow(expect.objectContaining({ code: 'revision_mismatch' }))
+  await expect(instanceMeta({ config, migrations: [{ name: '0001_initial.sql', sql }], indexes: [], fingerprint: '', guards: {} }))
+    .rejects.toThrow(expect.objectContaining({ code: 'revision_mismatch' }))
 })
 
 it('W42 imports a legacy config that explicitly uses a ref as displayField and suggests a scalar repair', async () => {
@@ -230,15 +230,15 @@ CREATE INDEX people_name_idx ON people (organization_id, name);\n`
     const upgraded = await application.store.load(instance)
     expect(upgraded.config.entities.people.fields.user).toMatchObject({ type: 'ref', entity: 'users', required: false })
     expect(upgraded.config.entities.people.relations.user_account).toEqual({ field: 'user', entity: 'users' })
-    expect(instanceMeta(upgraded).revision).toBe(2)
+    expect((await instanceMeta(upgraded)).revision).toBe(2)
   } finally { await client.close(); await application.server.close() }
 })
 
-it('metadata-only MCP preview upgrades a 0.1.0 marker through the shared revision writer', () => {
+it('metadata-only MCP preview upgrades a 0.1.0 marker through the shared revision writer', async () => {
   const config = defineInstance({ id: 'version_marker', revision: 3, interactive: false, roles: ['owner'], entities: {} })
   const migrations = [{ name: '0001_initial.sql', sql: initialSchema(config).replace(`'${CORE_VERSION}'`, "'0.1.0'") }]
   const bundle = { config, migrations, indexes: [], fingerprint: '', guards: {} }
-  expect(instanceMeta(bundle)).toMatchObject({ revision: 3, core_version: '0.1.0' })
+  expect(await instanceMeta(bundle)).toMatchObject({ revision: 3, core_version: '0.1.0' })
   const preview = prepare(config, [], [{ kind: 'set_locale', locale: 'cs' }])
   expect(preview.sql).toMatch(/INSERT INTO instance_meta VALUES \(4,/)
   expect(preview.sql).not.toMatch(/\b(?:CREATE|ALTER|DROP|DELETE|UPDATE)\b/i)

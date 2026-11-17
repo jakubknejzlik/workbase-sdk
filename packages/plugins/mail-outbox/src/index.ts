@@ -28,13 +28,12 @@ export class CloudflareEmailSender implements EmailSender {
   }
 }
 const status: MailOutboxPort['status'] = (db, id) => db.prepare('SELECT id,delivery_status,attempts,sent_at,last_error FROM email_outbox WHERE id=?').bind(id).first<MailStatus>()
-const deliver: MailOutboxPort['deliver'] = async (env, config, id, eligible) => {
+const deliver: MailOutboxPort['deliver'] = async (env, config, id, eligible, render) => {
   if (!env.EMAIL) return
   const now = new Date().toISOString()
-  const row = await env.DB.prepare('SELECT sender_name,recipient,subject,delivery_text,delivery_html,expires_at,delivery_status,attempts,lease_until,last_error FROM email_outbox WHERE id=?').bind(id)
-    .first<{ sender_name: string | null; recipient: string; subject: string; delivery_text: string | null; delivery_html: string | null; expires_at: string | null; delivery_status: string; attempts: number; lease_until: string | null; last_error: string | null }>()
-  // Legacy rows lack a caller-rendered payload/expiry. Retain them, never guess a template.
-  if (!row || row.delivery_status === 'sent' || row.last_error === 'email_send_timeout' || row.delivery_text === null || row.delivery_html === null
+  const row = await env.DB.prepare('SELECT body,sender_name,recipient,subject,delivery_text,delivery_html,expires_at,delivery_status,attempts,lease_until,last_error FROM email_outbox WHERE id=?').bind(id)
+    .first<{ body: string; sender_name: string | null; recipient: string; subject: string; delivery_text: string | null; delivery_html: string | null; expires_at: string | null; delivery_status: string; attempts: number; lease_until: string | null; last_error: string | null }>()
+  if (!row || row.delivery_status === 'sent' || row.last_error === 'email_send_timeout' || (!render && (row.delivery_text === null || row.delivery_html === null))
     || !row.expires_at || !Number.isFinite(Date.parse(row.expires_at)) || Date.parse(row.expires_at) <= Date.now()
     || (row.delivery_status === 'sending' && row.lease_until !== null && row.lease_until > now)) return
   if (row.delivery_status === 'sending') {
@@ -62,7 +61,9 @@ const deliver: MailOutboxPort['deliver'] = async (env, config, id, eligible) => 
   let timedOut = false
   try {
     if (!env.EMAIL_FROM) throw new Error('email_sender_missing')
-    await new CloudflareEmailSender(env.EMAIL, deadline).send({ from: row.sender_name ? `${JSON.stringify(row.sender_name)} <${env.EMAIL_FROM}>` : env.EMAIL_FROM, to: row.recipient, subject: row.subject, text: row.delivery_text, html: row.delivery_html })
+    const content = { body: row.body, text: row.delivery_text ?? '', html: row.delivery_html ?? '' }
+    const rendered = render ? await render(content) : content
+    await new CloudflareEmailSender(env.EMAIL, deadline).send({ from: row.sender_name ? `${JSON.stringify(row.sender_name)} <${env.EMAIL_FROM}>` : env.EMAIL_FROM, to: row.recipient, subject: ('subject' in rendered ? rendered.subject : undefined) ?? row.subject, text: rendered.text, html: rendered.html })
   } catch (error) {
     failed = true
     // Native send_email cannot be cancelled. A timeout has an unknown outcome;
@@ -93,7 +94,7 @@ export function mailOutbox(): WorkbasePlugin {
     name: 'mail-outbox', version: '0.1.0', provides: { 'mail-outbox': '1.x' }, mailOutbox: mailPort,
     migrations,
     async checkSchema(db) {
-      await db.prepare('SELECT id,sender_name,recipient,subject,body,delivery_text,delivery_html,expires_at,delivery_status,attempts,sent_at,last_error,lease_until FROM email_outbox INDEXED BY email_outbox_delivery_queue LIMIT 0').all()
+      await db.prepare('SELECT id,sender_name,recipient,subject,body,delivery_text,delivery_html,expires_at,delivery_status,attempts,sent_at,last_error,lease_until,operational_history FROM email_outbox INDEXED BY email_outbox_delivery_queue LIMIT 0').all()
     },
   })
 }

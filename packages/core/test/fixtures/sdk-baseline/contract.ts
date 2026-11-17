@@ -46,11 +46,11 @@ export function baselineContract(database: () => BaselineDatabase) {
   for (const languages of [['en'], []]) {
     const label = JSON.stringify(languages)
     const legacy = () => new KernelRegistry(defineInstance({ id: 'legacy', revision: 1, languages, entities: {} }))
-    it(`legacy languages=${label} keeps main's exact SQL and workbase-core ledger`, async () => {
+    it(`legacy languages=${label} keeps main's exact SQL and appends the evidence migration`, async () => {
       const kernel = legacy()
       // Captured from main 1f88765 for both language lists (and absent languages).
       expect(await sha256(initialSchema(kernel.config))).toBe('e9f01a0c333eeac9ae63a449fac1691bad86f1172403dcf797481ebc3f86e544')
-      expect((await expectedPluginMigrations(kernel.plugins, kernel.config)).map(row => row.namespace)).toEqual(['workbase-core'])
+      expect((await expectedPluginMigrations(kernel.plugins, kernel.config)).map(row => row.namespace)).toEqual(['workbase-core', 'workbase-core'])
     })
     it(`legacy languages=${label} replays a fresh database successfully`, async () => {
       const { db, query } = database(), kernel = legacy()
@@ -78,7 +78,7 @@ export function baselineContract(database: () => BaselineDatabase) {
     expect(files[0].sql).not.toMatch(/CREATE TABLE (?:atomic_assert|organizations|users|instance_meta)|create table "user"/i)
     expect(await migrateInstance(query, files, kernel)).toMatchObject({ applied: 1, total: 1 })
     expect(plan(null, kernel.config).sql).toBe(files[0].sql)
-    expect((await db.prepare('SELECT namespace FROM _plugin_migrations ORDER BY rowid').all()).results.map(row => row.namespace)).toEqual(['workbase-sdk', 'identity', 'members', 'members', 'members', 'members'])
+    expect((await db.prepare('SELECT namespace FROM _plugin_migrations ORDER BY rowid').all()).results.map(row => row.namespace)).toEqual(['workbase-sdk', 'workbase-sdk', 'identity', 'members', 'members', 'members', 'members', 'members'])
     const sdk = calls.findIndex(sql => sql.includes('CREATE TABLE atomic_assert'))
     const plugin = calls.findIndex(sql => sql.includes('ALTER TABLE memberships ADD COLUMN scope_id'))
     const domain = calls.findIndex(sql => sql.includes('CREATE TABLE "worker"'))
@@ -174,7 +174,7 @@ export function baselineContract(database: () => BaselineDatabase) {
     const upgraded = [...original, { name: '002_kept', sql: 'CREATE TABLE sdk_kept (id INTEGER); INSERT INTO sdk_kept VALUES (1);' }, pending]
     const mock = vi.spyOn(sdk, 'sdkMigrations').mockReturnValue(upgraded)
     await expect(migrateInstance(query, files, kernel)).rejects.toThrow()
-    expect((await db.prepare("SELECT name FROM _plugin_migrations WHERE namespace='workbase-sdk' ORDER BY position").all()).results).toEqual([{ name: '001_system' }, { name: '002_kept' }])
+    expect((await db.prepare("SELECT name FROM _plugin_migrations WHERE namespace='workbase-sdk' ORDER BY position").all()).results).toEqual([...original.map(({ name }) => ({ name })), { name: '002_kept' }])
     expect((await db.prepare('SELECT id FROM sdk_kept').all()).results).toEqual([{ id: 1 }])
     expect(await db.prepare("SELECT name FROM sqlite_master WHERE name='sdk_partial'").first()).toBeNull()
     expect(calls.some(sql => /ALTER TABLE memberships ADD COLUMN scope_id|CREATE TABLE "worker"/.test(sql))).toBe(false)
@@ -205,7 +205,7 @@ export function baselineContract(database: () => BaselineDatabase) {
     expect(await db.prepare("SELECT name FROM sqlite_master WHERE name='worker'").first()).toBeNull()
     expect((await db.prepare('SELECT * FROM _migrations').all()).results).toEqual([])
     expect((await db.prepare('SELECT * FROM instance_meta').all()).results).toEqual([])
-    expect(await db.prepare("SELECT count(*) n FROM _plugin_migrations WHERE namespace='members'").first('n')).toBe(4)
+    expect(await db.prepare("SELECT count(*) n FROM _plugin_migrations WHERE namespace='members'").first('n')).toBe(5)
     await expect(migrateInstance(query, files, kernel)).resolves.toMatchObject({ applied: 1 })
   })
 

@@ -45,7 +45,7 @@ function workflow(name: string): { source: string; parsed: Workflow } {
   const source = readFileSync(join(root, `.github/workflows/${name}.yml`), 'utf8')
   return { source, parsed: JSON.parse(execFileSync('bun', ['--no-install', '--eval', 'console.log(JSON.stringify(Bun.YAML.parse(await Bun.stdin.text())))'], { input: source, encoding: 'utf8' })) }
 }
-const ciCommands = ['bun install --frozen-lockfile', 'bun run lint', 'bun run typecheck', 'bun run check:ci-invariants', 'bun run test', 'bun run test:mcp', 'bash scripts/sdk-pack.sh', 'bun scripts/check-sdk-boundary.ts', 'bun scripts/scan-sdk-public.ts']
+const ciCommands = ['bun install --frozen-lockfile', 'bun x --no-install playwright install --with-deps chromium', 'bun run lint', 'bun run typecheck', 'bun run check:ci-invariants', 'bun run test', 'bun run test:mcp', 'bash scripts/sdk-pack.sh', 'bun scripts/check-sdk-boundary.ts', 'bun scripts/scan-sdk-public.ts']
 describe('exported public bootstrap workflow policy', () => {
   it('contains exactly the two public workflows and SDK root documentation', () => {
     expect(readdirSync(join(root, '.github'))).toEqual(['workflows'])
@@ -66,7 +66,7 @@ describe('exported public bootstrap workflow policy', () => {
     expect(Object.keys(parsed.on)).not.toContain('pull_request_target')
     expect(source.replaceAll('${{ secrets.WORKBASE_PRIVATE_TERMS }}', '')).not.toMatch(/secrets\s*[.\[]|self-hosted|CLOUDFLARE_|git clone|instances\/|upload-artifact|download-artifact/)
     for (const job of Object.values(parsed.jobs)) {
-      expect(job['runs-on']).toBe('ubuntu-latest')
+      expect(job['runs-on']).toBe('ubuntu-24.04')
       expect(job.needs).toBeUndefined()
       for (const step of job.steps) {
         if (step.uses) expect(step.uses).toMatch(/^[\w-]+\/[\w-]+@[a-f0-9]{40}$/)
@@ -87,11 +87,12 @@ describe('exported public bootstrap workflow policy', () => {
       expect(job.steps.filter(step => step.run && ciCommands.includes(step.run)).map(step => step.run)).toEqual(ciCommands)
     }
   })
-  it('runs read-only CI for every fork PR and pushes to main, without OIDC', () => {
+  it('runs read-only CI for PRs into main, pushes to main and manual dispatch, without OIDC', () => {
     const { source, parsed } = workflow('ci')
-    expect(Object.keys(parsed.on).sort()).toEqual(['pull_request', 'push'])
+    expect(Object.keys(parsed.on).sort()).toEqual(['pull_request', 'push', 'workflow_dispatch'])
     expect(parsed.on.push).toEqual({ branches: ['main'] })
-    expect(parsed.on.pull_request).toBeNull()
+    expect(parsed.on.pull_request).toEqual({ branches: ['main'] })
+    expect(parsed.on.workflow_dispatch).toBeNull()
     expect(source).not.toContain('id-token')
     expect(Object.keys(parsed.jobs)).toEqual(['check'])
     expect(parsed.jobs.check.if).toBeUndefined()
@@ -149,4 +150,21 @@ describe('exported public bootstrap workflow policy', () => {
   it.skipIf(!existsSync(join(process.cwd(), 'scripts/export-sdk.ts')))('keeps the private SDK release workflow absent', () => {
     expect(existsSync(join(process.cwd(), '.github/workflows/release.yml'))).toBe(false)
   })
+})
+
+it('CI reaches the single UI validator through root invariants', () => {
+  const manifest = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
+  expect(manifest.scripts['check:ci-invariants']).toContain('&& bun run check:ui')
+  expect(manifest.scripts['check:ui']).toBe('bun packages/plugins/console/ui/src/cli.ts')
+  expect(workflow('ci').parsed.jobs.check.steps.some(step => step.run === 'bun run check:ci-invariants')).toBe(true)
+})
+
+it('CI checks the committed worker OpenAPI after the access lock', () => {
+  const manifest = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
+  const invariants = readFileSync(join(root, 'scripts/sdk-ci-invariants.ts'), 'utf8')
+  expect(manifest.scripts['check:openapi']).toBe('bun scripts/check-openapi.ts')
+  expect(manifest.scripts['openapi:write']).toBe('bun scripts/check-openapi.ts --write')
+  expect(invariants.indexOf('await runOpenApiCli(')).toBeGreaterThan(invariants.indexOf('await runAccessCli('))
+  expect(invariants).toContain("'packages/core/test/fixtures/worker-access/config.ts'")
+  expect(JSON.parse(readFileSync(join(root, 'packages/core/package.json'), 'utf8')).exports['./openapi/cli']).toBe('./src/openapi/cli.ts')
 })

@@ -2,6 +2,7 @@ import { env } from 'cloudflare:workers'
 import { beforeEach, expect, it } from 'vitest'
 import { createApp } from '../src/app'
 import { CONSOLE_CSP } from '../src/console'
+import { workerFetch } from '../src/worker-fetch'
 import { setup, runtime } from '@workbasehq/test-support/helpers'
 import sample from './fixtures/sample/config'
 
@@ -19,7 +20,7 @@ it('console serves assets, extensionless SPA routes and exact CSP without swallo
   expect((await app.request('http://localhost/missing.js')).status).toBe(404)
   expect((await app.request('http://localhost/api/not-an-entity')).status).toBe(401)
   expect(paths).not.toContain('/api/not-an-entity')
-  for (const path of ['/api', '/auth/unknown', '/mcp', '/mcp/unknown', '/ops/unknown', '/query/unknown', '/orgs/unknown', '/invitations/unknown', '/audit/unknown', '/workflows/unknown', '/schema/unknown', '/bootstrap/unknown', '/o/123/bootstrap/unknown', '/o/123/capabilities/unknown']) {
+  for (const path of ['/api', '/auth/unknown', '/mcp', '/mcp/unknown', '/ops/unknown', '/query/unknown', '/orgs/unknown', '/invitations/unknown', '/audit/unknown', '/workflows/unknown', '/schema/unknown', '/o/123/capabilities/unknown']) {
     const response = await app.request('http://localhost' + path)
     expect(response.status, path).not.toBe(200)
     expect(response.headers.get('Content-Type'), path).not.toContain('text/html')
@@ -28,7 +29,28 @@ it('console serves assets, extensionless SPA routes and exact CSP without swallo
   for (const method of ['POST', 'OPTIONS']) {
     expect((await app.request('http://localhost/unknown/path', { method })).status).toBe(404)
   }
-  expect(await (await app.request('http://localhost/build.json')).json()).toEqual({ sha: 'a'.repeat(40), builtAt: '2026-10-24T00:00:00.000Z', revision: sample.revision })
+  expect(await (await app.request('http://localhost/build.json')).json()).toEqual({ sha: 'a'.repeat(40), builtAt: '2026-10-24T00:00:00.000Z', revision: sample.revision, openapi: 'unbuilt' })
+})
+
+it('retired metadata routes fall through to the SPA instead of returning JSON projections', async () => {
+  const settings = { ...runtime(), ASSETS: { fetch: async (request: Request) =>
+    new URL(request.url).pathname === '/index.html'
+      ? new Response('<h1>Console</h1>', { headers: { 'Content-Type': 'text/html' } })
+      : new Response('missing', { status: 404 }),
+  } as Fetcher }
+  const app = createApp(sample, settings)
+  const fetch = workerFetch(async () => ({ fetch: request => app.request(request) }))
+  for (const path of ['/bootstrap', '/o/org-a/bootstrap', '/o/org-a/console-registry']) {
+    for (const suffix of ['', '/unknown']) for (const method of ['GET', 'HEAD']) {
+      const request = new Request('http://localhost' + path + suffix, { method })
+      for (const response of [await app.request(request.clone()), await fetch(request, settings)]) {
+        expect(response.status).toBe(200)
+        expect(response.headers.get('Content-Type')).toContain('text/html')
+        expect(response.headers.get('Content-Type')).not.toContain('application/json')
+        if (method === 'GET') expect(await response.text()).toBe('<h1>Console</h1>')
+      }
+    }
+  }
 })
 
 const mutationPaths = ['/api/clients', '/commands/jobs/create', '/workflows/test', '/query', '/orgs', '/orgs/org-a/leave', '/invitations/accept', '/auth/link', '/auth/logout', '/auth/revoke-all']
@@ -100,5 +122,5 @@ it('raw local assets supply build identity without SST environment bindings', as
   } } as Fetcher })
   const response = await app.request('http://localhost/build.json', { headers: { Cookie: 'private=credential' } })
   expect(response.headers.get('Cache-Control')).toBe('no-store')
-  expect(await response.json()).toEqual({ sha: 'b'.repeat(40), builtAt: '2026-10-24T00:00:00.000Z', revision: sample.revision })
+  expect(await response.json()).toEqual({ sha: 'b'.repeat(40), builtAt: '2026-10-24T00:00:00.000Z', revision: sample.revision, openapi: 'unbuilt' })
 })

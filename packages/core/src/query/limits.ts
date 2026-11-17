@@ -5,4 +5,4 @@ export const QUERY_LIMITS = Object.freeze({
   levelRows: 2_000, rows: 5_000, statements: 16, bindings: 100,
   tableReferences: 64, sqlLength: 64_000, inputBytes: 64_000, cursorBytes: 8_000,
 })
-export interface QueryCost { expressionSources?: number; depth: number; relations: number; fieldRows: number; exists: number; nodes: number }
+export interface QueryCost { expressionSources?: number; statements: number; depth: number; relations: number; fieldRows: number; exists: number; nodes: number }

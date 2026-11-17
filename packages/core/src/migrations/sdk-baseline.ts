@@ -1,3 +1,4 @@
+import { operationalEvidenceMigration } from './operational-evidence'
 import type { PluginMigration } from '../kernel/plugin'
 import { systemSchema } from './system-schema'
 import { betterAuthSchema } from './better-auth-schema'
@@ -30,5 +31,5 @@ const baseline = systemSchema
 
 /** Append only: one immutable SQL file and receipt per SDK step, same engine as plugins. */
 export function sdkMigrations(): readonly PluginMigration[] {
-  return [{ name: SDK_BASELINE, sql: baseline }]
+  return [{ name: SDK_BASELINE, sql: baseline }, operationalEvidenceMigration]
 }

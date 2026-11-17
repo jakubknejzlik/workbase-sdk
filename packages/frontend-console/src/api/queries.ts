@@ -1,3 +1,4 @@
+import { buildReload } from '../build-reload'
 import { useQuery, useQueryClient, type QueryClient, type QueryFunctionContext } from '@tanstack/react-query'
 import { refreshRuntimeModel } from './runtime-model'
 import { authDestination } from './auth-destination'
@@ -35,13 +36,11 @@ export const organizationOptions = (orgId: string) => ({
 })
 export const useOrganization = (orgId: string) => useQuery({ ...organizationOptions(orgId), enabled: !!orgId, refetchOnMount: 'always', refetchOnWindowFocus: 'always', refetchInterval: 2_000 })
 export function useBuild() {
-  const client = useQueryClient()
   return useQuery({
     queryKey: ['build'],
     queryFn: async () => {
       const next = await api<Build>('/build.json')
-      const previous = client.getQueryData<Build>(['build'])
-      if (previous && previous.revision !== next.revision) window.location.reload()
+      buildReload.observe(next)
       return next
     },
     refetchInterval: 30_000,
@@ -56,8 +55,7 @@ export async function fetchCapabilities(client: QueryClient, orgId: string) {
   }
   const previous = client.getQueryData<ConsoleCapabilities>(['capabilities', orgId])
   if (previous && previous.revision !== next.revision) {
-    window.sessionStorage.setItem('console-schema-reloaded', '1')
-    window.location.reload()
+    void buildReload.refresh()
   }
   if (previous && JSON.stringify(previous) !== JSON.stringify(next)) await refreshRuntimeModel(client, orgId)
   return next
@@ -78,5 +76,5 @@ export async function removedMembershipDestination(client: QueryClient, orgId: s
   if (!me.user || me.memberships.some(item => item.organization_id === orgId)) return
   client.removeQueries({ queryKey: ['workspace-identity', orgId] })
   client.removeQueries({ queryKey: ['bootstrap'], type: 'inactive' })
-  return authDestination(null, me.memberships)
+  return authDestination(null, me.memberships, undefined, me.organizationsEnabled)
 }

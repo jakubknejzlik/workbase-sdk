@@ -1,3 +1,6 @@
+import { baseFields } from './model-inputs'
+export { baseFields, bodyValidator } from './model-inputs'
+import { recordActionsSchema } from './record-actions-data'
 import { coreEnums, type CoreRole } from './query/enum-values'
 import { z } from 'zod'
 import { calendarViewsSchema, validateCalendarViews } from './calendar-display'
@@ -98,8 +101,10 @@ const schema = z.object({
   displayName: z.string().trim().min(1).optional(),
   id: identifier, revision: z.number().int().positive(),
   entities: z.record(identifier, z.object({
+    renameFrom: identifier.optional(),
     fields: z.record(identifier, fieldSchema),
     relations: z.record(identifier, z.object({ field: identifier, entity: identifier, many: z.boolean().optional(), through: z.strictObject({ entity: identifier, field: identifier, createCommand: z.string().min(1), deleteCommand: z.string().min(1) }).optional() })).default({}),
+    actions: recordActionsSchema.optional(),
     commandsOnly: z.boolean().optional(),
     displayField: serializedExpressionSchema.optional(),
     displayExpression: z.string().optional(),
@@ -122,14 +127,16 @@ const schema = z.object({
 /** Shared schema for source-derived audits and property checks. */
 export const instanceConfigSchema = schema
 export type Field = z.infer<typeof fieldSchema>
-export type InstanceConfig = z.infer<typeof schema> & { effectiveAccess?: import('./access').EffectiveAccessPolicy }
+export type InstanceConfig = z.infer<typeof schema> & { effectiveAccess?: import('./access').EffectiveAccessPolicy; openapi?: Record<string, unknown> }
 export type InstanceInput = z.input<typeof schema>
 export type Operation = 'read' | 'create' | 'update' | 'delete'
-export const baseFields = ['id', 'organization_id', 'created_at', 'updated_at', 'version']
 export const reservedEntities = new Set(['users', 'organizations', 'memberships', 'sessions', 'invitations', 'email_outbox', 'audit_outbox', 'security_log', 'idempotency_keys', 'instance_meta', 'webhook_deliveries', 'audit_events', 'd1_migrations', 'identities', 'access_tokens', 'user', 'session', 'account', 'verification', 'rateLimit', 'identity_link_grants', '_plugin_migrations'])
 type InstanceDefinitionInput = Omit<ShorthandInput, 'roles' | 'entities' | 'permissions' | 'baseline'> & { roles?: string[]; entities?: ShorthandInput['entities']; permissions?: ShorthandInput['permissions'] }
 export function defineInstance(input: InstanceDefinitionInput): InstanceConfig {
-  return normalizeInstance(input)
+  const config = input as InstanceConfig
+  // Replaying or planning a compiled V3 schema must retain its authored roles,
+  // just as the runtime kernel does. Inline instances keep legacy expansion.
+  return normalizeInstance(input, config.baseline === 'workbase-sdk' && !!config.effectiveAccess)
 }
 /** @internal Shared kernel normalization; schema declarations opt into exact authored roles. */
 export function normalizeInstance(input: InstanceDefinitionInput, exactRoles = false, entityError?: (error: unknown, path: (string | number)[]) => never): InstanceConfig {
@@ -166,6 +173,12 @@ export function normalizeInstance(input: InstanceDefinitionInput, exactRoles = f
   const config = validator.parse({ ...data, roles,
     ...(Object.hasOwn(input, 'baseline') ? { baseline: (input as InstanceInput).baseline } : {}),
   }) as InstanceConfig
+  // Generated spec data survives normalization, copies and serialized configs.
+  // Only SDK-era configs carry a bound spec (bindOpenApi requires the baseline); legacy inputs cannot author one.
+  if ('openapi' in input) {
+    if (config.baseline !== 'workbase-sdk') throw new Error('openapi is generated into openapi.json and bound with bindOpenApi; legacy configs cannot carry it')
+    config.openapi = (input as InstanceConfig).openapi
+  }
   // Re-normalizing an executable config retains its already-compiled access policy.
   if ('effectiveAccess' in input) config.effectiveAccess = (input as InstanceConfig).effectiveAccess
   for (const name of Object.keys(config.pluginConfig ?? {})) {
@@ -196,7 +209,7 @@ export function normalizeInstance(input: InstanceDefinitionInput, exactRoles = f
         }
         if (name === 'users' && ['email', 'password_hash', 'salt'].includes(key)) throw new Error(`Account identity field is private: ${key}`)
         if (field.computed) field.readOnly = true
-        if (baseFields.includes(key)) throw new Error(`Reserved field: ${key}`)
+        if (baseFields.includes(key) || config.baseline === 'workbase-sdk' && ['actions', 'access'].includes(key)) throw new Error(`Reserved field: ${key}`)
         path = ['entities', name, 'fields', key, 'min']
         if (field.min !== undefined && !['int', 'float'].includes(field.type)) throw new Error('min requires a numeric field')
         path = ['entities', name, 'fields', key, 'default']
@@ -220,7 +233,9 @@ export function normalizeInstance(input: InstanceDefinitionInput, exactRoles = f
         }
       }
       for (const [relationName, r] of Object.entries(entity.relations)) {
-        path = ['entities', name, 'relations', relationName, 'field']
+        path = ['entities', name, 'relations', relationName]
+        if (config.baseline === 'workbase-sdk' && ['actions', 'access'].includes(relationName)) throw new Error(`Reserved relation: ${relationName}`)
+        path.push('field')
         const target = r.many ? config.entities[r.entity]?.fields[r.field] : entity.fields[r.field]
         if (!target || target.type !== 'ref' || target.entity !== (r.many ? name : r.entity)) throw new Error(`Invalid relation on ${name}`)
         path = ['entities', name, 'relations', relationName, 'through']
@@ -335,26 +350,6 @@ export function inspectInstance(input: Parameters<typeof defineInstance>[0]) {
     if (isDisplayFieldError(error) && error.config) return { config: error.config, errors: error.errors }
     throw error
   }
-}
-export function bodyValidator(entity: InstanceConfig['entities'][string], partial = false) {
-  const shape: Record<string, z.ZodType> = {}
-  for (const [name, f] of Object.entries(entity.fields)) {
-    if (f.readOnly || f.computed) continue
-    let v: z.ZodType
-    switch (f.type) {
-      case 'int': v = z.number().int().min(f.min ?? Number.MIN_SAFE_INTEGER); break
-      case 'float': v = z.number().min(f.min ?? -Number.MAX_VALUE); break
-      case 'bool': v = z.boolean(); break
-      case 'datetime': v = z.iso.datetime(); break
-      case 'enum': v = z.enum(f.values as [string, ...string[]]); break
-      default: v = z.string().min(1).max(f.type === 'text' ? 100000 : 2000)
-    }
-    if (!f.required) v = v.nullable()
-    if (!partial && f.default !== undefined) v = v.default(f.default)
-    else if (partial || !f.required) v = v.optional()
-    shape[name] = v
-  }
-  return z.strictObject(shape)
 }
 export const allowed = (c: InstanceConfig, role: string, entity: string, op: Operation) => Object.hasOwn(c.permissions, role) && Object.hasOwn(c.permissions[role], entity) && c.permissions[role][entity].includes(op)
 

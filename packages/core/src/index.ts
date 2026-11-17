@@ -30,3 +30,5 @@ export { expand } from './config-shorthand'
 
 export { consumeEvents } from './event-delivery'
 export type { AuditOutboxRow } from './kernel/audit-port'
+
+export * from './organization-name'

@@ -1,0 +1,6 @@
+{
+  "entity.worker_one": "{{count}} worker",
+  "entity.worker_other": "{{count}} workers",
+  "field.worker.name": "Name",
+  "field.worker.user": "Application access"
+}

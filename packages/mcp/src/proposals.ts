@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { changeSchema, exactVersion, fail } from './schemas.ts'
+import { changeSchema, compositionChangeSchema, exactVersion, fail } from './schemas.ts'
 import { migrationPreviewSchema, promotedFilesSchema } from './submit-change.ts'
 import { digestBytes, inputHashesSchema, inputPath, resultSchema, sha256Schema } from './sdk-upgrade-protocol.ts'
 import { sdkNames } from './sdk-registry.ts'
@@ -18,6 +18,15 @@ const legacyConfigSchema = z.strictObject({
   promotedRevision: z.number().int().optional(), migration: z.string().optional(),
 })
 const configChangeSchema = legacyConfigSchema.extend({ kind: z.literal('config_change') })
+const compositionProposalSchema = z.strictObject({
+  ...envelope, kind: z.literal('composition_change'),
+  status: z.enum(['proposed', 'validated', 'verified', 'promoted', 'discarded']),
+  changes: z.array(compositionChangeSchema).min(1).max(50),
+  validation: proofSchema.extend({ openapiHash: sha256Schema.nullable() }).optional(),
+  verification: proofSchema.extend({ openapiHash: sha256Schema.nullable() }).optional(),
+  promotedFiles: promotedFilesSchema.optional(), migrationPreview: migrationPreviewSchema.optional(), promotionHash: z.string().optional(),
+  dependencyDigest: z.string().optional(), promotedRevision: z.number().int().optional(),
+})
 const digest = z.string().regex(/^[a-f0-9]{64}$/).refine(value => !/\s/.test(value))
 const packageName = z.enum(['@workbasehq/core', '@workbasehq/plugins', '@workbasehq/mcp'])
 const artifact = z.strictObject({
@@ -60,8 +69,9 @@ const sdkUpgradeSchema = z.strictObject({
   }
   if (result.packages.some(pkg => pkg.version !== proposal.targetVersion)) reject()
   const paths = ['package.json', 'bun.lock', result.stage.marker.path]
-  if (!/^migrations\/[0-9]{4}_sdk_upgrade\.sql$/.test(result.stage.marker.path)
-    || Object.keys(artifacts).length !== 3 || paths.some(path => !artifacts[path])) { reject(); return }
+  const validMarker = /^migrations\/[0-9]{4}_sdk_upgrade\.sql$/.test(result.stage.marker.path)
+    || new RegExp(`^migrations/[0-9]{4}_r${proposal.baseRevision}\\.sql$`).test(result.stage.marker.path)
+  if (!validMarker || Object.keys(artifacts).length !== 3 || paths.some(path => !artifacts[path])) { reject(); return }
   for (const path of paths) {
     const file = artifacts[path]
     if (digestBytes(Buffer.from(file.data, 'base64')) !== file.sha256
@@ -79,7 +89,8 @@ const sdkUpgradeSchema = z.strictObject({
       || Object.entries(expected).some(([path, digest]) => actual[path] !== digest)) reject()
   }
 })
-export const proposalSchema = z.discriminatedUnion('kind', [configChangeSchema, sdkUpgradeSchema])
+export const proposalSchema = z.discriminatedUnion('kind', [configChangeSchema, sdkUpgradeSchema, compositionProposalSchema])
+export type CompositionProposal = z.infer<typeof compositionProposalSchema>
 export type ConfigChangeProposal = z.infer<typeof configChangeSchema>
 export type SdkUpgradeProposal = z.infer<typeof sdkUpgradeSchema>
 export type Proposal = z.infer<typeof proposalSchema>

@@ -1,3 +1,5 @@
+import { validateOrganizationName, organizationNameSchema } from '@workbasehq/core/organization-name'
+import { organizationNameServerReason } from './api/organization-name'
 import { useConsoleRegistry } from './api/console'
 import { NavigationIconView } from './navigation-icons'
 import { Link, Outlet, useMatches } from '@tanstack/react-router'
@@ -5,7 +7,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { SettingsLayout, WorkspaceSettings, Form, FormFieldInput, MutationSubmitButton, MutationErrorAlert, useMutationForm, useMutationSubmit, useMutationSession } from '@workbasehq/ui'
 import { useCapabilities, useOrganization } from './api/queries'
-import { profileClient, validProfileName, settingsError } from './api/profile'
+import { profileClient, settingsError } from './api/profile'
 import { SettingsMutation } from './profile'
 import { Loading, QueryError } from './screens'
 
@@ -61,12 +63,16 @@ function OrganizationForm({ orgId, name, canRename }: { orgId: string; name: str
       // Bootstrap seeds Me when revisiting a scope. Remove its old label snapshot.
       client.removeQueries({ queryKey: ['bootstrap'] }),
     ])
-  }, onError: () => { void client.invalidateQueries({ queryKey: ['capabilities', orgId] }) } })
+  }, onError: error => {
+    const reason = organizationNameServerReason(error)
+    if (reason) form.setError('name', { type: reason, message: t(`organizationName_${reason}`) })
+    void client.invalidateQueries({ queryKey: ['capabilities', orgId] })
+  } })
   const busy = save.isPending || session.pending
-  return <Form form={form} pending={busy} onSubmit={data => canRename && !busy ? submit(() => save.mutateAsync(data.name.trim())) : Promise.resolve()}>
+  return <Form form={form} pending={busy} onSubmit={data => canRename && !busy ? submit(() => save.mutateAsync(organizationNameSchema.parse(data.name))) : Promise.resolve()}>
     <WorkspaceSettings title={t('organizationSettings')} description={t(canRename ? 'organizationSettingsDescription' : 'organizationSettingsReadOnly')}
-      name={<FormFieldInput name="name" label={t('organizationName')} required disabled={!canRename || busy} rules={{ validate: value => validProfileName(String(value)) || t('invalidName') }} />}
-      error={<MutationErrorAlert isError={save.isError} error={save.error} fallbackMessage={t(settingsError(save.error))} />}
+      name={<FormFieldInput name="name" label={t('organizationName')} required disabled={!canRename || busy} rules={{ validate: value => { const result = validateOrganizationName(String(value)); return result.ok || t(`organizationName_${result.reason}`) } }} />}
+      error={<MutationErrorAlert isError={save.isError && !organizationNameServerReason(save.error)} error={save.error} fallbackMessage={t(settingsError(save.error))} />}
       footer={canRename && <MutationSubmitButton footer={false} type="submit" pending={busy} disabled={!form.formState.isDirty}>{t('saveChanges')}</MutationSubmitButton>} />
   </Form>
 }

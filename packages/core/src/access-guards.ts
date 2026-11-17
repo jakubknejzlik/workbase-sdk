@@ -1,3 +1,4 @@
+import { DeclarationError } from './schema/declaration'
 import type { EffectiveAccessPolicy } from './access'
 import type { AtomicOperation } from './execution/types'
 import type { WorkbasePlugin } from './kernel/plugin'
@@ -8,6 +9,13 @@ import { isBuiltinPlugin } from './kernel/builtin-source'
  */
 export function accessGuards(policy: EffectiveAccessPolicy, names: readonly string[], commands: readonly AtomicOperation<any>[], plugins: readonly WorkbasePlugin[]): EffectiveAccessPolicy {
   const registry = new Map(commands.map(command => [command.name, command]))
+  for (const action of policy.actions) {
+    const fail = (message: string): never => { throw new DeclarationError([...action.source.split('.'), 'command'], message) }
+    if (!names.includes(action.command)) fail(`Action command outside config.commands: ${action.command}`)
+    const command = registry.get(action.command)
+    if (!command) fail(`Unknown action command: ${action.command}`)
+    if ('system' in command!.permission) fail(`System-permission action command: ${action.command}`)
+  }
   const canonical = (permission: AtomicOperation['permission']) => 'system' in permission
     ? { system: permission.system } : { entity: permission.entity, operation: permission.operation }
   const key = (permission: AtomicOperation['permission']) => JSON.stringify(canonical(permission))

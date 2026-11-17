@@ -127,6 +127,10 @@ export interface ConsoleModelRelation {
   through?: { entity: string; field: string; createCommand: string; deleteCommand: string }
 }
 export interface ConsoleModelEntity extends Omit<ConsoleEntityDisplay, 'fields'> {
+  /** Structural identity of the protected link, independent of read/manage grants. */
+  accountLink?: { field: string; entity: string }
+  /** Members status endpoint is available under the current read grants. */
+  rowAccess?: boolean
   rowInvitations?: boolean
   fields: Record<string, ConsoleModelField>
   columns: string[]

@@ -2,6 +2,68 @@
 
 ## Unreleased
 
+- Remove the unused bootstrap and standalone console-registry HTTP handlers.
+  Their former paths follow normal SPA handling. The internal registry provider
+  and supported metadata endpoints remain available. (#153)
+
+- Standalone dev/test onboarding can use the development mailbox instead of
+  `EMAIL_FROM`, with mutually exclusive mail inputs and a separate ops MCP server.
+  Open registration establishes identities; `allowCreate: false` reserves org
+  provisioning for ops. The installed-consumer proof reads sign-in/invitation
+  links through the mailbox handler and provisions through the ops route before
+  checking CRUD, roles and isolation. See [onboarding](docs/sdk/onboarding.md). (#43 s4)
+- Add the separate `workbase ops` MCP server for operator-provisioned organizations
+  and optional development mailbox reads using the s2 sidecar. Environment-only
+  credentials, loopback-only HTTP, fixed errors and token redaction keep operator
+  access separate from tenant data tools. See [operator onboarding](docs/sdk/dev-mailbox.md#operator-onboarding-with-mcp). (#43 s3)
+- Add an opt-in development mailbox sidecar Worker for the exact `dev`/`test`
+  stages, with a dedicated secret and bounded, read-only recipient lookup.
+  Production provisioning rejects the option and application bundles exclude the
+  mailbox entry. See [first-owner onboarding](docs/sdk/dev-mailbox.md). (#43 s2)
+- V3 standalone authoring uses literal config/schema/access/UI/locales, then
+  schema planning → access lock → OpenAPI → checks/typecheck → an Instance-owned
+  Vite console and Worker. Init copies authored files without generating artifacts;
+  candidate installs use three coordinated tarballs and identical overrides. See
+  [consumption and local bootstrap](docs/sdk/consumption.md), based on
+  `packages/mcp/templates/standalone/package.json` and `scripts/smoke-template.ts`.
+- The installed-consumer smoke checks frozen tarball installation, deterministic
+  artifacts, builds, migration order/idempotence and repeated init, then real local
+  Worker/D1 sessions through outbox magic links and invites. It exercises cross-org
+  denial, CRUD/restart persistence, omitted/null PATCH, stale-write 409, paging/search,
+  unlink access loss, and four routes at two widths in cs/en. The extra language and
+  nullable field come from an unpacked test fixture, not the shipped template
+  (`scripts/fixtures/installed-consumer/`, `scripts/lib/installed-consumer-live.ts`).
+- Smoke isolation applies to post-install commands in steps 1–7; bootstrap,
+  installation, initial init and npm ci are outside it; the repeated init
+  in step 7 is isolated. Live steps 8–9 use a JS loopback
+  guard, not kernel isolation. The browser origin filter covers routed HTTP only,
+  not WebSockets; native workerd/Chromium networking is outside the JS guard.
+  A detached supervisor owns the live process group and a parent-pipe lifeline,
+  sweeps descendants on completion or pipe closure with TERM then KILL, and must
+  publish its final teardown marker with a successful live result. Timeout or
+  incomplete teardown fails the smoke (`scripts/smoke-template.ts`,
+  `scripts/lib/installed-consumer-network.cjs`,
+  `scripts/lib/installed-consumer-supervisor.cjs`,
+  `scripts/lib/installed-consumer-processes.cjs`,
+  `scripts/lib/installed-consumer-live.ts`).
+- **Supported metadata endpoints:** `/schema`, `/console-info` and console-model
+  routes remain in `packages/core/src/app.ts`; the smoke asserts `/schema` returns
+  200. Its browser checks absence of legacy requests, not unknown-path 404s
+  (`scripts/smoke-template.ts`,
+  `scripts/lib/installed-consumer-live.ts`).
+- Deferred slices and the narrower local substitutes are recorded below. These
+  probes are implemented in `scripts/lib/installed-consumer-live.ts` and
+  `scripts/smoke-template.ts`; remote work remains in the
+  [phase-2 checklist](docs/sdk/phase-2-checklist.md).
+
+  | Slice | Deferred acceptance | Current substitute |
+  | --- | --- | --- |
+  | 5/6 | Config-writer removal | Template `.mcp.json` has data MCP only; no claim that config-writer code was removed. |
+  | 15 | Retired endpoints/archives return 404 | Browser avoids legacy endpoints; consumer has no archive/versions directory. No retirement claim. |
+  | 17 | Seeded roles and automated DB keep/reset | Real local sign-up/invite sessions; manual reset/replay in phase 2. |
+  | 18 | Registry install and prerelease identity | Tarball sha512 integrity and coordinated-version assertions. |
+  | 19 | PR preview deployment and close cleanup | Manual deploy/remove in phase 2. |
+
 - Fresh `defineConfig` Instances apply SDK system/auth/account DDL in the reserved
   `workbase-sdk` namespace of `_plugin_migrations`, then plugins, then domain SQL.
   Verification follows the domain ledger; SDK/plugin failure blocks domain SQL

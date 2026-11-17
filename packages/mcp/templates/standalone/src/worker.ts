@@ -1,5 +1,5 @@
 import { createApp, scheduledRelay, consumeEvents, type AuditOutboxRow, type RuntimeEnv } from '@workbasehq/core'
-import config from '../config'
+import config from '../runtime'
 const apps = new WeakMap<RuntimeEnv, ReturnType<typeof createApp>>()
 function appFor(env: RuntimeEnv) {
   let app = apps.get(env)

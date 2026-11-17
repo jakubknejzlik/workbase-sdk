@@ -1,0 +1,10 @@
+{
+  "entity.worker_one": "{{count}} workers",
+  "entity.worker_other": "{{count}} workers",
+  "field.worker.name": "Name",
+  "field.worker.status": "Status",
+  "field.worker.user": "User",
+  "field.worker.locked": "Locked",
+  "enum.worker.status.active": "Active",
+  "enum.worker.status.off": "Off"
+}

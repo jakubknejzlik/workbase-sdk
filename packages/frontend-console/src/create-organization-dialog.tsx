@@ -4,7 +4,8 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { Button, CreateWorkspaceModal, Form, FormFieldInput, MutationSession, MutationSubmitButton, MutationErrorAlert, useMutationLabels, useMutationSession, useMutationForm, useMutationSubmit } from '@workbasehq/ui'
 import { api, ApiError } from './api/client'
-import { validProfileName } from './api/profile'
+import { validateOrganizationName, organizationNameSchema } from '@workbasehq/core/organization-name'
+import { organizationNameServerReason } from './api/organization-name'
 
 export function CreateOrganizationDialog({ open: controlledOpen, onOpenChange, trigger, onCloseAutoFocus, retainActive = false }: {
   open?: boolean; onOpenChange?: (open: boolean) => void; trigger?: string; onCloseAutoFocus?: (event: Event) => void; retainActive?: boolean
@@ -33,13 +34,16 @@ export function CreateOrganizationForm({ retainActive = false, setup = false, re
     await Promise.all([client.invalidateQueries({ queryKey: ['me'] }), client.invalidateQueries({ queryKey: ['bootstrap'], refetchType: 'none' }), client.invalidateQueries({ queryKey: ['invitation-inbox'] })])
     form.reset(); session.complete()
     if (!retainActive) await navigate({ to: '/o/$orgId', params: { orgId: org.id } })
+  }, onError: error => {
+    const reason = organizationNameServerReason(error)
+    if (reason) form.setError('name', { type: reason, message: t(`organizationName_${reason}`) })
   } })
   const busy = create.isPending || session.pending
   const errorKey = create.error instanceof ApiError && create.error.code === 'account_already_assigned' ? 'accountAlreadyAssigned' : create.error instanceof ApiError && create.error.status === 400 ? 'invalidName' : create.error instanceof ApiError && create.error.status === 403 ? 'forbidden' : 'createFailed'
-  const body = <Form form={form} className="w-full" pending={busy} onSubmit={data => submit(() => create.mutateAsync(data.name.trim()))}>
+  const body = <Form form={form} className="w-full" pending={busy} onSubmit={data => submit(() => create.mutateAsync(organizationNameSchema.parse(data.name)))}>
     <div className={setup ? 'space-y-4' : 'grid gap-4 py-4'}>
-      <FormFieldInput name="name" label={t('organizationName')} placeholder={t('organizationNamePlaceholder')} required autoFocus disabled={busy} rules={{ validate: value => validProfileName(String(value)) || t('invalidName') }} />
-      <MutationErrorAlert isError={create.isError} error={create.error} fallbackMessage={t(errorKey)} />
+      <FormFieldInput name="name" label={t('organizationName')} placeholder={t('organizationNamePlaceholder')} required autoFocus disabled={busy} rules={{ validate: value => { const result = validateOrganizationName(String(value)); return result.ok || t(`organizationName_${result.reason}`) } }} />
+      <MutationErrorAlert isError={create.isError && !organizationNameServerReason(create.error)} error={create.error} fallbackMessage={t(errorKey)} />
       {setup && <MutationSubmitButton footer={false} pending={busy} type="submit" className="w-full">{t('p2CompleteSetup')}</MutationSubmitButton>}
     </div>
     {!setup && <MutationSubmitButton pending={busy} type="submit">{t('create')}</MutationSubmitButton>}

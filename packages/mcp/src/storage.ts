@@ -1,7 +1,12 @@
+import { isLiteralConfig, loadConfig } from '@workbasehq/core/schema/load'
+import { assertInitialized } from './initialization.ts'
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { acquireInstanceLock } from './instance-lock.ts'
 import { devFixtures } from './dev-support.ts'
 import { noLink } from './paths.ts'
+import { replaySources } from './replay-sources.ts'
+import { parseRuntimeSource } from './composition/runtime-source.ts'
+import { hydrateRuntimePlugins } from './composition/registry.ts'
 import { constants } from 'node:fs'
 import { open, lstat, mkdir, readFile, readdir, realpath, rename, rm, writeFile, link, unlink } from 'node:fs/promises'
 import { resolve, join, dirname } from 'node:path'
@@ -14,7 +19,7 @@ import { hash } from './planning.ts'
 import { WorkflowError, fail, identifier, instanceSelector, type Index } from './schemas.ts'
 
 export type Migration = { name: string; sql: string }
-export type Bundle = { config: InstanceConfig; migrations: Migration[]; indexes: Index[]; fingerprint: string; dependencyDigest?: string; guards: Record<string, string | null> }
+export type Bundle = { config: InstanceConfig; runtime?: InstanceConfig; runtimeSource?: string; migrations: Migration[]; indexes: Index[]; fingerprint: string; dependencyDigest?: string; sdkVersion?: string; guards: Record<string, string | null> }
 export const json = (value: unknown) => JSON.stringify(value, null, 2) + '\n'
 export const configSource = (config: InstanceConfig, options: { history?: boolean } = {}) => {
   const { plugins, ...data } = serializableInstanceConfig(config)
@@ -75,8 +80,8 @@ export async function durableAtomic(path: string, data: string) {
   await syncDirectory(dirname(path))
 }
 const require = createRequire(import.meta.url)
-async function importConfig(path: string, sourceHash: string) {
-  if (process.versions.bun) {
+async function importConfig(path: string, sourceHash: string, replayPaths: string[] = [], invalidate = true) {
+  if (process.versions.bun && invalidate) {
     // Reload sibling version sources and history JSON as well as the entrypoint.
     // Keep SDK/plugin modules cached so canonical plugin provenance is preserved.
     for (const name of (await readdir(dirname(path))).filter(n => /^config(?:\.[a-z0-9_-]+)?\.(ts|json)$/.test(n))) {
@@ -84,6 +89,7 @@ async function importConfig(path: string, sourceHash: string) {
       await noLink(source)
       delete require.cache[source]
     }
+    for (const name of replayPaths) delete require.cache[join(dirname(path), name)]
   }
   const url = `${pathToFileURL(path).href}?mcp=${sourceHash}`
   // SDK consumers run Bun natively; tsx is only a Node/monorepo convenience.
@@ -132,7 +138,7 @@ async function dependencyHash(path: string) {
   const bytes = await fileBytes(path)
   return bytes === null ? null : byteHash(bytes)
 }
-const transactionPath = z.string().regex(/^(package\.json|bun\.lock|config(?:\.v[1-9][0-9]*)?\.ts|config\.(?:indexes|versions)\.json|migrations\/\d{4}_[a-z0-9_]+\.sql|proposals\/[a-f0-9-]+\.json)$/)
+const transactionPath = z.string().regex(/^(runtime\.ts|access\.ts|schema\.lock\.json|schema\/[a-z][a-z0-9_]{0,62}\.ts|openapi\.json|access\.lock\.(?:json|md)|package\.json|bun\.lock|config(?:\.v[1-9][0-9]*)?\.ts|config\.(?:indexes|versions)\.json|migrations\/\d{4}_[a-z0-9_]+\.sql|proposals\/[a-f0-9-]+\.json)$/)
 const digest = z.string().regex(/^[a-f0-9]{64}$/)
 const base64 = z.string().refine(value => Buffer.from(value, 'base64').toString('base64') === value)
 const identityPart = z.union([z.string().regex(/^(0|[1-9][0-9]*)$/), z.number().int().nonnegative().transform(String)])
@@ -338,14 +344,15 @@ export class Store {
       return await this.lockContext.run(held, fn)
     } finally { held.active = false; await release() }
   }
-  private configCache = new Map<string, { sourceHash: string; config: InstanceConfig }>()
+  private configCache = new Map<string, { sourceHash: string; config: InstanceConfig; runtimeHash?: string; runtime?: InstanceConfig; paths?: Record<string, Buffer> }>()
   private instanceDirectories = new Map<string, string>()
   private standalone = false
   public allowed: Set<string>
   constructor(public root: string, private requestedAllowed?: Set<string>) {
     this.allowed = requestedAllowed ?? new Set(devFixtures?.allowed ?? [])
   }
-  async init(allowEmpty = false) {
+  async init(allowEmpty = false, readOnly = false) {
+    this.configCache.clear()
     this.allowed = this.requestedAllowed ?? new Set(devFixtures?.allowed ?? [])
     this.standalone = false
     this.instanceDirectories.clear()
@@ -365,15 +372,23 @@ export class Store {
     this.root = await realpath(selectedRoot)
     if (exists || pending) {
       this.standalone = true
-      await mkdir(join(this.root, 'proposals'), { recursive: true, mode: 0o700 })
-      await this.withLock(this.root, async () => {
+      if (readOnly && pending) fail('instance_busy', 'Pending publication requires recovery before preview; restart the server', 409)
+      if (!readOnly) await mkdir(join(this.root, 'proposals'), { recursive: true, mode: 0o700 })
+      const discover = async () => {
         const configPath = join(this.root, 'config.ts')
-        const config = await importConfig(configPath, hash(await readFile(configPath, 'utf8')))
+        const literal = isLiteralConfig(configPath)
+        if (readOnly && !literal) fail('initialization_unsupported', 'initialize_instance supports fresh literal V3 declarations only', 422)
+        if (literal) await replaySources(this.root, { accessLock: true })
+        const config = literal
+          ? (await loadConfig(configPath, { bindExistingLock: false })).config
+          : await importConfig(configPath, hash(await readFile(configPath, 'utf8')))
         // Core IDs use SQL identifiers (underscores); MCP instance selectors use hyphens.
         const instance = instanceSelector(config.id)
         if (this.requestedAllowed && (this.requestedAllowed.size !== 1 || !this.requestedAllowed.has(instance))) fail('invalid_allowlist', 'Standalone allowlist must contain only the config id')
         this.allowed = new Set([instance])
-      })
+      }
+      if (readOnly) await discover()
+      else await this.withLock(this.root, discover)
     }
     if (!exists && !pending && allowEmpty && !this.requestedAllowed) {
       const names = await readdir(this.root)
@@ -384,7 +399,7 @@ export class Store {
     }
     for (const instance of this.allowed) {
       if (!/^[a-z][a-z0-9-]*$/.test(instance)) fail('invalid_allowlist', 'Invalid server allowlist')
-      if (this.standalone) await this.directory(instance)
+      if (this.standalone || readOnly) await this.directory(instance, readOnly)
       else await this.locked(instance, async () => { await this.directory(instance) })
     }
   }
@@ -395,7 +410,7 @@ export class Store {
     try { return (await lstat(journal)).isFile() }
     catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false; throw error }
   }
-  async directory(instance: string) {
+  async directory(instance: string, readOnly = false) {
     if (!this.allowed.has(instance)) fail('instance_not_allowed', 'Instance is not in the server allowlist', 403)
     await noLink(this.root)
     const directories: string[] = this.standalone ? [this.root] : []
@@ -420,7 +435,7 @@ export class Store {
     if (!config?.isFile() && !(config === null && await this.hasJournal(dir))) fail('invalid_instance_directory', 'Expected one configuration directory for the allowed instance')
     await noLink(join(dir, 'migrations'))
     await noLink(join(dir, 'proposals'), true)
-    await mkdir(join(dir, 'proposals'), { recursive: true, mode: 0o700 })
+    if (!readOnly) await mkdir(join(dir, 'proposals'), { recursive: true, mode: 0o700 })
     this.instanceDirectories.set(instance, dir)
     return dir
   }
@@ -443,20 +458,41 @@ export class Store {
     if (!this.owns(dir)) return this.withLock(dir, () => this.dependencyDigest(instance))
     return this.standalone ? (await dependencySnapshot(await this.directory(instance))).digest : undefined
   }
-  async load(instance: string): Promise<Bundle> {
+  async load(instance: string, options: { canonicalRuntime?: boolean } = {}): Promise<Bundle> {
     const dir = await this.directory(instance)
-    if (!this.owns(dir)) return this.withLock(dir, () => this.load(instance))
+    if (!this.owns(dir)) return this.withLock(dir, () => this.load(instance, options))
+    await assertInitialized(dir, instance)
     const dependencies = this.standalone ? await dependencySnapshot(dir) : undefined
     const names = (await readdir(dir)).filter(n => /^config(?:\.[a-z0-9_-]+)?\.(ts|json)$/.test(n)).sort()
     const sources: Record<string, string> = {}
     for (const name of names) { await noLink(join(dir, name)); sources[name] = await readFile(join(dir, name), 'utf8') }
+    // Hash the complete tracked graph before evaluating either entrypoint.
+    const inputs = await replaySources(dir, { accessLock: true })
+    const runtimeSource = inputs['runtime.ts']?.toString('utf8')
+    if (options.canonicalRuntime && runtimeSource === undefined) fail('runtime_not_canonical', 'runtime.ts is required for composition changes')
+    // Interpret before any runtime import; custom expressions must never execute
+    // merely because a caller tried to compose built-ins.
+    const model = options.canonicalRuntime ? parseRuntimeSource(runtimeSource!) : undefined
     const sourceHash = hash(sources)
     const cached = this.configCache.get(instance)
-    // Reload tracked version sources when their content changes, including transitive config imports.
-    const config = cached?.sourceHash === sourceHash ? cached.config
-      : await importConfig(join(dir, 'config.ts'), sourceHash)
-    this.configCache.set(instance, { sourceHash, config })
-    const migrationNames = (await readdir(join(dir, 'migrations'))).sort()
+    const graph = { ...sources, ...Object.fromEntries(Object.entries(inputs).map(([path, bytes]) => [path, bytes.toString('utf8')])) }
+    const runtimeHash = hash(graph)
+    const fresh = cached?.runtimeHash !== runtimeHash
+    const paths = [...new Set([...Object.keys(inputs), ...Object.keys(cached?.paths ?? {})])]
+    const config = fresh ? await importConfig(join(dir, 'config.ts'), runtimeHash, paths) : cached.config
+    let runtime: InstanceConfig | undefined
+    if (config.baseline === 'workbase-sdk') {
+      Object.assign(sources, graph)
+      if (inputs['runtime.ts']) {
+        // The config import already invalidated the graph. Preserve that same
+        // graph when loading runtime, including its import of config.ts.
+        runtime = model ? { ...config, ...(model.interactive === undefined ? {} : { interactive: model.interactive }), plugins: hydrateRuntimePlugins(model, config) }
+          : fresh ? await importConfig(join(dir, 'runtime.ts'), runtimeHash, paths, false) : cached.runtime
+        if (runtime?.id !== config.id || runtime.revision !== config.revision) fail('revision_mismatch', 'runtime.ts and config.ts disagree', 409)
+      }
+    }
+    if (!options.canonicalRuntime) this.configCache.set(instance, { sourceHash, config, runtimeHash, runtime, paths: inputs })
+    const migrationNames = (await readdir(join(dir, 'migrations'))).filter(name => name !== '.gitkeep').sort()
     if (migrationNames.some(n => !/^\d{4}_[a-z0-9_]+\.sql$/.test(n))) fail('invalid_migrations', 'Unexpected migration filename')
     const migrations: Migration[] = []
     for (const name of migrationNames) { await noLink(join(dir, 'migrations', name)); migrations.push({ name, sql: await readFile(join(dir, 'migrations', name), 'utf8') }) }
@@ -466,7 +502,9 @@ export class Store {
       ...Object.entries(sources).map(([name, source]) => [name, hash(source)]),
       ...migrations.map(m => [`migrations/${m.name}`, hash(m.sql)]),
     ])
-    return { config, indexes, migrations, ...(dependencies ? { dependencyDigest: dependencies.digest } : {}),
+    const sdkVersion = dependencies?.guards['package.json'] && config.baseline === 'workbase-sdk'
+      ? JSON.parse(await readFile(join(dir, 'package.json'), 'utf8')).dependencies?.['@workbasehq/core'] : undefined
+    return { config, ...(runtime ? { runtime } : {}), ...(options.canonicalRuntime ? { runtimeSource } : {}), indexes, migrations, ...(typeof sdkVersion === 'string' ? { sdkVersion } : {}), ...(dependencies ? { dependencyDigest: dependencies.digest } : {}),
       fingerprint: hash({ sources, config, migrations, indexes, ...(dependencies ? { dependencyDigest: dependencies.digest } : {}) }), guards }
   }
   async find(id: string) {
@@ -830,8 +868,11 @@ export class Store {
     const check = async (temporary?: string, publishing?: string) => {
       const paths = new Set([
         ...Object.keys(expected),
+        // Composition publication must also reject newly added authored graph
+        // inputs, as well as edits/deletions of the originally guarded paths.
+        ...(Object.hasOwn(guards, 'runtime.ts') ? Object.keys(await replaySources(dir, { accessLock: true })) : []),
         ...(await readdir(dir)).filter(n => /^config(?:\.[a-z0-9_-]+)?\.(ts|json)$/.test(n)),
-        ...(await readdir(join(dir, 'migrations'))).map(n => `migrations/${n}`),
+        ...(await readdir(join(dir, 'migrations'))).filter(n => n !== '.gitkeep').map(n => `migrations/${n}`),
       ])
       // Read the destination last, immediately before capturing it for publication.
       if (publishing) { paths.delete(publishing); paths.add(publishing) }

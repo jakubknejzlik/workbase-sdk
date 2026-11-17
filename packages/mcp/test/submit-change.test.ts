@@ -5,6 +5,8 @@ import { createHash } from 'node:crypto'
 import { cp, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+import { KernelRegistry } from '@workbasehq/core/kernel/registry'
+import { generate } from '../../core/src/openapi/generate.ts'
 import { json, Store } from '../src/storage.ts'
 import { Workflow } from '../src/workflow.ts'
 import { RestGitHub, notConfigured, type TreeEntry, type CheckRun } from '../src/github.ts'
@@ -410,3 +412,46 @@ it.each(['promote', 'submit_change'])('rejects SDK %s before config execution; s
     expect(configure).toHaveBeenCalled(); expect(credential).toHaveBeenCalled(); expect(calls.length).toBeGreaterThan(0)
   }
 })
+
+async function compositionSubmission() {
+  const p = await proposal()
+  p.kind = 'composition_change'
+  // This versioned fixture uses executable configs; use the CLI's generator directly.
+  const bundle = await store.load('sample'), kernel = new KernelRegistry(bundle.config)
+  const configHash = createHash('sha256').update(await readFile(join(dir(), 'config.ts'))).digest('hex')
+  const openapi = generate(kernel.config, kernel, configHash)
+  await writeFile(join(dir(), 'openapi.json'), openapi)
+  const openapiHash = createHash('sha256').update(openapi).digest('hex')
+  p.validation.openapiHash = openapiHash
+  p.verification.openapiHash = openapiHash
+  p.changes = [{ kind: 'set_plugin', plugin: 'organizations', options: { allowCreate: true } }, { kind: 'set_interactive', interactive: true }]
+  p.promotedRevision = p.baseRevision
+  delete p.migration
+  p.promotedFiles = [{ path: 'runtime.ts', data: 'export default {}\n' }, { path: 'access.lock.json', data: '{}\n' }, { path: 'access.lock.md', data: '# Access lock\n' }]
+  p.migrationPreview = { sql: '', configDiff: { plugins: ['organizations'], interactive: true }, revision: p.baseRevision }
+  p.promotionHash = promotionHash(p)
+  for (const file of p.promotedFiles) await writeFile(join(dir(), file.path), file.data)
+  await writeFile(proposalPath(), JSON.stringify(p))
+  return p
+}
+it('submits composition snapshots through the same guarded GitHub path and retries idempotently', async () => {
+  const p = await compositionSubmission()
+  const first = await submit()
+  expect(first).toMatchObject({ ok: true, prNumber: 17 })
+  const tree = trees.get(commits.get(String(first.headSha)).tree.sha)!
+  expect(tree.filter(e => e.path !== 'README.md').map(e => e.path).sort()).toEqual(p.promotedFiles.map((f: any) => `config/sample/${f.path}`).sort())
+  const body = bodies.find(b => b.title)!.body
+  expect(body).toContain('organizations')
+  expect(body).toContain('interactive')
+  expect(body).not.toContain('Migrace undefined')
+  expect(await submit()).toEqual(first)
+  expect(prs).toHaveLength(1)
+})
+it.each(['config.ts', 'schema.lock.json', 'migrations/0001_r1.sql', 'access.ts'])(
+  'rejects composition snapshot containing %s before GitHub access', async path => {
+    await compositionSubmission()
+    await changeProposal(p => { p.promotedFiles.push({ path, data: '' }); p.promotionHash = promotionHash(p) })
+    expect(await submit()).toMatchObject({ ok: false, error: { code: 'file_not_allowed' } })
+    expect(calls).toEqual([])
+  },
+)

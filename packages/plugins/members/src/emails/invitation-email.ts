@@ -1,3 +1,5 @@
+import type { VerifiedInvitationAcceptUrl } from '../invitation-url'
+
 export interface InvitationEmailInput {
   /** A reminder is an explicit manual resend, never a scheduled notification. */
   kind: 'invite' | 'reminder'
@@ -9,7 +11,7 @@ export interface InvitationEmailInput {
   expiresAt: Date
   /** Instance IANA timezone, e.g. Europe/Prague. Never uses the host timezone. */
   timeZone: string
-  acceptUrl: string
+  acceptUrl: VerifiedInvitationAcceptUrl
   /** Trusted instance configuration, supplied independently of acceptUrl. */
   configuredOrigin: string
   /** The instance supplies the invitation language. */
@@ -52,7 +54,7 @@ function httpsUrl(value: string, allowLocalHttp = false): URL {
 /**
  * Pure Members-owned renderer: no transport, storage, clock or configuration reads.
  * The caller resolves authorized display metadata and the seven-day expiry first.
- * The exact acceptance URL is preserved in both bodies after origin validation.
+ * The exact acceptance URL is preserved in both bodies after origin validation. The only link input is an already-verified value.
  */
 export function renderInvitationEmail(input: InvitationEmailInput): RenderedInvitationEmail {
   const language = input.language ?? 'en'

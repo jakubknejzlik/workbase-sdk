@@ -173,7 +173,7 @@ it('authored system grants admit custom-role audit readers and explicit denial b
       roles: { owner: { system: Object.fromEntries(accessSystemActions.map(action => [action, 'allow'])) } },
     }),
   })
-  expect([...effectiveRolePrivileges(owner, 'owner')]).toEqual([])
+  expect([...effectiveRolePrivileges(owner, 'owner')]).toEqual(['system:invitations.accept'])
 })
 
 it('normalizes registered command guards and enforces their additional permissions from the audit input', async () => {
@@ -324,7 +324,7 @@ it('narrow credential cannot inherit principal sensitive field grant', async () 
   expect(response.status).toBe(404)
   const own = await call('/api/worker/worker-admin')
   expect(own.status).toBe(200)
-  expect(await own.json()).toEqual({ id: 'worker-admin', name: 'admin' })
+  expect(await own.json()).toEqual({ id: 'worker-admin', name: 'admin', actions: {} })
 })
 
 it.each([['admin', 'staff', 'none'], ['staff', 'admin', 'none'], ['admin', 'staff', 'deny'], ['staff', 'admin', 'deny']] as const)(

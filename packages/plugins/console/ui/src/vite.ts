@@ -1,5 +1,7 @@
+import { execFileSync } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
-import { statSync } from 'node:fs'
+import { statSync, existsSync, readFileSync } from 'node:fs'
+import { mergeCatalogs, type Catalogs } from './catalogs'
 import { writeFile, mkdir, rm, rename, symlink, readlink } from 'node:fs/promises'
 import { dirname, relative, resolve, isAbsolute } from 'node:path'
 import { fileURLToPath, URL } from 'node:url'
@@ -7,6 +9,7 @@ import { createServer, transformWithEsbuild, type Plugin, type ViteDevServer } f
 import { init, parse } from 'es-module-lexer'
 import { Generator, getConfig } from '@tanstack/router-generator'
 import { loadConfig, SourceError } from '@workbasehq/core/schema/load'
+import { CONSOLE_SHA_MARKER, consoleArtifactsSHA, readConsoleArtifacts } from '@workbasehq/core/console-build'
 import { canonicalJSON, normalise, manifestHash, type Manifest } from './check'
 import { checkSources, type Sources } from './sources'
 
@@ -23,6 +26,7 @@ function componentStubs(sources: Sources): Plugin {
   return {
     name: 'workbase-ui-extraction-stubs', enforce: 'pre',
     async resolveId(id, importer) {
+      if (id === '@workbasehq/plugins/console/ui/react' && importer && sources.modules.has(clean(importer))) return '\0workbase-ui-access-card'
       if (id.startsWith(prefix)) { requireChecked(id.slice(prefix.length)); return id }
       const fromUI = importer && sources.modules.has(clean(importer))
       const result = await this.resolve(id, importer, { skipSelf: true })
@@ -36,6 +40,7 @@ function componentStubs(sources: Sources): Plugin {
       if (!result && (fromUI || requested.startsWith(ui))) throw new Error(`Module not in the checked UI graph: ${id}`)
     },
     async load(id) {
+      if (id === '\0workbase-ui-access-card') return 'export const AccessCard = () => null;'
       // Evaluate the exact text whose complete graph passed checkSources.
       if (!id.startsWith(prefix)) {
         const file = clean(id)
@@ -58,7 +63,7 @@ export async function extractManifest(root: string): Promise<Manifest> {
   const server = await createServer({
     root, configFile: false, logLevel: 'silent', appType: 'custom',
     plugins: [componentStubs(sources)],
-    resolve: { alias: { '@workbasehq/plugins/console/ui': fileURLToPath(new URL('./index.ts', import.meta.url)) } },
+    resolve: { alias: [{ find: /^@workbasehq\/plugins\/console\/ui$/, replacement: fileURLToPath(new URL('./index.ts', import.meta.url)) }] },
     server: { middlewareMode: true, watch: null, ws: false },
     ssr: { noExternal: ['@workbasehq/plugins'] },
   })
@@ -101,6 +106,15 @@ async function stage(root: string, output: string): Promise<{ result: Generation
   try {
     const manifest = await extractManifest(root)
     const paths = await generateRoutes(root, temp, manifest)
+    const loaded = await loadConfig(resolve(root, 'config.ts')), catalogs: Catalogs = {}
+    for (const lang of loaded.config.languages ?? []) {
+      catalogs[lang] = {}
+      for (const ns of ['domain', 'ui', 'sdk']) {
+        const file = resolve(root, 'locales', lang, ns + '.json')
+        if (existsSync(file)) catalogs[lang][ns] = JSON.parse(readFileSync(file, 'utf8'))
+      }
+    }
+    await writeFile(resolve(temp, 'locales.json'), canonicalJSON(mergeCatalogs(loaded.config.languages ?? ['en'], catalogs)) + '\n')
     await writeFile(resolve(temp, 'manifest.json'), canonicalJSON(manifest) + '\n')
     const result = { manifest, manifestHash: manifestHash(manifest), paths }
     await writeFile(resolve(temp, 'generation.json'), canonicalJSON({ manifestHash: result.manifestHash, paths }) + '\n')
@@ -118,13 +132,47 @@ async function stage(root: string, output: string): Promise<{ result: Generation
     } }
   } catch (error) { await discard(); throw error }
 }
+/** Resolve from the consumer repository, never the SDK package location. */
+export function resolveBuildSHA(root: string): string {
+  let sha = process.env.WORKBASE_BUILD_SHA ?? process.env.GITHUB_SHA
+  if (sha === undefined) {
+    try { sha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim() }
+    catch { throw new Error('Build SHA must be 40 hex characters; provide WORKBASE_BUILD_SHA or build in a git repository') }
+  }
+  if (!/^[a-f0-9]{40}$/i.test(sha)) throw new Error('Build SHA must be 40 hex characters')
+  return sha.toLowerCase()
+}
+/** Invoke before building/deploying an Instance so layout edits cannot reuse HEAD. */
+export function assertCleanDeploy(root: string): void {
+  const dirty = execFileSync('git', ['status', '--porcelain', '--untracked-files=normal'], { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
+  if (dirty.trim()) throw new Error('Deployment requires a clean git worktree, including untracked files')
+}
 export interface UIOptions { directory?: string }
 export type UIPlugin = Plugin & { idle(): Promise<void>; generation?: Generation; error?: Error }
 export function consoleUI(options: UIOptions = {}): UIPlugin {
+  const marker = CONSOLE_SHA_MARKER
+  let production = false
   let root: string, output: string, server: ViteDevServer | undefined
   let requested = 0, completed = 0, running: Promise<void> | undefined, closed = false
   const plugin: UIPlugin = {
     name: 'workbase-console-ui', enforce: 'pre',
+    config(_config, environment) {
+      production = environment.command === 'build'
+      return { define: { __WORKBASE_BUILD_SHA__: JSON.stringify('unbuilt') } }
+    },
+    writeBundle: { order: 'post', sequential: true, async handler(options) {
+      if (!production) return
+      // Vite copies public/ outside Rollup's bundle. Hash the actual upload tree.
+      // Never mutate hashed JS/CSS after Rollup assigns their cacheable filenames.
+      const directory = resolve(root, options.dir!)
+      const files = await readConsoleArtifacts(directory), sha = consoleArtifactsSHA(files)
+      for (const [name, bytes] of files) {
+        if (name.endsWith('.html') && bytes.includes(marker)) {
+          await writeFile(resolve(directory, name), Buffer.from(bytes.toString('latin1').replaceAll(marker, sha), 'latin1'))
+        }
+      }
+      await writeFile(resolve(directory, 'build-meta.json'), JSON.stringify({ sha, builtAt: new Date().toISOString() }) + '\n')
+    } },
     // Keep generated IDs at the stable pointer. Vite's module graph otherwise
     // retains realpaths into deleted generations even after invalidateAll().
     resolveId(id, importer) {
@@ -139,6 +187,10 @@ export function consoleUI(options: UIOptions = {}): UIPlugin {
         try { if (statSync(file).isFile()) return file + query } catch { /* Let Vite report a missing generated import. */ }
       }
     },
+    transformIndexHtml() { return [
+      { tag: 'meta', attrs: { name: 'referrer', content: 'no-referrer' }, injectTo: 'head-prepend' as const },
+      ...(production ? [{ tag: 'meta', attrs: { name: 'workbase-build-sha', content: marker }, injectTo: 'head-prepend' as const }] : []),
+    ] },
     configResolved(config) { root = config.root; output = resolve(root, options.directory ?? '.workbase-ui') },
     async buildStart() { if (!requested) request(); await plugin.idle(); if (plugin.error && !server) throw plugin.error },
     configureServer(value) {

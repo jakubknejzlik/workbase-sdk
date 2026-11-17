@@ -131,19 +131,18 @@ it('pending uniqueness is per scope and acceptance releases its slot without ret
   await request(app, '/orgs/org-a/members/owner-b', 'DELETE')
   expect((await invite('owner.b@example.test')).status).toBe(201)
 })
-it('Copy Link makes the earlier mail ineligible and its raw token unusable', async () => {
+it('Copy Link rotates only the copy selector and retains the queued mail association', async () => {
   const send = vi.fn().mockResolvedValue(undefined)
   const created = await json(await invite())
   const before = await env.DB.prepare('SELECT token_hash,delivery_outbox_id FROM invitations WHERE id=?').bind(created.id).first<{ token_hash: string; delivery_outbox_id: string }>()
   expect((await request(app, path(created.id, 'copy-link'), 'POST')).status).toBe(200)
   const stale = await request(app, '/invitations/accept', 'POST', { token: new URL(created.accept_url).searchParams.get('token') }, 'owner-b')
   expect(stale.status).toBe(404)
-  const kernel = new KernelRegistry(sample)
-  const { invitationDeliveryEligible } = await import('../src/mail')
-  await kernel.mailOutbox.retry({ ...runtime(), EMAIL: { send }, EMAIL_FROM: 'noreply@example.test' }, kernel.config, before!.delivery_outbox_id,
-    () => invitationDeliveryEligible(env.DB, created.id, 'org-a', before!.delivery_outbox_id, before!.token_hash))
-  expect(send).not.toHaveBeenCalled()
-  expect(await json(await request(app, path(created.id, 'delivery')))).toMatchObject({ delivery: { status: 'not_requested', attempts: 0 } })
+  const settings = { ...runtime(), EMAIL: { send }, EMAIL_FROM: 'noreply@example.test' }
+  const deliveringApp = createApp(sample, settings)
+  expect(await json(await request(deliveringApp, path(created.id, 'retry-delivery'), 'POST', {}))).toMatchObject({ delivery: { status: 'delivered', attempts: 1 } })
+  expect(send).toHaveBeenCalledTimes(1)
+  expect(await json(await request(deliveringApp, path(created.id, 'delivery')))).toMatchObject({ delivery: { status: 'delivered', attempts: 1 } })
 })
 
 it('deploy schema checks reject a weakened pending index and a missing expiry trigger', async () => {
@@ -207,7 +206,7 @@ it('combined members prefer profile names over legacy names without exposing pro
   expect(body.data).toContainEqual(expect.objectContaining({ user_id: 'owner-a', email: 'owner.a@example.test', display_name: 'Anna Správcová' }))
   expect(JSON.stringify(body)).not.toMatch(/firstName|lastName|first_name|last_name|synced|source_provider/)
   const plain = await json(await request(app, '/orgs/org-a/members'))
-  expect(plain.data).toContainEqual({ user_id: 'owner-a', email: 'owner.a@example.test', role: 'owner' })
+  expect(plain.data).toContainEqual({ user_id: 'owner-a', email: 'owner.a@example.test', role: 'owner', display_name: 'Anna Správcová' })
 })
 
 it('combined members use external profile names only while their synchronized binding is current', async () => {

@@ -1,15 +1,17 @@
 import { registerTempDir, cleanupTempDir } from '../../../scripts/lib/test-temp-dir.mjs'
 import { DatabaseSync } from 'node:sqlite'
-import { cp, lstat, mkdir, mkdtemp, readFile, readdir, realpath, writeFile } from 'node:fs/promises'
+import { cp, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { afterEach, expect, it } from 'vitest'
+import { sdkWorkflowError } from '../src/sdk-upgrade'
+import { SqlTokenizationError } from '../src/sql-tokens'
 import { CORE_VERSION } from '@workbasehq/core/config'
 import { execute } from '../src/sdk-process'
-import { captureSdkInputs, runSdkTarget } from '../src/sdk-target'
-import { acceptUpgradeResult, BRIDGE_VERSION, bridgeDigest, bridgeFiles, consumerModules, digestBytes, preparedSchema, resultSchema, type UpgradeRequest, type UpgradeStage } from '../src/sdk-upgrade-protocol'
+import { captureSdkInputs, runSdkTarget, reconstructReplayFailure } from '../src/sdk-target'
+import { acceptUpgradeResult, BRIDGE_VERSION, bridgeDigest, bridgeFiles, consumerModules, digestBytes, preparedSchema, resultSchema, replayFailureSchema, type UpgradeRequest, type UpgradeStage } from '../src/sdk-upgrade-protocol'
 
 const fixture = resolve('packages/mcp/test/fixtures/sdk-upgrade/valid-0.2.9')
 const source = resolve('packages/mcp/src'), checkout = resolve('.')
@@ -142,10 +144,61 @@ it('verifies local target migrations and rejects unbound/unknown child result fi
     { ...result, accepted: true },
   ]) expect(() => acceptUpgradeResult(changed, request, modules.packages, modules.resolutions)).toThrow()
 })
+it('prepares and verifies V3 SDK/plugin baselines before domain SQL in the isolated target bridge', async () => {
+  const root = await localConsumer()
+  await writeFile(join(root, 'config.ts'), `import { defineConfig, defineAccess, bindSchemaLock, accessEntities, accessSystemActions } from '@workbasehq/core/schema'
+import { schemaLock } from '@workbasehq/core/migrations/schema-lock'
+const config = defineConfig({ id: 'sdk_upgrade_fixture', interactive: false, languages: ['en'], roles: ['owner'], organizationOwnerRole: 'owner', entities: {},
+  plugins: [{ name: 'example', version: '1.0.0', migrations: [{ name: '001_example', sql: 'CREATE TABLE example AS SELECT revision FROM instance_meta;' }] }],
+  access: defineAccess({ predicates: {}, entities: Object.fromEntries(accessEntities.map(entity => [entity, { owner: 'deny' }])),
+    roles: { owner: { system: Object.fromEntries(accessSystemActions.map(action => [action, 'deny'])) } } }),
+})
+export default bindSchemaLock(config, schemaLock(config))
+`)
+  await writeFile(join(root, 'config.versions.json'), '[]\n')
+  await writeFile(join(root, 'config.indexes.json'), '[]\n')
+  await rename(join(root, 'migrations/0001_initial.sql'), join(root, 'migrations/0001_r1.sql'))
+  await writeFile(join(root, 'migrations/0001_r1.sql'), 'INSERT INTO example VALUES (7);\n')
+  const { request, database } = await preparedDatabase(root)
+  expect(request.stage!.marker.path).toBe('migrations/0002_r1.sql')
+  expect(await readFile(join(root, request.stage!.marker.path), 'utf8')).toBe('-- SDK stamp is owned by deployment.\n')
+  const result = resultSchema.parse(await bridge(root, request))
+  expect(result.schema.expected).toBe(result.schema.applied)
+  expect(result.marker).toEqual({ revision: 1, version: CORE_VERSION })
+  const db = new DatabaseSync(database)
+  try {
+    expect(db.prepare('SELECT * FROM example').all()).toEqual([{ revision: 7 }])
+    expect(db.prepare('SELECT namespace,name FROM _plugin_migrations ORDER BY rowid').all()).toEqual([
+      { namespace: 'workbase-sdk', name: '001_system' },
+      { namespace: 'workbase-sdk', name: '002_operational_evidence' },
+      { namespace: 'example', name: '001_example' },
+    ])
+  } finally { db.close() }
+})
 it('rejects invalid target configuration', async () => {
   const root = await localConsumer()
   await writeFile(join(root, 'config.ts'), "export default { id: 'broken', entities: {} }\n")
   await expect(bridge(root, await requestFor(root))).rejects.toThrow()
+})
+it('captures the current V3 template sources and verifies its runtime plugin baselines in the target bridge', async () => {
+  const root = await localConsumer(true)
+  const { bootstrapInstance } = await import('../src/bootstrap')
+  const { execFileSync } = await import('node:child_process')
+  await rm(join(root, 'config.ts'))
+  await rm(join(root, 'migrations/0001_initial.sql'))
+  await writeFile(join(root, 'config.versions.json'), '[]\n')
+  await writeFile(join(root, 'config.indexes.json'), '[]\n')
+  await bootstrapInstance(root, { id: 'sdk_upgrade_fixture', target: 'cloudflare-github' })
+  execFileSync('bun', [resolve('packages/core/src/migrations/schema-cli.ts'), 'plan', '--root', root, '--init'], { encoding: 'utf8' })
+  execFileSync('bun', [resolve('packages/core/src/openapi/cli.ts'), '--root', root, '--write'], { encoding: 'utf8' })
+  const { request } = await preparedDatabase(root)
+  for (const path of ['runtime.ts', 'access.ts', 'schema.lock.json', 'schema/worker.ts', 'openapi.json']) expect(request.inputHashes[path]).toBe(digestBytes(await readFile(join(root, path))))
+  const result = resultSchema.parse(await bridge(root, request))
+  expect(result.schema.expected).toBe(result.schema.applied)
+  expect(result.plugins.expected).toBe(result.plugins.applied)
+  expect(result.marker).toEqual({ revision: 1, version: CORE_VERSION })
+  await writeFile(join(root, 'openapi.json'), (await readFile(join(root, 'openapi.json'), 'utf8')) + '\n')
+  await expect(bridge(root, request)).rejects.toThrow('Changed bridge input: openapi.json')
 })
 it('prepares historical rbac and tenancy through consumer-resolved target exports', async () => {
   const root = await localConsumer()
@@ -209,4 +262,55 @@ it('rejects changed config/history/index/SQL bytes and candidate bridge source',
     await writeFile(join(root, path), (await readFile(join(root, path), 'utf8')) + '\n')
     await expect(bridge(root, request)).rejects.toThrow(/Changed bridge input|source digest/)
   }
+})
+
+it('normalizes index declaration, ON table and column quoting in the worker fingerprint', async () => {
+  const root = await localConsumer(), { request, database } = await preparedDatabase(root)
+  const db = new DatabaseSync(database)
+  try { db.exec('DROP INDEX notes_title_idx; CREATE INDEX [notes_title_idx] ON [notes] ([organization_id], [title])') } finally { db.close() }
+  const result = resultSchema.parse(await bridge(root, request))
+  expect(result.schema.expected).toBe(result.schema.applied)
+})
+
+it('round-trips a worker lexical failure through protocol parsing, parent reconstruction and the public SDK boundary', async () => {
+  const root = await localConsumer(false, true), { request, database } = await preparedDatabase(root)
+  const secret = 'private_sql_payload_104', db = new DatabaseSync(database)
+  try {
+    db.enableDefensive(false)
+    db.exec('PRAGMA writable_schema=ON')
+    db.prepare("UPDATE sqlite_master SET sql=sql||? WHERE name='notes'").run(' /* ' + secret)
+  } finally { db.close() }
+  // The in-process bridge must preserve the lexer type as well.
+  await expect(bridge(root, request)).rejects.toBeInstanceOf(SqlTokenizationError)
+  await writeFile(join(root, '.sdk-bridge/request.json'), JSON.stringify(request))
+  const modules = await consumerModules(root)
+  const result = await execute([process.execPath, '--import', modules.resolutions.tsx, join(root, '.sdk-bridge/sdk-upgrade-worker.ts')], root,
+    { timeoutMs: 30000, maxOutputBytes: 65536 })
+  expect(result.rc).toBe(1)
+  const raw = await readFile(join(root, '.sdk-bridge/replay-error.json'), 'utf8')
+  expect(raw).not.toContain(secret)
+  const failure = replayFailureSchema.parse(JSON.parse(raw))
+  expect(failure).toMatchObject({ identity: request.identity, inputHashes: request.inputHashes, code: 'sql_tokenization_unsupported', diagnostic: { phase: 'verification', offset: expect.any(Number) } })
+  const reconstructed = reconstructReplayFailure(failure)
+  expect(reconstructed).toBeInstanceOf(SqlTokenizationError)
+  const error = sdkWorkflowError(reconstructed)
+  expect(error).toMatchObject({ code: 'sql_tokenization_unsupported', status: 422, message: 'SQL contains an unsupported or incomplete token', details: { phase: 'verification' } })
+  expect(JSON.stringify({ ...error, message: error.message })).not.toContain(secret)
+  expect(() => replayFailureSchema.parse({ ...failure, code: 'other' })).toThrow()
+})
+
+it('accepts keyword-named columns and rejects NULL CHECK drift in the worker fingerprint', async () => {
+  const root = await localConsumer(), path = join(root, 'config.ts')
+  const sql = 'CREATE TABLE token_corpus ("null" INTEGER, "check" TEXT, "unique" TEXT, "constraint" TEXT, "primary" TEXT, "foreign" TEXT, CHECK ("null" IN (0,1)))'
+  await writeFile(path, (await readFile(path, 'utf8')).replace('plugins: [',
+    `plugins: [{ name: 'token-corpus', version: '1.0.0', migrations: [{ name: '001_table', sql: ${JSON.stringify(sql)} }] },`))
+  const { request, database } = await preparedDatabase(root)
+  expect(resultSchema.parse(await bridge(root, request)).schema.status).toBe('pass')
+  const db = new DatabaseSync(database)
+  try {
+    db.enableDefensive(false)
+    db.exec('PRAGMA writable_schema=ON')
+    db.prepare("UPDATE sqlite_master SET sql=? WHERE name='token_corpus'").run(sql.replace('CHECK ("null"', 'CHECK (null'))
+  } finally { db.close() }
+  await expect(bridge(root, request)).rejects.toThrow(/physical schema/)
 })

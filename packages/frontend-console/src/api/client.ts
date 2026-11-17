@@ -1,18 +1,20 @@
+import { clearSavedViews } from '@workbasehq/console-generated/saved-views'
+import type { Me } from './queries'
 import type { QueryClient } from '@tanstack/react-query'
 
 export class ApiError extends Error {
   constructor(public status: number, public code: string, public details?: unknown) { super(code) }
 }
 /** Only console-local paths can become a post-authentication destination. */
-export function safeReturnTo(value: unknown): string {
-  if (typeof value !== 'string' || !value.startsWith('/') || /[\\\u0000-\u0020]/.test(value)) return '/organizations'
+export function safeReturnTo(value: unknown, fallback = '/'): string {
+  if (typeof value !== 'string' || !value.startsWith('/') || /[\\\u0000-\u0020]/.test(value)) return fallback
   // Explicit invitation returns use only the recipient-authorized opaque ID.
   if (/^\/invitation\?id=[A-Za-z0-9_-]+$/.test(value)) return value
   try {
     const url = new URL(value, 'https://console.invalid')
-    if (url.origin !== 'https://console.invalid' || /%2f|%5c/i.test(value) || !/^\/(organizations|settings(?:\/profile)?|o\/[^/]+(?:\/.*)?)(?:\/)?$/.test(url.pathname)) return '/organizations'
+    if (url.origin !== 'https://console.invalid' || /%2f|%5c/i.test(value) || !/^\/(organizations|settings(?:\/profile)?|o\/[^/]+(?:\/.*)?)?(?:\/)?$/.test(url.pathname)) return fallback
     return url.pathname + url.search + url.hash
-  } catch { return '/organizations' }
+  } catch { return fallback }
 }
 export function signInLocation(returnTo = window.location.pathname + window.location.search) {
   return '/sign-in?returnTo=' + encodeURIComponent(safeReturnTo(returnTo))
@@ -21,6 +23,9 @@ export function signInLocation(returnTo = window.location.pathname + window.loca
 let loggingOut = false
 export async function logoutSession(client: QueryClient): Promise<void> {
   loggingOut = true
+  // Capture only verified in-memory projections, before cancellation/cache teardown.
+  const userId = client.getQueryData<Me>(['me'])?.user?.id
+  const instance = client.getQueryData<{ instance: string }>(['instance'])?.instance
   try {
     await client.cancelQueries()
     try {
@@ -29,6 +34,7 @@ export async function logoutSession(client: QueryClient): Promise<void> {
       // An expired session is already signed out; finish the same cache/navigation cleanup.
       if (!(error instanceof ApiError && error.status === 401)) throw error
     }
+    clearSavedViews(userId && instance ? { instance, userId } : undefined)
     window.location.assign('/sign-in')
     client.clear()
   } catch (error) {

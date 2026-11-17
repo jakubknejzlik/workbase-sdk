@@ -1,0 +1,247 @@
+import { createHash } from 'node:crypto'
+import { DatabaseSync } from 'node:sqlite'
+import { mkdtemp, mkdir, readFile, symlink, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join, resolve } from 'node:path'
+import { afterEach, expect, it, vi } from 'vitest'
+import { defineInstance } from '@workbasehq/core/config'
+import { defineConfig, bindSchemaLock, defineAccess, accessEntities, accessSystemActions } from '@workbasehq/core/schema'
+import { schemaLock } from '@workbasehq/core/migrations/schema-lock'
+import { initialSchema } from '@workbasehq/core/migrations/schema'
+import type { WorkbasePlugin } from '@workbasehq/core/kernel/plugin'
+import { migrateInstance } from '@workbasehq/core/infra'
+import { MigrationDiagnostic } from '../../core/src/infra/diagnostics'
+import { applyDisposable } from '../src/disposable'
+import { expectedSnapshot, replay, replayBundle, replayEngine } from '../src/offline'
+import * as offline from '../src/offline'
+import { MigrationReplayError, replayError, replayInstance, replayQuery } from '../src/migration-replay'
+import { prepare } from '../src/planning'
+import { Store, configSource } from '../src/storage'
+import { Workflow, errorResult } from '../src/workflow'
+import { sdkWorkflowError } from '../src/sdk-upgrade'
+import { pluginRegistry } from '../src/composition/registry'
+import { registerTempDir, cleanupTempDir } from '../../../scripts/lib/test-temp-dir.mjs'
+
+const roots: string[] = []
+afterEach(() => { vi.restoreAllMocks(); for (const root of roots.splice(0)) cleanupTempDir(root) })
+const sharedAccess = () => defineAccess({ predicates: {}, entities: Object.fromEntries(accessEntities.map(entity => [entity, { owner: 'deny' }])),
+  roles: { owner: { system: Object.fromEntries(accessSystemActions.map(action => [action, 'deny'])) } } })
+const config = (plugins: WorkbasePlugin[] = []) => {
+  const current = defineConfig({ id: 'replay_fixture', interactive: false, languages: ['en'], roles: ['owner'], organizationOwnerRole: 'owner', entities: {}, plugins,
+    access: sharedAccess(),
+  })
+  return bindSchemaLock(current, schemaLock(current))
+}
+const rejected = async (run: () => unknown) => {
+  try { await run() } catch (error) { return error }
+  throw new Error('Expected migration rejection')
+}
+const boundaries = (error: unknown) => {
+  const sdk = sdkWorkflowError(error)
+  // Error.message is non-enumerable; include it explicitly in the public proof.
+  return [errorResult(error), { code: sdk.code, status: sdk.status, message: sdk.message, details: sdk.details }]
+}
+// Every longer shared substring contains a shared six-character window.
+function assertPrivate(payload: string, results: unknown[]) {
+  for (const result of results) {
+    const publicValue = JSON.stringify(result)
+    for (let i = 0; i <= payload.length - 6; i++) expect(publicValue).not.toContain(payload.slice(i, i + 6))
+  }
+}
+
+it.each([
+  { tool: 'validate', format: 'V3' },
+  { tool: 'preview_migration', format: 'V3' },
+  { tool: 'apply_to_disposable', format: 'V3' },
+  { tool: 'promote', format: 'legacy' },
+  { tool: 'promote', format: 'V3' },
+])('verify1: $tool rejects a target locale rejected by deploy checkSchema ($format instance)', async ({ tool, format }) => {
+  const root = registerTempDir(await mkdtemp(join(tmpdir(), 'verify1-'))); roots.push(root)
+  const dir = join(root, 'examples/probe'), current = format === 'V3' ? config()
+    : defineInstance({ id: 'replay_fixture', revision: 1, interactive: false, roles: ['owner'], entities: {}, permissions: {} })
+  await mkdir(join(dir, 'migrations'), { recursive: true })
+  await symlink(resolve('node_modules'), join(root, 'node_modules'))
+  await writeFile(join(root, 'package.json'), '{"type":"module"}')
+  let rejectLocale = true
+  const checkSchema = vi.fn<NonNullable<WorkbasePlugin['checkSchema']>>(async (db, target) => {
+    if (rejectLocale && (target as { locale?: string }).locale === 'cs') await db.prepare('SELECT * FROM required_after_change').all()
+  })
+  const targetCheck: WorkbasePlugin = { name: 'target_check', version: '1.0.0', checkSchema }
+  if (format === 'V3') {
+    await writeFile(join(dir, 'access.ts'), `import { defineAccess } from '@workbasehq/core/schema'; export default defineAccess(${JSON.stringify(sharedAccess())});`)
+    await writeFile(join(dir, 'config.ts'), `import { defineConfig, bindSchemaLock } from '@workbasehq/core/schema';
+import access from './access.ts';
+import lock from './schema.lock.json';
+export default bindSchemaLock(defineConfig({ id: 'replay_fixture', interactive: false, languages: ['en'], roles: ['owner'], organizationOwnerRole: 'owner', entities: {}, access }), lock);`)
+    await writeFile(join(dir, 'schema.lock.json'), JSON.stringify(schemaLock(current)))
+    await writeFile(join(dir, 'runtime.ts'), `import config from './config.ts'; import { consoleUI } from '@workbasehq/plugins/console'; export default { ...config, plugins: [consoleUI()] };`)
+    // V3 locale uses canonical composition. Inject the deploy hook at built-in
+    // hydration rather than authoring a custom plugin outside that source boundary.
+    vi.spyOn(pluginRegistry.console, 'hydrate').mockReturnValue(targetCheck)
+  } else await writeFile(join(dir, 'config.ts'), configSource(current))
+  await writeFile(join(dir, 'migrations/0001_r1.sql'), initialSchema(current))
+  const store = new Store(root, new Set(['probe'])); await store.init()
+  const workflow = new Workflow(store), bundle = await store.load('probe', { canonicalRuntime: format === 'V3' })
+  expect(bundle.config.baseline).toBe(format === 'V3' ? 'workbase-sdk' : undefined)
+  const planned = prepare(bundle.config, [], [{ kind: 'set_locale', locale: 'cs' }])
+  // Composition keeps the V3 domain revision and migration history unchanged.
+  const target = format === 'V3' ? { ...bundle.config, locale: 'cs' as const } : planned.target
+  const migrations = format === 'V3' ? bundle.migrations : [...bundle.migrations, { name: '0002_r2.sql', sql: planned.sql }]
+  // Legacy Store.load ignores runtime.ts; supply its deploy hook explicitly.
+  const runtime = bundle.runtime ?? { ...bundle.config, plugins: [targetCheck] }
+  const engine = replayEngine(target, runtime), db = new DatabaseSync(':memory:')
+  let deployError: unknown
+  try { deployError = await rejected(() => migrateInstance(replayQuery(db, migrations), migrations.map(m => ({ filename: m.name, sql: m.sql, checksum: createHash('sha256').update(m.sql).digest('hex') })), engine.kernel)) }
+  finally { db.close() }
+  const deployFailure = replayError(deployError, engine) as MigrationReplayError
+  const deployCode = deployFailure.code
+  expect(deployCode).toBe('migration_replay_failed')
+  expect(deployFailure.diagnostic.migration).toBe('target_check/checkSchema')
+  const proposal = await workflow.call('propose_change', { instance: 'probe', baseRevision: 1, changes: [{ kind: 'set_locale', locale: 'cs' }] })
+  expect(proposal, JSON.stringify(proposal)).toMatchObject({ ok: true, ...(format === 'V3' ? { kind: 'composition_change' } : {}) })
+  if (format === 'V3') {
+    // Establish real prerequisites before testing each later boundary, then make
+    // the same target check fail without changing the proposal's source graph.
+    rejectLocale = false
+    if (tool !== 'validate') expect(await workflow.call('validate', { proposalId: proposal.proposalId })).toMatchObject({ ok: true })
+    if (tool === 'promote') expect(await workflow.call('apply_to_disposable', { proposalId: proposal.proposalId })).toMatchObject({ ok: true, verified: true })
+    rejectLocale = true
+    checkSchema.mockClear()
+  }
+  // Legacy replay does not run plugin hooks. Inject the real deploy checkSchema
+  // failure at its replay boundary to retain promote's public error parity check.
+  const snapshot = format === 'legacy' ? vi.spyOn(offline, 'expectedSnapshot').mockRejectedValue(deployFailure) : undefined
+  const configBefore = await readFile(join(dir, 'config.ts'))
+  const result = await workflow.call(tool, { proposalId: proposal.proposalId, ...(tool === 'promote' ? { expectedRevision: 1 } : {}) })
+  expect(result, JSON.stringify(result)).toMatchObject({ ok: false, error: { code: deployCode } })
+  if (format === 'V3') {
+    expect(checkSchema).toHaveBeenCalled()
+    expect(checkSchema.mock.calls.at(-1)?.[1]).toMatchObject({ locale: 'cs' })
+    expect(result).toMatchObject({ error: { details: { migration: 'target_check/checkSchema' } } })
+  }
+  if (snapshot) {
+    expect(snapshot).toHaveBeenCalledOnce()
+    expect(snapshot).toHaveBeenCalledWith(expect.objectContaining({ config: bundle.config }),
+      expect.objectContaining({ target: expect.objectContaining({ locale: 'cs' }) }))
+  }
+  expect(await readFile(join(dir, 'config.ts'))).toEqual(configBefore)
+  expect((await store.load('probe')).config.revision).toBe(1)
+})
+
+it('verify1: direct disposable replay runs target checkSchema before spawning Wrangler', async () => {
+  const current = config([{ name: 'target_check', version: '1.0.0', checkSchema: async (db, target) => {
+    if ((target as { locale?: string }).locale === 'cs') await db.prepare('SELECT * FROM required_after_change').all()
+  } }])
+  const bundle = { config: current, runtime: current, migrations: [{ name: '0001_r1.sql', sql: initialSchema(current) }], indexes: [], fingerprint: '', guards: {} }
+  const planned = prepare(current, [], [{ kind: 'set_locale', locale: 'cs' }])
+  const result = await applyDisposable(bundle, planned, [], false)
+  expect(result).toMatchObject({ verified: false, diffs: [{ code: 'migration_replay_failed' }] })
+  await expect(expectedSnapshot(bundle, planned)).rejects.toMatchObject({ code: 'migration_replay_failed' })
+})
+
+it("verify1: callback RAISE(FAIL,'UNIQUE constraint failed: SYNTHETIC_PRIVATE_TEXT') stays private", async () => {
+  const marker = 'SYNTHETIC_PRIVATE_TEXT'
+  const current = config([{ name: 'callback', version: '1.0.0', migrations: [{ name: 'callback', sql: '', statements: async () => [
+    `CREATE TABLE input (id INT); CREATE TRIGGER failure BEFORE INSERT ON input BEGIN SELECT RAISE(FAIL,'UNIQUE constraint failed: ${marker}'); END; INSERT INTO input VALUES(1);`,
+  ] }] }])
+  const error = await rejected(() => replayBundle({ config: current, migrations: [] }, () => {}))
+  assertPrivate(marker, boundaries(error))
+})
+
+it('verify1: six-character payload windows stay private across replay error paths', async () => {
+  vi.spyOn(console, 'error').mockImplementation(() => {})
+  for (let seed = 0; seed < 4; seed++) {
+    const payload = 'z' + createHash('sha256').update(`verify1:${seed}`).digest('hex')
+    const sqls = [
+      `SELECT * FROM ${payload};`, `SELECT ${payload} FROM instance_meta;`, `${payload};`,
+      `CREATE TABLE input (id UNIQUE); INSERT INTO input VALUES('${payload}'),('${payload}');`,
+      `CREATE TABLE input (id UNIQUE); INSERT INTO input VALUES('${payload}'); INSERT OR ROLLBACK INTO input VALUES('${payload}');`,
+      `PRAGMA foreign_keys=ON; CREATE TABLE parent(id PRIMARY KEY); CREATE TABLE input(id CONSTRAINT ${payload} REFERENCES parent(id) DEFERRABLE INITIALLY DEFERRED); INSERT INTO input VALUES(1);`,
+      `CREATE TABLE input (id NOT NULL); INSERT INTO input DEFAULT VALUES; -- ${payload}`,
+      `CREATE TABLE input (id CONSTRAINT ${payload} CHECK(id>0)); INSERT INTO input VALUES(0);`,
+      ...['', 'UNIQUE constraint failed: ', 'no such table: ', 'rebuild_requires_review_'].map(prefix =>
+        `CREATE TABLE input(id); CREATE TRIGGER failure BEFORE INSERT ON input BEGIN SELECT RAISE(FAIL,'${prefix}${payload}'); END; INSERT INTO input VALUES(1);`),
+    ]
+    for (const sql of sqls) {
+      const migrations = [{ name: '0001_r1.sql', sql }]
+      const domain = await rejected(() => replayBundle({ config: config(), migrations }, () => {}))
+      const plugin = await rejected(() => replayBundle({ config: config([{ name: 'callback', version: '1.0.0', migrations: [{ name: 'callback', sql: '', statements: async () => [sql] }] }]), migrations: [] }, () => {}))
+      const legacy = await rejected(() => replay(migrations, () => {}))
+      const db = new DatabaseSync(':memory:')
+      try {
+        const inline = await rejected(() => replayInstance(db, migrations, replayEngine(defineInstance({ id: 'inline_fixture', revision: 1, entities: {}, roles: ['owner'], permissions: {} }))))
+        assertPrivate(payload, [...boundaries(domain), ...boundaries(plugin), ...boundaries(legacy), ...boundaries(inline)])
+      } finally { db.close() }
+    }
+    for (const phase of ['statements', 'checkSchema'] as const) {
+      for (const forged of [false, true, 'diagnostic', 'engineDiagnostic']) {
+        const callback = () => {
+          if (forged === 'engineDiagnostic') throw new MigrationDiagnostic({ code: 'migration_history_mismatch', filename: `0001_${payload}.sql` })
+          if (forged === 'diagnostic') {
+            const diagnostic = { file: payload, migration: payload, kind: 'sql' as const, sqlError: payload }
+            throw new MigrationReplayError(diagnostic)
+          }
+          throw Object.assign(new Error(payload), forged ? { code: 'ERR_SQLITE_ERROR', errcode: 2067 } : {})
+        }
+        const plugin: WorkbasePlugin = { name: 'callback', version: '1.0.0', ...(phase === 'checkSchema' ? { checkSchema: callback } : { migrations: [{ name: 'callback', sql: '', statements: callback }] }) }
+        const error = await rejected(() => replayBundle({ config: config([plugin]), migrations: [{ name: '0001_r1.sql', sql: 'SELECT 1;' }] }, () => {}))
+        assertPrivate(payload, boundaries(error))
+      }
+    }
+    const schemaError = await rejected(() => replayBundle({ config: config([{ name: 'callback', version: '1.0.0', checkSchema: async db => { await db.prepare(`SELECT * FROM ${payload}`).all() } }]), migrations: [{ name: '0001_r1.sql', sql: 'SELECT 1;' }] }, () => {}))
+    assertPrivate(payload, boundaries(schemaError))
+  }
+})
+
+it('verify1: structured replay kinds ignore injected diagnostic text at both public boundaries', () => {
+  const payload = 'SYNTHETIC_PRIVATE_DIAGNOSTIC_TEXT'
+  const diagnostic = { file: 'migrations/0001_r1.sql', migration: '0001_r1.sql', kind: 'sql' as const, sqlError: payload }
+  const error = new MigrationReplayError(diagnostic)
+  assertPrivate(payload, boundaries(error))
+  expect(error.diagnostic.sqlError).toBe('SQLite SQL logic error')
+})
+
+it.each(['instance', 'proposal'])('verify1: native metadata read errors stay private during %s validation', async mode => {
+  for (let seed = 0; seed < 4; seed++) {
+    const payload = 'z' + createHash('sha256').update(`verify1:metadata:${seed}`).digest('hex')
+    const root = registerTempDir(await mkdtemp(join(tmpdir(), 'verify1-metadata-'))); roots.push(root)
+    const dir = join(root, 'examples/probe')
+    const current = defineInstance({ id: 'replay_fixture', revision: 1, interactive: false, roles: ['owner'], entities: {}, permissions: {} })
+    await mkdir(join(dir, 'migrations'), { recursive: true })
+    await symlink(resolve('node_modules'), join(root, 'node_modules'))
+    await writeFile(join(root, 'package.json'), '{"type":"module"}')
+    await writeFile(join(dir, 'config.ts'), configSource(current))
+    await writeFile(join(dir, 'migrations/0001_initial.sql'), initialSchema(current) + `\nDROP TABLE instance_meta; CREATE VIEW instance_meta AS SELECT * FROM ${payload};`)
+    const store = new Store(root, new Set(['probe'])); await store.init()
+    const workflow = new Workflow(store)
+    const proposal = mode === 'proposal' ? await workflow.call('propose_change', { instance: 'probe', baseRevision: 1, changes: [{ kind: 'set_locale', locale: 'en' }] }) : undefined
+    const result = await workflow.call('validate', proposal ? { proposalId: proposal.proposalId } : { instance: 'probe' })
+    expect(result).toMatchObject({ ok: false })
+    assertPrivate(payload, [result])
+  }
+})
+
+it('verify1: callback-authored engine diagnostics cannot publish formatted data', async () => {
+  const payload = 'SYNTHETIC_PRIVATE_DIAGNOSTIC_TEXT'
+  const current = config([{ name: 'callback', version: '1.0.0', migrations: [{ name: 'callback', sql: '', statements: async () => {
+    throw new MigrationDiagnostic({ code: 'migration_history_mismatch', filename: `0001_${payload}.sql` })
+  } }] }])
+  const error = await rejected(() => replayBundle({ config: current, migrations: [] }, () => {}))
+  expect(error).toMatchObject({ code: 'migration_history_mismatch' })
+  assertPrivate(payload, boundaries(error))
+})
+
+it('verify1: checks the proposed deployment once against committed data, keeping desired construction synthetic', async () => {
+  const checked: number[] = []
+  const current = config([{ name: 'target_check', version: '1.0.0', migrations: [{ name: 'state', sql: 'CREATE TABLE plugin_state (ready INTEGER);' }], checkSchema: async (db, target) => {
+    if ((target as { locale?: string }).locale === 'cs') {
+      const row = await db.prepare('SELECT ready FROM plugin_state').first<{ ready: number }>()
+      if (!row) throw new Error('Expected committed plugin state')
+      checked.push(row.ready)
+    }
+  } }])
+  const bundle = { config: current, runtime: current, migrations: [{ name: '0001_r1.sql', sql: initialSchema(current) + '\nINSERT INTO plugin_state VALUES(1);' }], indexes: [], fingerprint: '', guards: {} }
+  const planned = prepare(current, [], [{ kind: 'set_locale', locale: 'cs' }])
+  await expectedSnapshot(bundle, planned)
+  expect(checked).toEqual([1])
+})

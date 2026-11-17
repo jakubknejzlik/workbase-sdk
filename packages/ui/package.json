@@ -10,7 +10,8 @@
   "scripts": {
     "build": "vite build",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:layout": "playwright test --config playwright.layout.config.ts"
   },
   "dependencies": {
     "@hookform/resolvers": "5.2.2",

@@ -1,0 +1,17 @@
+# Exact historical reviews for #158: synthetic rotated identity keys in tests.
+# Each entry binds one commit, file, rule and line; no current/future keys are allowed.
+# 320f96e8 is the #87 fix merged in PR #93. The four other findings remain
+# reachable through that PR's retained WR branch, which is absent from main.
+320f96e821455d85e9fa5be7c19284ef630ce60d:packages/plugins/members/test/mail-finalization.test.ts:generic-api-key:27
+344e803cc4f25b3acf3862f7b345f79d96fb24a2:packages/plugins/members/test/mail-finalization.test.ts:generic-api-key:27
+344e803cc4f25b3acf3862f7b345f79d96fb24a2:packages/plugins/members/test/mail-finalization.test.ts:generic-api-key:56
+9f6f4b2e111a66e7362d319ea5f0d4696a2204da:packages/plugins/members/test/mail-finalization.test.ts:generic-api-key:27
+f4aa0ce5a1506941af6da0f58476cc183c667445:packages/plugins/members/test/mail-finalization.test.ts:generic-api-key:31
+
+# Exact historical review for #182: per-run synthetic MCP preflight test value.
+# The superseded #169 WR branch was deleted; only the squash hit is reachable.
+93783a5d6f0a97b421d0b30d40ce52162145093c:packages/mcp/test/initialization.test.ts:generic-api-key:136
+
+# Exact historical review for #194: synthetic rotated invitation identity key.
+# The superseded #176 branch was deleted after verifying the #177 squash tree.
+fd6b017be1c252b87d491d7c47e526ca21b6652b:packages/core/test/invitation-privacy.test.ts:generic-api-key:90

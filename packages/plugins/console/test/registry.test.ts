@@ -1,19 +1,28 @@
-import { beforeEach, expect, it } from 'vitest'
+import { assert, beforeEach, expect, it } from 'vitest'
 import sample from '../../../core/test/fixtures/sample/config'
 import { createApp } from '@workbasehq/core/app'
 import { KernelRegistry } from '@workbasehq/core/kernel/registry'
+import { requireScope } from '../../../core/src/authorization'
+import type { InstanceConfig } from '@workbasehq/core/config'
+import type { ConsoleModelContract } from '@workbasehq/core/console-contract'
 import { request, runtime, setup } from '@workbasehq/test-support/helpers'
 import { consoleUI, consoleRegistry } from '../src/index'
 
 beforeEach(async () => { await setup() })
+async function providerRegistry(config: InstanceConfig, user = 'owner-a') {
+  const kernel = new KernelRegistry(config)
+  const actor = await kernel.requireActor(new Request('http://localhost', { headers: { Authorization: `Bearer synthetic-${user}` } }), runtime())
+  return consoleRegistry(kernel.config, await requireScope(actor, 'org-a', kernel.config))
+}
 it.each([false, true])('SR-72 audit installation=%s controls API and registry placement', async installed => {
   const config = { ...sample, plugins: sample.plugins!.filter(plugin => installed || plugin.name !== 'audit') }
   const app = createApp(config, runtime())
   expect((await request(app, '/audit/events')).status).toBe(installed ? 200 : 404)
-  const response = await request(app, '/o/org-a/console-registry')
+  const response = await request(app, '/o/org-a/console-model')
   expect(response.status).toBe(200)
   expect(response.headers.get('cache-control')).toBe('private, no-store')
-  const registry = await response.json() as ReturnType<typeof consoleRegistry>
+  const { console: registry } = await response.json() as ConsoleModelContract
+  assert(registry)
   expect(registry.pages.some(page => page.id === 'audit.activity')).toBe(installed)
   expect(registry.navigation.some(item => item.page === 'audit.activity')).toBe(installed)
   expect(registry.pages.some(page => page.id === 'core.workflows')).toBe(true)
@@ -22,10 +31,11 @@ it('fails startup clearly when audit requires console but it is absent', () => {
   expect(() => createApp({ ...sample, plugins: sample.plugins!.filter(plugin => plugin.name !== 'console') }, runtime()))
     .toThrow('Plugin audit: missing required contract console@^1')
 })
-it('a headless instance has neither a registry endpoint nor an audit endpoint', async () => {
+it('a headless instance has no console provider or audit endpoint', async () => {
   const config = { ...sample, plugins: sample.plugins!.filter(plugin => !['audit', 'console'].includes(plugin.name)) }
   const app = createApp(config, runtime())
-  for (const path of ['/audit/events', '/o/org-a/console-registry']) expect((await request(app, path)).status).toBe(404)
+  expect((await request(app, '/audit/events')).status).toBe(404)
+  expect(new KernelRegistry(config).plugins.some(plugin => plugin.consoleRegistry)).toBe(false)
 })
 it('rejects UI contributions without an explicit console dependency', () => {
   expect(() => new KernelRegistry({ ...sample, plugins: [...sample.plugins!, { name: 'bad-ui', version: '1', contributes: { console: { pages: [] } } }] }))
@@ -39,13 +49,14 @@ it('console is an explicit versioned contract', () => expect(consoleUI().provide
 
 it('filters pages, entity placements and role-specific navigation on the server', async () => {
   const app = createApp(sample, runtime())
-  const response = await request(app, '/o/org-a/console-registry', 'GET', undefined, 'viewer-a')
-  const registry = await response.json() as ReturnType<typeof consoleRegistry>
+  const response = await request(app, '/o/org-a/console-model', 'GET', undefined, 'viewer-a')
+  const { console: registry } = await response.json() as ConsoleModelContract
+  assert(registry)
   expect(registry.pages.some(page => page.id === 'audit.activity')).toBe(false)
   expect(registry.navigation.some(item => item.page === 'audit.activity')).toBe(false)
   expect(registry.navigation.filter(item => item.entity).every(item => item.placement === 'sidebar')).toBe(true)
-  expect((await request(app, '/o/org-b/console-registry', 'GET', undefined, 'owner-a')).status).toBe(403)
-  expect((await app.request('/o/org-a/console-registry')).status).toBe(401)
+  expect((await request(app, '/o/org-b/console-model', 'GET', undefined, 'owner-a')).status).toBe(403)
+  expect((await app.request('/o/org-a/console-model')).status).toBe(401)
 })
 it('carries existing model and field UI hints unchanged and merges display contributions', async () => {
   const fieldUi = { hidden: false, section: 'private' }
@@ -57,9 +68,7 @@ it('carries existing model and field UI hints unchanged and merges display contr
       navigation: [{ id: 'demo.custom', placement: 'sidebar' as const, label: 'Demo', page: 'demo.custom', order: -1 }],
     } },
   }] }
-  const response = await request(createApp(config, runtime()), '/o/org-a/console-registry')
-  expect(response.status).toBe(200)
-  const registry = await response.json() as ReturnType<typeof consoleRegistry>
+  const registry = await providerRegistry(config)
   expect(registry.modelUi).toEqual(ui)
   expect(registry.entities.clients).toMatchObject({ ...ui.entities.clients, fields: { name: fieldUi }, form: { create: { fields: ['name'] }, edit: { fields: ['name'] } } })
   expect(registry.pages.find(page => page.id === 'demo.custom')).toMatchObject({ path: '/p/demo', renderer: 'members.list' })
@@ -81,10 +90,9 @@ it('filters contributed role/grant placements and unreadable entity views before
       ] } },
     }],
   }
-  const app = createApp(config, runtime())
-  const owner = await (await request(app, '/o/org-a/console-registry')).json() as ReturnType<typeof consoleRegistry>
+  const owner = await providerRegistry(config)
   for (const id of ['owners', 'authorized-tokens', 'entity.named_clients']) expect(owner.navigation.some(item => item.id === id)).toBe(true)
-  const viewer = await (await request(app, '/o/org-a/console-registry', 'GET', undefined, 'viewer-a')).json() as ReturnType<typeof consoleRegistry>
+  const viewer = await providerRegistry(config, 'viewer-a')
   for (const id of ['owners', 'authorized-tokens', 'entity.named_clients']) expect(viewer.navigation.some(item => item.id === id)).toBe(false)
   expect(viewer.navigation.some(item => item.group?.id === 'customers')).toBe(false)
 })

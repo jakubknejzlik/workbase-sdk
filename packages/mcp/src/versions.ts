@@ -1,3 +1,4 @@
+import { guardV3LegacyWrite } from './v3-guard.ts'
 import { readFile, readdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { defineInstance, type InstanceConfig } from '@workbasehq/core/config'
@@ -35,7 +36,7 @@ export async function versionFiles(directory: string, current: InstanceConfig, n
     // Loading an older archive now materializes built-ins. Compare only this
     // automatic projection; retain the recorded bytes and every grant exactly.
     const recordedConfig = recorded ? structuredClone(recorded.config) : undefined
-    if (recordedConfig && Array.isArray(recordedConfig.roles)) {
+    if (recordedConfig && recordedConfig.baseline !== 'workbase-sdk' && Array.isArray(recordedConfig.roles)) {
       for (const role of [config.organizationOwnerRole, 'member']) if (!recordedConfig.roles.includes(role)) {
         recordedConfig.roles.push(role)
         if (role === config.organizationOwnerRole) {
@@ -55,6 +56,7 @@ export async function versionFiles(directory: string, current: InstanceConfig, n
 export async function rollback(store: Store, instance: string, to: number, options: { allowDestructive?: boolean; expectedRevision?: number; preview?: boolean } = {}) {
   return store.locked(instance, async () => {
     const bundle: Bundle = await store.load(instance)
+    guardV3LegacyWrite(bundle.config, 'rollback')
     if (options.expectedRevision !== undefined && options.expectedRevision !== bundle.config.revision) fail('stale_revision', 'Revision changed; inspect history again', 409)
     const directory = await store.directory(instance)
     if (to > bundle.config.revision) fail('invalid_version', 'Rollback target must be an existing revision')
@@ -78,7 +80,7 @@ export async function rollback(store: Store, instance: string, to: number, optio
 export async function publishConfigVersion(store: Store, instance: string, bundle: Bundle, target: InstanceConfig, sql: string, slug: string, rollbackTo?: number) {
   const number = Math.max(0, ...bundle.migrations.map(m => Number(m.name.slice(0, 4)))) + 1
   if (number > 9999) fail('migration_limit', 'Migration number exceeds four digits')
-  const migration = `${String(number).padStart(4, '0')}_${slug}.sql`
+  const migration = `${String(number).padStart(4, '0')}_${target.baseline === 'workbase-sdk' ? `r${target.revision}` : slug}.sql`
   await store.commit(instance, [
     ...await versionFiles(await store.directory(instance), bundle.config, target, rollbackTo),
     { path: `migrations/${migration}`, data: sql, create: true },

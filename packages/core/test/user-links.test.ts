@@ -17,6 +17,7 @@ import { KernelRegistry } from '../src/kernel/registry'
 import { defineCommand, createCommandRegistry } from '../src/commands'
 import { executeAtomic } from '../src/execution/atomic'
 import { createWorkflowRegistry, D1WorkflowRuntime } from '../src/workflow-runtime'
+import { accountLinkUnique } from '../src/user-link-eligibility'
 import { linkAccountRow, invitationAccountLink, userLinkCommands } from '../src/user-links'
 import { compile } from '../src/execution/compiler'
 import { writeFilter } from '../src/execution/policies'
@@ -724,4 +725,107 @@ it.each(['link_account', 'remove_access'])('variant C rejects deleted issuer mem
   expect([response.status, await json(response)]).toEqual([403, { error: 'policy_violation' }])
   expect(await accountLinkRows()).toEqual(before)
   expect(await env.DB.prepare('SELECT count(*) n FROM audit_outbox').first('n')).toBe(0)
+})
+
+// SDK #89: exercise the actual Members route and D1, including hidden conflicts.
+const choices = (entity = 'people', row = 'p1') => request(app,
+  `/orgs/org-a/members?eligible=link_account&target_entity=${entity}&target_row=${row}`)
+it('89 picker excludes two other-row links, preserves ordinary Members and hides conflict identities', async () => {
+  const c = config()
+  await env.DB.exec("UPDATE people SET user='viewer-a' WHERE id='p2'; INSERT INTO people (id,organization_id,name,user,created_at,updated_at) VALUES ('hidden','org-a','Hidden','dispatcher-a','now','now');")
+  c.policies.people.owner = { where: { id: { eq: 'p1' } } }
+  app = createApp(c, runtime())
+  const response = await choices()
+  expect(response.status).toBe(200)
+  expect(response.headers.get('Cache-Control')).toBe('no-store')
+  expect(await json(response)).toEqual({ data: [{ user_id: 'owner-a', email: 'owner-a@example.test', role: 'owner', display_name: 'Existing Person' }] })
+  expect((await json(await request(app, '/orgs/org-a/members'))).data.map((m: any) => m.user_id)).toEqual(['dispatcher-a', 'owner-a', 'viewer-a'])
+})
+it('89 picker allows same-row relink, another entity and foreign-org links', async () => {
+  await env.DB.exec("UPDATE people SET user='viewer-a' WHERE id='p1'; UPDATE teams SET user='dispatcher-a' WHERE id='t1'; UPDATE people SET user='owner-b' WHERE id='foreign';")
+  expect((await json(await choices())).data.map((m: any) => m.user_id)).toEqual(['dispatcher-a', 'owner-a', 'viewer-a'])
+  expect((await json(await choices('people', 'p2'))).data.map((m: any) => m.user_id)).toEqual(['dispatcher-a', 'owner-a'])
+  expect((await link()).status).toBe(200)
+})
+it.each(['', '&target_entity=people', '&target_row=p1', '&target_entity=people&target_row=', '&target_entity=people%22&target_row=p1', '&target_entity=unknown&target_row=p1', '&target_entity=tasks&target_row=p1', '&target_entity=people&target_row=missing', '&target_entity=people&target_row=foreign', `&target_entity=people&target_row=${'x'.repeat(201)}`])
+('89 picker rejects invalid target context: %s', async query => {
+  const response = await request(app, `/orgs/org-a/members?eligible=link_account${query}`)
+  expect([response.status, await json(response)]).toEqual([400, { error: 'invalid_link_target' }])
+})
+it.each(['policy', 'read', 'update', 'link'])('89 inaccessible target fails closed: %s', async gate => {
+  const c = config()
+  if (gate === 'policy') c.policies.people.owner = { where: { id: { eq: 'p2' } } }
+  else if (gate === 'link') c.organizationPermissions.owner = ['members.read']
+  else c.permissions.owner.people = c.permissions.owner.people.filter(op => op !== gate)
+  app = createApp(c, runtime())
+  const response = await choices()
+  expect([response.status, await json(response)]).toEqual([400, { error: 'invalid_link_target' }])
+})
+it('89 picker-to-write race has one winner, a 409 loser and unchanged losing row/version/audit', async () => {
+  expect((await json(await choices())).data.map((m: any) => m.user_id)).toContain('viewer-a')
+  const before = await env.DB.prepare("SELECT * FROM people WHERE id='p1'").first()
+  let won = false
+  const db = new Proxy(env.DB, { get(target, key) {
+    if (key === 'batch') return async (statements: D1PreparedStatement[]) => {
+      if (!won) { won = true; expect((await link('p2')).status).toBe(200) }
+      return target.batch(statements)
+    }
+    const value = Reflect.get(target, key)
+    return typeof value === 'function' ? value.bind(target) : value
+  } })
+  const loser = createApp(config(), { ...runtime(), DB: db })
+  const response = await request(loser, '/commands/people/link_account', 'POST', { rowId: 'p1', userId: 'viewer-a' })
+  expect(won).toBe(true)
+  expect([response.status, await json(response)]).toEqual([409, { error: 'account_already_linked' }])
+  expect(await env.DB.prepare("SELECT * FROM people WHERE id='p1'").first()).toEqual(before)
+  expect(await linked('people', 'p2')).toBe('viewer-a')
+  expect(await env.DB.prepare('SELECT count(*) n FROM audit_outbox').first('n')).toBe(1)
+  expect((await json(await choices())).data.map((m: any) => m.user_id)).not.toContain('viewer-a')
+})
+
+it('89 shared predicate derives the configured field and scopes both correlated reads and write diagnosis', async () => {
+  // Public config currently requires `user`; the SQL helper must derive even a
+  // trusted renamed field rather than baking that restriction into the query.
+  const c = config()
+  c.entities.link_probe = { ...c.entities.people, fields: { account: c.entities.people.fields.user } }
+  await env.DB.exec("CREATE TABLE link_probe (id TEXT,organization_id TEXT,account TEXT,updated_at TEXT,version INTEGER DEFAULT 1); INSERT INTO link_probe VALUES ('target','org-a','owner-a','before',1),('other','org-a','dispatcher-a','before',1),('foreign','org-b','viewer-a','before',1);")
+  const target = { entity: 'link_probe', row: 'target' }
+  const unique = accountLinkUnique(c, 'org-a', target, { member: true })
+  const members = await env.DB.prepare(`SELECT u.id FROM users u WHERE u.organization_id=? AND ${unique.sql} ORDER BY u.id`).bind('org-a', ...(unique.bindings ?? [])).all()
+  expect(members.results).toEqual([{ id: 'owner-a' }, { id: 'viewer-a' }])
+  const kernel = new KernelRegistry(config())
+  const scope = await requireScope(await resolveActor(new Request('http://localhost', { headers: { Authorization: 'Bearer synthetic-owner-a' } }), runtime(), kernel.config), 'org-a', kernel.config)
+  const statement = linkAccountRow({ config: c, scope, now: 'after' }, target.entity, target.row, 'dispatcher-a').statements[0]
+  expect((await env.DB.prepare(statement.sql).bind(...(statement.bindings ?? [])).run()).meta.changes).toBe(0)
+  expect(await env.DB.prepare(statement.diagnose!.sql).bind(...(statement.diagnose!.bindings ?? [])).first('ok')).toBe(0)
+  expect(await env.DB.prepare("SELECT account,updated_at,version FROM link_probe WHERE id='target'").first()).toEqual({ account: 'owner-a', updated_at: 'before', version: 1 })
+})
+
+
+it.each(['Unique', 'owner-a@example.test', 'Unique Person owner-a@example.test', 'Person <owner-a@example.test>'])('91 eligible search matches name/email tokens: %s', async q => {
+  await env.DB.exec("UPDATE identity_profiles SET first_name='Unique',last_name='Person' WHERE user_id='owner-a'")
+  const response = await request(app, `/orgs/org-a/members?eligible=link_account&target_entity=people&target_row=p1&q=${encodeURIComponent(q)}`)
+  expect(response.status).toBe(200)
+  expect((await json(response)).data.map((member: any) => member.user_id)).toEqual(['owner-a'])
+  expect((await link('p1', 'owner-a')).status).toBe(200)
+})
+it.each(['nobody', 'new@example.test', '%', "' OR 1=1 --"])('91 no match is empty and does not mutate: %s', async q => {
+  const before = await accountLinkRows()
+  const response = await request(app, `/orgs/org-a/members?eligible=link_account&target_entity=people&target_row=p1&q=${encodeURIComponent(q)}`)
+  expect(await json(response)).toEqual({ data: [] })
+  expect(await accountLinkRows()).toEqual(before)
+  expect(await env.DB.prepare('SELECT count(*) n FROM audit_outbox').first('n')).toBe(0)
+})
+it('91 nonadministrator with members.read and link authority cannot search or receive identities/counts', async () => {
+  const c = config(); c.organizationPermissions.dispatcher = ['members.read', 'invitations.create']
+  app = createApp(c, runtime())
+  const response = await request(app, '/orgs/org-a/members?eligible=link_account&target_entity=people&target_row=p1&q=Existing&include=pending', 'GET', undefined, 'dispatcher-a')
+  expect([response.status, await json(response)]).toEqual([403, { error: 'permission_denied' }])
+})
+
+it('91 search uses trusted profile names with Czech case folding and no legacy-name leakage', async () => {
+  await env.DB.exec("UPDATE identity_profiles SET first_name='Šárka',last_name='Nová' WHERE user_id='owner-a'")
+  const search = (q: string) => request(app, `/orgs/org-a/members?eligible=link_account&target_entity=people&target_row=p1&q=${encodeURIComponent(q)}`)
+  expect((await json(await search('šárka nová'))).data.map((member: any) => member.user_id)).toEqual(['owner-a'])
+  expect((await json(await search('owner-a@example.test Existing'))).data).toEqual([])
 })

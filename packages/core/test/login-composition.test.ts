@@ -18,7 +18,7 @@ const paths = [
   ['/auth/magic-link/verify?token=invalid', 'GET', undefined],
   ['/me', 'GET', undefined], ['/orgs', 'POST', { name: 'Bypass' }],
   ['/invitations/accept', 'POST', { token: 'a'.repeat(64) }],
-  ['/bootstrap', 'GET', undefined], ['/o/org-a/bootstrap', 'GET', undefined],
+  ['/o/org-a/console-model', 'GET', undefined], ['/o/org-a/capabilities', 'GET', undefined],
 ] as const
 async function invitation() {
   await env.DB.prepare('INSERT INTO invitations (id,organization_id,email,role,token_hash,expires_at,inviter_id,created_at) VALUES (?,?,?,?,?,?,?,?)')
@@ -29,7 +29,7 @@ it.each(paths)('F1 absent login denies %s without minting a session', async (pat
   const app = createApp({ ...sample, interactive: false, plugins: [] }, runtime())
   const sessions = await env.DB.prepare('SELECT count(*) n FROM "session"').first('n')
   const response = await request(app, path, method, body)
-  expect(response.status).toBe(path.includes('bootstrap') ? 401 : 404)
+  expect(response.status).toBe(path.startsWith('/o/') ? 401 : 404)
   expect(response.headers.get('set-auth-token')).toBeNull()
   expect(await env.DB.prepare('SELECT count(*) n FROM "session"').first('n')).toBe(sessions)
 })

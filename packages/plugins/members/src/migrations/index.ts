@@ -1,3 +1,4 @@
+import deliveryCredential from './005-delivery-credential'
 import rowInvitations from './004-row-invitations'
 import scopes from './001-scopes'
 import pendingInvitations from './002-pending-invitations'
@@ -9,4 +10,5 @@ export const migrations = [
   pendingInvitations,
   recipients,
   rowInvitations,
+  deliveryCredential,
 ]

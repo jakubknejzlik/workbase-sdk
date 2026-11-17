@@ -221,3 +221,103 @@ Installed consumers invoke `@workbasehq/core/migrations/schema-cli` with `plan` 
 `check`; repository scripts only supply paths and the CI base.
 Runtime builds bind the lock with `bindSchemaLock`; direct `defineConfig`
 declarations remain unbound until a lock is supplied.
+
+New locks use `lockVersion: 2`. The lock retains SQL-only `tables` and adds
+`entities[]` with immutable `ent_…` IDs, `logicalName`, `physicalName`, and
+`fields[]` with immutable `fld_…` IDs and the same name pair. These are storage
+identities: SDK-owned accounts and computed fields have no domain storage entry;
+implicit domain columns do. IDs are deterministically seeded from the initial
+physical path, then preserved across explicit rename intents.
+
+`parseLock` and `bindSchemaLock` validate v2 and bootstrap repository v1 locks
+deterministically. A plan with no schema diff can write exactly that v2 bootstrap
+without a migration or revision change. Its original parent, physical names and
+all existing migration bytes remain unchanged. Old SDKs reject v2: upgrade the
+SDK before consuming a v2 lock.
+
+Both rename inputs use `renameFrom`: a field option, or a top-level entity option
+such as `defineEntity({ renameFrom: 'worker', fields: { … } })` in
+`schema/staff.ts`. Sources must exist in the base lock and disappear from the
+authored schema; names/IDs cannot collide or be claimed twice. Similar shapes
+never imply a rename. A rename must preserve the SQL definition and be isolated
+from other schema edits. Computed/implicit/account renames and backfill intents
+remain unsupported.
+
+Each rename appends to `transitions[]`: `id`, `entityId`, optional `fieldIds`
+(one field in this slice), `from`/`to` (`logical`, `physical`), `bridge`
+(`field` = dual column, `entity` = view), and `phase`
+(`expanded | switched | contracted`). History is retained. At most one
+non-contracted transition may exist per entity, including field transitions.
+An expanded candidate retains the source mapping and records the target as
+intent; logical switching belongs to a later release. This slice only builds
+pure candidate records: SQL planning rejects open transitions by ID before any
+lock/bundle writes. It cannot apply expansion, advance phases or contract.
+
+`createPhysicalNameResolver(lock)` is exported from `@workbasehq/core/schema`
+and `@workbasehq/core/schema/physical-names`. It validates and snapshots the lock;
+`entityId(logicalName)` and `fieldId(entityId, logicalName)` locate identities,
+while `table(entityId)` and `column(entityId, fieldId)` return pinned physical
+names. Unknown IDs/names and fields belonging to another entity fail. Runtime
+CRUD, query and policy compilers will adopt the resolver in the next slice.
+
+Record actions are strict entity data pointing at registered commands:
+
+```ts
+actions: {
+  close: {
+    command: 'record/close',
+    available: [{ when: { state: { eq: 'open' } }, reason: 'record.closed' }],
+  },
+}
+```
+
+`when` uses access predicates, including `{ use: 'name' }`. Compilation rejects
+unregistered, unallowlisted and system-permission commands. Expanded conditions,
+field dependencies and declaration sources live in `effectiveAccess.actions` and
+both access locks; command bodies remain opaque guards. `actionReasonKeys(config)`
+from `@workbasehq/core/schema` exposes the finite authored reason keys.
+
+SDK-era detail GETs include an `actions` map, independent of projection. Forbidden
+or masked-dependency actions are omitted. SQL evaluates availability and selects
+the first failing reason. List, query and generic mutation responses omit the map.
+The SDK era marker is `baseline: 'workbase-sdk'`; domain fields and relations named
+`actions` and `access` are reserved in that era, including declarations without compiled access.
+Legacy configurations retain their existing response and naming contracts.
+
+`POST /api/:entity/:id/actions/:name` accepts `{}` for input-less commands.
+Object-shaped command schemas declare other accepted body keys; body `id`,
+`rowId` and `role` are rejected. Values/defaults/transforms run once through the
+command schema, with the path supplying `id`. Role permission runs before record access; the first rule of
+one atomic batch rechecks read/write predicates and conditions with `expectRows: 1`.
+A hidden/unknown/masked action returns GET's `404 not_found` body. A readable,
+unavailable action returns `409 {error: 'action_unavailable', reason}`. Diagnosis
+is read-only after rollback. `client.act(entity, id, name, signal)` caches a returned
+detail row or refetches detail; failures expose `ApiFailure.reason`.
+
+Account links opt in with `defineAccess({ accountLinks: { worker: {
+invitationRole: 'staff' } }, ... })`. The role must exist, differ from the owner,
+and have read access to the linked entity. Legacy instances retain `member`.
+The mapping registers `invite`, `cancel_invite`, `link_account` and
+`unlink_account`; their core SQL conditions are recorded as `opaque: true` in
+lock version 1. These adapter commands are reachable through the record
+dispatcher. The existing legacy `link_account`/`remove_access` commands keep their
+original `rowId`/`userId` inputs and behavior.
+
+For mapped links, detail includes `access` only with `invitations.read`:
+`{state, account, invitation}`, with states `no_account`, `invited`, `expired`,
+`linked`. Account is `{id, display_name, email}`; invitation is
+`{id, email, expires_at}`. Linked state has no invitation. Staff read scope and
+mutation grants remain authored instance policy; the fixture grants self-read.
+
+The invite body is strictly `{email}`, link is `{user_id}`, cancel and unlink
+are `{}`. Body selectors and roles are rejected; the route owns the record id. Invitation
+credentials/selectors in a card body receive the same `404 not_found` regardless
+of their existence; they can never select another invitation.
+Invite returns `{invitation_id, expires_at, accept_url}` with `Cache-Control:
+no-store`; the credential is absent from detail, audit and locks. It queues one
+outbox intent in the same D1 batch. Expired history is superseded by migration
+004's trigger before its partial unique index is checked. Delivery is separate.
+Unlink clears links and pending account invitations, retaining membership and
+independently granted access. `client.actWith(entity, id, name, body, signal)`
+returns `{record, result}` after the same cache refresh as `act()`; credentials
+stay in the result and are never cached as record data.

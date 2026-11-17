@@ -5,6 +5,7 @@ import { resolve } from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
 import { consolePrivateTerms, reviewDigest } from './lib/public-vocabulary'
 import { checkConsolePublic, privateLocaleKeys } from './check-console-public'
+import { inspectSource } from './check-terminology'
 import { execFileSync } from 'node:child_process'
 import policy from './sdk-scan-policy.json'
 import { assertBytes, withPolicyDataReviews } from './lib/sdk-export-scan'
@@ -13,6 +14,20 @@ afterEach(() => vi.unstubAllEnvs())
 const syntheticTerms = ['quartzbeacon', 'cobalt-gateway', 'Žlutý signál']
 const vocabulary = new RegExp([consolePrivateTerms.source, ...syntheticTerms, 'secret_'].join('|'), 'iu')
 const scan = (directory: string) => checkConsolePublic(directory, vocabulary)
+it.each(['en', 'cs'])('91 %s Console catalog passes the terminology gate', language => {
+  const file = `packages/frontend-console/src/locales/${language}.json`
+  expect(inspectSource(file, readFileSync(resolve(import.meta.dirname, '..', file), 'utf8'))).toEqual([])
+})
+it.each(['page.tsx', 'packages/frontend-console/dist/assets/index.js'])('terminology accepts the preserved members path in %s', file => {
+  expect(inspectSource(file, "const page = { path: '/settings/workspace-members' }")).toEqual([])
+})
+it.each([
+  ['JSX text', 'page.tsx', 'const page = <span>/settings/workspace-members</span>'],
+  ['label', 'page.tsx', "const page = { label: '/settings/workspace-members' }"],
+  ['locale value', 'en.json', '{"members":"/settings/workspace-members"}'],
+])('terminology rejects the preserved members path as %s', (_kind, file, source) => {
+  expect(inspectSource(file, source)).toContainEqual({ code: 'terminology_forbidden', location: expect.any(String), match: 'workspace' })
+})
 it.each([
   ['substring in JSON', 'index.js', JSON.stringify({ label: 'xquartzbeaconx' })],
   ['embedded prefix in minified identifier', 'index.js', '(()=>{const xsecret_value=1;return 0})()'],
@@ -34,7 +49,9 @@ it('public bundle scan accepts generic and malformed data URIs', () => {
   const directory = registerTempDir(mkdtempSync(resolve(tmpdir(), 'console-scan-')))
   try {
     const uri = `data:application/json;base64,${Buffer.from('{"label":"field_name"}').toString('base64')}`
-    writeFileSync(resolve(directory, 'index.js'), `const assets = [${JSON.stringify(uri)}, "data:text/plain,%ZZ"]`)
+    // Build the malformed URI at runtime so the SDK source scan can stay strict.
+    const malformedUri = ['data:text/plain,', '%ZZ'].join('')
+    writeFileSync(resolve(directory, 'index.js'), `const assets = ${JSON.stringify([uri, malformedUri])}`)
     expect(scan(directory)).toContain('0 private model IDs')
   } finally { cleanupTempDir(directory) }
 })

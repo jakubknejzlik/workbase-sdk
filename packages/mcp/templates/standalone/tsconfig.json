@@ -14,15 +14,23 @@
       "node"
     ],
     "lib": [
-      "ES2023"
+      "ES2023",
+      "DOM",
+      "DOM.Iterable"
     ],
-    "jsx": "react-jsx",
-    "jsxImportSource": "hono/jsx"
+    "jsx": "react-jsx"
   },
   "include": [
     "config.ts",
+    "runtime.ts",
+    "access.ts",
+    "schema/**/*.ts",
+    "ui/**/*.ts",
     "src/**/*.ts",
     "scripts/**/*.ts",
-    "sst.config.ts"
+    "sst.config.ts",
+    "ui/**/*.tsx",
+    "src/**/*.tsx",
+    "vite.config.ts"
   ]
 }

@@ -5,7 +5,7 @@ import { pathToFileURL } from 'node:url'
 import { DatabaseSync } from 'node:sqlite'
 import { execFileSync } from 'node:child_process'
 import { afterEach, expect, it, vi } from 'vitest'
-import { loadConfig } from '../../src/schema/load'
+import { isLiteralConfig, loadConfig } from '../../src/schema/load'
 import { schemaLock, lockBytes, diffSpecs, checkSchema } from '../../src/migrations/schema-lock'
 import { KernelRegistry } from '../../src/kernel/registry'
 import { createApp } from '../../src/app'
@@ -115,4 +115,18 @@ it('column order drift names the first column and its source, falling back to th
   const source = { file: 'schema/worker.ts', line: 9, column: 1 }
   expect(() => checkSchema(fixture, lock, { 'entities.worker.fields.id': source })).toThrow('schema/worker.ts:9: worker.id: table/column order')
   expect(() => checkSchema(fixture, lock, { 'entities.worker': source })).toThrow('schema/worker.ts:9: worker.id: table/column order')
+})
+
+it('discovers literal V3 sources and ignores partial lock bytes only for fresh initialization', async () => {
+  const root = consumer(), path = join(root, 'config.ts')
+  expect(isLiteralConfig(path)).toBe(true)
+  writeFileSync(join(root, 'schema.lock.json'), 'partial authored lock bytes')
+  await expect(loadConfig(path)).rejects.toBeDefined()
+  const loaded = await loadConfig(path, { bindExistingLock: false })
+  expect(loaded.config.id).toBe(fixture.id)
+  expect(readFileSync(join(root, 'schema.lock.json'), 'utf8')).toBe('partial authored lock bytes')
+  // Discovery never evaluates consumer statements; the literal loader rejects them.
+  writeFileSync(path, readFileSync(path, 'utf8') + "\nthrow new Error('must never execute')\n")
+  expect(isLiteralConfig(path)).toBe(true)
+  await expect(loadConfig(path, { bindExistingLock: false })).rejects.toThrow('Expected only imports')
 })

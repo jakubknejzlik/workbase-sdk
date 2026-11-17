@@ -1,3 +1,4 @@
+import { invitationMailbox } from './helpers/invitation-mailbox'
 import { completeInvitationProfiles } from '@workbasehq/test-support/helpers'
 import { env } from 'cloudflare:workers'
 import { beforeEach, expect, it } from 'vitest'
@@ -5,8 +6,9 @@ import { createApp } from '../src/app'
 import sample from './fixtures/sample/config'
 import { setup, request, json, runtime } from '@workbasehq/test-support/helpers'
 
+let mailbox: ReturnType<typeof invitationMailbox>
 let app: Awaited<ReturnType<typeof setup>>
-beforeEach(async () => { app = await setup() })
+beforeEach(async () => { await setup(); mailbox = invitationMailbox(); app = createApp(sample, { ...runtime(), ...mailbox.delivery }) })
 const count = (table: string) => env.DB.prepare(`SELECT count(*) AS n FROM ${table}`).first<number>('n')
 
 beforeEach(completeInvitationProfiles)
@@ -28,13 +30,14 @@ it('OI invitation creation rolls back its claim when the email intent has zero e
 })
 it('OI invitation acceptance rolls back consumption when the membership has zero effects and permits retry', async () => {
   const invitation = await json(await request(app, '/orgs/org-a/invitations', 'POST', { email: 'owner.b@example.test', role: 'viewer' }))
-  const mail = await env.DB.prepare('SELECT body FROM email_outbox').first<string>('body')
-  const token = /token=([a-f0-9]{64})/.exec(mail!)![1]
+  const token = mailbox.acceptUrl().searchParams.get('token')!
   await env.DB.exec("CREATE TRIGGER skip_membership BEFORE INSERT ON memberships BEGIN SELECT RAISE(IGNORE); END;")
+  // Invitation creation and post-commit delivery already have their own audits.
+  const auditBefore = (await count('audit_outbox'))!
   expect((await request(app, '/invitations/accept', 'POST', { token }, 'owner-b')).status).toBeGreaterThanOrEqual(400)
   expect(await env.DB.prepare('SELECT accepted_at FROM invitations WHERE id=?').bind(invitation.id).first('accepted_at')).toBeNull()
   expect(await env.DB.prepare("SELECT count(*) AS n FROM memberships WHERE user_id='owner-b' AND organization_id='org-a'").first('n')).toBe(0)
-  expect(await count('audit_outbox')).toBe(1)
+  expect((await count('audit_outbox'))! - auditBefore).toBe(0)
   expect(await count('atomic_assert')).toBe(0)
   await env.DB.exec('DROP TRIGGER skip_membership;')
   expect((await request(app, '/invitations/accept', 'POST', { token }, 'owner-b')).status).toBe(201)
@@ -63,6 +66,7 @@ it('OI every organization mutation uses one assertion-bearing atomic submission'
     return typeof value === 'function' ? value.bind(target) : value
   } })
   const sql = new WeakMap<D1PreparedStatement, string>()
+  // Measure organization mutations without the separately audited mail delivery lifecycle.
   app = createApp(sample, { ...runtime(), DB: db })
   async function mutation(path: string, method: string, body: unknown, status: number, user = 'owner-a') {
     const before = submissions.length
@@ -81,9 +85,11 @@ it('OI every organization mutation uses one assertion-bearing atomic submission'
   await mutation('/orgs/org-a/leave', 'POST', undefined, 204, 'dispatcher-a')
   const revoked = await mutation('/orgs/org-a/invitations', 'POST', { email: 'viewer.a@example.test', role: 'viewer' }, 201)
   await mutation(`/orgs/org-a/invitations/${revoked.id}`, 'DELETE', undefined, 204)
-  await mutation('/orgs/org-a/invitations', 'POST', { email: 'owner.b@example.test', role: 'viewer' }, 201)
-  const mail = await env.DB.prepare("SELECT body FROM email_outbox WHERE recipient='owner.b@example.test'").first<string>('body')
-  await mutation('/invitations/accept', 'POST', { token: /token=([a-f0-9]{64})/.exec(mail!)![1] }, 201, 'owner-b')
+  const invitation = await mutation('/orgs/org-a/invitations', 'POST', { email: 'owner.b@example.test', role: 'viewer' }, 201)
+  // Obtain the mailbox proof outside mutation() and through the unobserved database.
+  const deliveringApp = createApp(sample, { ...runtime(), ...mailbox.delivery })
+  expect((await request(deliveringApp, `/orgs/org-a/invitations/${invitation.id}/resend`, 'POST', {})).status).toBe(200)
+  await mutation('/invitations/accept', 'POST', { token: mailbox.acceptUrl().searchParams.get('token')! }, 201, 'owner-b')
   const token = await mutation('/orgs/org-a/tokens', 'POST', { name: 'Atomic token', role: 'viewer' }, 201)
   await mutation(`/orgs/org-a/tokens/${token.id}`, 'DELETE', undefined, 204)
 })

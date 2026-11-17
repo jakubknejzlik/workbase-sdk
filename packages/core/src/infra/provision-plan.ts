@@ -1,11 +1,14 @@
 import type { Input } from '@pulumi/pulumi'
+import { createHash } from 'node:crypto'
 import { readFile, readdir, stat } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import type { SchemaRevision } from '../schema-compatibility'
 import { migrationHash, readMigrationFiles, sha256 } from './migration-files'
 import { ProvisionDiagnostic, provisionFailure } from './provision-diagnostics'
 import { installedInfraDirectory } from './package-tools'
 import { provisionConfigSchema } from './provision-config'
+import { consoleArtifactsSHA, consoleHTMLStamps, readConsoleArtifacts } from '../console-build'
 
 export interface ProvisionOptions {
   /** Trusted application module, default-exporting an InstanceConfig. Paths resolve from projectRoot. */
@@ -14,7 +17,7 @@ export interface ProvisionOptions {
   migrationsDir: string
   resourcePrefix: string
   stage: string
-  /** Prebuilt console directory. Omit for an API-only Worker. */
+  /** Built Instance console directory with verified SHA metadata. Omit for an API-only Worker. */
   assetsDir?: string
   /** Stable, operator-supplied secret, e.g. new sst.Secret('AuthSecret').value. Never generated per deploy. */
   authSecret: Input<string>
@@ -26,6 +29,8 @@ export interface ProvisionOptions {
   internalToken?: Input<string>
   /** Secret OPS_TOKEN for protected operations; takes precedence over INTERNAL_TOKEN. */
   opsToken?: Input<string>
+  /** Opt-in, separate credential-reading Worker. Only the exact dev and test stages are permitted. */
+  devMailbox?: { token: Input<string> }
   /** Defaults to CLOUDFLARE_DEFAULT_ACCOUNT_ID. Credentials stay in the deploy environment. */
   accountId?: string
   /** Defaults to the SST app root (process.cwd() inside SST run()). */
@@ -49,6 +54,7 @@ export interface ProvisionPlan {
   schema: SchemaRevision
   environment: Record<string, string>
   bindingNames: string[]
+  devMailbox?: { name: string; handler: string; bindingNames: string[] }
   migration: { command: string; bin: string; triggers: string[] }
 }
 
@@ -60,6 +66,10 @@ function label(value: unknown, limit: number): value is string {
 /** No values supplied by callers are included in validation messages. */
 export function validateProvisionOptions(options: ProvisionOptions): void {
   if (!options || !label(options.stage, 32)) throw new ProvisionDiagnostic('provision_invalid_stage')
+  if (options.devMailbox !== undefined) {
+    if (options.stage !== 'dev' && options.stage !== 'test') throw new ProvisionDiagnostic('provision_invalid_dev_mailbox_stage')
+    if (!options.devMailbox?.token || (typeof options.devMailbox.token === 'string' && !/^[\x21-\x7e]{32,256}$/.test(options.devMailbox.token))) throw new ProvisionDiagnostic('provision_invalid_dev_mailbox_token')
+  }
   if (!label(options.resourcePrefix, 63)) throw new ProvisionDiagnostic('provision_invalid_prefix')
   if (!nonempty(options.handler)) throw new ProvisionDiagnostic('provision_invalid_handler')
   if (!nonempty(options.configPath)) throw new ProvisionDiagnostic('provision_invalid_config_path')
@@ -84,7 +94,7 @@ export function validateProvisionOptions(options: ProvisionOptions): void {
 function resourceName(prefix: string, stage: string, suffix: string) {
   const hash = sha256(JSON.stringify([prefix, stage, suffix])).slice(0, 12)
   const stem = `${prefix}-${stage}-${suffix}`
-  const limit = suffix === 'worker' ? 54 : 63
+  const limit = suffix === 'worker' || suffix === 'dev-mailbox' ? 54 : 63
   return `${stem.slice(0, limit - hash.length - 1).replace(/-+$/, '')}-${hash}`
 }
 
@@ -114,10 +124,28 @@ export async function createProvisionPlan(options: ProvisionOptions): Promise<Pr
   try {
     if (!(await stat(handler)).isFile() || !(await stat(configPath)).isFile() || !(await stat(migrationsDir)).isDirectory() || (assetsDir && !(await stat(assetsDir)).isDirectory())) throw 0
   } catch { throw new ProvisionDiagnostic('provision_inputs_unreadable') }
-  const secrets = [options.authSecret, options.internalToken, options.opsToken, options.webhook?.url, options.webhook?.allowedHosts, options.webhook?.service]
+  if (assetsDir) {
+    let files: Map<string, Buffer>, metadata: { sha?: unknown; builtAt?: unknown }
+    try {
+      files = await readConsoleArtifacts(assetsDir)
+      metadata = JSON.parse(files.get('build-meta.json')!.toString('utf8'))
+      if (!metadata || typeof metadata.sha !== 'string' || !/^[a-f0-9]{40}$/.test(metadata.sha)
+        || typeof metadata.builtAt !== 'string' || !Number.isFinite(Date.parse(metadata.builtAt))) throw 0
+    } catch { throw new ProvisionDiagnostic('provision_console_metadata_invalid') }
+    const stamps = consoleHTMLStamps(files.get('index.html')?.toString('utf8') ?? '')
+    if (stamps.length !== 1 || stamps[0] !== metadata.sha || consoleArtifactsSHA(files) !== metadata.sha
+      || [...files].some(([name, bytes]) => name.endsWith('.html') && consoleHTMLStamps(bytes.toString('utf8')).some(sha => sha !== metadata.sha))) {
+      throw new ProvisionDiagnostic('provision_console_sha_mismatch')
+    }
+  }
+  const secrets = [options.authSecret, options.internalToken, options.opsToken, options.devMailbox?.token, options.webhook?.url, options.webhook?.allowedHosts, options.webhook?.service]
     .filter((value): value is string => typeof value === 'string' && value.length > 0)
   const schema = await provisionConfigSchema(root, configPath, migrationsDir, secrets)
   try {
+    // Older consumers without the artifact retain provisioning; live verification fails closed.
+    let openapi = 'unbuilt'
+    try { openapi = createHash('sha256').update(await readFile(join(dirname(configPath), 'openapi.json'))).digest('hex') }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error }
     const files = await readMigrationFiles(migrationsDir)
     const tools = await packageTools()
     const name = (suffix: string) => resourceName(options.resourcePrefix, options.stage, suffix)
@@ -125,12 +153,13 @@ export async function createProvisionPlan(options: ProvisionOptions): Promise<Pr
       stage: options.stage, root, configPath, handler, migrationsDir, ...(assetsDir ? { assetsDir } : {}),
       names: { database: name('db'), audit: name('audit'), events: name('events'), deadLetter: name('events-dlq'), worker: name('worker') },
       id: `Workbase${sha256(JSON.stringify([options.resourcePrefix, options.stage])).slice(0, 20)}`,
+      ...(options.devMailbox ? { devMailbox: { name: name('dev-mailbox'), handler: fileURLToPath(import.meta.resolve('@workbasehq/core/dev-mailbox')), bindingNames: ['DB', 'STAGE', 'DEV_MAILBOX_TOKEN'] } } : {}),
       schema,
-      environment: { STAGE: options.stage, SCHEMA_EXPECTED: JSON.stringify(schema), AUTH_BASE_URL: options.authBaseUrl,
+      environment: { STAGE: options.stage, SCHEMA_EXPECTED: JSON.stringify(schema), OPENAPI_SHA256: openapi, AUTH_BASE_URL: options.authBaseUrl,
         ...(options.email ? { EMAIL_FROM: options.email.from } : {}),
         ...(options.webhook?.events ? { WEBHOOK_EVENTS: options.webhook.events } : {}),
       },
-      bindingNames: ['DB', 'AUDIT_KV', 'EVENTS_QUEUE', 'BETTER_AUTH_SECRET', 'AUTH_BASE_URL', 'STAGE', 'SCHEMA_EXPECTED',
+      bindingNames: ['DB', 'AUDIT_KV', 'EVENTS_QUEUE', 'BETTER_AUTH_SECRET', 'AUTH_BASE_URL', 'STAGE', 'SCHEMA_EXPECTED', 'OPENAPI_SHA256',
         ...(assetsDir ? ['ASSETS'] : []), ...(options.email ? ['EMAIL', 'EMAIL_FROM'] : []),
         ...(options.webhook ? ['WEBHOOK_URL', 'WEBHOOK_ALLOWED_HOSTS', ...(options.webhook.service ? ['WEBHOOK_SERVICE'] : []), ...(options.webhook.events ? ['WEBHOOK_EVENTS'] : [])] : []),
         ...(options.internalToken ? ['INTERNAL_TOKEN'] : []),

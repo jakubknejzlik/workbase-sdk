@@ -1,16 +1,19 @@
 {
   "name": "@workbasehq/console-generated",
   "private": true,
+  "scripts": { "test": "vitest run", "typecheck": "tsc --noEmit" },
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
     "./read": "./src/read.ts",
     "./screens": "./src/screens.tsx",
     "./writes": "./src/write-screens.tsx",
+    "./saved-views": "./src/saved-views.ts",
     "./list-model": "./src/list-model.ts",
     "./picker-search": "./src/use-picker-search.ts"
   },
   "dependencies": {
+    "@workbasehq/plugins": "workspace:*",
     "react": "19.2.8",
     "@tanstack/react-query": "5.90.21",
     "@tanstack/react-router": "1.170.41",
@@ -18,6 +21,7 @@
     "@workbasehq/ui": "workspace:*"
   },
   "devDependencies": {
-    "@types/react": "19.2.18"
+    "@types/react": "19.2.18",
+    "@types/react-dom": "19.2.4"
   }
 }

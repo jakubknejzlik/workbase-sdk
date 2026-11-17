@@ -36,6 +36,7 @@ export function consoleModel(kernel: KernelRegistry, scope: Scope): ConsoleModel
       if (Array.isArray(schema.required)) schema.required = schema.required.filter(field => Object.hasOwn(schema.properties as object, field))
       return consoleInputSchema(schema, node => authority.schema(node) && literalGrants.get(node) !== false)
     }
+    const link = Object.entries(entity.fields).find(([, field]) => field.userLink)
     let rowInvitations = false
     if (kernel.providers.has('members') && authority.read(name, 'id') && Object.values(entity.fields).some(field => field.userLink)) {
       try { kernel.permission(scope, name, 'create'); kernel.resourcePermission(scope, 'invitations.create'); organizationPermission(config, scope, 'invitations.create'); rowInvitations = canGrantRole(config, scope.role, 'member') } catch {}
@@ -44,6 +45,7 @@ export function consoleModel(kernel: KernelRegistry, scope: Scope): ConsoleModel
     const displayField = entity.displayField && authority.read(name, entity.displayField) ? entity.displayField : undefined
     return [name, {
       ...display,
+      ...(link ? { accountLink: { field: link[0], entity: link[1].entity! }, rowAccess: kernel.providers.has('members') && authority.read(name, 'id') && authority.grant('invitations.read') } : {}),
       ...(rowInvitations ? { rowInvitations: true } : {}),
       fields: Object.fromEntries(fieldsFor(config, name).filter(field => authority.read(name, field)).map(field => {
         const definition = entity.fields[field]
