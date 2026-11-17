@@ -2,7 +2,7 @@ import { registerTempDir, cleanupTempDir } from '../../../scripts/lib/test-temp-
 import { spawn, type ChildProcess } from 'node:child_process'
 import { createInterface } from 'node:readline'
 import { once } from 'node:events'
-import { cp, mkdtemp, readFile, symlink, writeFile } from 'node:fs/promises'
+import { cp, mkdtemp, readFile, stat, symlink, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
@@ -156,7 +156,7 @@ it.each([['request cancellation', 'verify'], ['stdin EOF', 'verify'], ['SIGTERM'
     expect((await owner.call('inspect_schema', { instance: 'sample' })).ok).toBe(true)
   }
   expect(() => process.kill(verify.descendant, 0)).toThrow()
-  await expect(readFile(join(verify.scratch, 'barrier.sock'))).rejects.toMatchObject({ code: 'ENOENT' })
+  await expect(stat(verify.scratch)).rejects.toMatchObject({ code: 'ENOENT' })
   expect((await competitor.call('validate', { instance: 'sample' })).ok).toBe(true)
   const saved = JSON.parse(await readFile(join(root, 'proposals', `${proposalId}.json`), 'utf8'))
   expect(saved.status).toBe('proposed'); expect(saved.evidence).toBeUndefined()
