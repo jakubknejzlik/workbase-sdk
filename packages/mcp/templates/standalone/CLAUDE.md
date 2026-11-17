@@ -15,8 +15,13 @@ public SDK renderer/auth/style exports, following ADR 0008 (superseding SDK #45)
 
 Deployment takes `WORKBASE_PUBLIC_HOSTNAME` as a literal bare hostname and derives
 the HTTPS auth origin plus a Cloudflare Custom Domain (DNS/certificate managed).
+A set value must be a valid lowercase ASCII hostname using only `[a-z0-9.-]`,
+validated without normalization. Only an unset `WORKBASE_PUBLIC_HOSTNAME` means
+no public hostname; an empty or whitespace-only set value fails fast, even with
+a valid `AUTH_BASE_URL`.
 Use `AUTH_BASE_URL` only as the HTTPS fallback without a hostname; only that value
-expands `{stage}` for previews. Blank inputs are unset; at least one is required.
+expands `{stage}` for previews. Blank `AUTH_BASE_URL` values are unset; at least
+one input is required.
 A hostname wins over a stale fallback with a warning; an invalid hostname fails.
 Existing scaffolds must replace the removed hostname env variable and `domain`
 option with `WORKBASE_PUBLIC_HOSTNAME` and `publicHostname`; legacy inputs fail.
