@@ -104,8 +104,11 @@ try {
   const result = await config.run()
   console.log(JSON.stringify({ options, expected: './dist/console', result }))
 } catch (error) { console.log(JSON.stringify({ error: error.message, called: Boolean(options) })) }`
+  const inherited = { ...process.env }
+  delete inherited.WORKBASE_DOMAIN
+  delete inherited.WORKBASE_PUBLIC_HOSTNAME
   const result = spawnSync('bun', ['--no-install', '--eval', script], { cwd: root, encoding: 'utf8', env: {
-    ...process.env, WORKBASE_RESOURCE_PREFIX: 'test-instance', BETTER_AUTH_SECRET: 'test-secret',
+    ...inherited, WORKBASE_RESOURCE_PREFIX: 'test-instance', BETTER_AUTH_SECRET: 'test-secret',
     AUTH_BASE_URL: 'https://{stage}.example.test', EMAIL_FROM: email,
     WORKBASE_OPS_TOKEN: 'example-ops', WORKBASE_DEV_MAILBOX_TOKEN: mailbox,
   } })

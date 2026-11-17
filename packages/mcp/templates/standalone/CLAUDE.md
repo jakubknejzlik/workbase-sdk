@@ -13,6 +13,16 @@ Run `bun run build:console` to validate and bundle the Instance UI into
 `dist/console`. Both Wrangler and SST rebuild and serve that directory using
 public SDK renderer/auth/style exports, following ADR 0008 (superseding SDK #45). Do not add seeded accounts.
 
+Deployment takes `WORKBASE_PUBLIC_HOSTNAME` as a literal bare hostname and derives
+the HTTPS auth origin plus a Cloudflare Custom Domain (DNS/certificate managed).
+Use `AUTH_BASE_URL` only as the HTTPS fallback without a hostname; only that value
+expands `{stage}` for previews. Blank inputs are unset; at least one is required.
+A hostname wins over a stale fallback with a warning; an invalid hostname fails.
+Existing scaffolds must replace the removed hostname env variable and `domain`
+option with `WORKBASE_PUBLIC_HOSTNAME` and `publicHostname`; legacy inputs fail.
+Separately launched MCP clients must set `WORKBASE_BASE_URL` to that resolved
+origin themselves: deployment env is not inherited.
+
 Managers operating this Instance later must use the approved MCP/PR workflow and
 must not edit code directly. The template registers `workbase_config` for local V3 authoring,
 plus separate data and ops MCP servers with environment-only credentials. For dev/test onboarding, follow README.md and `docs/sdk/onboarding.md`

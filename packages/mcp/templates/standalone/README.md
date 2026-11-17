@@ -107,8 +107,25 @@ before registering resources. Missing metadata or a mismatched SHA stops deploym
 run `bun run build:console` to regenerate the complete output.
 The Worker handles SPA fallback and auth/API routes on the same origin.
 SDK `provision()` applies SDK → plugin → Instance migrations before upload.
-For staging, set `AUTH_BASE_URL` to the canonical origin: native Worker requests
-redirect there, so it must be reachable and must not redirect to itself.
+Set `WORKBASE_PUBLIC_HOSTNAME` to a literal bare hostname, for example
+`app.example.test`. The SDK trims/lowercases it, derives `https://app.example.test`
+for the `AUTH_BASE_URL` Worker binding, and attaches a Cloudflare Custom Domain
+that manages DNS and its certificate. Set each environment's hostname explicitly;
+placeholders such as `{stage}` are rejected. Schemes, ports, paths, trailing dots,
+embedded whitespace, IPs and wildcards are rejected; ASCII punycode labels are accepted.
+
+Without a custom hostname, set `AUTH_BASE_URL` to an exact HTTPS origin, for
+example a workers.dev origin. Only this fallback expands `{stage}`, including
+preview stages such as `prefix-pr-123`. Both inputs are optional individually;
+blank values are unset and at least one is required. When both are supplied the
+hostname wins, with one warning for a differing origin or malformed unused fallback.
+An invalid hostname always fails. Native Worker requests redirect to the resolved
+origin, which must be reachable and must not redirect to itself.
+
+For existing scaffolds, replace the removed hostname env variable with
+`WORKBASE_PUBLIC_HOSTNAME` and update `sst.config.ts` to pass `publicHostname`
+instead of the removed `domain` option. Legacy inputs fail with a typed migration
+diagnostic; there is no alias. Keep the app name, resource prefix and stage stable.
 No deploy is performed by init. No preview workflow or deployment wrapper ships here.
 
 ## First owner without real mail
@@ -119,7 +136,9 @@ Cloudflare inputs. Leave `EMAIL_FROM` empty: the SST config rejects it together
 with the mailbox token. Every other stage rejects the mailbox; without that
 token, an authorized `EMAIL_FROM` is required. Deployment returns `devMailboxUrl`.
 
-Export `WORKBASE_BASE_URL` (the canonical app origin), `WORKBASE_OPS_TOKEN`,
+A separately launched MCP client must set `WORKBASE_BASE_URL` to the resolved
+origin itself (`https://<WORKBASE_PUBLIC_HOSTNAME>` or the expanded fallback).
+Export it alongside `WORKBASE_OPS_TOKEN`,
 `WORKBASE_DEV_MAILBOX_URL` (that output) and `WORKBASE_DEV_MAILBOX_TOKEN` to your
 MCP client. `.mcp.json` registers `workbase ops` beside the data server with
 environment-only credentials; SST's `.env` is not automatically the MCP environment.

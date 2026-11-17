@@ -49,7 +49,8 @@ export default $config({
       configPath: './config.ts', handler: './worker.ts', migrationsDir: './migrations',
       resourcePrefix: 'neutral-instance', stage: $app.stage,
       authSecret: new sst.Secret('AuthSecret').value,
-      authBaseUrl: process.env.AUTH_BASE_URL!,
+      publicHostname: process.env.WORKBASE_PUBLIC_HOSTNAME,
+      authBaseUrl: process.env.AUTH_BASE_URL,
     })
     return { url: deployed.url, databaseId: deployed.databaseId }
   },
@@ -57,19 +58,41 @@ export default $config({
 ```
 
 The operator supplies `CLOUDFLARE_DEFAULT_ACCOUNT_ID`, `CLOUDFLARE_API_TOKEN`,
-`AUTH_BASE_URL` and a stable SST `AuthSecret` before deployment. The auth secret
-must be at least 32 characters; retain it across redeployments. `authBaseUrl` is
-the exact public HTTPS origin, without credentials, query, fragment or a path.
-Use the known workers.dev origin or supply `domain` with the same hostname.
+a stable SST `AuthSecret` and either `publicHostname` or `authBaseUrl` before
+deployment. The auth secret must be at least 32 characters; retain it across
+redeployments. `publicHostname` is trimmed/lowercased and derives the HTTPS origin
+used for `AUTH_BASE_URL` and the Cloudflare Custom Domain attachment (DNS and
+certificate managed by SST). It must be a literal bare DNS hostname: no scheme,
+port, path, credentials, query, fragment, trailing dot, embedded whitespace, IP,
+wildcard or placeholder. Labels must be 1–63 ASCII characters with no leading or
+trailing hyphen, total length at most 253; punycode labels/TLDs are accepted.
+
+Without a hostname, `authBaseUrl` is the exact HTTPS origin (e.g. workers.dev),
+without credentials, query, fragment or a path; no Custom Domain is attached.
+The hostname takes precedence; a different parsed fallback origin produces one
+structured warning, and an invalid unused fallback produces an ignored-fallback
+warning. Invalid hostnames always fail. `validateProvisionOptions()` returns the
+resolved `publicOrigin`, optional `publicHostname`, and structured `warnings`.
+`createProvisionPlan()` exposes the same fields without logging; `provision()`
+emits each warning once before registering resources. The existing `url` output
+continues to report the Worker URL.
+
+The removed `domain` option fails with a typed diagnostic naming `publicHostname`.
+Update existing configs to the new option and env variable; no alias is provided.
+The standalone template treats blank optional env values as unset and fails on the
+removed hostname env variable. Only its `AUTH_BASE_URL` fallback expands `{stage}`
+for preview stages such as `prefix-pr-N`; the core performs no stage substitution.
+A separately launched MCP client must set `WORKBASE_BASE_URL` to the resolved
+origin itself; it does not inherit the deployment environment.
 The API does not discover the account subdomain or generate an auth secret.
 
 | Input | Contract |
 | --- | --- |
 | `configPath`, `handler`, `migrationsDir` | Required application-owned module, Worker entry and ordered SQL directory |
 | `resourcePrefix`, `stage` | Required lowercase DNS-style names; prefix ≤63, stage ≤32 characters |
-| `authSecret`, `authBaseUrl` | Required stable `Input<string>` secret and explicit HTTPS origin |
+| `authSecret` | Required stable `Input<string>` secret |
+| `publicHostname?`, `authBaseUrl?` | At least one required; hostname derives HTTPS origin and wins over fallback |
 | `assetsDir?` | Built Instance console directory (normally `dist/console`) with verified SHA metadata; absent means no `ASSETS` binding |
-| `domain?` | Optional Cloudflare custom hostname matching the auth origin |
 | `email?: { from }` | Native `EMAIL` send binding restricted to this sender, plus `EMAIL_FROM` |
 | `webhook?: { url, allowedHosts, service?, events? }` | Explicit URL/host allowlist, optional existing Worker service name and event filter |
 | `internalToken?` | Optional secret `INTERNAL_TOKEN` for protected operations |

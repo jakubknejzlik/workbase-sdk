@@ -3,7 +3,8 @@ import { redactCliOutput } from './diagnostics'
 const codes = [
   'provision_invalid_stage', 'provision_invalid_prefix', 'provision_invalid_handler',
   'provision_invalid_config_path', 'provision_invalid_migrations_dir', 'provision_invalid_assets_dir',
-  'provision_invalid_auth_secret', 'provision_invalid_auth_base_url', 'provision_invalid_domain',
+  'provision_invalid_auth_secret', 'provision_invalid_auth_base_url', 'provision_invalid_public_hostname',
+  'provision_missing_public_origin', 'provision_legacy_domain', 'provision_legacy_domain_env',
   'provision_invalid_email', 'provision_invalid_webhook', 'provision_invalid_account_id',
   'provision_invalid_dev_mailbox_stage', 'provision_invalid_dev_mailbox_token',
   'provision_config_load_failed', 'provision_invalid_config', 'provision_inputs_unreadable',
@@ -20,6 +21,9 @@ export class ProvisionDiagnostic extends Error {
   constructor(code: ProvisionDiagnosticCode, detail?: { message: string; secrets: string[] }) {
     const safeCode = codes.includes(code) ? code : 'provision_failed'
     let message: string = safeCode
+    if (safeCode === 'provision_missing_public_origin') message += ': set publicHostname or authBaseUrl (WORKBASE_PUBLIC_HOSTNAME or AUTH_BASE_URL in the standalone template)'
+    if (safeCode === 'provision_legacy_domain') message += ': domain was removed; use publicHostname instead'
+    if (safeCode === 'provision_legacy_domain_env') message += ': WORKBASE_DOMAIN was removed; use WORKBASE_PUBLIC_HOSTNAME instead'
     if (safeCode === 'provision_console_metadata_invalid') message += ': console build-meta.json is missing or invalid; run build:console before provisioning'
     if (safeCode === 'provision_console_sha_mismatch') message += ': console SHA does not match the HTML stamp and emitted artifacts; run build:console before provisioning'
     if (safeCode === 'provision_config_load_failed' && detail) {
