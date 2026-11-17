@@ -238,7 +238,7 @@ it('stdio refuses byte-only authored comment edits after verification and preser
   await writeFile(migrationFile, migration)
   const connection = await connect(root)
   try {
-    const args = await propose(connection.call, [rename('Cleaning')])
+    const args = await propose(connection.call, [rename('Field Ops')])
     expect(await connection.call('validate', args)).toMatchObject({ ok: true })
     expect(await connection.call('preview_migration', args)).toMatchObject({ ok: true })
     expect(await connection.call('apply_to_disposable', args)).toMatchObject({ ok: true, verified: true })
@@ -267,6 +267,6 @@ it('stdio refuses byte-only authored comment edits after verification and preser
     }
     expect(await snapshot(root)).toEqual(before)
     expect(await connection.call('promote', { ...args, expectedRevision: 1 })).toMatchObject({ ok: true, status: 'promoted', revision: 1 })
-    expect(await readFile(file)).toEqual(Buffer.from(source.replace('"cleaning"', '"Cleaning"')))
+    expect(await readFile(file)).toEqual(Buffer.from(source.replace('"fieldops"', '"Field Ops"')))
   } finally { await connection.close() }
 })
