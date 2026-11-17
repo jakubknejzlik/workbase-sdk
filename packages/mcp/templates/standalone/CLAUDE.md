@@ -46,3 +46,9 @@ V3 domain-change promotion is unsupported and returns `v3_promote_unsupported`;
 physical schema changes require reviewed source edits and migration generation.
 Custom plugins/commands, plugin removal and role definitions also require reviewed
 source changes. Do not mix legacy changes with these V3 kinds in one proposal.
+
+Fresh V3 MCP workflow: `bootstrap_instance` → `initialize_instance` (preview, then
+apply with the returned `planHash`) → `inspect_schema`. Dependencies must already
+be provisioned. Initialization writes schema, migration, OpenAPI and composed
+access artifacts locally; it never installs or deploys. Existing differing or
+partial artifacts require review and are never overwritten.

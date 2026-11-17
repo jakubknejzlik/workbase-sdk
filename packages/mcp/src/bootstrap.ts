@@ -29,7 +29,7 @@ async function templateFiles(dir: string, prefix = ''): Promise<string[]> {
   }
   return paths.sort()
 }
-export type BootstrapReport = { ok: true; files: { path: string; status: 'created' | 'unchanged' | 'conflict' }[] }
+export type BootstrapReport = { ok: true; nextStep: { tool: 'initialize_instance'; arguments: { instance: string; mode: 'preview' }; root: string }; files: { path: string; status: 'created' | 'unchanged' | 'conflict' }[] }
 export async function bootstrapInstance(serverRoot: string, raw: unknown): Promise<BootstrapReport> {
   try { return await bootstrapFiles(serverRoot, raw) }
   catch (error) {
@@ -92,5 +92,5 @@ async function bootstrapFiles(serverRoot: string, raw: unknown): Promise<Bootstr
       files.push({ path, status: same ? 'unchanged' : 'conflict' })
     }
   }
-  return { ok: true, files: files.sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0) }
+  return { ok: true, nextStep: { tool: 'initialize_instance', arguments: { instance: selector, mode: 'preview' }, root: target }, files: files.sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0) }
 }

@@ -1,12 +1,26 @@
 # Authoring V3 composition, access and languages through MCP
 
 The standalone `.mcp.json` registers `workbase_config` alongside `workbase_data`
-and `workbase_ops`. After installing dependencies and generating initial schema,
-access and OpenAPI artifacts, launch it from the Instance directory. It runs the
+and `workbase_ops`. After provisioning dependencies, launch it from the Instance
+directory, including an incomplete scaffold. It runs the
 installed `workbase config --root .` and needs no API credentials or optional
 environment variables. Data and ops keep separate credentials and responsibilities;
 only those remote servers need an app origin such as `https://app.example.test`.
 Existing Instances must merge the new entry manually: init preserves existing files.
+
+For a fresh root, call `bootstrap_instance`, then `initialize_instance` with
+`{ "instance": "my-instance", "mode": "preview" }`. Review the five generated
+artifacts (schema lock, initial migration, OpenAPI and both access locks), their
+exact bytes, hashes, conflicts and `planHash`. Apply with
+`{ "instance": "my-instance", "mode": "apply", "planHash": "<preview planHash>" }`.
+Then continue with `inspect_schema` in the same stdio session or after restart.
+Initialization holds the instance lock and publishes all files through guarded
+recovery. A matching completed initialization is unchanged; partial or differing
+artifacts return `initialization_conflict` and are preserved. Source or dependency
+changes invalidate the plan. `dependencies_missing` identifies the package and
+remedy; initialization never installs packages, accesses a registry or deploys an instance.
+Normal config calls on an incomplete scaffold return `initialization_required`
+with this next step. Bootstrap retains its file-copy and conflict contract.
 
 Call `inspect_schema` with the Instance selector (the config ID with underscores
 replaced by hyphens). Use the returned revision in `propose_composition` as

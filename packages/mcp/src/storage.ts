@@ -1,3 +1,5 @@
+import { isLiteralConfig, loadConfig } from '@workbasehq/core/schema/load'
+import { assertInitialized } from './initialization.ts'
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { acquireInstanceLock } from './instance-lock.ts'
 import { devFixtures } from './dev-support.ts'
@@ -136,7 +138,7 @@ async function dependencyHash(path: string) {
   const bytes = await fileBytes(path)
   return bytes === null ? null : byteHash(bytes)
 }
-const transactionPath = z.string().regex(/^(runtime\.ts|access\.ts|schema\/[a-z][a-z0-9_]{0,62}\.ts|openapi\.json|access\.lock\.(?:json|md)|package\.json|bun\.lock|config(?:\.v[1-9][0-9]*)?\.ts|config\.(?:indexes|versions)\.json|migrations\/\d{4}_[a-z0-9_]+\.sql|proposals\/[a-f0-9-]+\.json)$/)
+const transactionPath = z.string().regex(/^(runtime\.ts|access\.ts|schema\.lock\.json|schema\/[a-z][a-z0-9_]{0,62}\.ts|openapi\.json|access\.lock\.(?:json|md)|package\.json|bun\.lock|config(?:\.v[1-9][0-9]*)?\.ts|config\.(?:indexes|versions)\.json|migrations\/\d{4}_[a-z0-9_]+\.sql|proposals\/[a-f0-9-]+\.json)$/)
 const digest = z.string().regex(/^[a-f0-9]{64}$/)
 const base64 = z.string().refine(value => Buffer.from(value, 'base64').toString('base64') === value)
 const identityPart = z.union([z.string().regex(/^(0|[1-9][0-9]*)$/), z.number().int().nonnegative().transform(String)])
@@ -350,6 +352,7 @@ export class Store {
     this.allowed = requestedAllowed ?? new Set(devFixtures?.allowed ?? [])
   }
   async init(allowEmpty = false) {
+    this.configCache.clear()
     this.allowed = this.requestedAllowed ?? new Set(devFixtures?.allowed ?? [])
     this.standalone = false
     this.instanceDirectories.clear()
@@ -372,7 +375,11 @@ export class Store {
       await mkdir(join(this.root, 'proposals'), { recursive: true, mode: 0o700 })
       await this.withLock(this.root, async () => {
         const configPath = join(this.root, 'config.ts')
-        const config = await importConfig(configPath, hash(await readFile(configPath, 'utf8')))
+        const literal = isLiteralConfig(configPath)
+        if (literal) await replaySources(this.root, { accessLock: true })
+        const config = literal
+          ? (await loadConfig(configPath, { bindExistingLock: false })).config
+          : await importConfig(configPath, hash(await readFile(configPath, 'utf8')))
         // Core IDs use SQL identifiers (underscores); MCP instance selectors use hyphens.
         const instance = instanceSelector(config.id)
         if (this.requestedAllowed && (this.requestedAllowed.size !== 1 || !this.requestedAllowed.has(instance))) fail('invalid_allowlist', 'Standalone allowlist must contain only the config id')
@@ -450,6 +457,7 @@ export class Store {
   async load(instance: string, options: { canonicalRuntime?: boolean } = {}): Promise<Bundle> {
     const dir = await this.directory(instance)
     if (!this.owns(dir)) return this.withLock(dir, () => this.load(instance, options))
+    await assertInitialized(dir, instance)
     const dependencies = this.standalone ? await dependencySnapshot(dir) : undefined
     const names = (await readdir(dir)).filter(n => /^config(?:\.[a-z0-9_-]+)?\.(ts|json)$/.test(n)).sort()
     const sources: Record<string, string> = {}

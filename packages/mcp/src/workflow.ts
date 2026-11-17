@@ -2,6 +2,7 @@ import { guardV3LegacyWrite } from './v3-guard.ts'
 import { SourceError } from '@workbasehq/core/schema/load'
 import { submitChange, promotionHash } from './submit-change.ts'
 import type { GitHubConfiguration } from './github.ts'
+import { initializeInstance } from './initialization.ts'
 import { bootstrapInstance } from './bootstrap.ts'
 import { appendFile, readFile, readdir } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -96,6 +97,11 @@ export class Workflow {
       if (!Object.hasOwn(schemas, name)) fail('unknown_tool', 'Unknown tool', 404)
       const input = schemas[name as ToolName].parse(raw) as Record<string, any>
       const targetInstance = input.instance ?? (await this.store.find(input.proposalId)).instance
+      if (name === 'initialize_instance') {
+        const result = await initializeInstance(this.store, targetInstance, schemas.initialize_instance.parse(raw))
+        if (input.mode === 'apply') await this.store.init()
+        return result
+      }
       if (name === 'rollback') {
         const result = await rollback(this.store, targetInstance, Number(input.to.slice(1)), input)
         if (result.written === true) {

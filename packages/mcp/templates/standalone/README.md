@@ -41,7 +41,17 @@ During phase 2, author `config.ts`, `schema/*`, `access.ts`, `ui/*` and
 `locales/en/*.json` as code. `runtime.ts` composes SDK plugins outside the literal
 config boundary and enables interactive login there. `config.ts` binds the generated
 `openapi.json` for anonymous serving; the literal loader can generate it before it exists.
-For a fresh Instance run these in order:
+For MCP-only initialization, with the SDK dependencies already provisioned, call
+`initialize_instance` with `{ "instance": "{{INSTANCE_SELECTOR}}", "mode": "preview" }`,
+review its paths, exact bytes, hashes and conflicts, then call `initialize_instance`
+with `{ "instance": "{{INSTANCE_SELECTOR}}", "mode": "apply", "planHash": "<preview planHash>" }`.
+Continue with `inspect_schema` in the same session. Incomplete scaffolds can also
+restart the config MCP server. The initializer never installs packages or deploys;
+`dependencies_missing` identifies the package and remedy. Partial or differing
+artifacts return `initialization_conflict`; matching completed initialization is
+an unchanged no-op. Bootstrap remains a conflict-preserving file copy.
+
+For the equivalent shell workflow, run these in order:
 
 ```sh
 bun run migrate:plan --init
