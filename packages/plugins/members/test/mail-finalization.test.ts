@@ -24,7 +24,7 @@ it.each(cases)('current inputs $locale $kind rotated=$rotated re-render with ver
   await env.DB.prepare('UPDATE email_outbox SET body=? WHERE id=?').bind(JSON.stringify(inputs), row.id).run()
   const send = vi.fn().mockResolvedValue(undefined)
   const settings = { ...runtime(), EMAIL: { send }, EMAIL_FROM: 'noreply@example.test' }
-  if (rotated) settings.IDENTITY.secret = 'synthetic-rotated-key-at-least-32-characters'
+  if (rotated) settings.IDENTITY.secret = 'r'.repeat(32)
   const acceptUrl = await buildInvitationAcceptUrl(settings, { selector: inputs.selector, purpose: 'email' })
   const app = createApp(config, settings)
   const retry = () => request(app, `/orgs/org-a/invitations/${created.id}/retry-delivery`, 'POST', {})
