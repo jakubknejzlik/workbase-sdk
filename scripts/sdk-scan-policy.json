@@ -641,7 +641,7 @@
     {
       "pathDigest": "616e9a931a0c7bea02752f9e4b81381f577c1cdd03da8446ff2678f5303fe79c",
       "lineDigest": "287d257e475c66b73fa7c092cc997054530b79ddfc76103475c89b53ed04e6ef",
-      "lineNumber": 52,
+      "lineNumber": 53,
       "reason": "Required public npm dependency/import; exact package identity, not an owner deployment."
     },
     {
@@ -751,6 +751,13 @@
       "reason": "Synthetic local-only database identifier in neutral runtime/template fixtures; not an account ID.",
       "line": "        kv_namespaces: [{ binding: 'AUDIT_KV', id: '00000000000000000000000000000001' }],",
       "lineNumber": 70
+    },
+    {
+      "path": "packages/frontend-console/e2e/runtime/workflow-setup.ts",
+      "value": "00000000000000000000000000000097",
+      "reason": "Synthetic local-only database identifier in neutral runtime/template fixtures; not an account ID.",
+      "line": "    kv_namespaces: [{ binding: 'AUDIT_KV', id: '00000000000000000000000000000097' }],",
+      "lineNumber": 26
     }
   ],
   "emails": [
@@ -847,7 +854,7 @@
       "line": "    const response = await env.WEBHOOK_SERVICE?.fetch('https://webhook.internal/health', { signal: AbortSignal.timeout(3000) })",
       "value": "webhook.internal",
       "reason": "Synthetic Service Binding destination; local runtime health probe, not a deployed host.",
-      "lineNumber": 26
+      "lineNumber": 28
     },
     {
       "path": "scripts/smoke-mcp-template.ts",
@@ -868,14 +875,14 @@
       "line": "    for (const url of ['https://user:secret@example.test', 'http://example.test', 'http://192.168.1.1', 'http://0.0.0.0',",
       "value": "192.168.1.1",
       "reason": "Negative test fixture: ops provisioning must reject private/unspecified network hosts; not a deployed host.",
-      "lineNumber": 174
+      "lineNumber": 175
     },
     {
       "path": "packages/mcp/test/ops/contract.test.ts",
       "line": "    for (const url of ['https://user:secret@example.test', 'http://example.test', 'http://192.168.1.1', 'http://0.0.0.0',",
       "value": "0.0.0.0",
       "reason": "Negative test fixture: ops provisioning must reject private/unspecified network hosts; not a deployed host.",
-      "lineNumber": 174
+      "lineNumber": 175
     }
   ]
 }

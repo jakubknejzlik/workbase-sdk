@@ -3,9 +3,9 @@ type Case = { label: string; input: string } & ({ value: string; reason?: never 
 const accept = (input: string, value = input, label = input): Case => ({ label, input, value })
 const reject = (label: string, input: string, reason: string): Case => ({ label, input, reason })
 export const organizationNameCases: Case[] = [
-  ...['Úklid Novák s.r.o.', 'Čistota & syn, a.s.', "O'Brien Cleaning", 'O’Brien Cleaning',
-    'Acme (CZ) – Praha 4', 'Firma #1 / pobočka Brno', '50% Clean!', 'acme.cz', 'Seznam.cz a.s.',
-    'info@acme.cz', '<Acme> "Clean"', 'Café 🧽', '清洁公司'].map(value => accept(value)),
+  ...['Úklid Novák s.r.o.', 'Čistota & syn, a.s.', "O'Brien Services", 'O’Brien Services',
+    'Acme (CZ) – Praha 4', 'Firma #1 / pobočka Brno', '50% Clean!', 'acme.example', 'Seznam.example a.s.',
+    'info@example.com', '<Acme> "Clean"', 'Café 🧽', '清洁公司'].map(value => accept(value)),
   accept('  Acme  ', 'Acme', 'trim'),
   accept('  Cafe\u0301  ', 'Café', 'trim then NFC'),
   accept('Acme  Inc', 'Acme  Inc', 'ordinary internal spaces'),
@@ -38,7 +38,7 @@ export const organizationNameCases: Case[] = [
   reject('ZWJ emoji', 'Team 👩\u200d👩\u200d👧', 'hidden_character'),
   ...[0xa0, 0x2000, 0x200a, 0x202f, 0x205f, 0x3000].map(cp => reject(`Zs U+${cp.toString(16)}`, `Acme${String.fromCodePoint(cp)}Inc`, 'nonstandard_space')),
   ...[0x378, 0xe000, 0xf0000, 0xd800, 0xdc00].map(cp => reject(`Cn/Co/Cs U+${cp.toString(16)}`, `Acme${String.fromCodePoint(cp)}Inc`, 'invalid_character')),
-  ...['https://acme.cz', 'Acme see HTTP://x.example/invitations/accept?token=1', 'ftp://acme', 'Acme custom+v1.2-x://host'].map(value => reject(value, value, 'url_not_allowed')),
+  ...['https://acme.example', 'Acme see HTTP://x.example/invitations/accept?token=1', 'ftp://acme.test', 'Acme custom+v1.2-x://host.test'].map(value => reject(value, value, 'url_not_allowed')),
 ]
 
 /** Raw JSON/schema inputs; text forms cannot submit these values. */
