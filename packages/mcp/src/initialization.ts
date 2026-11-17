@@ -79,7 +79,7 @@ async function dependencies(root: string, model: RuntimeModel) {
   const nonce = randomUUID()
   // Only this closed vocabulary can cross the process boundary. A dependency
   // can put arbitrary data (including credentials) in its exception or output.
-  const dependencyNames = ['zod', 'hono', 'typescript', '@jakub.knejzlik/ts-query', 'better-auth'] as const
+  const dependencyNames = ['zod', 'hono', 'typescript', 'better-auth'] as const
   const script = `const write = process.stdout.write.bind(process.stdout);
   const emit = result => write(JSON.stringify({ nonce: ${JSON.stringify(nonce)}, ...result }));
   const names = ${JSON.stringify(dependencyNames)};

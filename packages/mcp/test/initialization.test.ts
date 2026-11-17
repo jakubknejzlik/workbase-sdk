@@ -113,10 +113,13 @@ it.each(['bun', 'node'].flatMap(runtime => ['early-exit', 'throw-secret', 'stder
   await isolatedSdk(root)
   // A real SDK transitive import exits before the rest of the graph runs.
   // Supply the rest of the graph so missing modules cannot mask this fixture.
-  for (const [owner, name] of [['core', 'hono'], ['core', 'typescript'], ['core', '@jakub.knejzlik/ts-query'], ['plugins', 'better-auth']]) {
-    const destination = join(root, 'node_modules', name)
-    await mkdir(dirname(destination), { recursive: true })
-    await symlink(await realpath(resolve('packages', owner, 'node_modules', name)), destination)
+  for (const owner of ['core', 'plugins']) {
+    const manifest = JSON.parse(await readFile(resolve('packages', owner, 'package.json'), 'utf8'))
+    for (const name of Object.keys(manifest.dependencies).filter(name => name !== 'zod')) {
+      const destination = join(root, 'node_modules', name)
+      await mkdir(dirname(destination), { recursive: true })
+      await symlink(await realpath(resolve('packages', owner, 'node_modules', name)), destination)
+    }
   }
   const zod = join(root, 'node_modules/zod')
   await mkdir(zod, { recursive: true })
