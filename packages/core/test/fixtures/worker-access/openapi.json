@@ -5063,16 +5063,15 @@
     },
     "/invitations/preflight": {
       "post": {
+        "description": "Read-only preview. A matching verified session or an anonymous token with a server-verified mailbox proof receives full metadata, including terminal state. Copied selectors and invalid mailbox proofs receive only id and account_match, uniformly across states. A different signed-in account always receives the minimal response.",
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
                 "additionalProperties": false,
                 "properties": {
-                  "return_to": {
-                    "type": "string"
-                  },
                   "token": {
+                    "pattern": "^[a-f0-9]{64}(?:\\.[a-f0-9]{0,64})?$",
                     "type": "string"
                   }
                 },
@@ -5090,106 +5089,125 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": false,
-                  "properties": {
-                    "account_match": {
-                      "anyOf": [
-                        {
-                          "type": "boolean"
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    },
-                    "expires_at": {
-                      "type": "string"
-                    },
-                    "id": {
-                      "type": "string"
-                    },
-                    "inviter": {
+                  "oneOf": [
+                    {
                       "additionalProperties": false,
                       "properties": {
-                        "display_name": {
+                        "account_match": {
+                          "enum": [
+                            false,
+                            null
+                          ]
+                        },
+                        "id": {
                           "type": "string"
                         }
                       },
                       "required": [
-                        "display_name"
+                        "account_match",
+                        "id"
                       ],
                       "type": "object"
                     },
-                    "organization": {
+                    {
                       "additionalProperties": false,
                       "properties": {
+                        "account_match": {
+                          "enum": [
+                            true,
+                            null
+                          ]
+                        },
+                        "expires_at": {
+                          "type": "string"
+                        },
                         "id": {
                           "type": "string"
                         },
-                        "name": {
-                          "anyOf": [
-                            {
+                        "inviter": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "display_name": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "display_name"
+                          ],
+                          "type": "object"
+                        },
+                        "organization": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "id": {
                               "type": "string"
                             },
-                            {
-                              "type": "null"
+                            "name": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
                             }
-                          ]
-                        }
-                      },
-                      "required": [
-                        "id",
-                        "name"
-                      ],
-                      "type": "object"
-                    },
-                    "role": {
-                      "type": "string"
-                    },
-                    "state": {
-                      "enum": [
-                        "pending",
-                        "expired",
-                        "accepted",
-                        "declined",
-                        "revoked"
-                      ],
-                      "type": "string"
-                    },
-                    "target": {
-                      "additionalProperties": false,
-                      "properties": {
-                        "entity": {
+                          },
+                          "required": [
+                            "id",
+                            "name"
+                          ],
+                          "type": "object"
+                        },
+                        "role": {
                           "type": "string"
                         },
-                        "row": {
-                          "anyOf": [
-                            {
+                        "state": {
+                          "enum": [
+                            "pending",
+                            "expired",
+                            "accepted",
+                            "declined",
+                            "revoked"
+                          ],
+                          "type": "string"
+                        },
+                        "target": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "entity": {
                               "type": "string"
                             },
-                            {
-                              "type": "null"
+                            "row": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
                             }
-                          ]
+                          },
+                          "required": [
+                            "entity",
+                            "row"
+                          ],
+                          "type": "object"
                         }
                       },
                       "required": [
-                        "entity",
-                        "row"
+                        "account_match",
+                        "expires_at",
+                        "id",
+                        "inviter",
+                        "organization",
+                        "role",
+                        "state"
                       ],
                       "type": "object"
                     }
-                  },
-                  "required": [
-                    "account_match",
-                    "expires_at",
-                    "id",
-                    "inviter",
-                    "organization",
-                    "role",
-                    "state"
-                  ],
-                  "type": "object"
+                  ]
                 }
               }
             },
@@ -5241,14 +5259,10 @@
                   "additionalProperties": false,
                   "properties": {
                     "account_match": {
-                      "anyOf": [
-                        {
-                          "type": "boolean"
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ]
+                      "enum": [
+                        true
+                      ],
+                      "type": "boolean"
                     },
                     "actions": {
                       "items": {
@@ -5607,6 +5621,183 @@
         ]
       }
     },
+    "/invitations/{id}/preview": {
+      "get": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "return_to",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "account_match": {
+                      "enum": [
+                        true
+                      ],
+                      "type": "boolean"
+                    },
+                    "actions": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    "expires_at": {
+                      "type": "string"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "inviter": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "display_name": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "display_name"
+                      ],
+                      "type": "object"
+                    },
+                    "navigation_target": {
+                      "type": "string"
+                    },
+                    "next": {
+                      "enum": [
+                        "terminal",
+                        "preview",
+                        "profile"
+                      ],
+                      "type": "string"
+                    },
+                    "organization": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "name": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "name"
+                      ],
+                      "type": "object"
+                    },
+                    "profile_complete": {
+                      "type": "boolean"
+                    },
+                    "return_to": {
+                      "type": "string"
+                    },
+                    "role": {
+                      "type": "string"
+                    },
+                    "state": {
+                      "enum": [
+                        "pending",
+                        "expired",
+                        "accepted",
+                        "declined",
+                        "revoked"
+                      ],
+                      "type": "string"
+                    },
+                    "target": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "entity": {
+                          "type": "string"
+                        },
+                        "row": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "entity",
+                        "row"
+                      ],
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "account_match",
+                    "actions",
+                    "expires_at",
+                    "id",
+                    "inviter",
+                    "navigation_target",
+                    "next",
+                    "organization",
+                    "profile_complete",
+                    "return_to",
+                    "role",
+                    "state"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "API error"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "bearer": []
+          }
+        ]
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ]
+    },
     "/invitations/{id}/resolve": {
       "parameters": [
         {
@@ -5644,14 +5835,10 @@
                   "additionalProperties": false,
                   "properties": {
                     "account_match": {
-                      "anyOf": [
-                        {
-                          "type": "boolean"
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ]
+                      "enum": [
+                        true
+                      ],
+                      "type": "boolean"
                     },
                     "actions": {
                       "items": {
@@ -5975,14 +6162,10 @@
                         "additionalProperties": false,
                         "properties": {
                           "account_match": {
-                            "anyOf": [
-                              {
-                                "type": "boolean"
-                              },
-                              {
-                                "type": "null"
-                              }
-                            ]
+                            "enum": [
+                              true
+                            ],
+                            "type": "boolean"
                           },
                           "expires_at": {
                             "type": "string"

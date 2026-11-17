@@ -48,14 +48,14 @@ test.each(['//evil', '/workers', '/invitation?id=invite-A'])('callback consumes 
 })
 test('callback without memberships uses the invitation inbox', async () => {
   history.replaceState(null, '', '/auth/complete')
-  const fetch = vi.fn(async (path: string) => json(path === '/me' ? { ...me, memberships: [] } : { data: [{ navigation_target: '/invitation?id=invite-A' }] }))
+  const fetch = vi.fn(async (path: string) => json(path === '/me' ? { ...me, memberships: [] } : path === '/me/profile' ? complete : { data: [{ navigation_target: '/invitation?id=invite-A' }] }))
   render(view(fetch).element); await waitFor(() => expect(navigate).toHaveBeenCalledWith('/invitation?id=invite-A'))
   expect(fetch.mock.calls.slice(0, 2).map(([path]) => path)).toEqual(['/me', '/me/invitations'])
 })
 test('token is scrubbed synchronously; only POST bodies carry it; anonymous resolution requires a click', async () => {
   const token = 'sensitive-invitation-token'; history.replaceState({ oldURL: token }, '', '/invitation?token=' + token)
   const consoleError = vi.spyOn(console, 'error'), consoleLog = vi.spyOn(console, 'log')
-  const fetch = vi.fn(async (path: string, _init: ClientRequestInit) => json(path === '/invitations/preflight' ? invitation : { error: 'unauthenticated' }, path === '/invitations/preflight' ? 200 : 401))
+  const fetch = vi.fn(async (path: string, _init: ClientRequestInit) => json(path === '/invitations/preflight' ? { id: invitation.id, account_match: null } : { error: 'unauthenticated' }, path === '/invitations/preflight' ? 200 : 401))
   render(view(fetch, true).element)
   expect(location.pathname + location.search).toBe('/invitation'); expect(history.state).toBeNull()
   await screen.findByText('Continue'); expect(fetch.mock.calls.every(([path]) => path === '/invitations/preflight')).toBe(true)

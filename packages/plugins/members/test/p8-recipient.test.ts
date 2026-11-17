@@ -58,16 +58,22 @@ it('ID discovery and token resolution share recipient and profile eligibility', 
   const id = await json(await call(`/invitations/${a.id}/preview`))
   const token = await json(await call('/invitations/resolve', { token: a.token }))
   expect(id).toEqual(token)
+  expect(Object.keys(id).sort()).toEqual(['account_match', 'actions', 'expires_at', 'id', 'inviter', 'navigation_target', 'next', 'organization', 'profile_complete', 'return_to', 'role', 'state'])
   expect(id).toMatchObject({ state: 'pending', next: 'profile', profile_complete: false, actions: ['decline'] })
   expect(await env.DB.prepare('SELECT bound_user_id,accepted_at FROM invitations WHERE id=?').bind(a.id).first()).toEqual({ bound_user_id: 'owner-b', accepted_at: null })
   expect(await json(await call(`/invitations/${a.id}/accept`, {}))).toEqual({ error: 'profile_incomplete' })
   await complete()
   expect(await json(await call(`/invitations/${a.id}/preview`))).toMatchObject({ actions: ['accept', 'decline'] })
 })
-it('anonymous preflight is read-only and does not disclose recipient email, credentials or profile', async () => {
+it.each(['copied', 'delivered'])('anonymous %s preflight is read-only and gates recipient metadata on mailbox proof', async purpose => {
   const a = await invite()
-  const r = await anonymous('/invitations/preflight', { token: a.token })
-  expect(await json(r)).toMatchObject({ account_match: null, state: 'pending' })
+  const r = await anonymous('/invitations/preflight', { token: purpose === 'copied' ? new URL(a.accept_url).searchParams.get('token') : a.token })
+  expect(r.status).toBe(200)
+  const body = await json(r)
+  expect(body).toEqual(purpose === 'copied' ? { id: a.id, account_match: null } : {
+    id: a.id, organization: { id: 'org-a', name: 'Organization A' }, inviter: { display_name: 'owner-a' },
+    role: 'viewer', expires_at: a.expires_at, state: 'pending', account_match: null,
+  })
   expect(r.headers.get('Cache-Control')).toContain('no-store')
   expect(r.headers.get('Referrer-Policy')).toBe('no-referrer')
   expect(r.headers.get('set-auth-token')).toBeNull()
@@ -83,9 +89,8 @@ it.each(['resolve', 'preflight', 'accept', 'decline'])('wrong account cannot con
   const a = await invite()
   const r = await call(`/invitations/${action}`, { token: a.token }, 'viewer-a')
   if (action === 'preflight') {
-    expect(await json(r)).toMatchObject({ account_match: false })
-    expect(JSON.stringify(await json(await call('/invitations/preflight', { token: a.token }, 'viewer-a')))).not.toContain('owner.b@example.test')
-  } else expect(r.status).toBe(403)
+    expect(await json(r)).toEqual({ id: a.id, account_match: false })
+  } else { expect(r.status).toBe(403); expect(await json(r)).toEqual({ error: 'invitation_not_for_this_account' }) }
   expect((await call(`/invitations/${a.id}/preview`, undefined, 'viewer-a')).status).toBe(404)
   expect(await env.DB.prepare('SELECT bound_user_id,accepted_at,declined_at FROM invitations WHERE id=?').bind(a.id).first()).toEqual({ bound_user_id: null, accepted_at: null, declined_at: null })
 })
@@ -278,4 +283,22 @@ it('copy selector rotation during the acceptance commit preserves the delivered 
   })
   expect((await call('/invitations/accept', { token: a.token })).status).toBe(201)
   expect(await env.DB.prepare('SELECT accepted_user_id FROM invitations WHERE id=?').bind(a.id).first('accepted_user_id')).toBe('owner-b')
+})
+
+it('an unverified real recipient session gets no metadata from preflight or ID preview', async () => {
+  const a = await invite()
+  const login = await anonymous('/invitations/resolve', { token: a.token })
+  expect(login.status).toBe(200)
+  const bearer = login.headers.get('set-auth-token')!
+  expect(Boolean(bearer)).toBe(true)
+  await env.DB.prepare('UPDATE "user" SET "emailVerified"=0 WHERE id=?').bind('owner-b').run()
+  for (const path of ['/invitations/preflight', `/invitations/${a.id}/preview`]) {
+    const preflight = path.endsWith('preflight')
+    const denied = await app.request(`http://localhost${path}`, {
+      method: preflight ? 'POST' : 'GET', headers: { Authorization: `Bearer ${bearer}`, 'Content-Type': 'application/json', Origin: 'http://localhost' },
+      ...(preflight ? { body: JSON.stringify({ token: a.token }) } : {}),
+    })
+    expect(denied.status).toBe(403)
+    expect(await json(denied)).toEqual({ error: 'verified_session_required' })
+  }
 })

@@ -17,8 +17,10 @@ const invitation = object({ id: string, email: string, expires_at: string })
 const org = object({ id: string, name: nullable(string) })
 const target = object({ entity: string, row: nullable(string) })
 const metadata = { id: string, organization: org, inviter: object({ display_name: string }), role: string, expires_at: string, target,
-  state: { type: 'string', enum: ['pending', 'expired', 'accepted', 'declined', 'revoked'] }, account_match: nullable(boolean) }
+  state: { type: 'string', enum: ['pending', 'expired', 'accepted', 'declined', 'revoked'] }, account_match: { type: 'boolean', enum: [true] } }
+const publicEntry = object({ id: string, account_match: { enum: [false, null] } })
 const metadataRequired = Object.keys(metadata).filter(key => key !== 'target')
+const preflight = { oneOf: [publicEntry, object({ ...metadata, account_match: { enum: [true, null] } }, metadataRequired)] }
 const preview = object({ ...metadata, navigation_target: string, return_to: string, profile_complete: boolean, next: { type: 'string', enum: ['terminal', 'preview', 'profile'] }, actions: strings }, [...metadataRequired, 'navigation_target', 'return_to', 'profile_complete', 'next', 'actions'])
 const profile = object({ id: string, email: string, firstName: nullable(string), lastName: nullable(string), displayName: nullable(string),
   authority: object({ kind: { type: 'string', enum: ['local', 'idp'] }, provider: nullable(string), synchronization: nullable(object({ method: string, maxLatencySeconds: { type: 'integer', minimum: 0 } })) }),
@@ -52,8 +54,9 @@ export function publicPaths(): Record<string, Schema> {
       '409': response(object({ error: { type: 'string', enum: ['account_already_linked', 'invitation_pending', 'invitation_conflict'] } }), 'Invitation conflict'),
     }, { requestBody: request(object({ email: { type: 'string', format: 'email' }, role: string, target: object({ entity: { type: 'string', pattern: '^[a-z][a-z0-9_]*$' }, row: { type: 'string', minLength: 1, maxLength: 200 } }), profile_prefill: object({ firstName: string, lastName: string }, []) }, ['email'])),
       description: 'Creates an invitation. A row target derives its role from the configured entity. Returns 409 account_already_linked if the target is occupied or the known invitee is already linked to another row of the same entity in this organization. The uniqueness check is repeated atomically when inserting the invitation; unknown addresses and links to different entities or organizations are allowed.' }) },
-    '/invitations/preflight': { post: operation({ '200': response(object(metadata, metadataRequired)) }, { security: [], requestBody: request(tokenBody) }) },
+    '/invitations/preflight': { post: operation({ '200': response(preflight) }, { security: [], requestBody: request(object({ token: { type: 'string', pattern: '^[a-f0-9]{64}(?:\\.[a-f0-9]{0,64})?$' } })), description: 'Read-only preview. A matching verified session or an anonymous token with a server-verified mailbox proof receives full metadata, including terminal state. Copied selectors and invalid mailbox proofs receive only id and account_match, uniformly across states. A different signed-in account always receives the minimal response.' }) },
     '/invitations/resolve': { post: operation({ '200': response(preview) }, { security: [], requestBody: request(tokenBody) }) },
+    '/invitations/{id}/preview': { parameters: [parameter('id', 'path', string, true)], get: operation({ '200': response(preview) }, { parameters: [parameter('return_to', 'query', string)] }) },
     '/invitations/{id}/resolve': { parameters: [parameter('id', 'path', string, true)], post: operation({ '200': response(preview) }, { requestBody: request(returnBody) }) },
     ...Object.fromEntries(['accept', 'decline'].map(action => [`/invitations/{id}/${action}`, { parameters: [parameter('id', 'path', string, true)], post: operation({
       '200': response(object({ id: string, state: { type: 'string', enum: [action === 'accept' ? 'accepted' : 'declined'] }, replayed: boolean, organization_id: string, role: string, entry_target: string }, ['id', 'state', 'replayed'])),
