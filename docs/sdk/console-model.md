@@ -161,7 +161,7 @@ field or expression operand drops the complete widget. `ConsoleQuery` exposes
 optional `search` and `labelWhere` with the same shapes as the core query API.
 Navigation to excluded views, denied entities/pages or other roles is omitted, together with unused configured navigation groups. These rules apply
 even when no console provider is installed. The `console` member can therefore be
-narrower than the provider's standalone `/console-registry` response.
+narrower than the internal `consoleRegistry` provider result.
 
 `fields.required` describes the storage requirement; `fields.nullable` is its
 inverse for configured fields. A required field with a server default may be
@@ -213,8 +213,8 @@ runtime bindings or executable label expressions enter the document.
 
 ## Migration from console-generated
 
-The browser migration is W29. This change leaves `/schema`, bootstrap, generated
-models, frontend code and existing endpoint enforcement unchanged.
+The browser migration is W29. `/schema` and generated models remain available;
+the browser reads the runtime contract through the scoped console-model endpoint.
 
 | Generated model field | Runtime contract field |
 | --- | --- |

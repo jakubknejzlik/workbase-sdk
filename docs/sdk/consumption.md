@@ -245,9 +245,9 @@ performance thresholds are enforced. Source:
   built-script checks do not establish those properties.
 - No `sst deploy`: the smoke bundles/imports SST configuration and checks an
   offline provision plan without registering resources.
-- Legacy endpoints still mounted: `/schema`, `/console-info`, bootstrap and
-  console-model routes remain. Browser request avoidance is the substitute for
-  deferred retirement, not proof of 404s.
+- Supported metadata endpoints `/schema`, `/console-info` and console-model
+  remain mounted. The smoke checks browser request avoidance; unknown paths
+  follow normal SPA handling and are not guaranteed to return 404.
 
 Sources: [smoke scope](../../scripts/smoke-template.ts),
 [local live implementation](../../scripts/lib/installed-consumer-live.ts),

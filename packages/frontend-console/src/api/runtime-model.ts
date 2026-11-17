@@ -11,8 +11,9 @@ export const runtimeModelOptions = (orgId: string) => ({
 export function useRuntimeModel(orgId?: string) {
   return useQuery({ ...runtimeModelOptions(orgId!), enabled: !!orgId, refetchOnMount: false, refetchOnWindowFocus: 'always', refetchInterval: 30_000 })
 }
-/** An authority signal discards the old projection before refreshing it. */
+/** Publish fresh authority without remounting the runtime host on successful refresh.
+ * Refetch errors still reach consumers immediately, which render fail-closed UI. */
 export async function refreshRuntimeModel(client: QueryClient, orgId: string) {
   await client.cancelQueries({ queryKey: ['console-model', orgId] })
-  await client.resetQueries({ queryKey: ['console-model', orgId] })
+  await client.invalidateQueries({ queryKey: ['console-model', orgId], refetchType: 'all' })
 }

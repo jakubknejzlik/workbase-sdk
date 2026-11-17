@@ -308,7 +308,7 @@ staged-tarball regression verifies the actual React/Vite exports. The standard `
 requires the private vocabulary input; a missing secret prevents a release
 archive from being certified. The built HTML probe rejects inline script/style
 and verifies the no-referrer meta tag. Browser acceptance records every flow and
-fails if it requests console-model, console-info, bootstrap or `/schema`.
+fails if it requests console-model, console-info, `/schema` or retired metadata routes.
 
 Personal saved views in the generated console are browser-local, scoped by verified
 instance, user, organization and entity, and never restored automatically. They
