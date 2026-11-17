@@ -101,6 +101,7 @@ const schema = z.object({
   displayName: z.string().trim().min(1).optional(),
   id: identifier, revision: z.number().int().positive(),
   entities: z.record(identifier, z.object({
+    renameFrom: identifier.optional(),
     fields: z.record(identifier, fieldSchema),
     relations: z.record(identifier, z.object({ field: identifier, entity: identifier, many: z.boolean().optional(), through: z.strictObject({ entity: identifier, field: identifier, createCommand: z.string().min(1), deleteCommand: z.string().min(1) }).optional() })).default({}),
     actions: recordActionsSchema.optional(),

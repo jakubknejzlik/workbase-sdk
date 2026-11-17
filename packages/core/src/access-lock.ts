@@ -4,7 +4,7 @@ import { realpathSync } from 'node:fs'
 import { readFile, writeFile } from 'node:fs/promises'
 import { isAbsolute, relative, resolve, sep } from 'node:path'
 import { enforcementInputs, type AccessKernel } from './access-inputs'
-import type { SourceMap } from './schema/load'
+import type { SourceMap } from './schema/source-location'
 
 export interface AccessLockOptions {
   root: string

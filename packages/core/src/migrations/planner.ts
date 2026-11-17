@@ -1,9 +1,20 @@
 import { defineInstance, inspectInstance, type InstanceConfig } from '../config'
 import { column, createEntity, initialSchema, literal, quote, revisionSQL } from './schema'
 import { rebuildWithNullableRefs, type SupplementalIndex } from './rebuild'
+import { schemaLock } from './schema-lock'
+import { assertNoRenameSQL } from './schema-plan'
 export interface MigrationPlan { sql: string; destructive: string[]; blocked: string[]; warnings: string[] }
 export function plan(fromConfig: InstanceConfig | null, toConfig: InstanceConfig, options: { allowDestructive?: boolean; indexes?: SupplementalIndex[] } = {}): MigrationPlan {
   const to = defineInstance(toConfig)
+  // SDK-era callers cannot bypass the lock planner's rename gate by using this
+  // older entry point. Inline legacy configs keep their existing contract.
+  if (to.baseline === 'workbase-sdk' && Object.values(to.entities).some(e => e.renameFrom || Object.values(e.fields).some(f => f.renameFrom))) {
+    try { assertNoRenameSQL(schemaLock(to, fromConfig ? schemaLock(fromConfig) : undefined)) }
+    catch (error) {
+      const reason = error instanceof Error ? error.message : String(error)
+      return { sql: `-- BLOCKED: ${reason}\n`, destructive: [], blocked: [reason], warnings: [] }
+    }
+  }
   if (!fromConfig) return { sql: initialSchema(to), destructive: [], blocked: [], warnings: [] }
   // An older schema may violate a new presentation invariant; the result must
   // still pass strict validation above. Never alter its physical baseline.

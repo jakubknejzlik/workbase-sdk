@@ -8,9 +8,9 @@ import { accountLink, DeclarationError, defineConfig, defineEntity, defineAccess
 import type { InstanceConfig } from '../config'
 import type { AccessInput, EntityAccess } from '../access'
 import { parseLock } from '../migrations/schema-lock'
+import type { SourceLocation, SourceMap } from './source-location'
+export type { SourceLocation, SourceMap } from './source-location'
 
-export interface SourceLocation { file: string; line: number; column: number }
-export type SourceMap = Record<string, SourceLocation>
 export class SourceError extends Error {
   constructor(readonly location: SourceLocation, message: string) {
     super(`${location.file}:${location.line}:${location.column}: ${message}`)
