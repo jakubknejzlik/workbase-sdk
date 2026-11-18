@@ -1,5 +1,5 @@
 import { createRequire } from 'node:module'
-import { mkdtemp, cp, readFile, writeFile, rm } from 'node:fs/promises'
+import { mkdtemp, cp, readFile, writeFile, rm, symlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { resolve, join } from 'node:path'
 import { expect, it } from 'vitest'
@@ -106,6 +106,8 @@ it('filters transform fallback nodes before conversion while preserving sibling 
 })
 it('validates 3.1, rejects broken documents, and round-trips exact canonical bytes', async () => {
   const text = bytes(), doc = JSON.parse(text)
+  const committed = await readFile(join(root, 'openapi.json'), 'utf8'), kernel = fixture()
+  expect(generate(kernel.config, kernel, JSON.parse(committed)['x-workbase-config-hash'])).toBe(committed)
   expect(JSON.stringify(canonical(JSON.parse(text)), null, 2) + '\n').toBe(text)
   await SwaggerParser.validate(structuredClone(doc))
   await expect(SwaggerParser.validate({ ...structuredClone(doc), info: { title: 'broken' } })).rejects.toThrow()
@@ -151,6 +153,11 @@ it('describes request grammar, disjoint entities, both cursor contracts and muta
   expect(check({ entity: 'worker', limit: 0 })).toBe(false)
   expect(check({ entity: 'missing', limit: 1 })).toBe(false)
   expect(check({ entity: 'worker', limit: 1, where: { name: { unknown: 'x' } } })).toBe(false)
+  const summary = { entity: 'worker', summary: { version: 1, metrics: [{ op: 'count', alias: 'rows' }] } }
+  expect(check(summary)).toBe(false)
+  expect(check({ ...summary, limit: 1 })).toBe(false)
+  expect(doc.components.schemas.Query_worker.properties).not.toHaveProperty('summary')
+  expect(Object.keys(doc.components.schemas).some(name => name.startsWith('Summary'))).toBe(false)
   expect(doc.components.schemas.List_worker.properties.next_cursor.description).toContain('last returned row id')
   expect(doc.components.schemas.Result_worker.properties.next_cursor.description).toContain('Opaque signed')
   expect(doc.paths['/api/worker'].post.parameters[0].name).toBe('Idempotency-Key')
@@ -225,10 +232,11 @@ it('checks private vocabulary over the committed fixture with loadPrivateTerms',
 })
 it('CLI detects missing, stale and edited-field drift; check never writes; --write repairs', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'workbase-openapi-'))
-  // Keep package resolution inside the worktree when importing copied config modules.
-  const temp = resolve('packages/core/test/fixtures', directory.split('/').at(-1)!)
+  const temp = directory
   try {
     await cp(root, temp, { recursive: true })
+    // Keep all probes under TMPDIR while resolving the pinned workspace packages.
+    await symlink(resolve('node_modules'), join(temp, 'node_modules'), 'dir')
     const args = ['--config', join(temp, 'config.ts')]
     const original = await readFile(join(temp, 'openapi.json'), 'utf8')
     expect(await runOpenApiCli(args)).toBe(0)
@@ -240,7 +248,7 @@ it('CLI detects missing, stale and edited-field drift; check never writes; --wri
     expect(await runOpenApiCli([...args, '--write'])).toBe(0)
     expect(await runOpenApiCli(args)).toBe(0)
     await expect(runOpenApiCli(['--live', 'https://example.test', '--write'])).rejects.toThrow('Usage')
-  } finally { await rm(temp, { recursive: true, force: true }); await rm(directory, { recursive: true, force: true }) }
+  } finally { await rm(directory, { recursive: true, force: true }) }
 })
 it('the literal loader fixture has the same worker/account public schema and policy as the runtime fixture', async () => {
   const { config, configHash } = await loadConfig(join(root, 'config.ts'))

@@ -11,6 +11,8 @@ import { expressionInfo, fieldExpression, readableComputed } from './expressions
 
 export { fieldsFor, fieldType, operatorsFor, filterSchema, querySchema } from './input-schema'
 export type { Scalar, Filter, Order, Selection, RowAccessState, QueryInput } from './input-schema'
+export { SUMMARY_VERSION, SUMMARY_LIMITS, summaryQuerySchema, summaryResultSchema } from './summary-schema'
+export type { SummaryModel, SummaryField, SummaryMetric, SummaryWindow, SummaryOptions, SummaryQuery, SummaryResult } from './summary-schema'
 import { fieldsFor, operatorsFor, querySchema, type Filter, type Selection, type QueryInput } from './input-schema'
 /** Bound recursion before Zod, including malformed/unrecognized inputs. */
 function preflight(input: unknown) {
