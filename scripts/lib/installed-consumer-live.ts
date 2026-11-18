@@ -10,6 +10,7 @@ import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'nod
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { chromium, type Browser, type BrowserContext, type Page } from 'playwright'
 import type { Manifest } from '../../packages/plugins/console/ui/src/check'
+import { consoleArtifactsSHA, consoleHTMLStamps, readConsoleArtifacts } from '../../packages/core/src/console-build'
 import { deferTempDirCleanup } from './test-temp-dir.mjs'
 
 declare const document: { documentElement: { scrollWidth: number } }
@@ -417,6 +418,9 @@ export default { ...worker, fetch(request, env, ctx) {
     // Instance bundle built from candidate SDK sources in step 4.
     const assets = join(consumer, 'dist/console')
     const html = readFileSync(join(assets, 'index.html'), 'utf8')
+    const metadata = json(join(assets, 'build-meta.json'))
+    assert.equal(metadata.sha, consoleArtifactsSHA(await readConsoleArtifacts(assets)), 'Instance metadata must identify the emitted bytes')
+    assert.deepEqual(consoleHTMLStamps(html), [metadata.sha])
     const references = [...html.matchAll(/(?:src|href)=["']([^"']+\.(?:js|css)(?:[?#][^"']*)?)["']/g)].map(match => match[1])
     assert(references.some(path => path.endsWith('.js')) && references.some(path => path.endsWith('.css')))
     const hash = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex')

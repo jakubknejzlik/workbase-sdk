@@ -67,8 +67,10 @@ Producer `prepack` rebuilds the frontend producer workspace and stages
 and strips producer scripts/development dependencies from registry-safe manifests.
 The payload contains `index.html`, hashed JS/CSS, generic EN/CS locale JSON,
 `build-meta.json`, Apache `LICENSE` and the shared-component `NOTICE`.
-Metadata reads `version` from the plugins manifest; no private package version is
-used. Producer workspaces, fixtures and private catalogs are excluded. Build and
+Metadata reads `version` from the plugins manifest, `sourceCommit` from git, and
+`sha` from the final emitted directory using the same artifact hash and HTML stamp
+as Instance builds. The packaged directory also passes plan-only provisioning.
+Producer workspaces, fixtures and private catalogs are excluded. Build and
 staged/packed scans reject private content and source maps; only the exact
 reviewed component NOTICE can contain its provenance attribution.
 
