@@ -78,8 +78,11 @@ Supported kinds, as defined in [schemas.ts](../../packages/mcp/src/schemas.ts):
   with domain, runtime or access changes is rejected. Continue through validation,
   preview, disposable verification and promotion as below.
 - `set_locale` takes `locale`, `defaultLanguage` and/or `languages` (`en`/`cs`).
-  V3 presentation changes share a batch with `set_catalog_entries` and `set_instance_display_name`, separate from
+  V3 presentation changes share a batch with `set_label`, `set_catalog_entries` and `set_instance_display_name`, separate from
   runtime/access/schema changes, and preserve the domain revision and schema lock. See the language example below.
+- `set_label` takes `entity`, `language` and explicit `pluralForms` for entity
+  captions, plus optional `singular` and `object`. A field caption instead takes
+  `entity`, `field`, `language`, `label`. V3 captions write domain catalog keys.
 
 The access compiler checks roles, actions and entity matrices. Composition and
 access kinds can share a proposal; `propose_change` also accepts these V3 kinds.
@@ -117,12 +120,17 @@ and plural categories for each supported language. For a fresh worker scaffold:
   "baseRevision": 1,
   "changes": [
     { "kind": "set_locale", "languages": ["en", "cs"] },
+    { "kind": "set_label", "entity": "worker", "language": "en",
+      "singular": "Worker", "object": "worker", "pluralForms": {
+        "one": "{{count}} worker", "other": "{{count}} workers"
+    } },
+    { "kind": "set_label", "entity": "worker", "language": "cs",
+      "singular": "Pracovník", "object": "pracovníka", "pluralForms": {
+        "one": "{{count}} pracovník", "few": "{{count}} pracovníci",
+        "many": "{{count}} pracovníka", "other": "{{count}} pracovníků"
+    } },
+    { "kind": "set_label", "entity": "worker", "field": "name", "language": "cs", "label": "Jméno" },
     { "kind": "set_catalog_entries", "language": "cs", "namespace": "domain", "entries": {
-      "entity.worker_one": "{{count}} pracovník",
-      "entity.worker_few": "{{count}} pracovníci",
-      "entity.worker_many": "{{count}} pracovníka",
-      "entity.worker_other": "{{count}} pracovníků",
-      "field.worker.name": "Jméno",
       "field.worker.user": "Přístup do aplikace"
     } },
     { "kind": "set_catalog_entries", "language": "cs", "namespace": "ui", "entries": {
@@ -150,11 +158,18 @@ counted forms (`one`, `few`, `many`, `other`), consistent interpolation, and no
 orphan keys. Errors include locations and the missing keys. Dictionary-only
 batches preserve config and access/OpenAPI artifacts, including their absence.
 
-This is issue #186 slice 1. V3 `set_label`, named singular/object forms, and their
-renderer support remain slice 2. Use only the inventoried V3 keys in this slice;
-page/nav titles stay independent `ui:` keys. Legacy-instance captions retain their
-existing behavior. Previously saved legacy caption proposals cannot publish V3
-sources; recreate them with catalog operations. The V3 legacy-write guard remains.
+V3 `set_label` writes counted `entity.<entity>_<category>` keys and the optional
+named keys `entity.<entity>.singular` and `entity.<entity>.object`. Entity captions
+require every plural category for the language in `pluralForms`; a legacy `plural`
+string is refused with an actionable diagnostic. No forms are inferred.
+The required-key inventory exposes named forms as optional until authored in an
+enabled language, then validation requires them in every enabled language.
+The renderer uses the singular form as the accessible name of entity forms and
+the object form in the Create label (for example, “Vytvořit pracovníka”);
+without an object form it uses generic `sdk:create`. Page/nav titles stay
+independent `ui:` keys. Legacy-instance captions retain their existing behavior.
+Previously saved legacy caption proposals cannot publish V3 sources; recreate
+them with V3 caption/catalog operations. The V3 legacy-write guard remains.
 
 Proofs persist across restarts and bind config/schema/runtime, UI declarations
 and checked modules, catalog bytes/path inventories (including absent catalogs),

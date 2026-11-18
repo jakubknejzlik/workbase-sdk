@@ -2,9 +2,31 @@ import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile, stat } from
 import { dirname, join, relative } from 'node:path'
 import { stateRoot } from '../disposable.ts'
 import { noLink, json, type Bundle } from '../storage.ts'
-import { fail, WorkflowError, type CatalogChange } from '../schemas.ts'
+import { fail, WorkflowError, type CatalogChange, type LabelChange } from '../schemas.ts'
+import type { InstanceConfig } from '@workbasehq/core/config'
 import { byteHash } from '../byte-digest.ts'
 import { replaySources } from '../replay-sources.ts'
+
+/** Typed captions become ordinary catalog edits in the existing presentation batch. */
+export function labelCatalog(config: InstanceConfig, change: LabelChange): CatalogChange {
+  if (change.entity === 'users' || !Object.hasOwn(config.entities, change.entity)) fail('unknown_entity', `Unknown authored entity: ${change.entity}`)
+  const entries: Record<string, string> = {}
+  if (change.field !== undefined) {
+    if (!Object.hasOwn(config.entities[change.entity].fields, change.field)) fail('unknown_field', `Unknown field: ${change.entity}.${change.field}`)
+    entries[`field.${change.entity}.${change.field}`] = change.label!
+  } else {
+    const categories = new Intl.PluralRules(change.language).resolvedOptions().pluralCategories
+    const missing = categories.filter(category => change.pluralForms?.[category] === undefined)
+    const extra = Object.keys(change.pluralForms ?? {}).filter(category => !categories.includes(category as Intl.LDMLPluralRule))
+    if (change.plural !== undefined || missing.length || extra.length) {
+      fail('invalid_plural_forms', `V3 entity ${change.entity} (${change.language}) requires explicit pluralForms for ${categories.join(', ')}; missing: ${missing.join(', ') || 'none'}; unsupported: ${extra.join(', ') || 'none'}. Replace legacy plural with pluralForms; use inspect_schema dictionaries.pluralCategories.`, 422)
+    }
+    for (const category of categories) entries[`entity.${change.entity}_${category}`] = change.pluralForms![category]!
+    if (change.singular !== undefined) entries[`entity.${change.entity}.singular`] = change.singular
+    if (change.object !== undefined) entries[`entity.${change.entity}.object`] = change.object
+  }
+  return { kind: 'set_catalog_entries', language: change.language, namespace: 'domain', entries }
+}
 
 export async function catalogPlan(root: string, changes: CatalogChange[]) {
   const files = new Map<string, string>()

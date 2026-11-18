@@ -7,6 +7,7 @@ import { ConsoleProvider, PageView } from '../src/react'
 import { entityCreatePage, entityDetailPage, entityEditPage, entityListPage, type Node, page, list } from '../src/index'
 import type { Manifest } from '../src/check'
 import type { ClientRequestInit } from '../src/client'
+import { createI18n } from '../src/i18n'
 const fields = Object.fromEntries(['name', 'extra', 'user', 'locked'].map(name => [name, { type: name === 'user' ? 'ref' : 'string', required: name === 'name', readOnly: name === 'locked', userLink: name === 'user', computed: false }]))
 const meta = { displayField: 'name', fields }
 const links = { list: { to: '/items', bind: {} }, detail: { to: '/items/$itemId', bind: { itemId: 'record.id' } }, edit: { to: '/items/$itemId/edit', bind: { itemId: 'record.id' } } }
@@ -177,6 +178,34 @@ test('create entry and dirty edit back follow declared paths', async () => {
   render(view(async () => json(row), 'edit'))
   fireEvent.change(await screen.findByLabelText('domain:field.probe.name'), { target: { value: 'Dirty' } }); fireEvent.click(screen.getByText('sdk:back'))
   expect(confirm).toHaveBeenCalledTimes(1); expect(navigate).toHaveBeenCalledWith('/items/x')
+})
+
+test.each(['en', 'cs'] as const)('named %s entity captions render object-form Create and singular form names while titles remain independent', async language => {
+  const singular = language === 'cs' ? 'Pracovník' : 'Worker', object = language === 'cs' ? 'pracovníka' : 'worker'
+  const i18n = createI18n({ languages: [language], catalogs: { [language]: {
+    domain: { 'entity.probe.singular': singular, 'entity.probe.object': object, 'entity.probe_one': '{{count}} item', 'entity.probe_other': '{{count}} items', 'field.probe.name': 'Name' },
+    ui: { 'probe.list': 'Independent list title', 'probe.create': 'Independent create title' },
+  } } })
+  const listPage = route('list', []), createPage = route('create', [])
+  render(h(ConsoleProvider, { caps: grants({ probe: meta }), identity: { actorId: 'a', orgId: 'one' }, t: i18n.t, i18n, fetch: async () => json({ data: [], next_cursor: null }) }, h(PageView, { definition: listPage, route: listPage, routes: [listPage, createPage], entities: { probe: meta }, params: {}, search: {}, navigate })))
+  fireEvent.click(screen.getByRole('button', { name: language === 'cs' ? 'Vytvořit pracovníka' : 'Create worker' }))
+  expect(navigate).toHaveBeenCalledWith('/items/new')
+  expect(screen.getByRole('heading', { name: 'Independent list title' })).toBeTruthy()
+  cleanup()
+  render(h(ConsoleProvider, { caps: grants({ probe: meta }), identity: { actorId: 'a', orgId: 'one' }, t: i18n.t, i18n }, h(PageView, { definition: createPage, route: createPage, entities: { probe: meta }, params: {}, search: {}, navigate })))
+  expect(screen.getByRole('form', { name: singular })).toBeTruthy()
+  expect(screen.getByRole('heading', { name: 'Independent create title' })).toBeTruthy()
+})
+
+test('real translator falls back to generic sdk:create when no object form exists in the active language', async () => {
+  const i18n = createI18n({ languages: ['cs', 'en'], catalogs: {
+    en: { domain: { 'entity.probe.object': 'worker' } },
+    cs: { domain: { 'entity.probe_other': '{{count}} pracovníků', 'field.probe.name': 'Jméno' }, ui: { 'probe.list': 'Seznam' } },
+  } })
+  const listPage = route('list', [])
+  render(h(ConsoleProvider, { caps: grants({ probe: meta }), identity: { actorId: 'a', orgId: 'one' }, t: i18n.t, i18n, fetch: async () => json({ data: [], next_cursor: null }) }, h(PageView, { definition: listPage, route: listPage, routes: [listPage, route('create')], entities: { probe: meta }, params: {}, search: {}, navigate })))
+  expect(screen.getByRole('button', { name: 'Vytvořit' })).toBeTruthy()
+  expect(screen.queryByRole('button', { name: 'Create worker' })).toBeNull()
 })
 
 test('page primitive infers list binding and renders static layout slots without fetching', async () => {

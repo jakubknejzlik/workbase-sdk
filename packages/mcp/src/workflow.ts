@@ -140,7 +140,7 @@ export class Workflow {
       return await this.store.locked(targetInstance, async () => {
         if (name === 'upgrade_sdk') return proposeSdkUpgrade(this.store, targetInstance, input.baseRevision, input.targetVersion, proposalId!)
         if (name === 'propose_composition') return proposeComposition(this.store, targetInstance, input.baseRevision, input.changes, proposalId!)
-        if (name === 'propose_change' && input.changes.some((change: unknown) => (change as { kind: string }).kind !== 'set_locale' && compositionChangeSchema.safeParse(change).success)) {
+        if (name === 'propose_change' && input.changes.some((change: { kind: string }) => !['set_locale', 'set_label'].includes(change.kind) && compositionChangeSchema.safeParse(change).success)) {
           if (!input.changes.every((change: unknown) => compositionChangeSchema.safeParse(change).success)) fail('mixed_change_kinds', 'Composition and legacy config changes must be proposed separately')
           return proposeComposition(this.store, targetInstance, input.baseRevision, input.changes, proposalId!)
         }

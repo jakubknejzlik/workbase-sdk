@@ -44,10 +44,12 @@ const consoleLocaleSchema = z.enum(['en', 'cs'])
 const setLabel = z.strictObject({
   kind: z.literal('set_label'), entity: identifier, language: consoleLocaleSchema,
   singular: caption.optional(), plural: caption.optional(), object: caption.optional().describe('Object/accusative form for the Add button, e.g. rezervaci'),
+  pluralForms: z.strictObject({ zero: caption.optional(), one: caption.optional(), two: caption.optional(), few: caption.optional(), many: caption.optional(), other: caption.optional() }).optional()
+    .describe('V3 entity captions require every Intl plural category for the language (en: one/other; cs: one/few/many/other), with consistent interpolation. Use inspect_schema dictionaries.pluralCategories.'),
   field: identifier.optional(), label: caption.optional(),
 }).refine(change => change.field !== undefined
-  ? change.label !== undefined && change.singular === undefined && change.plural === undefined && change.object === undefined
-  : change.label === undefined && [change.singular, change.plural, change.object].some(value => value !== undefined),
+  ? change.label !== undefined && change.singular === undefined && change.plural === undefined && change.object === undefined && change.pluralForms === undefined
+  : change.label === undefined && [change.singular, change.plural, change.object, change.pluralForms].some(value => value !== undefined),
 'Provide entity singular/plural/object captions, or field and label; do not mix the targets')
 const setLocale = z.strictObject({
   kind: z.literal('set_locale'), locale: consoleLocaleSchema.optional(), defaultLanguage: consoleLocaleSchema.optional(),
@@ -65,6 +67,7 @@ const setCatalogEntries = z.strictObject({
   }).pipe(z.record(catalogKey, caption)).refine(entries => Object.keys(entries).length > 0 && Object.keys(entries).length <= 1000, 'Provide 1–1000 entries'),
 })
 export type CatalogChange = z.infer<typeof setCatalogEntries>
+export type LabelChange = z.infer<typeof setLabel>
 const instanceDisplayName = z.string().trim().min(1).max(1000)
 const setInstanceDisplayName = z.strictObject({ kind: z.literal('set_instance_display_name'), displayName: instanceDisplayName })
 export type PresentationChange = LocaleChange | z.infer<typeof setInstanceDisplayName>
@@ -104,10 +107,10 @@ export const setRolesSchema = z.strictObject({
   organizationOwnerRole: identifier,
 }).refine(change => change.roles.includes(change.organizationOwnerRole), 'organizationOwnerRole must be in roles')
 export type RolesChange = z.infer<typeof setRolesSchema>
-export const compositionChangeSchema = z.union([runtimeChangeSchema, accessChangeSchema, setRolesSchema, setLocale, setCatalogEntries, setInstanceDisplayName])
+export const compositionChangeSchema = z.union([runtimeChangeSchema, accessChangeSchema, setRolesSchema, setLocale, setCatalogEntries, setInstanceDisplayName, setLabel])
 export type CompositionChange = z.infer<typeof compositionChangeSchema>
-export const isPresentationChange = (change: { kind: string }): change is PresentationChange | CatalogChange =>
-  change.kind === 'set_locale' || change.kind === 'set_instance_display_name' || change.kind === 'set_catalog_entries'
+export const isPresentationChange = (change: { kind: string }): change is PresentationChange | CatalogChange | LabelChange =>
+  change.kind === 'set_locale' || change.kind === 'set_instance_display_name' || change.kind === 'set_catalog_entries' || change.kind === 'set_label'
 
 export const changeSchema = z.discriminatedUnion('kind', [
   setLabel,

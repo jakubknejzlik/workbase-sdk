@@ -55,6 +55,9 @@ async function fixture() {
 }
 const catalog = (entries: Record<string, string>, language = 'en', namespace = 'domain') => ({ kind: 'set_catalog_entries', language, namespace, entries })
 const bilingual = [{ kind: 'set_locale', languages: ['en', 'cs'], locale: 'cs' }, ...csCatalogChanges]
+const enForms = { one: '{{count}} worker', other: '{{count}} workers' }
+const csForms = { one: csDomain['entity.worker_one'], few: csDomain['entity.worker_few'], many: csDomain['entity.worker_many'], other: csDomain['entity.worker_other'] }
+const entityCaption = (language: string, pluralForms: Record<string, string>, singular: string, object: string) => ({ kind: 'set_label', entity: 'worker', language, pluralForms, singular, object })
 async function propose(call: Awaited<ReturnType<typeof stdio>>['call'], changes: unknown[] = bilingual) {
   const proposed = await call('propose_change', { instance: 'demo', baseRevision: 1, changes })
   expect(proposed, JSON.stringify(proposed)).toMatchObject({ ok: true, kind: 'composition_change' })
@@ -65,36 +68,76 @@ async function validate(call: Awaited<ReturnType<typeof stdio>>['call'], args: R
   expect(result, JSON.stringify(result)).toMatchObject({ ok: true, errors: [] })
 }
 
-it('publishes displayName and explicit EN/CS catalogs through stdio, consumes persisted proofs, and preserves source/history', async () => {
+it('publishes displayName, EN/CS caption forms and catalogs through stdio, consumes persisted proofs, and preserves source/history', async () => {
   const root = await fixture()
   let session = await stdio(root)
   try {
     const inspection = await session.call('inspect_schema', { instance: 'demo' })
     expect(inspection.dictionaries).toMatchObject({ languages: ['en'], catalogs: { en: { domain: { 'field.worker.name': 'Name' } } }, pluralCategories: { cs: expect.arrayContaining(['one', 'few', 'many', 'other']) } })
     expect(inspection.dictionaries.requiredKeys).toContainEqual({ key: 'domain:entity.worker', plural: true, sources: expect.arrayContaining([expect.objectContaining({ file: join(root, 'schema/worker.ts'), line: expect.any(Number) })]) })
+    for (const form of ['singular', 'object']) expect(inspection.dictionaries.requiredKeys).toContainEqual(expect.objectContaining({ key: `domain:entity.worker.${form}`, optional: true }))
     const paths = ['config.ts', 'runtime.ts', 'access.ts', 'schema/worker.ts', 'schema.lock.json', ...(await fs.readdir(join(root, 'migrations'))).map(name => `migrations/${name}`)]
     const before = await Promise.all(paths.map(path => fs.readFile(join(root, path))))
-    const args = await propose(session.call, [{ kind: 'set_instance_display_name', displayName: '  Úklid 東京  ' }, ...bilingual, catalog({ 'field.worker.name': 'Full name' })])
+    const args = await propose(session.call, [
+      { kind: 'set_instance_display_name', displayName: '  Úklid 東京  ' }, bilingual[0],
+      entityCaption('en', enForms, 'Worker', 'worker'), entityCaption('cs', csForms, 'Pracovník', 'pracovníka'),
+      { kind: 'set_label', entity: 'worker', field: 'name', language: 'en', label: 'Full name' },
+      { kind: 'set_label', entity: 'worker', field: 'name', language: 'cs', label: 'Jméno' },
+      catalog({ 'field.worker.user': csDomain['field.worker.user'] }, 'cs'), csCatalogChanges[1],
+    ])
     await validate(session.call, args)
     const preview = await session.call('preview_migration', args)
     expect(preview).toMatchObject({ ok: true, revision: 1, sql: '' })
     expect(preview.files.map((file: { path: string }) => file.path)).toEqual(expect.arrayContaining(['config.ts', 'locales/en/domain.json', 'locales/cs/domain.json', 'locales/cs/ui.json']))
+    const staged = (path: string) => JSON.parse(preview.files.find((file: { path: string }) => file.path === path).data)
+    expect(staged('locales/cs/domain.json')).toEqual({ ...csDomain, 'entity.worker.singular': 'Pracovník', 'entity.worker.object': 'pracovníka' })
+    expect(staged('locales/en/domain.json')).toMatchObject({ 'entity.worker.singular': 'Worker', 'entity.worker.object': 'worker', 'entity.worker_one': enForms.one, 'entity.worker_other': enForms.other })
     expect(await session.call('apply_to_disposable', args)).toMatchObject({ ok: true, verified: true, diffs: [] })
     expect(await Promise.all(paths.map(path => fs.readFile(join(root, path))))).toEqual(before)
     await session.close(); session = await stdio(root)
     expect(await session.call('promote', { ...args, expectedRevision: 1 })).toMatchObject({ ok: true, status: 'promoted', revision: 1 })
     await session.close(); session = await stdio(root)
-    expect(await session.call('inspect_schema', { instance: 'demo' })).toMatchObject({ revision: 1, displayName: 'Úklid 東京', languages: ['en', 'cs'], dictionaries: { catalogs: { cs: { domain: csDomain, ui: csUi }, en: { domain: { 'field.worker.name': 'Full name', 'field.worker.user': 'Application access' } } } } })
+    const published = await session.call('inspect_schema', { instance: 'demo' })
+    expect(published).toMatchObject({ revision: 1, displayName: 'Úklid 東京', languages: ['en', 'cs'], dictionaries: { catalogs: { cs: { domain: { ...csDomain, 'entity.worker.singular': 'Pracovník', 'entity.worker.object': 'pracovníka' }, ui: csUi }, en: { domain: { 'field.worker.name': 'Full name', 'field.worker.user': 'Application access', 'entity.worker.object': 'worker' } } } } })
+    for (const form of ['singular', 'object']) expect(published.dictionaries.requiredKeys).toContainEqual(expect.objectContaining({ key: `domain:entity.worker.${form}`, optional: false }))
     const after = await Promise.all(paths.map(path => fs.readFile(join(root, path))))
     expect(after.slice(1)).toEqual(before.slice(1))
-    for (const command of ['check:ui', 'typecheck', 'check:schema', 'check:access', 'check:openapi']) {
-      execFileSync('bun', ['run', command], { cwd: root, stdio: 'pipe' })
-    }
     expect(after[0].toString().match(/^import .*$/gm)).toEqual(before[0].toString().match(/^import .*$/gm))
     expect(after[0].toString()).toContain('bindSchemaLock(defineConfig({')
     for (const script of ['check:ui', 'typecheck', 'check:schema', 'check:access', 'check:openapi']) {
       execFileSync('bun', ['run', script], { cwd: root, encoding: 'utf8', stdio: 'pipe' })
     }
+  } finally { await session.close() }
+})
+
+it('rejects incomplete typed Czech plurals and unknown caption targets, and requires named forms in every enabled language before promotion', async () => {
+  const root = await fixture(), session = await stdio(root)
+  try {
+    const call = (changes: unknown[]) => session.call('propose_change', { instance: 'demo', baseRevision: 1, changes })
+    for (const category of ['one', 'few', 'many', 'other']) {
+      const forms = Object.fromEntries(Object.entries(csForms).filter(([key]) => key !== category))
+      expect(await call([entityCaption('cs', forms, 'Pracovník', 'pracovníka')])).toMatchObject({ ok: false, error: { code: 'invalid_plural_forms', message: expect.stringContaining(`missing: ${category}`) } })
+    }
+    for (const change of [
+      { kind: 'set_label', entity: 'worker', language: 'cs', plural: 'Pracovníci' },
+      { kind: 'set_label', entity: 'worker', language: 'cs', singular: 'Pracovník' },
+      entityCaption('en', { ...enForms, few: 'few workers' }, 'Worker', 'worker'),
+    ]) expect(await call([change])).toMatchObject({ ok: false, error: { code: 'invalid_plural_forms', message: expect.stringContaining('pluralForms') } })
+    for (const [change, code] of [
+      [{ ...entityCaption('en', enForms, 'Worker', 'worker'), entity: 'missing' }, 'unknown_entity'],
+      [{ kind: 'set_label', entity: 'missing', field: 'name', language: 'cs', label: 'Jméno' }, 'unknown_entity'],
+      [{ kind: 'set_label', entity: 'worker', field: 'missing', language: 'cs', label: 'Jméno' }, 'unknown_field'],
+    ] as const) expect(await call([change])).toMatchObject({ ok: false, error: { code } })
+    for (const change of [
+      { kind: 'set_interactive', interactive: true },
+      { kind: 'add_field', entity: 'worker', field: 'note', definition: { type: 'string' } },
+    ]) expect(await call([entityCaption('en', enForms, 'Worker', 'worker'), change])).toMatchObject({ ok: false, error: { code: 'mixed_change_kinds' } })
+    const args = await propose(session.call, [...bilingual, entityCaption('en', enForms, 'Worker', 'worker')])
+    for (const tool of ['validate', 'promote']) expect(await session.call(tool, { ...args, ...(tool === 'promote' ? { expectedRevision: 1 } : {}) })).toMatchObject({ ok: false, error: { code: 'invalid_presentation', details: expect.arrayContaining([
+      expect.objectContaining({ lang: 'cs', key: 'domain:entity.worker.singular', code: 'missing-key' }),
+      expect.objectContaining({ lang: 'cs', key: 'domain:entity.worker.object', code: 'missing-key' }),
+    ]) } })
+    expect(await fs.readFile(join(root, 'locales/en/domain.json'), 'utf8')).not.toContain('entity.worker.object')
   } finally { await session.close() }
 })
 
@@ -174,7 +217,7 @@ it.each([
   } finally { await session.close() }
 })
 
-it('publishes dictionary-only updates without adding access/OpenAPI artifacts and rejects unsafe inputs', async () => {
+it('publishes V3 set_label alone without adding access/OpenAPI artifacts and rejects unsafe inputs', async () => {
   const root = await fixture(), session = await stdio(root)
   try {
     await fs.writeFile(join(root, 'config.ts'), (await fs.readFile(join(root, 'config.ts'), 'utf8')).replace("import spec from './openapi.json'\n", '').replace('bindOpenApi(bindSchemaLock(', 'bindSchemaLock(').replace('}), lock), spec)', '}), lock)'))
@@ -182,7 +225,7 @@ it('publishes dictionary-only updates without adding access/OpenAPI artifacts an
     for (const change of [catalog({ '../escape': 'No' }), catalog({ 'field.worker.name': ' ' }), catalog({ 'field.worker.name': 'No' }, '../cs'), { ...catalog({ valid: 'No' }), path: 'config.ts' }, catalog({ valid: 'No' }, 'en', 'sdk'), catalog(JSON.parse('{"__proto__":"No"}'))]) {
       expect(await session.call('propose_change', { instance: 'demo', baseRevision: 1, changes: [change] })).toMatchObject({ ok: false, error: { code: 'invalid_input' } })
     }
-    const args = await propose(session.call, [catalog({ 'field.worker.name': 'Full name' })])
+    const args = await propose(session.call, [{ kind: 'set_label', entity: 'worker', field: 'name', language: 'en', label: 'Full name' }])
     await validate(session.call, args)
     const preview = await session.call('preview_migration', args)
     expect(preview.files.map((file: { path: string }) => file.path)).toEqual(['locales/en/domain.json'])

@@ -28,7 +28,7 @@ export type ProviderProps = { caps?: Capabilities; onAuthorizationFailure?: (sta
 export function ConsoleProvider({ identity, t, baseURL = '', fetch: transport = globalThis.fetch, slots = {}, i18n, caps, onAuthorizationFailure, children }: ProviderProps) {
   const language = useSyncExternalStore(i18n?.subscribe ?? (() => () => {}), i18n?.language ?? (() => ''), i18n?.language ?? (() => ''))
   // A fresh translator identity per language makes memoized authored consumers re-render on language change.
-  const translate = useMemo<Translate>(() => t.bind(null), [t, language])
+  const translate = useMemo<Translate>(() => Object.assign(t.bind(null), { exists: t.exists }), [t, language])
   const scopeKey = canonicalJSON([identity.actorId, identity.orgId, caps ?? null])
   const client = useMemo(() => createClient({ baseURL, ...identity, fetch: transport, onAuthorizationFailure }), [baseURL, scopeKey, transport, onAuthorizationFailure])
   const queries = useMemo(() => new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity, refetchOnWindowFocus: false } } }), [client])
@@ -172,7 +172,8 @@ function Form({ props, metadata, initial, reload }: { props: ViewProps; metadata
   const conflict = hadConflict
   const state = failure ? failureState(failure) : undefined
   const ctx: RenderContext = { ...runtime, slots: props.slots ?? runtime.slots, metadata, entity: definition.entity!, mode: definition.mode, record: base, draft, change: (name, value) => setDraft(current => ({ ...current, [name]: value })), issues: state?.kind === 'validation' ? state.issues : [] }
-  return h('form', { noValidate: true, onSubmit: (e: { preventDefault(): void }) => { e.preventDefault(); void save() } },
+  const singularKey = 'domain:entity.' + definition.entity + '.singular'
+  return h('form', { 'aria-label': translate.exists?.(singularKey) ? translate(singularKey) : undefined, noValidate: true, onSubmit: (e: { preventDefault(): void }) => { e.preventDefault(); void save() } },
     conflict ? h('div', { role: 'alert' }, translate('sdk:conflict'), h('button', { type: 'button', disabled: saving, onClick: () => { void reloadCopy() } }, translate('sdk:reloadServerCopy'))) : state && message(state, translate),
     ...definition.layout.map((node, i) => h('div', { key: i }, renderNode(node, ctx))),
     h('button', { type: 'submit', disabled: saving }, translate('sdk:save')),
@@ -193,10 +194,11 @@ function ListView({ props, metadata }: { props: ViewProps; metadata: EntityMeta 
   const [bind, setBind] = useState(resolved), { state, more, hasMore, loadingMore } = useList(props.definition.entity!, metadata, bind)
   const create = props.routes?.filter(route => route.entity === props.definition.entity && route.mode === 'create' && gate(runtime.caps, { entities: props.entities }).allows(route))
   const createPath = create?.length === 1 && !Object.keys(create[0].params).length ? buildPath(create[0].path, {}) : undefined
+  const objectKey = 'domain:entity.' + props.definition.entity + '.object'
   useEffect(() => setBind(resolved), [canonicalJSON(resolved)])
   return h('div', null,
     h('p', null, translate('domain:entity.' + props.definition.entity, { count: state.kind === 'ready' ? state.data.length : 0 })),
-    createPath && h('button', { onClick: () => props.navigate(createPath) }, translate('sdk:create')),
+    createPath && h('button', { onClick: () => props.navigate(createPath) }, translate.exists?.(objectKey) ? translate('sdk:createEntity', { object: translate(objectKey) }) : translate('sdk:create')),
     metadata.displayField !== 'id' && h('input', { 'aria-label': translate('sdk:search'), value: bind.search ?? '', onChange: (e: { target: { value: string } }) => setBind(current => ({ ...current, search: e.target.value })) }),
     h('select', { 'aria-label': translate('sdk:sort'), value: bind.sort || metadata.displayField, onChange: (e: { target: { value: string } }) => setBind(current => ({ ...current, sort: e.target.value })) }, ...[...new Set(['id', ...Object.keys(metadata.fields)])].map(field => h('option', { key: field, value: field }, field === 'id' ? translate('sdk:identifier') : translate('domain:field.' + props.definition.entity + '.' + field)))),
     h('select', { 'aria-label': translate('sdk:direction'), value: bind.dir || 'asc', onChange: (e: { target: { value: string } }) => setBind(current => ({ ...current, dir: e.target.value })) }, ...['asc', 'desc'].map(dir => h('option', { key: dir, value: dir }, translate('sdk:' + dir)))),

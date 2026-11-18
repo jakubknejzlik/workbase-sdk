@@ -1,4 +1,4 @@
-import { catalogPlan, validatePresentation } from './presentation.ts'
+import { catalogPlan, labelCatalog, validatePresentation } from './presentation.ts'
 import { join } from 'node:path'
 import { durableAtomic, json, type Bundle, type Store } from '../storage.ts'
 import { fail, identifier, isPresentationChange, type AccessChange, type CompositionChange, type RolesChange, type RuntimeChange } from '../schemas.ts'
@@ -45,7 +45,7 @@ async function prepare(bundle: Bundle, changes: CompositionChange[], root: strin
   const accessChanges = changes.filter(isAccess)
   const access = accessChanges.length ? await accessPlan(root, accessChanges) : { config: bundle.config, files: [] }
   const presentation = await presentationPlan(root, changes.filter(change => change.kind === 'set_locale' || change.kind === 'set_instance_display_name'))
-  const catalogs = await catalogPlan(root, changes.filter(change => change.kind === 'set_catalog_entries'))
+  const catalogs = await catalogPlan(root, changes.flatMap(change => change.kind === 'set_label' ? [labelCatalog(bundle.config, change)] : change.kind === 'set_catalog_entries' ? [change] : []))
   const config = presentation?.config ?? access.config
   const model = applyRuntimeChanges(parseRuntimeSource(bundle.runtimeSource!), runtimeChanges, config)
   const source = runtimeChanges.length ? rewriteRuntimeSource(bundle.runtimeSource!, model, config)
@@ -116,7 +116,7 @@ export async function executeComposition(store: Store, proposal: CompositionProp
   const plan = await compositionPlan(bundle, target.target, target.source, root, target.files)
   // Catalog bytes do not change access provenance. Retain existing artifacts and
   // never introduce access artifacts for a dictionary-only publication.
-  if (presentation && proposal.changes.every(change => change.kind === 'set_catalog_entries')) plan.files = target.files
+  if (presentation && proposal.changes.every(change => change.kind === 'set_catalog_entries' || change.kind === 'set_label')) plan.files = target.files
   const prepared = { ...target, ...plan }
   const { requirements, guards: requirementGuards } = await compositionRequirements(await store.directory(proposal.instance), prepared.model)
   assertCompositionRequirements(requirements)
