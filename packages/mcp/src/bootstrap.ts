@@ -63,6 +63,27 @@ async function bootstrapFiles(serverRoot: string, raw: unknown): Promise<Bootstr
   const paths = await templateFiles(template)
   // Preflight every destination before the audit or template can write anything.
   for (const path of paths) await safePath(target, join(target, path === 'gitignore' ? '.gitignore' : path))
+  let rendered = new Map<string, string>()
+  for (const source of paths) {
+    rendered.set(source === 'gitignore' ? '.gitignore' : source, (await readFile(join(template, source), 'utf8'))
+      .replaceAll('{{SDK_VERSION}}', version)
+      .replaceAll('{{INSTANCE_ID}}', input.id).replaceAll('{{INSTANCE_SELECTOR}}', selector)
+      .replaceAll('{{INSTANCE_DISPLAY_NAME}}', () => JSON.stringify(input.displayName ?? input.id)))
+  }
+  if (input.initialComposition) {
+    const { renderInitialComposition } = await import('./bootstrap-composition.ts')
+    rendered = await renderInitialComposition(rendered, input.initialComposition)
+    // Initial role selection is confined to an empty destination (dependencies
+    // may already be available). Never fill holes in an existing graph/target.
+    const entries = await readdir(target).catch((error: NodeJS.ErrnoException) => {
+      if (error.code === 'ENOENT') return []
+      throw error
+    })
+    if (entries.some(name => name !== 'node_modules')) {
+      const files: BootstrapReport['files'] = [...rendered.keys()].map(path => ({ path, status: 'conflict' }))
+      return { ok: true, nextStep: { tool: 'initialize_instance', arguments: { instance: selector, mode: 'preview' }, root: target }, files }
+    }
+  }
   await mkdir(join(boundary, 'proposals'), { recursive: true, mode: 0o700 })
   await appendFile(join(boundary, 'proposals/log.jsonl'), JSON.stringify({ timestamp: new Date().toISOString(), callId: crypto.randomUUID(), tool: 'bootstrap_instance' }) + '\n',
     { mode: 0o600, flag: constants.O_WRONLY | constants.O_APPEND | constants.O_CREAT | constants.O_NOFOLLOW })
@@ -78,10 +99,7 @@ async function bootstrapFiles(serverRoot: string, raw: unknown): Promise<Bootstr
     const destination = join(target, path)
     await safePath(target, destination)
     await mkdir(dirname(destination), { recursive: true })
-    const content = (await readFile(join(template, source), 'utf8'))
-      .replaceAll('{{SDK_VERSION}}', version)
-      .replaceAll('{{INSTANCE_ID}}', input.id).replaceAll('{{INSTANCE_SELECTOR}}', selector)
-      .replaceAll('{{INSTANCE_DISPLAY_NAME}}', () => JSON.stringify(input.displayName ?? input.id))
+    const content = rendered.get(path)!
     try {
       const file = await open(destination, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o644)
       try { await file.writeFile(content) } finally { await file.close() }

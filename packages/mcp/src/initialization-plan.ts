@@ -17,7 +17,7 @@ import { hash } from './planning.ts'
 import { byteHash, byteManifest } from './byte-digest.ts'
 import { replaySources } from './replay-sources.ts'
 import { parseRuntimeSource, type RuntimeModel } from './composition/runtime-source.ts'
-import { hydrateRuntimePlugins } from './composition/registry.ts'
+import { hydrateRuntimePlugins, permissionOptions } from './composition/registry.ts'
 
 export const initializationPaths = ['schema.lock.json', 'migrations/0001_r1.sql', 'openapi.json', 'access.lock.json', 'access.lock.md'] as const
 
@@ -172,6 +172,11 @@ export async function planInitialization(root: string, instance: string, staged?
   if (!runtimeSource) fail('runtime_not_canonical', 'Fresh initialization requires canonical runtime.ts', 422)
   const model = parseRuntimeSource(decodeSource(runtimeSource, join(root, 'runtime.ts')))
   if (staged && hash(model) !== hash(staged.model)) fail('runtime_not_canonical', 'Staged runtime model must match the rendered source', 422)
+  const permissions = model.plugins.find(plugin => plugin.plugin === 'permissions')?.options as { roles: string[]; ownerRole: string } | undefined
+  const expectedPermissions = permissionOptions(loaded.config)
+  if (permissions && (JSON.stringify(permissions.roles) !== JSON.stringify(expectedPermissions.roles) || permissions.ownerRole !== expectedPermissions.ownerRole)) {
+    fail('runtime_not_canonical', 'runtime.ts permissions must derive roles and ownerRole from the config graph before initialization', 422)
+  }
   const dependencyGuards = await initializationDependencies(root, model)
   const schema = await plan({ config: loaded.config, sources: loaded.sources, baseMigrations: {} })
   if (!schema.bundle || schema.bundle.filename !== '0001_r1.sql') fail('initialization_unsupported', 'Fresh initialization requires the first domain revision', 422)
