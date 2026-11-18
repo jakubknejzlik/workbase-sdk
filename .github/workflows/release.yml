@@ -55,6 +55,9 @@ jobs:
       - run: bash scripts/sdk-pack.sh
         env:
           WORKBASE_PRIVATE_TERMS: ${{ secrets.WORKBASE_PRIVATE_TERMS }}
+      - run: bun scripts/smoke-console-package.ts
+        env:
+          WORKBASE_PRIVATE_TERMS: ${{ secrets.WORKBASE_PRIVATE_TERMS }}
       - run: bun scripts/check-sdk-boundary.ts
         env:
           WORKBASE_PRIVATE_TERMS: ${{ secrets.WORKBASE_PRIVATE_TERMS }}

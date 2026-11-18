@@ -27,7 +27,8 @@ export function stageConsolePackage(root: string, name: 'core' | 'plugins', dest
     cpSync(join(source, 'console/ui/README.md'), join(destination, 'console/ui/README.md'))
     const assets = join(source, 'console/assets')
     const metadata = JSON.parse(readFileSync(join(assets, 'build-meta.json'), 'utf8'))
-    if (metadata.version !== manifest.version || metadata.primitivesProof) throw new Error('Rebuild console assets for the plugins version before packing')
+    if (metadata.version !== manifest.version || metadata.primitivesProof || !/^[a-f0-9]{40}$/.test(metadata.sha)
+      || !/^[a-f0-9]{40}$/.test(metadata.sourceCommit)) throw new Error('Rebuild console assets for the plugins version before packing')
     console.log(checkConsolePublic(assets))
     cpSync(assets, join(destination, 'console/assets'), { recursive: true })
   }
