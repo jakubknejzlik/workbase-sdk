@@ -13,12 +13,14 @@ function Proof() {
   const record = (name: string) => () => setHandlers(previous => [...previous, name])
   return <main className="space-y-6 p-6">
     <h1>Disabled slotted link: {mode}</h1>
-    <label><input type="checkbox" checked={disabled} onChange={event => setDisabled(event.target.checked)} /> Disable</label>
+    <label><input type="checkbox" checked={disabled} onChange={event => { setDisabled(event.target.checked); setHandlers([]) }} /> Disable</label>
     <Button asChild disabled={disabled && (mode === 'disabled' || mode === 'both')}
       aria-disabled={disabled && (mode === 'aria' || mode === 'both') ? 'true' : undefined}
+      onClick={record('button-click')} onKeyDown={record('button-keydown')} onKeyUp={record('button-keyup')}
       onMouseDownCapture={record('button-mousedown-capture')} onMouseDown={record('button-mousedown')}
       onAuxClickCapture={record('button-auxclick-capture')} onAuxClick={record('button-auxclick')}>
       <a href="/button-disabled-links.html?destination=1" aria-disabled={disabled && mode === 'child-aria' ? 'true' : undefined}
+        onClick={record('child-click')} onKeyDown={record('child-keydown')} onKeyUp={record('child-keyup')}
         onMouseDownCapture={record('child-mousedown-capture')} onMouseDown={record('child-mousedown')}
         onAuxClickCapture={record('child-auxclick-capture')} onAuxClick={record('child-auxclick')}>Destination</a>
     </Button>

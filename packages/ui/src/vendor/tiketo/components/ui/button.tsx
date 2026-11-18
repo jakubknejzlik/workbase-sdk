@@ -56,13 +56,15 @@ function Button({
     child?.props.disabled || child?.props["aria-disabled"] === true || child?.props["aria-disabled"] === "true"
   )
   const disabledSlotProps = slotDisabled ? {
+    // Remove the destination from both Slot and child props. Native link actions
+    // (including the context menu) must have nothing to navigate to.
+    href: undefined,
     "aria-disabled": true as const,
     // Match native disabled controls' tab-order policy. Programmatic focus stays
     // available for explanations; Tab still leaves normally (see the key guard).
     tabIndex: -1,
     onClickCapture: preventDisabledActivation,
     onAuxClickCapture: preventDisabledActivation,
-    onMouseDownCapture: preventDisabledMiddleMouseActivation,
     onKeyDownCapture: preventDisabledKeyActivation,
     onKeyUpCapture: preventDisabledKeyActivation,
   } : undefined
@@ -75,7 +77,7 @@ function Button({
       {...disabledSlotProps}
     >
       {/* Slot merges child handlers first, so replace child capture handlers too.
-          Cancelling in capture blocks navigation and both bubbling handlers. */}
+          These guards also block custom activation on non-anchor children. */}
       {child && disabledSlotProps
         ? React.cloneElement(child, disabledSlotProps)
         : props.children}
@@ -90,10 +92,6 @@ function preventDisabledActivation(event: React.SyntheticEvent) {
 
 function preventDisabledKeyActivation(event: React.KeyboardEvent) {
   if (event.key === "Enter" || event.key === " ") preventDisabledActivation(event)
-}
-
-function preventDisabledMiddleMouseActivation(event: React.MouseEvent) {
-  if (event.button === 1) preventDisabledActivation(event)
 }
 
 export { Button, buttonVariants }
