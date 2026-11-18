@@ -112,11 +112,24 @@ remote `DATABASE_ID`, using `runtime.ts`.
 
 For deployment, copy `deploy.env.example` to private `.env`. Configure
 `CLOUDFLARE_DEFAULT_ACCOUNT_ID`, `CLOUDFLARE_API_TOKEN`, stable `BETTER_AUTH_SECRET`,
-`WORKBASE_RESOURCE_PREFIX`, exact HTTPS `AUTH_BASE_URL`, and an authorized
+`WORKBASE_RESOURCE_PREFIX`, and an authorized
 `EMAIL_FROM` (or a dev/test mailbox token), plus `WORKBASE_OPS_TOKEN`.
-Optional `WORKBASE_DOMAIN` must match that origin. URL/domain may
-contain `{stage}`. `WORKBASE_OWNER_EMAIL` is a manual login address, not a seed
-or authorization grant. Registration is open for first sign-in; self-service
+Set `WORKBASE_PUBLIC_HOSTNAME` to a literal bare hostname such as `app.example.test`:
+the SDK derives its HTTPS origin and attaches a Cloudflare Custom Domain, managing
+DNS and the certificate. The raw hostname is validated without normalization and
+must use only lowercase ASCII `[a-z0-9.-]`; no scheme, port, path,
+trailing dot, embedded whitespace, IP, wildcard or placeholder is allowed. Punycode
+labels/TLDs are accepted. Configure each environment's hostname explicitly.
+Alternatively, without a custom hostname, set `AUTH_BASE_URL` to an exact HTTPS
+origin (for example workers.dev). Only this fallback expands `{stage}`, including
+`prefix-pr-N` previews. Only an unset `WORKBASE_PUBLIC_HOSTNAME` means no public
+hostname; an empty or whitespace-only set value is rejected. Blank `AUTH_BASE_URL`
+values are unset; at least one input is required.
+A supplied hostname wins over a differing or malformed fallback with one warning;
+invalid hostnames fail. Existing scaffolds must replace the removed hostname env
+variable and `domain` option with `WORKBASE_PUBLIC_HOSTNAME` and `publicHostname`;
+legacy inputs fail with typed migration diagnostics, without an alias.
+`WORKBASE_OWNER_EMAIL` is a manual login address, not a seed or authorization grant. Registration is open for first sign-in; self-service
 organization creation is disabled. Follow [first-owner onboarding](onboarding.md)
 to sign in, provision through ops and invite staff without real mail on dev/test.
 
@@ -136,7 +149,8 @@ so the Worker handles SPA fallback and auth/API routes.
 Provisioning applies SDK → plugin → Instance migrations before upload. See the
 [infra contract](../../packages/core/src/infra/README.md) for state, bindings and
 migration guarantees. In staging, native Worker requests redirect to the canonical
-`AUTH_BASE_URL`; that origin must be reachable and must not redirect to itself.
+`AUTH_BASE_URL` binding derived from the resolved public origin; that origin must
+be reachable and must not redirect to itself.
 
 SST uses the account-level shared `sst-state` R2 bucket. Arrange account/state
 access before deployment; resource/stage prefixes do not isolate that bucket.
@@ -149,8 +163,10 @@ The generated `.mcp.json` registers `workbase_config` for local V3 authoring,
 plus separate data and ops MCP servers with environment-only credentials. Data
 uses `WORKBASE_TOKEN` and `WORKBASE_ORG_ID`, with read-only mode by default; ops
 uses `WORKBASE_OPS_TOKEN` and optional mailbox inputs. Both remote servers use
-`WORKBASE_BASE_URL`, for example `https://app.example.test`. Mailbox variables have
-empty defaults so they can be omitted in production. See [onboarding](onboarding.md)
+`WORKBASE_BASE_URL`, for example `https://app.example.test`. A separately launched
+MCP client must set this to the resolved origin itself (`https://<WORKBASE_PUBLIC_HOSTNAME>`
+or the expanded `AUTH_BASE_URL` fallback); it does not inherit the deploy environment.
+Mailbox variables have empty defaults so they can be omitted in production. See [onboarding](onboarding.md)
 and keep credentials private.
 
 ## V3 changes through MCP
