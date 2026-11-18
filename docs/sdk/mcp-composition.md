@@ -25,6 +25,65 @@ characters), defaulting to `id`. The CLI forwards it as
 `init --id fieldops --target cloudflare-github --display-name "Field Ops"`. Bootstrap remains create-only;
 renaming an initialized instance uses the proposal flow below.
 
+Bootstrap also accepts optional `initialComposition` to select the complete role/access
+graph **before** any target is provisioned. It reuses `set_roles` and the access
+operations below; there is no separate runtime or account-role list. For example:
+
+```json
+{
+  "id": "fieldops",
+  "target": "cloudflare-github",
+  "initialComposition": {
+    "roles": ["owner", "dispatcher", "viewer", "member"],
+    "organizationOwnerRole": "owner",
+    "access": [
+      { "kind": "set_system_access", "role": "owner", "grants": {
+        "organizations.create": "deny", "organizations.update": "allow",
+        "members.leave": "allow", "members.read": "allow",
+        "members.update": "allow", "members.remove": "allow",
+        "invitations.accept": "allow", "invitations.create": "allow", "invitations.read": "allow",
+        "invitations.revoke": "allow", "tokens.create": "allow",
+        "tokens.read": "allow", "tokens.revoke": "allow",
+        "audit.read": "allow", "workflows.read": "allow",
+        "workflows.resume": "allow", "workflows.cancel": "allow"
+      } },
+      { "kind": "set_entity_access", "entity": "worker", "role": "owner",
+        "access": { "read": "allow", "create": "allow", "update": "allow", "delete": "allow" } },
+      { "kind": "set_entity_access", "entity": "worker", "role": "member",
+        "access": { "read": { "where": { "user": { "eq": "$actor.id" } }, "fields": ["name"] },
+          "create": "deny", "update": "deny", "delete": "deny" } },
+      { "kind": "set_account_link", "entity": "worker", "invitationRole": "member" }
+    ]
+  }
+}
+```
+
+Grants are explicit: new identifiers start denied, including the owner; an unchanged
+identifier retains its scaffold grants under the shared `set_roles` rules. Add
+`set_entity_access` for any SDK entities the owner should access. Each
+`set_system_access` replaces the whole system matrix and must explicitly include
+every supported action as `allow` or `deny`. The worker invitation mapping must
+reference a final non-owner role. The complete graph and built-in runtime are compiled in private staging
+before any scaffold file is published. Invalid graphs publish nothing. The generated
+`config.ts`, `access.ts`, `schema/worker.ts` and `runtime.ts` share that graph;
+the SDK derives the account-role enum from it. Omitting `initialComposition`
+preserves every default scaffold byte (`admin,staff`, owner `admin`).
+
+Initial composition is create-only: the destination must be empty apart from
+pre-provisioned `node_modules`. Existing source, artifacts or target files cause
+conflicts, preserving all existing bytes and leaving missing scaffold files absent.
+Select the graph in the first bootstrap call; use proposals for later role changes.
+The physical schema lock, initial domain migration bytes and revision remain equal
+to the default scaffold. Initialization preview/hash/publication guards include all
+four graph sources and generated OpenAPI/access projections; runtime permissions
+must agree with config roles and owner. Existing generated artifacts still conflict
+if their bytes differ.
+
+This only authors and initializes source. It does not create or attest a persistent
+local target. Server-managed local-target creation and the full empty-root MCP
+acceptance flow are deferred to the next slice of #225. Existing target role-usage
+and owner-change safety checks continue to apply to later proposals.
+
 Normal config calls on an incomplete scaffold return `initialization_required`
 with this next step. Bootstrap retains its file-copy and conflict contract.
 
