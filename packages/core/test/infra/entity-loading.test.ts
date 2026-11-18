@@ -3,6 +3,7 @@ import { join, relative, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { spawnSync } from 'node:child_process'
 import { afterEach, describe, expect, it } from 'vitest'
+import { decodeSource } from '../../src/schema/load'
 
 const roots: string[] = []
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }) })
@@ -460,4 +461,35 @@ console.log('ok')`)
   const result = spawnSync('bun', [join(root, 'proto.ts')], { encoding: 'utf8' })
   expect(result.stderr).toBe('')
   expect(result.stdout.trim()).toBe('ok')
+})
+
+it.each(['config.ts', 'schema/worker.ts'])('rejects malformed UTF-8 in %s before interpreting declarations with a bounded location', async path => {
+  const { root, run } = consumer()
+  const file = join(root, path), original = readFileSync(file)
+  // Include a valid replacement character before the invalid byte: it is not an encoding error.
+  const prefix = Buffer.from('\ufeff// valid \ufffd\r\n// ')
+  const bytes = Buffer.concat([prefix, Buffer.from([0x80]), Buffer.from(' private-comment\r\n'), original])
+  writeFileSync(file, bytes)
+  const result = run()
+  expect(result.status).toBe(1)
+  expect(result.stderr.trim()).toBe(`${file}:2:4: Invalid UTF-8 encoding in authored TypeScript`)
+  expect(readFileSync(file)).toEqual(bytes)
+})
+
+it('accepts valid U+FFFD, BOM and CRLF without changing source bytes', async () => {
+  const { root, run } = consumer()
+  const file = join(root, 'schema/worker.ts')
+  const bytes = Buffer.from('\ufeff// valid \ufffd\r\n' + readFileSync(file, 'utf8').replaceAll('\n', '\r\n'))
+  writeFileSync(file, bytes)
+  const result = run()
+  expect(result.stderr).toBe('')
+  expect(result.status).toBe(0)
+  expect(readFileSync(file)).toEqual(bytes)
+})
+
+it.each([
+  [0xc0, 0x80], [0xe0, 0x80, 0x80], [0xed, 0xa0, 0x80], [0xf4, 0x90, 0x80, 0x80], [0xe2, 0x82], [0x81],
+])('rejects malformed UTF-8 sequence %j with a bounded diagnostic at the sequence start', (...sequence) => {
+  const bytes = Buffer.concat([Buffer.from('\ufeff// \ufffd\r\n// 🧹 '), Buffer.from(sequence)])
+  expect(() => decodeSource(bytes, 'authored.ts')).toThrow('authored.ts:2:7: Invalid UTF-8 encoding in authored TypeScript')
 })

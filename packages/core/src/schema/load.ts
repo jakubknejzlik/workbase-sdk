@@ -23,8 +23,29 @@ function location(node: ts.Node): SourceLocation {
   return { file: file.fileName, line: pos.line + 1, column: pos.character + 1 }
 }
 function fail(node: ts.Node, message: string): never { throw new SourceError(location(node), message) }
+/** Checked source must round-trip without replacing malformed bytes or stripping a BOM. */
+export function decodeSource(bytes: Uint8Array, file: string): string {
+  try { return new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes) }
+  catch {
+    // Only the error path needs a second pass. Streaming leaves an incomplete
+    // sequence buffered, so the location points to its first authored character.
+    const decoder = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true })
+    let line = 1, column = 1, carriageReturn = false
+    for (let i = 0; i < bytes.length; i++) {
+      let text: string
+      try { text = decoder.decode(bytes.subarray(i, i + 1), { stream: true }) }
+      catch { break }
+      for (const character of text) {
+        if (character === '\r' || character === '\n' && !carriageReturn || character === '\u2028' || character === '\u2029') { line++; column = 1 }
+        else if (character !== '\n') column += character.length
+        carriageReturn = character === '\r'
+      }
+    }
+    throw new SourceError({ file, line, column }, 'Invalid UTF-8 encoding in authored TypeScript')
+  }
+}
 function readSource(file: string) {
-  const text = readFileSync(file, 'utf8')
+  const text = decodeSource(readFileSync(file), file)
   const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS)
   // Syntax errors the host would reject must never yield an interpreted config.
   const [diagnostic] = ts.transpileModule(text, { fileName: file, reportDiagnostics: true, compilerOptions: { target: ts.ScriptTarget.Latest } }).diagnostics ?? []

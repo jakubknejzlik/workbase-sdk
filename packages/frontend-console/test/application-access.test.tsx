@@ -6,7 +6,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { I18nextProvider, initReactI18next } from 'react-i18next'
 import i18next from 'i18next'
 import en from '../src/locales/en.json'
-import { GeneratedActions } from '../../console-generated/src/write-screens'
+import { GeneratedActions, GeneratedRowActions } from '../../console-generated/src/write-screens'
 import { GeneratedReadPage } from '../../console-generated/src/screens'
 import { readQuery, type Model, type Capabilities, type ReadQuery } from '../../console-generated/src/read'
 
@@ -31,7 +31,7 @@ function fixture(layout: Layout = 'default') {
   const caps = { resources: { 'invitations.read': true, 'members.read': true }, revision: 1, commands: ['entries/remove_access', 'entries/link_account'], entities: Object.fromEntries(Object.entries(model.entities).map(([name, entity]) => [name, { operations: ['read'], readable: Object.keys(entity.fields), writable: [] }])) } as Capabilities
   return { model, caps }
 }
-async function mount(options: { accessRead?: boolean; list?: boolean; layout?: Layout; status?: Record<string, unknown>; error?: number; loading?: boolean; available?: boolean; transport?: boolean; manage?: boolean; commands?: string[]; searchLinkAccount?: boolean; membersRead?: boolean } = {}) {
+async function mount(options: { recordActions?: boolean; accessRead?: boolean; list?: boolean; layout?: Layout; status?: Record<string, unknown>; error?: number; loading?: boolean; available?: boolean; transport?: boolean; manage?: boolean; commands?: string[]; searchLinkAccount?: boolean; membersRead?: boolean } = {}) {
   const { model, caps } = fixture(options.layout)
   if (options.accessRead !== undefined) caps.resources!['invitations.read'] = options.accessRead
   if (options.searchLinkAccount !== undefined) caps.resources!['members.search_link_account'] = options.searchLinkAccount
@@ -39,6 +39,7 @@ async function mount(options: { accessRead?: boolean; list?: boolean; layout?: L
   Object.assign(model.entities.entries, { rowAccess: options.available ?? true, rowInvitations: options.manage ?? true })
   if (options.manage === false) caps.commands = []
   if (options.commands) caps.commands = options.commands
+  if (options.recordActions) caps.entities.entries.operations.push('delete')
   const i18n = i18next.createInstance()
   await i18n.use(initReactI18next).init({ lng: 'en', resources: { en: { translation: { ...en, field_user: 'Raw User', relation_user_account: 'Raw User account', relation_alias: 'Raw account alias', field_reviewer: 'Reviewer', relation_reviewer_account: 'Reviewer account', field_name: 'Name' } } } })
   const write = vi.fn(async (_path: string, _method: string, _body?: unknown, _key?: string) => {
@@ -49,7 +50,7 @@ async function mount(options: { accessRead?: boolean; list?: boolean; layout?: L
   })
   const request = vi.fn(async (query: ReadQuery) => ({ data: query.entity === 'entries' ? [{ id: 'entry', name: 'Neutral entry', user: 'account', reviewer: 'reviewer', user_account: { id: 'account', name: 'Raw account' }, alias: { id: 'account', name: 'Raw account' }, reviewer_account: { id: 'reviewer', name: 'Review person' } }] : [{ id: 'reviewer', name: 'Review person' }], next_cursor: null }))
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  render(<I18nextProvider i18n={i18n}><QueryClientProvider client={client}><GeneratedReadPage model={model} caps={caps} orgId="org" entity="entries" id={options.list ? undefined : "entry"} request={request} write={options.transport === false ? undefined : write} actions={row => <GeneratedActions model={model} caps={caps} orgId="org" entity="entries" request={request} write={write} row={row} />} /></QueryClientProvider></I18nextProvider>)
+  render(<I18nextProvider i18n={i18n}><QueryClientProvider client={client}><GeneratedReadPage model={model} caps={caps} orgId="org" entity="entries" id={options.list ? undefined : "entry"} rowActions={(row, disabled) => <GeneratedRowActions model={model} caps={caps} orgId="org" entity="entries" request={request} write={write} row={row} disabled={disabled} />} request={request} write={options.transport === false ? undefined : write} actions={row => <GeneratedActions model={model} caps={caps} orgId="org" entity="entries" request={request} write={write} row={row} />} /></QueryClientProvider></I18nextProvider>)
   if (!options.list) await screen.findByRole('heading', { name: 'Neutral entry' })
   return { write, request, client }
 }
@@ -272,4 +273,31 @@ it.each([false, true])('178 staff without invitations.read hides access in list=
   expect(screen.queryByText(en.rowAccessUnavailable)).toBeNull()
   expect(screen.queryByRole('columnheader', { name: en.rowAccess })).toBeNull()
   expect(write).not.toHaveBeenCalled()
+})
+
+it('209 generated list gives record and access controls distinct visible and accessible names', async () => {
+  await mount({ list: true, recordActions: true, status: { state: 'invited', can_invite: true, can_cancel: true, invitation: { id: 'pending', email: 'one@example.test' }, inconsistency: null } })
+  const access = await screen.findByRole('button', { name: /one@example.test – Invited, Application access actions/ })
+  expect(access.closest('td')!.textContent).toBe('one@example.test')
+  const record = screen.getByRole('button', { name: 'Actions for Neutral entry' })
+  expect(record.textContent).toBe('')
+  expect(record.querySelector('svg.lucide-ellipsis[aria-hidden="true"]')).toBeTruthy()
+  await userEvent.setup().click(record)
+  expect(screen.getAllByRole('menuitem').map(item => item.textContent)).toEqual(['Delete'])
+})
+
+it('209 list preserves separately authorized account actions when invitation status is unavailable', async () => {
+  await mount({ list: true, available: false, manage: false, commands: ['entries/link_account', 'entries/remove_access'] })
+  await userEvent.setup().click(await screen.findByRole('button', { name: /Access status unavailable, Application access actions/ }))
+  expect(screen.getAllByRole('menuitem').map(item => item.textContent)).toEqual(['Link account', 'Remove access'])
+  expect(screen.getByRole('menu').textContent).toContain(en.rowAccessUnavailable)
+  expect(screen.getByRole('menu').querySelector('[data-slot="dropdown-menu-label"] [aria-hidden="true"]')).toBeTruthy()
+})
+it.each([[true, true], [true, false], [false, true], [false, false]])('209 list independently gates record=%s and access=%s controls', async (recordActions, accessRead) => {
+  const { write } = await mount({ list: true, recordActions, accessRead, commands: [] })
+  await screen.findByRole('link', { name: 'Neutral entry' })
+  if (accessRead) await screen.findByRole('button', { name: /No access, Application access actions/ })
+  expect(screen.queryAllByRole('button', { name: /Application access actions/ })).toHaveLength(accessRead ? 1 : 0)
+  expect(screen.queryAllByRole('button', { name: /[Aa]ctions for Neutral entry/ })).toHaveLength(recordActions ? 1 : 0)
+  if (!accessRead) expect(write).not.toHaveBeenCalled()
 })

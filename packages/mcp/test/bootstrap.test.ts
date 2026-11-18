@@ -91,9 +91,10 @@ it.each([
   await writeFile(join(root, '.test-bin/bun'), '#!/bin/sh\nprintf "%s\\n" "$*" > build-command.txt\n')
   await chmod(join(root, '.test-bin/bun'), 0o755)
   const script = `import { mock } from 'bun:test'
+const { resolvePublicOrigin } = await import(${JSON.stringify(resolve('packages/core/src/infra/public-origin.ts'))})
 process.env.PATH = ${JSON.stringify(join(root, '.test-bin'))} + ':' + process.env.PATH
 let options
-mock.module('@workbasehq/core/infra/provision', () => ({ provision: async value => {
+mock.module('@workbasehq/core/infra/provision', () => ({ resolvePublicOrigin, provision: async value => {
   options = value
   return { url: 'https://example.test', databaseId: 'test-db', ...(value.devMailbox ? { devMailboxUrl: 'https://mailbox.example.test' } : {}) }
 } }))
@@ -104,8 +105,11 @@ try {
   const result = await config.run()
   console.log(JSON.stringify({ options, expected: './dist/console', result }))
 } catch (error) { console.log(JSON.stringify({ error: error.message, called: Boolean(options) })) }`
+  const inherited = { ...process.env }
+  delete inherited.WORKBASE_DOMAIN
+  delete inherited.WORKBASE_PUBLIC_HOSTNAME
   const result = spawnSync('bun', ['--no-install', '--eval', script], { cwd: root, encoding: 'utf8', env: {
-    ...process.env, WORKBASE_RESOURCE_PREFIX: 'test-instance', BETTER_AUTH_SECRET: 'test-secret',
+    ...inherited, WORKBASE_RESOURCE_PREFIX: 'test-instance', BETTER_AUTH_SECRET: 'test-secret',
     AUTH_BASE_URL: 'https://{stage}.example.test', EMAIL_FROM: email,
     WORKBASE_OPS_TOKEN: 'example-ops', WORKBASE_DEV_MAILBOX_TOKEN: mailbox,
   } })

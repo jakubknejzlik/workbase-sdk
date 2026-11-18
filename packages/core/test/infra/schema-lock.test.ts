@@ -14,6 +14,7 @@ import { initialSchema } from '../../src/migrations/schema'
 import { vi } from 'vitest'
 import { defineConfig, bindSchemaLock, declarationSchema } from '../../src/schema'
 import fixture from '../fixtures/config-era/config'
+import { legacySQLAtHistoricalStamp } from '../fixtures/sdk-baseline/legacy-sql-contract'
 
 const roots: string[] = []
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }) })
@@ -131,7 +132,9 @@ it('legacy fixture DDL byte snapshot captured before the projection refactor', a
   const hashes: Record<string, string> = {}
   for (const name of ['sample', 'accounts', 'policy-graph']) {
     const { default: config } = await import(`../fixtures/${name}/config.ts`)
-    hashes[name] = createHash('sha256').update(initialSchema(config)).digest('hex')
+    // Retain the released 0.2.15 snapshot; separately verify today's revision
+    // stamp instead of re-pinning historical SQL hashes on every SDK release.
+    hashes[name] = createHash('sha256').update(legacySQLAtHistoricalStamp(initialSchema(config), config.revision)).digest('hex')
   }
   expect(hashes).toMatchInlineSnapshot(`
     {

@@ -203,7 +203,7 @@ Mount `AuthShell` from `@workbasehq/plugins/console/ui/react` outside the
 Instance `RouterProvider`. Create its runtime once with
 `createAuthI18n({ languages, catalogs })`; this feeds `workbase:language` from
 localStorage through the existing profile-language seam. Pass `{ manifest, i18n,
-navigate: path => router.navigate({ to: path }) }` and the router as children.
+displayName: config.displayName, navigate: path => router.navigate({ to: path }) }` and the router as children.
 The shell intercepts `/sign-in`, `/auth/complete`, and `/invitation` before
 mounting the Instance router. Those first route segments are reserved.
 
@@ -219,7 +219,11 @@ The initial incoming link necessarily transports its token in the document URL;
 no subsequent request URL, history entry, storage or console output retains it.
 
 Slice-11 copy links carry **no mailbox proof**. On staging without an EMAIL
-binding, the recipient clicks Continue and submits the inline magic-link form.
+binding, the recipient sees “Invitation to <instance>” (the public `displayName`,
+with Workbase as fallback), invited-email guidance, and “Sign in to accept”. That
+button opens the inline magic-link form without resolving or accepting the invitation.
+Copied links reveal no invitation metadata or state before recipient sign-in.
+Server-verified delivered links retain their metadata preview and Continue flow.
 An operator reads that second link directly from D1, using the query shape in
 `scripts/identity-session.mjs`:
 

@@ -7,11 +7,11 @@ import { I18nextProvider, initReactI18next } from 'react-i18next'
 import i18next from 'i18next'
 import en from '../src/locales/en.json'
 import cs from '../src/locales/cs.json'
-import { ApplicationAccessCard, GeneratedActions, GeneratedCreateDialog, GeneratedRowActions } from '../../console-generated/src/write-screens'
+import { ApplicationAccessCard, GeneratedActions, GeneratedCreateDialog, GeneratedRowActions, GeneratedRowInvitation } from '../../console-generated/src/write-screens'
 import type { Model, Capabilities } from '../../console-generated/src/read'
 vi.mock('@tanstack/react-router', () => ({ useNavigate: () => vi.fn(), Link: ({ children }: { children: ReactNode }) => <a>{children}</a> }))
 const family = ['link_account', 'remove_access', 'access_invite', 'access_cancel_invite', 'access_link_account', 'access_unlink_account']
-async function mount(surface: 'detail' | 'menu' | 'create' | 'edit', options: { nonLinkable?: boolean; admin?: boolean; labels?: Record<string, string>; language?: 'en' | 'cs'; linkConflict?: boolean; noMembers?: boolean; deferMutation?: boolean; membersRead?: boolean; membersFailure?: boolean; state?: string; grouped?: boolean; unavailable?: boolean; denial?: boolean; inconsistency?: string | null; accounts?: object[]; failure?: boolean; uncertainInvite?: boolean; deliveryFailure?: boolean; contact?: 'contact_email' | 'hidden'; grants?: string[]; v3?: boolean; loading?: boolean; error?: boolean; mutationDenied?: boolean } = {}) {
+async function mount(surface: 'detail' | 'menu' | 'row' | 'create' | 'edit', options: { liveCancel?: boolean; nonLinkable?: boolean; admin?: boolean; labels?: Record<string, string>; language?: 'en' | 'cs'; linkConflict?: boolean; noMembers?: boolean; deferMutation?: boolean; membersRead?: boolean; membersFailure?: boolean; state?: string; grouped?: boolean; unavailable?: boolean; denial?: boolean; inconsistency?: string | null; accounts?: object[]; failure?: boolean; uncertainInvite?: boolean; deliveryFailure?: boolean; contact?: 'contact_email' | 'hidden'; grants?: string[]; v3?: boolean; loading?: boolean; error?: boolean; mutationDenied?: boolean } = {}) {
   const v3 = options.v3 !== false
   const model = { instance: 'neutral', limits: { root: 100, relations: 10 }, entities: { entries: { accountLink: { field: 'user', entity: 'accounts' }, rowAccess: !options.unavailable, rowInvitations: !options.unavailable, fields: { id: { type: 'string' }, version: { type: 'integer' }, name: { type: 'string' }, email: { type: 'string' } }, writeSchema: { type: 'object', properties: { name: { type: 'string' }, email: { type: 'string' } } }, columns: ['name', 'email'], relations: {}, routes: {} } }, commands: family.filter(n => v3 || !n.startsWith('access_')).map(name => ({ name: `entries/${name}`, permission: { entity: 'entries', operation: 'update' }, inputSchema: { type: 'object', properties: { rowId: { type: 'string', referenceEntity: 'entries' } }, required: ['rowId'] } })) } as unknown as Model
   const caps = { resources: { 'invitations.read': true, 'members.read': options.membersRead !== false, 'members.search_link_account': options.admin !== false && options.membersRead !== false }, revision: 1, commands: (options.grants ?? family).map(n => `entries/${n}`), entities: { entries: { operations: ['read', 'create', 'update'], readable: ['id', 'version', 'name', 'email'], writable: ['name', 'email'] } } } as Capabilities
@@ -25,7 +25,7 @@ async function mount(surface: 'detail' | 'menu' | 'create' | 'edit', options: { 
       if (statusBlock) return new Promise(() => {})
       if (statusError) throw { status: 500 }
       if (path.endsWith('/delivery')) return { delivery: { status: options.deliveryFailure ? 'failed' : 'queued' } }
-      if (path.startsWith('/api/')) { const s = status(); return { ...row, version, ...(options.unavailable ? {} : { access: { ...s, state: s.state === 'signed_in' ? 'linked' : s.state } }), actions: { invite: { enabled: current === 'no_account' || current === 'expired' }, cancel_invite: { enabled: current === 'invited' }, link_account: { enabled: current !== 'signed_in' }, unlink_account: { enabled: current === 'signed_in' } } } }
+      if (path.startsWith('/api/')) { const s = status(); return { ...row, version, ...(options.unavailable ? {} : { access: { ...s, state: s.state === 'signed_in' ? 'linked' : s.state } }), actions: { invite: { enabled: current === 'no_account' || current === 'expired' }, cancel_invite: { enabled: current === 'invited' && options.liveCancel !== false }, link_account: { enabled: current !== 'signed_in' }, unlink_account: { enabled: current === 'signed_in' } } } }
       return status()
     }
     if (path === '/api/entries') return { ...row, ...body, id: 'created', version }
@@ -47,7 +47,7 @@ async function mount(surface: 'detail' | 'menu' | 'create' | 'edit', options: { 
   if (options.grouped) model.entities.entries.detail = { groups: [{ id: 'main', label: 'Main', fields: ['name', 'email'] }] }
   const onDenied = vi.fn()
   const props = { model, caps, onDenied, orgId: 'org', entity: 'entries', write, request }
-  render(<I18nextProvider i18n={i18n}><QueryClientProvider client={client}>{surface === 'create' ? <GeneratedCreateDialog {...props} open onOpenChange={vi.fn()} /> : surface === 'menu' ? <><ApplicationAccessCard {...props} row={row} /><GeneratedRowActions {...props} row={row} /></> : <>{surface === 'detail' && <ApplicationAccessCard {...props} row={row} />}<GeneratedActions {...props} row={row} /></>}</QueryClientProvider></I18nextProvider>)
+  render(<I18nextProvider i18n={i18n}><QueryClientProvider client={client}>{surface === 'create' ? <GeneratedCreateDialog {...props} open onOpenChange={vi.fn()} /> : surface === 'row' ? <GeneratedRowInvitation {...props} row={row} /> : surface === 'menu' ? <><ApplicationAccessCard {...props} row={row} /><GeneratedRowActions {...props} row={row} /></> : <>{surface === 'detail' && <ApplicationAccessCard {...props} row={row} />}<GeneratedActions {...props} row={row} /></>}</QueryClientProvider></I18nextProvider>)
   const user = userEvent.setup()
   if (surface === 'edit') await user.click(screen.getByRole('button', { name: 'Edit' }))
   return { write, request, user, client, onDenied }
@@ -606,4 +606,17 @@ it('178 invite-only errors stay visible in the unified dialog', async () => {
   expect((await screen.findByRole('alert')).textContent).toBe(en.forbiddenDescription)
   expect(onDenied).toHaveBeenCalledTimes(1)
   expect(screen.getByRole('dialog')).toBeTruthy()
+})
+
+it.each([[], ['access_invite'], ['access_cancel_invite'], ['access_invite', 'access_cancel_invite']].flatMap(grants => [true, false].map(liveCancel => ({ grants, liveCancel }))))
+('209 V3 pending row filters grants=$grants and live cancel=$liveCancel', async ({ grants, liveCancel }) => {
+  const { user, write } = await mount('row', { state: 'invited', grants, liveCancel })
+  await user.click(await screen.findByRole('button', { name: /Invited, Application access actions/ }))
+  const invite = grants.includes('access_invite'), cancel = grants.includes('access_cancel_invite') && liveCancel
+  expect(screen.queryAllByRole('menuitem').map(item => item.textContent)).toEqual([
+    ...(invite ? [en.rowInvite_resend, en.rowInvite_copy] : []),
+    ...(invite && cancel ? [en.rowChangeMemberOrEmail] : []),
+    ...(cancel ? [en.rowInvite_cancel] : []),
+  ])
+  expect(write.mock.calls.every(([, method]) => method === 'GET')).toBe(true)
 })

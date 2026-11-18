@@ -15,6 +15,9 @@ import type { WorkbasePlugin } from '../../../src/kernel/plugin'
 import { identity } from '../../../../plugins/identity/src'
 import { members } from '../../../../plugins/members/src'
 import { permissions } from '../../../../plugins/permissions/src'
+import released from './released-1d09aee4.json'
+import beforeEvidence from './released-1f88765.json'
+import { expectLegacyInitialSQL } from './legacy-sql-contract'
 
 const defineConfig = (input: Parameters<typeof unboundConfig>[0]) => {
   const config = unboundConfig(input); return bindSchemaLock(config, schemaLock(config))
@@ -43,13 +46,12 @@ export async function domainFiles(kernel = composition()) {
 /** Same acceptance contract runs on native workerd D1 and the Node SQLite adapter. */
 export function baselineContract(database: () => BaselineDatabase) {
   afterEach(() => { vi.restoreAllMocks() })
-  for (const languages of [['en'], []]) {
+  for (const languages of [['en'], [], undefined]) {
     const label = JSON.stringify(languages)
     const legacy = () => new KernelRegistry(defineInstance({ id: 'legacy', revision: 1, languages, entities: {} }))
-    it(`legacy languages=${label} keeps main's exact SQL and appends the evidence migration`, async () => {
+    it(`legacy languages=${label} preserves historical SQL structure with the current SDK stamp`, async () => {
       const kernel = legacy()
-      // Captured from main 1f88765 for both language lists (and absent languages).
-      expect(await sha256(initialSchema(kernel.config))).toBe('e9f01a0c333eeac9ae63a449fac1691bad86f1172403dcf797481ebc3f86e544')
+      await expectLegacyInitialSQL(initialSchema(kernel.config))
       expect((await expectedPluginMigrations(kernel.plugins, kernel.config)).map(row => row.namespace)).toEqual(['workbase-core', 'workbase-core'])
     })
     it(`legacy languages=${label} replays a fresh database successfully`, async () => {
@@ -58,16 +60,48 @@ export function baselineContract(database: () => BaselineDatabase) {
       expect(await db.prepare('SELECT revision FROM instance_meta').first('revision')).toBe(1)
       expect((await db.prepare('SELECT DISTINCT namespace FROM _plugin_migrations').all()).results).toEqual([{ namespace: 'workbase-core' }])
     })
-    it(`legacy languages=${label} accepts an existing legacy database`, async () => {
-      const { db, query } = database()
-      // Seed the unchanged main-era SQL and receipts without the language option.
-      const existing = new KernelRegistry(defineInstance({ id: 'legacy', revision: 1, entities: {} }))
-      const files = await domainFiles(existing)
-      await migrateInstance(query, files, existing)
-      const before = (await db.prepare('SELECT * FROM _plugin_migrations').all()).results
-      await expect(migrateInstance(query, files, legacy())).resolves.toMatchObject({ applied: 0 })
-      expect((await db.prepare('SELECT * FROM _plugin_migrations').all()).results).toEqual(before)
-    })
+    for (const history of [beforeEvidence, released]) {
+      it(`legacy languages=${label} upgrades frozen ${history.source} SQL and receipts without rewriting history`, async () => {
+        const { db, query, calls } = database(), kernel = legacy()
+        // Database snapshot and migration file captured by running the historical
+        // SDK from git, never seeded through the current migration implementation.
+        await query(history.seedSQL)
+        const filesBefore = JSON.stringify(history.files)
+        const domainRows = async () => JSON.stringify((await db.prepare('SELECT * FROM _migrations ORDER BY filename').all()).results)
+        const pluginRows = async () => (await db.prepare('SELECT * FROM _plugin_migrations ORDER BY namespace,position').all()).results
+        expect(await domainRows()).toBe(JSON.stringify(history.domain))
+        expect(JSON.stringify(await pluginRows())).toBe(JSON.stringify(history.plugins))
+        expect((await db.prepare('SELECT * FROM instance_meta ORDER BY revision').all()).results).toEqual(history.meta)
+        expect(await sha256(history.files[0].sql)).toBe(history.files[0].checksum)
+        calls.length = 0
+        // Regenerating that file with today's stamp really is a history mismatch.
+        // The safe upgrade must consume the released file instead.
+        await expect(migrateInstance(query, await domainFiles(kernel), kernel)).rejects.toThrow('migration_history_mismatch')
+        expect(calls.every(sql => /^\s*SELECT\b/i.test(sql))).toBe(true)
+        calls.length = 0
+        // This compares the stored historical checksum with the retained file,
+        // not with freshly generated SQL carrying the new CORE_VERSION.
+        await expect(migrateInstance(query, history.files, kernel)).resolves.toMatchObject({ applied: 0, total: 1 })
+        expect(await domainRows()).toBe(JSON.stringify(history.domain))
+        const plugins = await pluginRows()
+        expect(JSON.stringify(plugins.slice(0, history.plugins.length))).toBe(JSON.stringify(history.plugins))
+        expect(plugins).toEqual(await expectedPluginMigrations(kernel.plugins, kernel.config))
+        expect(plugins.filter(row => row.name === '002_operational_evidence')).toHaveLength(1)
+        expect(calls.filter(sql => sql.includes('ALTER TABLE webhook_deliveries ADD COLUMN created_at'))).toHaveLength(history === beforeEvidence ? 1 : 0)
+        expect((await db.prepare('SELECT revision,core_version FROM instance_meta').all()).results).toEqual([{ revision: 1, core_version: CORE_VERSION }])
+        expect((await db.prepare('PRAGMA foreign_key_check').all()).results).toEqual([])
+        const meta = (await db.prepare('SELECT * FROM instance_meta').all()).results
+        calls.length = 0
+        await expect(migrateInstance(query, history.files, kernel)).resolves.toMatchObject({ applied: 0, total: 1 })
+        expect(calls.filter(sql => !/^\s*SELECT\b/i.test(sql))).toEqual([
+          'CREATE TABLE IF NOT EXISTS _plugin_migrations (namespace TEXT NOT NULL, name TEXT NOT NULL, position INTEGER NOT NULL, checksum TEXT NOT NULL, PRIMARY KEY(namespace,name), UNIQUE(namespace,position))',
+        ])
+        expect(await domainRows()).toBe(JSON.stringify(history.domain))
+        expect(JSON.stringify(await pluginRows())).toBe(JSON.stringify(plugins))
+        expect((await db.prepare('SELECT * FROM instance_meta').all()).results).toEqual(meta)
+        expect(JSON.stringify(history.files)).toBe(filesBefore)
+      })
+    }
   }
   it('fresh SDK -> plugins -> domain, then verification, yields usable identity and worker', async () => {
     const { db, query, calls } = database()

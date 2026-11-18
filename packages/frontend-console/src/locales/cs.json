@@ -624,5 +624,6 @@
   "memberPendingLink": "Čeká na propojení",
   "rowFindRequired": "Vyberte člena nebo zadejte platnou e-mailovou adresu.",
   "rowAccountNotLinkable": "Tento účet nelze propojit s tímto záznamem.",
-  "rowAccessActions": "Akce přístupu do aplikace"
+  "rowAccessActions": "Akce přístupu do aplikace",
+  "rowChangeMemberOrEmail": "Změnit člena nebo e-mail"
 }

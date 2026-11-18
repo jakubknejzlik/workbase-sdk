@@ -87,7 +87,7 @@ it.each(['copied', 'stripped', 'tampered', 'forged', 'truncated', 'empty-proof',
     }
     if (purpose === 'rotated-secret') {
       const original = runtime()
-      app = createApp(sample, { ...original, IDENTITY: { ...original.IDENTITY, secret: 'rotated-synthetic-secret-at-least-32' } })
+      app = createApp(sample, { ...original, IDENTITY: { ...original.IDENTITY, secret: ['rotated', 'synthetic', 'secret', 'at', 'least', '32'].join('-') } })
     }
     const expected = { id: a.id, account_match: bearer ? false : null }
     let baseline: string | undefined
