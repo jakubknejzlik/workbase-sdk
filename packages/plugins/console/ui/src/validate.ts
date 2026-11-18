@@ -12,7 +12,7 @@ import { checkDictionaries, type Catalogs } from './dictionaries'
 import { sdkCatalogs } from './catalogs'
 export type Location = { file: string; line: number; col: number }
 export type Finding = Location & { code: string; key?: string; lang?: string; message?: string }
-export type KeySource = Location & { plural?: boolean }
+export type KeySource = Location & { plural?: boolean; optional?: boolean }
 export type Scan = { keys: Map<string, KeySource[]>; families: Set<string>; findings: Finding[] }
 export const breakpoints = ['xs', 'sm', 'md', 'lg', 'xl'] as const
 export function effectiveSpans(span: Span): number[] {
@@ -36,6 +36,9 @@ export function requiredKeys(config: { entities: Schema }, manifest: Manifest, s
     // defineConfig injects the SDK-owned users projection; it is not an authored domain entity.
     if (entity === 'users') continue
     add(`domain:entity.${entity}`, { ...schemaAt(`entities.${entity}`), plural: true })
+    // These renderer forms are optional until authored in any enabled language;
+    // then every enabled language must supply the same named form.
+    for (const form of ['singular', 'object']) add(`domain:entity.${entity}.${form}`, { ...schemaAt(`entities.${entity}`), optional: true })
     for (const [field, f] of Object.entries(spec.fields)) {
       const location = schemaAt(`entities.${entity}.fields.${field}`)
       add(`domain:field.${entity}.${field}`, location)
@@ -162,5 +165,10 @@ export async function inspectDictionaries(root: string, options: { sdkResolution
     }
   }
   return { languages: loaded.config.languages, catalogs, pluralCategories,
-    requiredKeys: [...required].map(([key, sources]) => ({ key, plural: sources.some(source => source.plural), sources })), errors }
+    requiredKeys: [...required].map(([key, sources]) => {
+      const [ns, name] = key.split(':')
+      const named = sources.every(source => source.optional)
+      const authored = (loaded.config.languages ?? []).some(language => Object.hasOwn(catalogs[language]?.[ns] ?? {}, name))
+      return { key, plural: sources.some(source => source.plural), ...(named ? { optional: !authored } : {}), sources }
+    }), errors }
 }

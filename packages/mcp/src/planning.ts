@@ -71,6 +71,7 @@ export function guard(changes: Change[], config: InstanceConfig) {
     }
     if (c.kind === 'set_locale') continue
     if (c.kind === 'set_label') {
+      if (c.pluralForms !== undefined) fail('invalid_input', 'pluralForms requires a V3 presentation proposal; use plural for legacy entity captions')
       if (!entities.has(c.entity)) fail('unknown_entity', `Unknown entity: ${c.entity}`)
       continue
     }

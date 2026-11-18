@@ -136,6 +136,15 @@ Namespaces are `domain`, `ui` (the default), and `sdk`, with flat dotted keys.
 `fallbackLng: false` prevents language fallback; missing keys render `⟦ns:key⟧`
 and log an error. Interpolation values are escaped by React. Entity labels take
 `{ count }`; plural forms must match each language's `Intl.PluralRules` categories.
+Optional `domain:entity.<entity>.singular` names entity forms accessibly, and
+`domain:entity.<entity>.object` supplies the object in `sdk:createEntity`
+(“Create {{object}}” / “Vytvořit {{object}}”). Without an object form the renderer
+uses `sdk:create`. These named forms appear in the inventory as optional;
+once authored in one enabled language, each enabled language must supply them.
+Page and navigation titles remain independent `ui:` keys.
+MCP V3 `set_label` writes these keys and counted forms in the existing presentation
+batch. Entity captions require explicit `pluralForms` (`one/other` for English;
+`one/few/many/other` for Czech); field captions use `field` and `label` instead.
 SDK cs/en catalogs ship in `src/locales`; optional partial
 `locales/<lang>/sdk.json` overrides merge into the generated resources. Unknown
 SDK keys, extra interpolation variables and `$t(` nesting fail validation.

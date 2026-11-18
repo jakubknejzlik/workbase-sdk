@@ -14,6 +14,7 @@
   "cancel": "Cancel",
   "edit": "Edit",
   "create": "Create",
+  "createEntity": "Create {{object}}",
   "search": "Search",
   "sort": "Sort",
   "direction": "Direction",
