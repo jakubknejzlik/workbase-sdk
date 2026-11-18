@@ -9,11 +9,11 @@ import { parseRuntimeSource, rewritePermissionsSource } from './composition/runt
 import { hydrateRuntimePlugins } from './composition/registry.ts'
 import { noLink } from './paths.ts'
 import { stateRoot } from './disposable.ts'
-import { fail, type InitialComposition } from './schemas.ts'
+import { fail, type BootstrapInitialComposition } from './schemas.ts'
 
 /** Private staging only. No existing consumer root or target is read or changed.
  * Keep the ordinary init CLI core-free by loading this module only on opt-in. */
-export async function renderInitialComposition(files: Map<string, string>, initial: InitialComposition) {
+export async function renderInitialComposition(files: Map<string, string>, initial: BootstrapInitialComposition) {
   await mkdir(stateRoot, { recursive: true }); await noLink(stateRoot)
   const staging = await realpath(await mkdtemp(join(stateRoot, 'bootstrap-')))
   try {
