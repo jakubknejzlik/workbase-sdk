@@ -1,5 +1,6 @@
+import { uniqueIndexName } from '../entity-constraints'
 import type { InstanceConfig } from '../config'
-import { physicalTables, renderTable, renderColumn, quote, type TableSpec } from './schema'
+import { physicalTables, renderTable, renderColumn, renderUniqueConstraint, quote, type TableSpec } from './schema'
 import type { SourceMap } from '../schema/source-location'
 import { initialEntityId, initialFieldId, transitionId, validateLock, type EntityLineage, type RenameTransition, type SchemaLock } from '../schema/lock-format'
 export type { SchemaLock, EntityLineage, FieldLineage, RenameTransition } from '../schema/lock-format'
@@ -28,6 +29,12 @@ export function diffSpecs(baseTables: readonly TableSpec[], tables: readonly Tab
       if (column.notNull && (column.defaultSql === null || column.defaultSql === 'NULL')) reject(base.name, column.name, 'NOT NULL additions require a non-null default')
       sql.push(`ALTER TABLE ${quote(base.name)} ADD COLUMN ${renderColumn(column)};`)
     }
+    for (const old of base.constraints ?? []) {
+      const current = table!.constraints?.find(c => c.name === old.name)
+      if (current && !equal(old, current)) reject(base.name, undefined, `changing constraint ${old.name} is unsupported; use a new name`)
+      if (!current) sql.push(`DROP INDEX ${quote(uniqueIndexName(base.name, old.name))};`)
+    }
+    for (const constraint of table!.constraints ?? []) if (!base.constraints?.some(c => c.name === constraint.name)) sql.push(renderUniqueConstraint(table!.name, constraint))
     for (const key of ['unique', 'checks', 'foreignKeys', 'indexes'] as const) {
       if (!equal(base[key], table![key])) {
         const changed = [...base.foreignKeys, ...table!.foreignKeys].find(f => !base.foreignKeys.some(b => equal(b, f)) || !table!.foreignKeys.some(b => equal(b, f)))
@@ -106,6 +113,7 @@ export function schemaLock(config: InstanceConfig, base?: SchemaLock, sources: S
         fields[physical] = { ...field, renameFrom: undefined }
       }
       normalized.entities[entity.physicalName] = { ...input, renameFrom: undefined, fields,
+        ...(input.constraints?.length ? { constraints: input.constraints.map(c => ({ ...c, fields: c.fields.map(key => fieldNames.get(key) ?? key) })) } : {}),
         checks: input.checks.map(c => ({ ...c, left: fieldNames.get(c.left) ?? c.left, right: fieldNames.get(c.right) ?? c.right })),
       }
       entities.push(entity)
@@ -124,7 +132,7 @@ export function schemaLock(config: InstanceConfig, base?: SchemaLock, sources: S
       entity.fields = table.columns.map(c => entity.fields.find(f => f.physicalName === c.name) ?? { id: initialFieldId(entity.id, c.name), logicalName: c.name, physicalName: c.name })
     }
     const changed = !!sql || !equal(transitions, previous?.transitions ?? [])
-    return validateLock({ lockVersion: 2, revision: previous ? previous.revision + Number(changed) : 1, parent: previous?.parent ?? null, tables, entities, transitions })
+    return validateLock({ lockVersion: previous?.lockVersion === 3 || tables.some(t => t.constraints?.length) ? 3 : 2, revision: previous ? previous.revision + Number(changed) : 1, parent: previous?.parent ?? null, tables, entities, transitions })
   } catch (error) { return located(error, sources) }
 }
 export function parseLock(bytes: string): SchemaLock {

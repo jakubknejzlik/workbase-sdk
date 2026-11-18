@@ -7,7 +7,8 @@ import { commands, secondaryCommands, quaternaryCommands, workflow } from './ope
 import { consoleUI } from '@workbasehq/plugins/console'
 
 // Reuse the SDK's neutral relational graph; no instance implementation is loaded.
-const model = { entities: base.entities, commands: commands.map(command => command.name) }
+const entities = { ...base.entities, clients: { ...base.entities.clients, constraints: [{ kind: 'unique' as const, name: 'client_identity_unique', fields: ['name', 'email'] }] } }
+const model = { entities, commands: commands.map(command => command.name) }
 const secondaryModel = { entities: secondaryBase.entities, commands: secondaryCommands.map(command => command.name) }
 const quaternaryModel = { ...model, commands: quaternaryCommands.map(command => command.name) }
 export const samplePlugin = () => builtinPlugin({ name: 'sample', version: '0.1.0', model, commands, workflows: [workflow] })

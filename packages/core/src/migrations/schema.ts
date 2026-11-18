@@ -1,3 +1,4 @@
+import { uniqueIndexName, type EntityConstraint } from '../entity-constraints'
 import { systemSchema } from './system-schema'
 export { systemSchema } from './system-schema'
 import { workflowSchema } from '../workflow-schema'
@@ -23,6 +24,7 @@ export interface ColumnSpec {
   implicit?: boolean; primaryKey?: boolean; references?: { table: string; column: string }
 }
 export interface TableSpec {
+  constraints?: EntityConstraint[]
   name: string; columns: ColumnSpec[]; unique: string[][]; checks: string[]
   foreignKeys: { columns: string[]; table: string; targetColumns: string[] }[]
   indexes: { name: string; columns: string[] }[]
@@ -48,7 +50,7 @@ export function physicalTable(name: string, entity: InstanceConfig['entities'][s
   const refs = fields.filter(([, f]) => f.type === 'ref')
   const implicit = (name: string, sqlType: string, notNull = true, defaultSql: string | null = null): ColumnSpec =>
     ({ name, sqlType, notNull, defaultSql, checks: [], implicit: true })
-  return { name, columns: [
+  return { name, ...(entity.constraints?.length ? { constraints: [...entity.constraints].sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0) } : {}), columns: [
     { ...implicit('id', 'TEXT', false), primaryKey: true },
     { ...implicit('organization_id', 'TEXT'), references: { table: 'organizations', column: 'id' } },
     implicit('created_at', 'TEXT'), implicit('updated_at', 'TEXT'), implicit('version', 'INTEGER', true, '1'),
@@ -59,6 +61,9 @@ export function physicalTable(name: string, entity: InstanceConfig['entities'][s
     indexes: [{ name: `${name}_org_idx`, columns: ['organization_id', 'id'] }, ...refs.map(([key]) => ({ name: `${name}_${key}_idx`, columns: ['organization_id', key] }))],
   }
 }
+export function renderUniqueConstraint(table: string, constraint: EntityConstraint) {
+  return `CREATE UNIQUE INDEX ${quote(uniqueIndexName(table, constraint.name))} ON ${quote(table)}(${['organization_id', ...constraint.fields].map(quote).join(', ')});`
+}
 export function renderTable(table: TableSpec) {
   const q = (name: string) => table.columns.find(c => c.name === name)?.implicit ? name : quote(name)
   const columns = [
@@ -67,7 +72,7 @@ export function renderTable(table: TableSpec) {
     ...table.checks.map(check => `CHECK (${check})`),
   ]
   const indexes = table.indexes.map(index => `CREATE INDEX ${quote(index.name)} ON ${quote(table.name)}(${index.columns.map(q).join(', ')});`)
-  return `CREATE TABLE ${quote(table.name)} (\n  ${columns.join(',\n  ')}\n);\n${indexes[0]}\n${indexes.slice(1).join('\n')}`
+  return `CREATE TABLE ${quote(table.name)} (\n  ${columns.join(',\n  ')}\n);\n${indexes[0]}\n${indexes.slice(1).join('\n')}${table.constraints?.length ? '\n' + table.constraints.map(c => renderUniqueConstraint(table.name, c)).join('\n') : ''}`
 }
 export function createEntity(name: string, entity: InstanceConfig['entities'][string]) { return renderTable(physicalTable(name, entity)) }
 

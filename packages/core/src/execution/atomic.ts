@@ -1,3 +1,4 @@
+import { uniqueConflict } from '../constraint-errors'
 import { postCommitFor } from './post-commit'
 import { needsPolicyReceipt, receiptIdentity, receiptExpression, authorizeReplay } from './policy-receipts'
 import { kernelFor } from '../kernel/registry'
@@ -69,7 +70,7 @@ export async function executeAtomic<S extends z.ZodType>(operation: AtomicOperat
     const winner = await replay()
     if (winner) return winner
     if (error instanceof RuleFailed && conflict) throw new RuleFailed(error.rule, conflict)
-    throw error
+    throw error instanceof ApiError ? error : uniqueConflict(error, config) ?? error
   }
   // The commit is final: post-commit failures must never enter rollback/replay
   // handling, and idempotent replays must never repeat external effects.
