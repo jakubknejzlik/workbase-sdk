@@ -35,7 +35,7 @@ test('evidence path rejects repository, archive and symlink escapes before writi
 
 function artifacts(name: string) {
   const consumer = join(scratch, name)
-  put(join(consumer, 'package-lock.json'), { packages: Object.fromEntries(['core', 'mcp', 'plugins'].map(name => ['node_modules/@workbasehq/' + name, { version: '0.3.0' }])) })
+  put(join(consumer, 'package-lock.json'), { packages: Object.fromEntries(['core', 'mcp', 'plugins'].map(name => ['node_modules/@workbasehq/' + name, { version: '0.3.1' }])) })
   put(join(consumer, '.mcp.json'), { mcpServers: { workbase_data: { args: ['data'] }, workbase_ops: { args: ['ops'] }, workbase_config: { args: ['./node_modules/@workbasehq/mcp/src/bin.ts', 'config', '--root', '.'], command: 'bun' } } })
   const paths = ['/workers', '/workers/$workerId', '/workers/$workerId/edit', '/workers/new']
   put(join(consumer, '.workbase-ui/manifest.json'), { entities: { worker: { fields: { name: {}, note: {}, user: {} } } }, routes: paths.map(path => ({ path })) })

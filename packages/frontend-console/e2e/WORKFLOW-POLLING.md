@@ -18,7 +18,20 @@ local fixture without those inputs, build the same frontend assets with
 that the shell needs (an absent date becomes `unbuilt` and cannot be formatted):
 
 ```sh
-bun -e 'import { writeFileSync } from "node:fs"; import { execFileSync } from "node:child_process"; writeFileSync("packages/frontend-console/dist/build-meta.json", JSON.stringify({ sha: execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim(), builtAt: new Date().toISOString() }))'
+bun - <<'TS'
+import { writeFileSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
+import { CONSOLE_SHA_MARKER, consoleArtifactsSHA, readConsoleArtifacts } from './packages/core/src/console-build'
+const directory = 'packages/frontend-console/dist'
+const files = await readConsoleArtifacts(directory), sha = consoleArtifactsSHA(files)
+for (const [name, bytes] of files) {
+  if (name.endsWith('.html') && bytes.includes(CONSOLE_SHA_MARKER)) {
+    writeFileSync(`${directory}/${name}`, Buffer.from(bytes.toString('latin1').replaceAll(CONSOLE_SHA_MARKER, sha), 'latin1'))
+  }
+}
+const sourceCommit = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()
+writeFileSync(`${directory}/build-meta.json`, JSON.stringify({ sha, sourceCommit, builtAt: new Date().toISOString() }))
+TS
 ```
 
 Each repetition creates a fresh `run-*` persistence directory, seeds synthetic
