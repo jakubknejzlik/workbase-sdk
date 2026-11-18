@@ -48,7 +48,9 @@ in the result, without modifying a field or selecting an expression.
 `groupBy` is a nonempty array of distinct stored scalar field names: `string`,
 `text`, `int`, `float`, `bool`, `datetime` or `enum`. Numeric sums, grouping and
 windows reject computed fields, references, relation paths and expression
-operands with specific schema diagnostics. The built-in stored fields `id`,
+operands. Summary diagnostics expose only a code, structural path (dynamic keys
+become `[key]`), a fixed message per code, and numeric bounds when applicable,
+even when input reporting is requested. The built-in stored fields `id`,
 `organization_id`, `version`, `created_at` and `updated_at` use the same metadata
 as row queries. A `day` bucket cannot also appear as a raw grouping field.
 

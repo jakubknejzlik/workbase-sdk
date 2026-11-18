@@ -46,15 +46,62 @@ const alias = z.string().min(1).max(64).regex(/^(?!(?:prototype|constructor)$)[a
 const version = z.number().int().min(SUMMARY_VERSION).max(SUMMARY_VERSION)
 const instant = z.iso.datetime({ offset: true }).regex(/T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2})$/).refine(value => Number.isFinite(Date.parse(value)), 'Invalid summary instant')
 
-function summaryObject<T extends z.ZodRawShape>(shape: T) {
-  return z.strictObject(shape, { error: issue => {
-    if (issue.code !== 'unrecognized_keys') return undefined
-    // Every summary object rejects unknown keys without exposing their names or
-    // values in any issue field, even with reportInput. Sanitize the raw issue
-    // before Zod finalizes it; changing only its message would retain keys/input.
-    Object.assign(issue, { keys: [], input: undefined })
-    return 'Unknown summary properties are unsupported'
-  } })
+const summaryIssueMessages: Readonly<Record<z.core.$ZodIssueCode, string>> = Object.freeze({
+  invalid_type: 'Invalid summary type',
+  invalid_value: 'Unsupported summary value',
+  invalid_union: 'Unsupported summary variant',
+  invalid_format: 'Invalid summary format',
+  too_big: 'Summary limit exceeded',
+  too_small: 'Summary minimum not met',
+  unrecognized_keys: 'Unknown summary properties are unsupported',
+  custom: 'Invalid summary constraint',
+  invalid_key: 'Invalid summary key',
+  invalid_element: 'Invalid summary element',
+  not_multiple_of: 'Invalid summary multiple',
+})
+const summaryPathKeys = new Set(['entity', 'where', 'summary', 'version', 'metrics', 'groupBy', 'window', 'maxGroups',
+  'op', 'alias', 'field', 'from', 'to', 'timeZone', 'bucket', 'kind', 'data', 'groups'])
+
+function summaryIssue(issue: z.core.$ZodRawIssue): z.core.$ZodRawIssue {
+  // Diagnostic invariant: every summary request/result issue is rebuilt from this
+  // allowlist, regardless of code or reportInput. Never spread raw issues or copy
+  // input, messages, enum inventories, nested errors or unknown future fields.
+  // Model/alias map keys and predicate keys are input-derived, even when their
+  // spelling happens to match a structural key; replace those path segments too.
+  const path = issue.path ?? []
+  const safe = {
+    code: issue.code,
+    path: path.map((segment, index) => {
+      if (typeof segment === 'number' && Number.isSafeInteger(segment) && segment >= 0) return segment
+      const dynamic = (path[0] === 'where' && index > 0)
+        || (path[0] === 'data' && (path[2] === 'groups' || path[2] === 'metrics') && index > 2)
+      return !dynamic && typeof segment === 'string' && summaryPathKeys.has(segment) ? segment : '[key]'
+    }),
+    message: summaryIssueMessages[issue.code] ?? summaryIssueMessages.custom,
+    ...(typeof issue.minimum === 'number' && Number.isFinite(issue.minimum) ? { minimum: issue.minimum } : {}),
+    ...(typeof issue.maximum === 'number' && Number.isFinite(issue.maximum) ? { maximum: issue.maximum } : {}),
+  }
+  // Deliberately narrower than Zod's issue variants (no required raw metadata).
+  return safe as z.core.$ZodRawIssue
+}
+
+function summaryDiagnostics<T extends z.ZodType>(schema: T): T {
+  const run = schema._zod.run
+  // Wrap the complete parse, including aborted container/discriminator parses;
+  // a refinement/error map alone cannot cover all failures. Keep the canonical
+  // schema definition intact so JSON Schema projection has identical semantics.
+  schema._zod.run = (payload, ctx) => {
+    // Zod finalization otherwise adds an input property even to projected issues.
+    // This is its per-parse context, not the caller's options or global config.
+    Object.assign(ctx, { reportInput: false })
+    const project = (result: z.core.ParsePayload) => {
+      result.issues = result.issues.map(summaryIssue)
+      return result
+    }
+    const result = run(payload, ctx)
+    return result instanceof Promise ? result.then(project) : project(result)
+  }
+  return schema
 }
 
 function operand(config: InstanceConfig, entity: string, use: 'sum' | 'groupBy' | 'window') {
@@ -63,21 +110,13 @@ function operand(config: InstanceConfig, entity: string, use: 'sum' | 'groupBy' 
     const field = config.entities[entity].fields[name], type = fieldType(config, entity, name)
     return !field?.computed && type !== 'ref' && (use === 'groupBy' || (use === 'sum' ? ['int', 'float'].includes(type) : type === 'datetime'))
   })
-  return z.enum(legal, { error: issue => {
-    const name = issue.input
-    if (typeof name !== 'string' || /[.()\s]/.test(name)) return 'Summary expressions are unsupported; use a stored field name'
-    const field = Object.hasOwn(config.entities[entity].fields, name) ? config.entities[entity].fields[name] : undefined
-    if (field?.computed) return 'Summary computed operands are unsupported; use a stored field'
-    if (field?.type === 'ref' || Object.hasOwn(config.entities[entity].relations, name)) return 'Summary reference operands are unsupported; use a stored scalar field'
-    if (!names.includes(name)) return 'Unknown summary field'
-    return use === 'sum' ? 'Summary sum requires a stored numeric field' : 'Summary window requires a stored datetime field'
-  } })
+  return z.enum(legal)
 }
 
 /** Canonical, model-derived contract. Does not authorize or execute a query. */
 export function summaryQuerySchema<C extends InstanceConfig, E extends keyof C['entities'] & string>(config: C, entity: E): z.ZodType<SummaryQuery<C, E>> {
   if (!Object.hasOwn(config.entities, entity)) throw new Error('Unknown summary entity')
-  const window = summaryObject({ field: operand(config, entity, 'window'), from: instant, to: instant,
+  const window = z.strictObject({ field: operand(config, entity, 'window'), from: instant, to: instant,
     timeZone: z.enum(['UTC']).optional(), bucket: z.enum(['day']).optional(),
   }).superRefine((value, ctx) => {
     // Compare instants, including explicit offsets, rather than timestamp text.
@@ -88,10 +127,10 @@ export function summaryQuerySchema<C extends InstanceConfig, E extends keyof C['
     if (value.bucket && buckets > SUMMARY_LIMITS.dailyBuckets) ctx.addIssue({ code: 'custom', path: ['bucket'], message: 'Summary window exceeds daily bucket limit' })
   })
   const metric = z.discriminatedUnion('op', [
-    summaryObject({ op: z.enum(['count']), alias }),
-    summaryObject({ op: z.enum(['sum']), alias, field: operand(config, entity, 'sum') }),
+    z.strictObject({ op: z.enum(['count']), alias }),
+    z.strictObject({ op: z.enum(['sum']), alias, field: operand(config, entity, 'sum') }),
   ])
-  const summary = summaryObject({ version, metrics: z.array(metric).min(1).max(SUMMARY_LIMITS.metrics)
+  const summary = z.strictObject({ version, metrics: z.array(metric).min(1).max(SUMMARY_LIMITS.metrics)
     .refine(values => new Set(values.map(value => value.alias)).size === values.length, 'Summary aliases must be unique'),
   groupBy: z.array(operand(config, entity, 'groupBy')).min(1).max(SUMMARY_LIMITS.groupBy)
     .refine(values => new Set(values).size === values.length, 'Summary groupBy fields must be unique').optional(),
@@ -99,7 +138,7 @@ export function summaryQuerySchema<C extends InstanceConfig, E extends keyof C['
   }).superRefine((value, ctx) => {
     if (value.window?.bucket && value.groupBy?.includes(value.window.field)) ctx.addIssue({ code: 'custom', path: ['groupBy'], message: 'Summary bucket field cannot also be a groupBy field' })
   })
-  return summaryObject({ entity: z.enum([entity]), where: filterSchema(config)(entity, 0).optional(), summary }) as z.ZodType<SummaryQuery<C, E>>
+  return summaryDiagnostics(z.strictObject({ entity: z.enum([entity]), where: filterSchema(config)(entity, 0).optional(), summary })) as z.ZodType<SummaryQuery<C, E>>
 }
 
 function groupValue(config: InstanceConfig, entity: string, field: string): z.ZodType {
@@ -118,7 +157,7 @@ export function summaryResultSchema<C extends InstanceConfig, E extends keyof C[
   if (summary.window?.bucket) groups[summary.window.field] = z.iso.datetime().refine(value => Date.parse(value) % dayMs === 0, 'Summary day bucket must start at UTC midnight')
   for (const metric of summary.metrics) metrics[metric.alias] = metric.op === 'count' ? z.number().int().safe().nonnegative()
     : (fieldType(config, entity, metric.field) === 'int' ? z.number().int().safe() : z.number().finite()).nullable()
-  const row = summaryObject({ groups: summaryObject(groups), metrics: summaryObject(metrics) })
+  const row = z.strictObject({ groups: z.strictObject(groups), metrics: z.strictObject(metrics) })
   const data = Object.keys(groups).length ? z.array(row).max(summary.maxGroups ?? SUMMARY_LIMITS.groups) : z.array(row).length(1)
-  return summaryObject({ kind: z.enum(['summary']), version, data }) as unknown as z.ZodType<SummaryResult<C, E, S>>
+  return summaryDiagnostics(z.strictObject({ kind: z.enum(['summary']), version, data })) as unknown as z.ZodType<SummaryResult<C, E, S>>
 }

@@ -48,11 +48,96 @@ it.each(unknownKeyCases.flatMap(([name, contract, input]) => [false, true].map(r
     const serialized = JSON.stringify(parsed.error.issues)
     expect(serialized).not.toContain(unsafeKey)
     expect(serialized).not.toContain(unsafeValue)
-    expect(parsed.error.issues).toContainEqual(expect.objectContaining({ code: 'unrecognized_keys', keys: [] }))
+    expect(parsed.error.issues).toContainEqual(expect.objectContaining({ code: 'unrecognized_keys', message: 'Unknown summary properties are unsupported' }))
+    for (const issue of parsed.error.issues) expect(issue).not.toHaveProperty('keys')
     expect(JSON.stringify(input)).toContain(unsafeKey)
     expect(JSON.stringify(input)).toContain(unsafeValue)
   },
 )
+
+// Deterministic property-style generation: vary keys, values, containers and
+// nesting while requiring coverage of every summary-owned issue code.
+it.each([false, true])('projects every summary diagnostic without input data (reportInput=%s)', async reportInput => {
+  const reached = new Set<string>(), messages = new Map<string, string>()
+  for (let seed = 0; seed < 8; seed++) {
+    const key = `diagnostic_key_canary_${seed}`, value = `diagnostic_value_canary_${seed}`
+    const poison = { [key]: value }
+    const model = instanceConfigSchema.parse({ ...config, entities: { sales: { ...config.entities.sales,
+      fields: { ...config.entities.sales.fields, [key]: { type: 'enum', values: [value] } },
+    } } })
+    const resultOptions = { version: 1, metrics: [{ op: 'count', alias: key }], groupBy: [key] } as const
+    const resultSchema = summaryResultSchema(model, 'sales', resultOptions)
+    const result = { kind: 'summary', version: 1, data: [{ groups: { [key]: value }, metrics: { [key]: 1 } }] }
+    const row = result.data[0]
+    const cases: [z.ZodType, unknown, string][] = [
+      [schema, request({ metrics: [{ op: value, alias: key, ...poison }] }), 'invalid_union'],
+      [schema, { ...request(), ...poison }, 'unrecognized_keys'],
+      [schema, request({ metrics: Array.from({ length: SUMMARY_LIMITS.metrics + 1 + seed }, () => ({ op: 'count', alias: key, ...poison })) }), 'too_big'],
+      [schema, request({ groupBy: Array.from({ length: SUMMARY_LIMITS.groupBy + 1 + seed }, () => value), ...poison }), 'too_big'],
+      [schema, request({ groupBy: [value], ...poison }), 'invalid_value'],
+      [schema, request({ maxGroups: SUMMARY_LIMITS.groups + 1 + seed, ...poison }), 'too_big'],
+      [schema, request({ maxGroups: -seed, ...poison }), 'too_small'],
+      [schema, request({ metrics: [], ...poison }), 'too_small'],
+      [schema, request({ metrics: [{ op: 'count', alias: value.toUpperCase() }], ...poison }), 'invalid_format'],
+      [schema, request({ window: { ...window, from: value, ...poison } }), 'invalid_format'],
+      [schema, request({ metrics: [{ op: 'count', alias: key }, { op: 'count', alias: key }], ...poison }), 'custom'],
+      [schema, request({ window: { ...window, to: window.from, ...poison } }), 'custom'],
+      [resultSchema, { ...result, data: Array.from({ length: SUMMARY_LIMITS.groups + 1 + seed }, () => ({ ...row, ...poison })) }, 'too_big'],
+      [resultSchema, { ...result, data: [{ ...row, groups: {} }] }, 'invalid_value'],
+      [resultSchema, { ...result, data: [{ ...row, metrics: { [key]: value } }] }, 'invalid_type'],
+      [resultSchema, { ...result, data: [{ ...row, metrics: { [key]: -1 - seed } }] }, 'too_small'],
+      [resultSchema, { ...result, data: [{ ...row, groups: { [key]: `${value}_rejected` } }] }, 'invalid_value'],
+      [resultSchema, { ...result, data: [{ ...row, groups: { ...row.groups, ...poison }, metrics: { ...row.metrics, ...poison } }] }, 'invalid_type'],
+      [summaryResultSchema(config, 'sales', grouped), { ...groupedResult, data: [{ ...groupRow, groups: { ...groupRow.groups, ...poison }, metrics: { ...groupRow.metrics, ...poison } }] }, 'unrecognized_keys'],
+    ]
+    for (const container of [value, [poison], seed, null]) {
+      cases.push([schema, container, 'invalid_type'],
+        [schema, { ...request(), summary: container }, 'invalid_type'],
+        [schema, request({ metrics: container }), Array.isArray(container) ? 'invalid_union' : 'invalid_type'],
+        [schema, request({ metrics: [container] }), 'invalid_type'],
+        [schema, request({ window: container }), 'invalid_type'],
+        [resultSchema, container, 'invalid_type'],
+        [resultSchema, { ...result, data: [{ ...row, groups: container, metrics: container }] }, 'invalid_type'])
+    }
+    for (const [contract, input, code] of cases) {
+      const parsed = contract.safeParse(input, { reportInput, error: () => value })
+      expect(parsed.success).toBe(false)
+      if (parsed.success) throw new Error('Expected invalid generated summary')
+      expect(parsed.error.issues.some(issue => issue.code === code), code).toBe(true)
+      for (const issue of parsed.error.issues) {
+        reached.add(issue.code)
+        if (messages.has(issue.code)) expect(issue.message).toBe(messages.get(issue.code))
+        else messages.set(issue.code, issue.message)
+        for (const bound of ['minimum', 'maximum'] as const) {
+          if (bound in issue) expect(Number.isFinite(issue[bound as keyof typeof issue])).toBe(true)
+        }
+      }
+      const serialized = JSON.stringify(parsed.error.issues)
+      expect(serialized).not.toContain(key)
+      expect(serialized).not.toContain(value)
+      // Enforce the allowlist itself, including fields added by future Zod versions.
+      for (const issue of parsed.error.issues) {
+        expect(Object.keys(issue).every(field => ['code', 'path', 'message', 'minimum', 'maximum'].includes(field))).toBe(true)
+      }
+      // All supported parse entry points share the same projection.
+      expect((await contract.safeParseAsync(input, { reportInput })).error?.issues).toEqual(parsed.error.issues)
+      expect(z.safeParse(contract, input, { reportInput }).error?.issues).toEqual(parsed.error.issues)
+      expect((await z.safeParseAsync(contract, input, { reportInput })).error?.issues).toEqual(parsed.error.issues)
+      expect((await contract['~standard'].validate(input)).issues).toEqual(parsed.error.issues)
+      expect(() => contract.parse(input, { reportInput })).toThrowError(expect.objectContaining({ issues: parsed.error.issues }))
+    }
+  }
+  expect([...reached].sort()).toEqual(['custom', 'invalid_format', 'invalid_type', 'invalid_union', 'invalid_value', 'too_big', 'too_small', 'unrecognized_keys'])
+})
+
+it('masks result map keys even when they match grammar tokens', () => {
+  const result = summaryResultSchema(config, 'sales', { ...options, metrics: [{ op: 'count', alias: 'version' }], groupBy: ['version'] })
+  const parsed = result.safeParse({ kind: 'summary', version: 1, data: [{ groups: { version: 'invalid' }, metrics: { version: 'invalid' } }] })
+  expect(parsed.success).toBe(false)
+  if (!parsed.success) expect(parsed.error.issues.map(issue => issue.path)).toEqual([
+    ['data', 0, 'groups', '[key]'], ['data', 0, 'metrics', '[key]'],
+  ])
+})
 
 const validRequests = [
   request(), request({ metrics: [{ op: 'count', alias: 'rows' }] }),
@@ -104,12 +189,12 @@ it.each([...invalidRequests, ...semanticInvalid])('rejects %s', (_, value) => {
   expect(schema.safeParse(value).success).toBe(false)
 })
 it.each([
-  ['owner', 'reference'], ['parent', 'reference'], ['calculated', 'computed'], ['SUM(amount)', 'expressions'], ['missing', 'Unknown'],
-])('provides specific operand diagnostics for %s', (field, diagnostic) => {
+  'owner', 'parent', 'calculated', 'SUM(amount)', 'missing',
+])('rejects unsupported operands with fixed diagnostics for %s', field => {
   for (const summary of [{ groupBy: [field] }, { metrics: [{ op: 'sum', field, alias: 'total' }] }, { window: { ...window, field } }]) {
     const parsed = schema.safeParse(request(summary))
     expect(parsed.success).toBe(false)
-    if (!parsed.success) expect(parsed.error.issues[0].message).toContain(diagnostic)
+    if (!parsed.success) expect(parsed.error.issues[0].message).toBe('Unsupported summary value')
   }
 })
 it('rejects an unknown schema entity and does not disclose computed expressions', () => {
