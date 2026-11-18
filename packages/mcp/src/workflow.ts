@@ -8,7 +8,7 @@ import { appendFile, readFile, readdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { z } from 'zod'
 import { atomic, configSource, json, noLink, Store, type Bundle } from './storage.ts'
-import { schemas, compositionChangeSchema, WorkflowError, fail, type ToolName } from './schemas.ts'
+import { schemas, compositionChangeSchema, isPresentationChange, WorkflowError, fail, type ToolName } from './schemas.ts'
 import { guard, hash, prepare, prepareChanges } from './planning.ts'
 import { effectivePolicies } from './policies.ts'
 import { expectedSnapshot, instanceMeta } from './offline.ts'
@@ -172,15 +172,27 @@ export class Workflow {
             if (!['promoted', 'discarded'].includes(p.status)) pending.push({ proposalId: p.proposalId, baseRevision: p.baseRevision, createdAt: p.createdAt, status: p.status })
           }
           const diagnostics = await diagnose()
+          let dictionaries
+          if (bundle.config.baseline === 'workbase-sdk') {
+            const ui = await import('@workbasehq/plugins/console/ui/check')
+            try { dictionaries = await ui.inspectDictionaries(dir) }
+            catch {
+              // Invalid declarations must remain inspectable for repair. The
+              // validator supplies located diagnostics when inventory cannot compile.
+              dictionaries = { languages: bundle.config.languages, requiredKeys: [], errors: await ui.validateInstance(dir) }
+            }
+          }
           return { ok: true, instance: targetInstance, revision: bundle.config.revision, displayName: bundle.config.displayName, instance_meta: diagnostics.meta, validation: diagnostics.validation,
             entities: bundle.config.entities, roles: bundle.config.roles, organizationOwnerRole: bundle.config.organizationOwnerRole, permissions: bundle.config.permissions,
+            ...(dictionaries ? { dictionaries } : {}),
             languages: bundle.config.languages, locale: bundle.config.locale, ui: bundle.config.ui, enumLabels: bundle.config.enumLabels,
             policies: effectivePolicies(bundle.config), organizationPermissions: bundle.config.organizationPermissions,
             indexes: bundle.indexes, pendingProposals: pending }
         }
         if (name === 'propose_change') {
-          if (bundle.config.baseline === 'workbase-sdk' && input.changes.some((change: { kind: string }) => change.kind === 'set_locale')) {
-            if (!input.changes.every((change: { kind: string }) => change.kind === 'set_locale')) fail('mixed_change_kinds', 'Propose V3 language changes separately from legacy config changes')
+          if (bundle.config.baseline === 'workbase-sdk' && input.changes.some((change: { kind: string }) => isPresentationChange(change))
+            || input.changes.some((change: { kind: string }) => change.kind === 'set_catalog_entries')) {
+            if (!input.changes.every((change: { kind: string }) => isPresentationChange(change))) fail('mixed_change_kinds', 'Propose V3 language changes separately from legacy config changes')
             return proposeComposition(this.store, targetInstance, input.baseRevision, input.changes, proposalId!)
           }
           guardV3LegacyWrite(bundle.config, 'propose', input.changes)

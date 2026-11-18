@@ -78,8 +78,8 @@ Supported kinds, as defined in [schemas.ts](../../packages/mcp/src/schemas.ts):
   with domain, runtime or access changes is rejected. Continue through validation,
   preview, disposable verification and promotion as below.
 - `set_locale` takes `locale`, `defaultLanguage` and/or `languages` (`en`/`cs`).
-  V3 presentation changes require a separate proposal and preserve the domain revision
-  and schema lock. See the language example below.
+  V3 presentation changes share a batch with `set_catalog_entries` and `set_instance_display_name`, separate from
+  runtime/access/schema changes, and preserve the domain revision and schema lock. See the language example below.
 
 The access compiler checks roles, actions and entity matrices. Composition and
 access kinds can share a proposal; `propose_change` also accepts these V3 kinds.
@@ -107,13 +107,32 @@ Every organization counts, including a generated `instance` placeholder. Configu
 roles before organization provisioning; this operation never deletes target rows.
 
 For enabled console languages, call `propose_change` (or `propose_composition`)
-with a separate proposal, for example:
+with a presentation-only proposal. First inspect `dictionaries` from `inspect_schema`: it
+contains enabled languages, existing catalogs, required keys with source references,
+and plural categories for each supported language. For a fresh worker scaffold:
 
 ```json
 {
   "instance": "my-instance",
   "baseRevision": 1,
-  "changes": [{ "kind": "set_locale", "languages": ["en", "cs"] }]
+  "changes": [
+    { "kind": "set_locale", "languages": ["en", "cs"] },
+    { "kind": "set_catalog_entries", "language": "cs", "namespace": "domain", "entries": {
+      "entity.worker_one": "{{count}} pracovník",
+      "entity.worker_few": "{{count}} pracovníci",
+      "entity.worker_many": "{{count}} pracovníka",
+      "entity.worker_other": "{{count}} pracovníků",
+      "field.worker.name": "Jméno",
+      "field.worker.user": "Přístup do aplikace"
+    } },
+    { "kind": "set_catalog_entries", "language": "cs", "namespace": "ui", "entries": {
+      "workers.list.title": "Pracovníci",
+      "workers.create.title": "Nový pracovník",
+      "workers.detail.title": "Pracovník",
+      "workers.edit.title": "Upravit pracovníka",
+      "workers.nav.title": "Pracovníci"
+    } }
+  ]
 }
 ```
 
@@ -121,14 +140,34 @@ with a separate proposal, for example:
 (`en`/`cs`); the first entry is the V3 default. `locale` and `defaultLanguage`
 remain optional independent settings; `defaultLanguage` updates
 `ui.defaultLanguage`. Language proposals edit literal values in `config.ts`,
-retaining its imports, schema-lock binding and other options. Provide the
-consumer's `locales/<language>/ui.json` and `domain.json` dictionaries separately.
-Recreate older locale proposals as new proposals to use this V3 publication path.
+retaining its imports, schema-lock binding and other options. `set_catalog_entries`
+upserts flat, nonempty strings into derived `locales/en|cs/domain|ui.json` paths;
+other entries are preserved. Arbitrary paths and SDK overrides are not writable.
+Translations must be authored explicitly; English is never copied to Czech.
+The complete staged config/schema/UI/catalog graph runs through the console UI
+validator. Every enabled language must be complete: Czech requires all four
+counted forms (`one`, `few`, `many`, `other`), consistent interpolation, and no
+orphan keys. Errors include locations and the missing keys. Dictionary-only
+batches preserve config and access/OpenAPI artifacts, including their absence.
+
+This is issue #186 slice 1. V3 `set_label`, named singular/object forms, and their
+renderer support remain slice 2. Use only the inventoried V3 keys in this slice;
+page/nav titles stay independent `ui:` keys. Legacy-instance captions retain their
+existing behavior. Previously saved legacy caption proposals cannot publish V3
+sources; recreate them with catalog operations. The V3 legacy-write guard remains.
+
+Proofs persist across restarts and bind config/schema/runtime, UI declarations
+and checked modules, catalog bytes/path inventories (including absent catalogs),
+and prior presentation publication receipts. Edits, deletions, new inputs, and
+competing same-revision publications invalidate proofs. Publication rechecks inputs
+under the instance lock and journals owned locale-directory creation along with
+catalogs, config/artifacts, and proposal metadata for recoverable rollback.
 
 Continue through these tools in order:
 
 1. `validate` with `{proposalId}` checks the target kernel, access declarations,
-   committed history and deployment requirements. Resolve blocking requirements
+   committed history and deployment requirements. Presentation batches also validate
+   the full staged UI and dictionaries. Resolve blocking requirements
    through reviewed source or infrastructure changes before proceeding.
 2. `preview_migration` with `{proposalId}` returns exact proposed file bytes,
    regenerated access locks, plugin migration statuses and plugin SQL. Domain

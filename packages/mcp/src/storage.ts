@@ -8,8 +8,8 @@ import { replaySources } from './replay-sources.ts'
 import { parseRuntimeSource } from './composition/runtime-source.ts'
 import { hydrateRuntimePlugins } from './composition/registry.ts'
 import { constants } from 'node:fs'
-import { open, lstat, mkdir, readFile, readdir, realpath, rename, rm, writeFile, link, unlink } from 'node:fs/promises'
-import { resolve, join, dirname } from 'node:path'
+import { open, lstat, mkdir, readFile, readdir, realpath, rename, rm, writeFile, link, unlink, rmdir } from 'node:fs/promises'
+import { resolve, join, dirname, relative, basename } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { createRequire } from 'node:module'
 import { inspectInstance, isDisplayFieldError, serializableInstanceConfig, type InstanceConfig } from '@workbasehq/core/config'
@@ -139,14 +139,16 @@ async function dependencyHash(path: string) {
   const bytes = await fileBytes(path)
   return bytes === null ? null : byteHash(bytes)
 }
-const transactionPath = z.string().regex(/^(runtime\.ts|access\.ts|schema\.lock\.json|schema\/[a-z][a-z0-9_]{0,62}\.ts|openapi\.json|access\.lock\.(?:json|md)|package\.json|bun\.lock|config(?:\.v[1-9][0-9]*)?\.ts|config\.(?:indexes|versions)\.json|migrations\/\d{4}_[a-z0-9_]+\.sql|proposals\/[a-f0-9-]+\.json)$/)
+const transactionPath = z.string().regex(/^(runtime\.ts|access\.ts|schema\.lock\.json|schema\/[a-z][a-z0-9_]{0,62}\.ts|openapi\.json|access\.lock\.(?:json|md)|package\.json|bun\.lock|config(?:\.v[1-9][0-9]*)?\.ts|config\.(?:indexes|versions)\.json|migrations\/\d{4}_[a-z0-9_]+\.sql|locales\/(?:en|cs)\/(?:domain|ui)\.json|proposals\/[a-f0-9-]+\.json)$/)
 const digest = z.string().regex(/^[a-f0-9]{64}$/)
 const base64 = z.string().refine(value => Buffer.from(value, 'base64').toString('base64') === value)
 const identityPart = z.union([z.string().regex(/^(0|[1-9][0-9]*)$/), z.number().int().nonnegative().transform(String)])
 const identitySchema = z.strictObject({ dev: identityPart, ino: identityPart, hash: digest })
 type FileIdentity = z.infer<typeof identitySchema>
 const ownedJournalSchema = z.strictObject({
-  version: z.literal(3), transactionId: z.uuid(), files: z.array(z.strictObject({
+  version: z.literal(3), transactionId: z.uuid(),
+  directories: z.array(z.strictObject({ path: z.string().regex(/^locales(?:\/(?:en|cs))?$/), stage: z.uuid(), dev: identityPart, ino: identityPart })).optional(),
+  files: z.array(z.strictObject({
     path: transactionPath, before: base64.nullable(), stage: z.uuid(), after: identitySchema,
     capture: z.strictObject({ token: z.uuid(), identity: identitySchema }).optional(),
   }).refine(file => file.before === null ? file.capture === undefined
@@ -159,11 +161,11 @@ const journalSchema = z.union([
   z.strictObject({ files: z.array(z.strictObject({ path: transactionPath, before: z.string().nullable(), afterHash: digest.optional() })) }),
 ])
 // Validate all destinations before either publication or recovery can mutate anything.
-async function validatePaths(dir: string, paths: string[], inspectFiles = true) {
+async function validatePaths(dir: string, paths: string[], inspectFiles = true, missingLocales = false) {
   dir = resolve(dir)
   const seen = new Set<string>()
   await noLink(dir)
-  const directories = new Map<string, { dev: bigint; ino: bigint }>()
+  const directories = new Map<string, { dev: bigint; ino: bigint } | null>()
   for (const parent of [resolve(dir), join(dir, 'proposals')]) {
     const stat = await lstat(parent, { bigint: true })
     if (!stat.isDirectory() || stat.isSymbolicLink()) fail('unsafe_path', 'Transaction ancestors must be real directories', 403)
@@ -173,10 +175,14 @@ async function validatePaths(dir: string, paths: string[], inspectFiles = true) 
     if (!transactionPath.safeParse(path).success || seen.has(path)) fail('invalid_journal', 'Invalid promotion journal path', 500)
     seen.add(path)
     const destination = resolve(dir, path)
-    await noLink(dirname(destination))
+    await noLink(dirname(destination), missingLocales)
     if (inspectFiles) await noLink(destination, true)
     for (let parent = dirname(destination); ; parent = dirname(parent)) {
-      const stat = await lstat(parent, { bigint: true })
+      const stat = await lstat(parent, { bigint: true }).catch(error => {
+        if (error.code === 'ENOENT' && missingLocales && /^locales(?:\/(?:en|cs))?$/.test(relative(dir, parent))) return null
+        throw error
+      })
+      if (!stat) { directories.set(parent, null); continue }
       if (!stat.isDirectory() || stat.isSymbolicLink()) fail('unsafe_path', 'Transaction ancestors must be real directories', 403)
       const previous = directories.get(parent)
       if (previous && (previous.dev !== stat.dev || previous.ino !== stat.ino)) conflict(path)
@@ -186,7 +192,7 @@ async function validatePaths(dir: string, paths: string[], inspectFiles = true) 
     // Reject directories and other special files as well as symlinks.
     if (inspectFiles) await fileBytes(destination)
   }
-  return async (path: string) => {
+  const fence = async (path: string) => {
     path = resolve(path)
     const chain: string[] = []
     for (let parent = dirname(path); ; parent = dirname(parent)) {
@@ -198,13 +204,18 @@ async function validatePaths(dir: string, paths: string[], inspectFiles = true) 
     // and each syscall is accepted, as in #208; this is not a directory-handle lock.
     for (const parent of chain) {
       const stat = await lstat(parent, { bigint: true }).catch(error => {
+        if (error.code === 'ENOENT' && directories.get(parent) === null) return null
         if (error.code === 'ENOENT') conflict(path)
         throw error
       })
       const expected = directories.get(parent)
-      if (!expected || !stat.isDirectory() || stat.isSymbolicLink() || stat.dev !== expected.dev || stat.ino !== expected.ino) conflict(path)
+      if (stat === null && expected === null) continue
+      if (!stat || !expected || !stat.isDirectory() || stat.isSymbolicLink() || stat.dev !== expected.dev || stat.ino !== expected.ino) conflict(path)
     }
   }
+  return Object.assign(fence, { directory: (path: string, identity: { dev: string; ino: string } | null) => {
+    directories.set(resolve(dir, path), identity ? { dev: BigInt(identity.dev), ino: BigInt(identity.ino) } : null)
+  } })
 }
 class TransactionConflict extends WorkflowError {
   constructor(readonly path: string) { super('concurrent_modification', `Instance files changed during transaction: ${path}`, 409) }
@@ -468,7 +479,7 @@ export class Store {
     const sources: Record<string, Buffer> = {}
     for (const name of names) { await noLink(join(dir, name)); sources[name] = (await fileBytes(join(dir, name)))! }
     // Hash the complete tracked graph before evaluating either entrypoint.
-    const inputs = await replaySources(dir, { accessLock: true })
+    const inputs = await replaySources(dir, { accessLock: true, presentation: options.canonicalRuntime === true })
     const graph = { ...sources, ...inputs }
     // Reject malformed authored TypeScript before parsing, importing or editing it.
     for (const [path, bytes] of Object.entries(graph)) if (path.endsWith('.ts')) decodeSource(bytes, join(dir, path))
@@ -506,6 +517,10 @@ export class Store {
     const indexes = sources['config.indexes.json'] ? z.array(z.strictObject({ entity: identifier, name: identifier, fields: z.array(identifier).min(1) })).parse(JSON.parse(sources['config.indexes.json'].toString('utf8'))) : []
     const guards = Object.fromEntries([
       ...Object.entries(dependencies?.guards ?? {}),
+      ...(config.baseline === 'workbase-sdk' && options.canonicalRuntime ? [
+        ...['runtime.ts', 'access.ts', 'schema.lock.json', 'access.lock.json', 'access.lock.md', 'openapi.json'].map(path => [path, null]),
+        ...['en', 'cs'].flatMap(lang => ['domain', 'ui', 'sdk'].map(ns => [`locales/${lang}/${ns}.json`, null])),
+      ] : []),
       ...Object.entries(byteManifest(graph)),
     ])
     const sdkVersion = dependencies?.guards['package.json'] && config.baseline === 'workbase-sdk'
@@ -656,8 +671,17 @@ export class Store {
   async recover(dir: string) { await this.withLock(dir, async () => {}) }
   private async rollbackOwned(dir: string, journal: OwnedJournal, source: string, publicationFence?: Fence, expectedJournal?: FileIdentity) {
     const journalPath = join(dir, 'proposals/.promotion.json')
-    const validated = await validatePaths(dir, journal.files.map(file => file.path), false)
+    const validated = await validatePaths(dir, journal.files.map(file => file.path), false, true)
     const fence = publicationFence ?? validated
+    for (const directory of journal.directories ?? []) {
+      const path = join(dir, directory.path)
+      const stat = await lstat(path, { bigint: true }).catch(error => { if (error.code === 'ENOENT') return null; throw error })
+      if (stat && (!stat.isDirectory() || stat.isSymbolicLink() || stat.dev.toString() !== directory.dev || stat.ino.toString() !== directory.ino)) conflict(path)
+      // A syscall may have installed the directory before its caller observed an
+      // error. Reattach only the journal-owned identity before undoing files.
+      validated.directory(directory.path, stat ? directory : null)
+      if (publicationFence && 'directory' in publicationFence) (publicationFence as typeof validated).directory(directory.path, stat ? directory : null)
+    }
     const marker = `${journalPath}.conflict-${hash(source).slice(0, 16)}`
     let journalFile: Awaited<ReturnType<typeof fileSnapshot>> = null
     let conflicted = false
@@ -752,14 +776,42 @@ export class Store {
       await syncDirectory(dirname(marker))
       conflict(journalPath)
     }
+    // Interrupted removeOwned can leave a retained hardlink after its canonical
+    // unlink failed. Dispose only names with the exact journal-owned new inode;
+    // matching bytes alone never establish ownership. Otherwise a new locale
+    // directory would stay nonempty across recovery retries.
+    for (const file of journal.files) if (file.path.startsWith('locales/')) {
+      const directory = dirname(join(dir, file.path)), prefix = basename(file.path) + '.'
+      const names = await readdir(directory).catch(error => { if (error.code === 'ENOENT') return []; throw error })
+      for (const name of names) {
+        if (!name.startsWith(prefix) || !/^[a-f0-9-]{36}\.tmp$/.test(name.slice(prefix.length))) continue
+        const path = join(directory, name)
+        if (sameFile((await fileSnapshot(path))?.identity, file.after)) {
+          await assertOwned(path, file.after, fence); await unlink(path)
+        }
+      }
+    }
     // Cleanup begins only after every canonical original has been verified.
-    for (const directory of new Set(journal.files.map(file => dirname(resolve(dir, file.path))))) await syncDirectory(directory)
+    for (const directory of new Set(journal.files.map(file => dirname(resolve(dir, file.path))))) {
+      if (await lstat(directory).catch(() => null)) await syncDirectory(directory)
+    }
     for (const file of journal.files) if (file.capture) {
       const temporary = `${resolve(dir, file.path)}.${file.capture.token}.tmp`
       if (await fileSnapshot(temporary)) {
         await assertOwned(temporary, file.capture.identity, fence)
         await unlink(temporary)
       }
+    }
+    for (const directory of [...journal.directories ?? []].reverse()) {
+      for (const path of [join(dir, directory.path), join(dir, 'proposals', `.promotion-dir-${directory.stage}`)]) {
+        const stat = await lstat(path, { bigint: true }).catch(error => { if (error.code === 'ENOENT') return null; throw error })
+        if (!stat) continue
+        if (!stat.isDirectory() || stat.isSymbolicLink() || stat.dev.toString() !== directory.dev || stat.ino.toString() !== directory.ino) conflict(path)
+        await rmdir(path)
+        await syncDirectory(dirname(path))
+      }
+      validated.directory(directory.path, null)
+      if (publicationFence && 'directory' in publicationFence) (publicationFence as typeof validated).directory(directory.path, null)
     }
     await removeOwned(journalPath, journalFile!.identity, fence)
     await syncDirectory(dirname(journalPath))
@@ -827,7 +879,7 @@ export class Store {
     const journal: OwnedJournal = { version: 3, transactionId: crypto.randomUUID(), files: [] }
     let source: string
     const staged = new Map<string, { path: string; identity: FileIdentity }>()
-    const fence = await validatePaths(dir, files.map(file => file.path))
+    const fence = await validatePaths(dir, files.map(file => file.path), true, true)
     const cleanupStaged = async () => {
       for (const file of staged.values()) {
         if (sameFile((await fileSnapshot(file.path))?.identity, file.identity)) {
@@ -836,6 +888,17 @@ export class Store {
       }
     }
     try {
+      const parents = new Set(files.filter(file => file.path.startsWith('locales/')).flatMap(file => ['locales', dirname(file.path)]))
+      for (const path of [...parents].sort()) {
+        if (await lstat(join(dir, path)).catch(error => { if (error.code === 'ENOENT') return null; throw error })) continue
+        const stage = crypto.randomUUID(), temporary = join(dir, 'proposals', `.promotion-dir-${stage}`)
+        await fence(temporary)
+        await mkdir(temporary, { mode: 0o700 })
+        const stat = await lstat(temporary, { bigint: true })
+        ;(journal.directories ??= []).push({ path, stage, dev: stat.dev.toString(), ino: stat.ino.toString() })
+        await syncDirectory(temporary)
+      }
+      await syncDirectory(join(dir, 'proposals'))
       for (const f of files) {
         const path = join(dir, f.path)
         const before = await fileSnapshot(path)
@@ -858,7 +921,11 @@ export class Store {
       }
       source = json(journal)
       if (!journalSchema.safeParse(JSON.parse(source)).success) fail('invalid_journal', 'Invalid promotion journal', 500)
-    } catch (error) { await cleanupStaged(); throw error }
+    } catch (error) {
+      await cleanupStaged()
+      for (const directory of journal.directories ?? []) await rmdir(join(dir, 'proposals', `.promotion-dir-${directory.stage}`))
+      throw error
+    }
     const internalPaths = new Set([
       ...[...staged.values()].map(file => file.path),
       ...journal.files.flatMap(file => file.capture ? [`${join(dir, file.path)}.${file.capture.token}.tmp`] : []),
@@ -867,7 +934,7 @@ export class Store {
       const paths = new Set([
         ...Object.keys(expected),
         // Reject additions as well as edits/deletions of tracked graph inputs.
-        ...Object.keys(await replaySources(dir, { accessLock: true })),
+        ...Object.keys(await replaySources(dir, { accessLock: true, presentation: Object.hasOwn(guards, 'locales/en/domain.json') })),
         ...(await readdir(dir)).filter(n => /^config(?:\.[a-z0-9_-]+)?\.(ts|json)$/.test(n)),
         ...(await readdir(join(dir, 'migrations'))).filter(n => n !== '.gitkeep').map(n => `migrations/${n}`),
       ])
@@ -891,6 +958,17 @@ export class Store {
       // The immutable durable journal records original and staged inode identities
       // before capture or publication. Restart never infers ownership from bytes.
       await syncDirectory(dirname(journalPath))
+      for (const directory of journal.directories ?? []) {
+        const path = join(dir, directory.path), temporary = join(dir, 'proposals', `.promotion-dir-${directory.stage}`)
+        await fence(join(path, '.directory-fence'))
+        if (await lstat(path).catch(error => { if (error.code === 'ENOENT') return null; throw error })) conflict(path)
+        const stat = await lstat(temporary, { bigint: true })
+        if (!stat.isDirectory() || stat.isSymbolicLink() || stat.dev.toString() !== directory.dev || stat.ino.toString() !== directory.ino) conflict(temporary)
+        await rename(temporary, path)
+        fence.directory(directory.path, directory)
+        await syncDirectory(dirname(path))
+        await syncDirectory(join(dir, 'proposals'))
+      }
       for (const f of files) {
         const path = join(dir, f.path), stage = staged.get(f.path)!
         await check(stage.path, f.path)
@@ -917,7 +995,16 @@ export class Store {
       // journal destination belongs to somebody else even if its bytes match.
       if (journalIdentity) await this.rollbackOwned(dir, journal, source, fence, journalIdentity)
       throw error
-    } finally { await cleanupStaged() }
+    } finally {
+      await cleanupStaged()
+      if (!journalIdentity) for (const directory of journal.directories ?? []) {
+        const path = join(dir, 'proposals', `.promotion-dir-${directory.stage}`)
+        const stat = await lstat(path, { bigint: true }).catch(error => { if (error.code === 'ENOENT') return null; throw error })
+        if (stat?.isDirectory() && stat.dev.toString() === directory.dev && stat.ino.toString() === directory.ino) {
+          await fence(path); await rmdir(path)
+        }
+      }
+    }
     // Journal retirement is the durable commit point. Failed disposal can leave
     // harmless retained originals, but cannot revoke a completed publication.
     for (const file of journal.files) if (file.capture) {
