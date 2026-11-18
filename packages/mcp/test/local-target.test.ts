@@ -256,3 +256,45 @@ it('rejects symlinked target ancestry and invalid explicit operator evidence wit
     expect(await fs.readFile(join(root, 'saved-local', 'mcp-target', `${created.targetId}.sqlite`))).toBeDefined()
   } finally { vi.unstubAllEnvs(); await app.server.close() }
 })
+
+
+it('refuses a second association when the receipt is missing but target files remain', async () => {
+  const { root, app, call } = await fixture()
+  try {
+    const created = await target(call), bytes = await fs.readFile(created.path)
+    const receipt = join(root, '.local/mcp-target/receipt.json')
+    await fs.rename(receipt, join(root, 'saved-receipt.json'))
+    const preview = await accepted(call, 'create_local_target', { instance })
+    expect(await call('create_local_target', { instance, mode: 'apply', planHash: preview.planHash }))
+      .toMatchObject({ ok: false, error: { code: 'local_target_conflict' } })
+    expect(await fs.readFile(created.path)).toEqual(bytes)
+    await expect(fs.readFile(receipt)).rejects.toMatchObject({ code: 'ENOENT' })
+    const proposalId = await propose(call, [{ kind: 'set_roles', roles, organizationOwnerRole: 'dispatcher' }])
+    expect(await call('apply_to_disposable', { proposalId })).toMatchObject({ ok: false, error: { code: 'role_usage_unverified' } })
+    await fs.rename(join(root, 'saved-receipt.json'), receipt)
+    expect(await target(call)).toMatchObject({ status: 'unchanged', targetId: created.targetId })
+  } finally { await app.server.close() }
+})
+
+it('recovers a first receipt write interrupted before publication without deleting its remnant', async () => {
+  const { root, app, call } = await fixture()
+  try {
+    const original = storage.durableAtomic
+    let remnant: string | undefined
+    vi.spyOn(storage, 'durableAtomic').mockImplementation(async (path, data) => {
+      if (path.endsWith('receipt.json')) {
+        remnant = path + '.' + crypto.randomUUID() + '.tmp'
+        await fs.writeFile(remnant, data, { flag: 'wx' })
+        throw new Error('interrupted first receipt publication')
+      }
+      return original(path, data)
+    })
+    const preview = await accepted(call, 'create_local_target', { instance })
+    const apply = { instance, mode: 'apply', planHash: preview.planHash }
+    expect(await call('create_local_target', apply)).toMatchObject({ ok: false })
+    vi.restoreAllMocks()
+    const before = await fs.readFile(remnant!)
+    expect(await call('create_local_target', apply)).toMatchObject({ ok: true, status: 'created' })
+    expect(await fs.readFile(remnant!)).toEqual(before)
+  } finally { await app.server.close() }
+})

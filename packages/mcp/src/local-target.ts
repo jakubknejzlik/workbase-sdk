@@ -1,6 +1,6 @@
 import { DatabaseSync } from 'node:sqlite'
 import { constants } from 'node:fs'
-import { lstat, mkdir, open, readFile, link } from 'node:fs/promises'
+import { lstat, mkdir, open, readFile, readdir, link } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { z } from 'zod'
 import { durableAtomic, json, type Store } from './storage.ts'
@@ -98,6 +98,13 @@ export async function createLocalTarget(store: Store, instance: string, input: {
       await sync(path); await sync(join(path, '..'))
     }
     if (!receipt) {
+      // A missing association is not permission to substitute a new target for
+      // this root. Only pre-intent atomic-write remnants can precede a receipt;
+      // preparing intent is durable before any SQLite attempt is created.
+      const remnants = await readdir(directory(root))
+      if (remnants.some(name => !/^receipt\.json\.[a-f0-9-]{36}\.tmp$/.test(name))) {
+        fail('local_target_conflict', 'Local target files exist without their receipt; preserve and restore the association before retrying', 409)
+      }
       receipt = { version: 1, instance, instanceId: crypto.randomUUID(), targetId: crypto.randomUUID(), root: resolve(root),
         rootIdentity: await statIdentity(root), planHash, fingerprint: bundle.fingerprint,
         ...(bundle.dependencyDigest ? { dependencyDigest: bundle.dependencyDigest } : {}), state: 'preparing' }
