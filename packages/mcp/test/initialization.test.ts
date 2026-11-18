@@ -9,6 +9,7 @@ import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { createServer } from '../src/server.ts'
 import { bootstrapInstance } from '../src/bootstrap.ts'
 import { initializationPaths } from '../src/initialization.ts'
+import { planInitialization } from '../src/initialization-plan.ts'
 
 const roots: string[] = []
 afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))) })
@@ -354,5 +355,21 @@ it.each(['source', 'dependencies'])('rolls back all artifacts when %s change dur
     expect(await apply(first.planHash)).toMatchObject({ ok: false, error: { code: change === 'source' ? 'concurrent_modification' : 'dependencies_missing' } })
     for (const path of initializationPaths) await expect(readFile(join(root, path))).rejects.toMatchObject({ code: 'ENOENT' })
     expect(await readdir(join(root, 'proposals'))).not.toContain('.promotion.json')
+  } finally { await app.server.close() }
+})
+
+it('shares the read-only planner with the default tool and returns byte-exact five-artifact previews', async () => {
+  const { root, app, preview, apply } = await fixture()
+  try {
+    const before = await tree(root)
+    const planned = await planInitialization(root, instance)
+    const tool = await preview()
+    expect(tool).toMatchObject({ ok: true, planHash: planned.planHash, files: planned.files, conflicts: [] })
+    expect(planned.files.map(file => file.path)).toEqual(initializationPaths)
+    for (const file of planned.files) expect(file.hash).toBe(digest(file.data))
+    expect(await tree(root)).toEqual(before)
+    expect(await apply(tool.planHash)).toMatchObject({ ok: true, status: 'initialized' })
+    expect(await artifacts(root)).toEqual(planned.files.map(file => file.data))
+    expect(await apply(tool.planHash)).toMatchObject({ ok: true, status: 'unchanged', planHash: planned.planHash })
   } finally { await app.server.close() }
 })
