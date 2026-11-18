@@ -580,6 +580,7 @@ it.each(['en', 'cs'] as const)('178 %s keeps disabled confirmation and cancellat
   await user.clear(input); await user.type(input, 'bad@invalid')
   await screen.findByText(t.rowInviteNoMembers)
   expect(submit).toHaveProperty('disabled', true)
+  await user.click(submit); await user.type(input, '{Enter}')
   expect(write.mock.calls.every(([, method]) => method === 'GET')).toBe(true)
 })
 it.each(['en', 'cs'] as const)('178 %s explains an existing ineligible account and never offers an invitation', async language => {

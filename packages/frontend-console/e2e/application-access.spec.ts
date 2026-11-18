@@ -8,7 +8,7 @@ let stop: (() => Promise<void>) | undefined
 const evidence = process.env.WB178_SCREENSHOTS ?? '/Users/jarvis/.sitebrew-work/evidence/wb-209'
 test.beforeAll(async () => { stop = await setup({ worker: 'application-access-worker.ts', seed: 'application-access-seed.ts' }); mkdirSync(evidence, { recursive: true }) })
 test.afterAll(async () => { await stop?.() })
-for (const language of ['en', 'cs'] as const) for (const width of [1440, 390]) test(`${language} ${width}: Owner and Staff, list/detail, unified picker and pending link`, async ({ browser }) => {
+for (const language of ['en', 'cs'] as const) for (const width of [1440, 390]) test(`${language} ${width}: Owner and Staff, list/detail, unified picker and pending link`, async ({ browser }, testInfo) => {
   test.setTimeout(90_000)
   const t = language === 'cs' ? cs : en
   const owner = await browser.newContext({ baseURL: origin, viewport: { width, height: 900 }, hasTouch: width === 390, isMobile: width === 390, extraHTTPHeaders: { Authorization: 'Bearer access-admin-session' } })
@@ -111,11 +111,48 @@ for (const language of ['en', 'cs'] as const) for (const width of [1440, 390]) t
     await expect(confirm).toBeVisible(); await expect(confirm).toBeDisabled()
     await expect(dialog.getByRole('button', { name: t.cancel, exact: true })).toBeVisible()
     await expect(input).toHaveAccessibleDescription(t.rowFindRequired)
-    await input.fill('bad@invalid'); await expect(confirm).toBeDisabled()
+    // The disabled state also means searching. Match this query's response and
+    // localized rendered result before asserting or capturing its invalid state.
+    const invalidSearch = page.waitForResponse(response => {
+      const url = new URL(response.url())
+      return url.pathname === '/orgs/org-a/members' && url.searchParams.get('eligible') === 'link_account' && url.searchParams.get('q') === 'bad@invalid' && response.ok()
+    })
+    await input.fill('bad@invalid')
+    await invalidSearch
+    await expect(dialog.getByText(t.rowInviteNoMembers, { exact: true })).toBeVisible()
+    await expect(dialog.getByText(t.loading, { exact: true })).toHaveCount(0)
+    await expect(confirm).toBeDisabled()
+    await expect(input).toHaveAccessibleDescription(t.rowFindRequired)
+    await expect(confirm).toHaveCSS('opacity', '1')
+    await expect(confirm).toHaveCSS('cursor', 'not-allowed')
+    const disabledFill = await confirm.evaluate(node => getComputedStyle(node).backgroundColor)
+    if (width === 1440) {
+      await confirm.hover()
+      await expect(confirm).toHaveCSS('background-color', disabledFill)
+    }
+    // Native mouse and keyboard activation must not submit the invalid query.
+    const writes: string[] = []
+    const recordWrite = (request: import('@playwright/test').Request) => { if (request.method() === 'POST') writes.push(new URL(request.url()).pathname) }
+    page.on('request', recordWrite)
+    const confirmBox = (await confirm.boundingBox())!
+    await page.mouse.click(confirmBox.x + confirmBox.width / 2, confirmBox.y + confirmBox.height / 2)
+    await input.press('Enter')
+    await expect(confirm).toBeDisabled()
+    expect(writes).toEqual([])
+    page.off('request', recordWrite)
     await shot('invalid-email')
+    const eligibleSearch = page.waitForResponse(response => {
+      const url = new URL(response.url())
+      return url.pathname === '/orgs/org-a/members' && url.searchParams.get('eligible') === 'link_account' && url.searchParams.get('q') === 'Jana' && response.ok()
+    })
     await input.fill('Jana')
+    await eligibleSearch
     await dialog.getByRole('option', { name: 'Jana Eligible · free@example.test', exact: true }).click()
-    await expect(dialog.getByRole('button', { name: t.rowInvite_link })).toBeEnabled()
+    const linkConfirm = dialog.getByRole('button', { name: t.rowInvite_link, exact: true })
+    await expect(linkConfirm).toBeEnabled()
+    await expect(dialog.getByText(t.loading, { exact: true })).toHaveCount(0)
+    await expect(linkConfirm).not.toHaveCSS('background-color', disabledFill)
+    await testInfo.attach('confirm-states', { body: JSON.stringify({ language, width, disabledFill, enabledFill: await linkConfirm.evaluate(node => getComputedStyle(node).backgroundColor) }), contentType: 'application/json' })
     await shot('eligible-member')
     await input.fill('blocked@example.test'); await input.click()
     await expect(input).toHaveAccessibleDescription(t.write_account_already_linked)
