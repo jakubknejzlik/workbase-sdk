@@ -1,7 +1,7 @@
 # Query summary contract v1
 
-This is the preparatory contract for SDK #154, slice 1 of 3. The canonical
-schemas and types are exported from `@workbasehq/core/query/schema`.
+This is the preparatory contract for SDK #154, slice 1 of 3. The plain parse
+functions and types are exported from `@workbasehq/core/query/schema`.
 **Summary execution is not activated:** `POST /query`, served OpenAPI and the
 registered MCP query tool remain row-only. A contract-valid summary currently
 receives the existing safe `query_invalid` envelope through both HTTP and MCP.
@@ -49,8 +49,8 @@ in the result, without modifying a field or selecting an expression.
 `text`, `int`, `float`, `bool`, `datetime` or `enum`. Numeric sums, grouping and
 windows reject computed fields, references, relation paths and expression
 operands. Summary diagnostics expose only a code, structural path (dynamic keys
-become `[key]`), a fixed message per code, and numeric bounds when applicable,
-even when input reporting is requested. The built-in stored fields `id`,
+become `[key]`), a fixed message and an optional finite operand reason. The parse
+functions accept no Zod settings or error callbacks. The built-in stored fields `id`,
 `organization_id`, `version`, `created_at` and `updated_at` use the same metadata
 as row queries. A `day` bucket cannot also appear as a raw grouping field.
 
@@ -154,7 +154,9 @@ operands, a finite reason (`reference`, `computed`, `expression`, `unknown_field
 or `unsupported_type`). Dynamic map and predicate path keys become `[key]`.
 Unknown diagnostic codes become `invalid_summary` with a fixed message; raw
 messages, rejected values, key inventories and Zod errors never cross this
-boundary, including when `reportInput` or a custom error map is supplied.
+boundary. The parse functions accept no settings or callbacks. Internal parsing
+uses an SDK-owned constant error map before mapping issues, so consumer global
+Zod error and locale hooks are never invoked during summary validation.
 
 The Zod schemas are private to their construction module. The detached build
 helper `openapi/summary-contract.ts` exports only JSON request/result fragments,

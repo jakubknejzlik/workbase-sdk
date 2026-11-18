@@ -64,3 +64,14 @@ function schemaTypes(normalized: InstanceConfig) {
   return { parsed, parsedResult, invalid }
 }
 void [baseFields, result, unknown, text, computed, reference, computedGroup, window, version, mixed, spread, rowQuery, invalidResult, nullCount, nullBucket, unknownAlias, schemaTypes]
+
+// Public validation exposes no Zod settings or raw callback channel.
+function rejectsParseSettings(config: InstanceConfig) {
+  // @ts-expect-error SummaryParseSettings was removed from the public module.
+  type RemovedSettings = import('@workbasehq/core/query/schema').SummaryParseSettings
+  // @ts-expect-error Request parsing accepts no Zod settings.
+  parseSummaryRequest(config, 'sales', {}, { reportInput: true })
+  // @ts-expect-error Result parsing accepts no raw callback or settings.
+  parseSummaryResult(config, 'sales', { version: 1, metrics: [{ op: 'count', alias: 'rows' }] }, {}, { error: () => 'unsafe' })
+}
+void rejectsParseSettings

@@ -29,9 +29,11 @@ export type SafeIssue = {
 const pathKeys = new Set(['entity', 'where', 'summary', 'version', 'metrics', 'groupBy', 'window', 'maxGroups',
   'op', 'alias', 'field', 'from', 'to', 'timeZone', 'bucket', 'kind', 'data', 'groups'])
 
-// Boundary invariant: BOTH plain parse functions rebuild EVERY issue here after
-// Zod finishes, regardless of reportInput or error maps. Never return Zod errors
-// or expose parseable schemas: annotations/clones cannot bypass this mapper.
+// Boundary invariant: BOTH plain parse functions accept no Zod settings/callbacks
+// and finalize with an SDK-owned constant error map that preempts global hooks,
+// including nested union issues. No consumer sees raw issues before this mapper.
+// Rebuild EVERY issue here; never return Zod errors or expose parseable schemas:
+// annotations/clones cannot bypass this mapper.
 // Codes/reasons require own-property membership, including future/unknown codes.
 // Never copy input, received, keys, options, raw messages or any unknown fields.
 export function summaryIssue(issue: { code?: unknown; path?: readonly unknown[] }, reason?: SummaryOperandReason): SafeIssue {

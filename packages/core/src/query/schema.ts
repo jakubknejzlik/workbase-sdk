@@ -12,7 +12,7 @@ import { expressionInfo, fieldExpression, readableComputed } from './expressions
 export { fieldsFor, fieldType, operatorsFor, filterSchema, querySchema } from './input-schema'
 export type { Scalar, Filter, Order, Selection, RowAccessState, QueryInput } from './input-schema'
 export { SUMMARY_VERSION, SUMMARY_LIMITS, parseSummaryRequest, parseSummaryResult } from './summary-schema'
-export type { SummaryModel, SummaryField, SummaryMetric, SummaryWindow, SummaryOptions, SummaryQuery, SummaryResult, SummaryValidation, SummaryParseSettings } from './summary-schema'
+export type { SummaryModel, SummaryField, SummaryMetric, SummaryWindow, SummaryOptions, SummaryQuery, SummaryResult, SummaryValidation } from './summary-schema'
 export type { SafeIssue, SummaryOperandReason } from './summary-issues'
 import { fieldsFor, operatorsFor, querySchema, type Filter, type Selection, type QueryInput } from './input-schema'
 /** Bound recursion before Zod, including malformed/unrecognized inputs. */

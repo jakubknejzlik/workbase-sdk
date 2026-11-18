@@ -1,11 +1,12 @@
 import { createRequire } from 'node:module'
-import { expect, it } from 'vitest'
+import { expect, it, vi } from 'vitest'
+import { z } from 'zod'
 import SwaggerParser from '@apidevtools/swagger-parser'
 import { instanceConfigSchema, type InstanceConfig } from '../../src/config'
 import * as publicSummary from '@workbasehq/core/query/schema'
 import * as internalSummary from '../../src/query/summary-schema'
 import { summaryIssue } from '../../src/query/summary-issues'
-import { SUMMARY_LIMITS, SUMMARY_VERSION, parseSummaryRequest, parseSummaryResult, type SummaryParseSettings, type SummaryValidation, type SummaryOptions } from '@workbasehq/core/query/schema'
+import { SUMMARY_LIMITS, SUMMARY_VERSION, parseSummaryRequest, parseSummaryResult, type SummaryValidation, type SummaryOptions } from '@workbasehq/core/query/schema'
 import { summaryContract } from '../../src/openapi/summary-contract'
 
 const require = createRequire(import.meta.url)
@@ -21,9 +22,14 @@ const options = { version: SUMMARY_VERSION, metrics } as const
 const request = (summary = {}) => ({ entity: 'sales', summary: { ...options, ...summary } })
 const window = { field: 'at', from: '2026-01-01T00:00:00Z', to: '2026-01-02T00:00:00Z', timeZone: 'UTC', bucket: 'day' } as const
 const grouped = { ...options, groupBy: ['category', 'enabled'], window } as const
-const parseRequest = (input: unknown, settings?: SummaryParseSettings) => parseSummaryRequest(config, 'sales', input, settings)
+// Adversarial JavaScript callers may still pass removed settings as extra args.
+// Keep the earlier reportInput/message cases without adding settings to the API.
+type RejectedParseSettings = { reportInput?: boolean; error?: () => string }
+const parseRequest = (input: unknown, settings?: RejectedParseSettings): SummaryValidation<unknown> =>
+  Reflect.apply(parseSummaryRequest, undefined, [config, 'sales', input, settings])
 const resultParser = (model: InstanceConfig, entity: string, summary: SummaryOptions<InstanceConfig, string>) =>
-  (input: unknown, settings?: SummaryParseSettings) => parseSummaryResult(model, entity, summary, input, settings)
+  (input: unknown, settings?: RejectedParseSettings): SummaryValidation<unknown> =>
+    Reflect.apply(parseSummaryResult, undefined, [model, entity, summary, input, settings])
 const ungroupedResult = { kind: 'summary', version: 1, data: [{ groups: {}, metrics: { rows: 0, total: null, cost: null } }] }
 const groupRow = { groups: { category: null, enabled: false, at: '2026-01-01T00:00:00Z' }, metrics: { rows: 2, total: 7, cost: 1.5 } }
 const groupedResult = { kind: 'summary', version: 1, data: [groupRow] }
@@ -45,7 +51,7 @@ const unknownKeyCases = [
 ] as const
 it.each(unknownKeyCases.flatMap(([name, contract, input]) => [false, true].map(reportInput => ({ name, contract, input, reportInput }))))(
   'rejects unknown keys without disclosing keys or values: $name (reportInput=$reportInput)', ({ contract, input, reportInput }) => {
-    // Opting into Zod input diagnostics must not reintroduce rejected unknown data.
+    // Removed Zod settings passed as extra JS arguments must have no effect.
     const parsed = contract(input, { reportInput })
     expect(parsed.ok).toBe(false)
     if (parsed.ok) throw new Error('Expected unknown-key rejection')
@@ -73,7 +79,7 @@ it.each([false, true])('projects every summary diagnostic without input data (re
     const resultSchema = resultParser(model, 'sales', resultOptions)
     const result = { kind: 'summary', version: 1, data: [{ groups: { [key]: value }, metrics: { [key]: 1 } }] }
     const row = result.data[0]
-    const cases: [(input: unknown, settings?: SummaryParseSettings) => SummaryValidation<unknown>, unknown, string][] = [
+    const cases: [(input: unknown, settings?: RejectedParseSettings) => SummaryValidation<unknown>, unknown, string][] = [
       [parseRequest, request({ metrics: [{ op: value, alias: key, ...poison }] }), 'invalid_union'],
       [parseRequest, { ...request(), ...poison }, 'unrecognized_keys'],
       [parseRequest, request({ metrics: Array.from({ length: SUMMARY_LIMITS.metrics + 1 + seed }, () => ({ op: 'count', alias: key, ...poison })) }), 'too_big'],
@@ -327,8 +333,8 @@ for (const kind of ['request', 'result'] as const) {
 }
 it('maps invalid result options through the request boundary', () => {
   const invalid = { ...options, metrics: [{ op: 'sum', field: 'calculated', alias: 'total' }] } as const
-  const parsed = parseSummaryResult(config, 'sales', invalid, ungroupedResult, { reportInput: true })
-  expect(parsed).toEqual(parseSummaryRequest(config, 'sales', { entity: 'sales', summary: invalid }, { reportInput: true }))
+  const parsed = parseSummaryResult(config, 'sales', invalid, ungroupedResult)
+  expect(parsed).toEqual(parseSummaryRequest(config, 'sales', { entity: 'sales', summary: invalid }))
   expect(JSON.stringify(parsed)).not.toContain('PRIVATE_EXPRESSION_CANARY')
   expect(() => summaryContract(config, 'sales', invalid)).toThrow('Invalid summary options')
 })
@@ -344,11 +350,109 @@ it('selects operand reasons from trusted metadata and ignores supplied reasons',
     } } })
     const parsed = parseSummaryRequest(model, 'sales', request({
       metrics: [{ op: 'sum', field: 'operand', alias: 'total', reason: unsafeValue }], reason: unsafeValue,
-    }), { reportInput: true })
+    }))
     expect(parsed.ok).toBe(false)
     if (!parsed.ok) expect(parsed.issues).toContainEqual(expect.objectContaining({ reason }))
     expect(JSON.stringify(parsed)).not.toContain('CANARY')
   }
   const raw = { code: 'invalid_value', path: ['summary', 'groupBy', 0], params: { reason: 'reference' }, reason: 'computed' }
   expect(summaryIssue(raw)).toEqual({ code: 'invalid_value', path: raw.path, message: 'Unsupported summary value' })
+})
+
+// Review4: consumer hooks must never see even one raw issue or private schema.
+for (const kind of ['request', 'result'] as const) for (const hook of ['per-parse', 'global'] as const) {
+ it(`${kind} must not expose a parseable schema through the ${hook} error map`, () => {
+  const input = { ...(kind === 'request' ? { entity: 'sales', summary: options }
+   : { kind: 'summary', version: 1, data: [{ groups: {}, metrics: { rows: 0, total: null, cost: null } }] }),
+   UNSAFE_KEY_CANARY: 'UNSAFE_VALUE_CANARY' }
+  let captured: unknown
+  const error = vi.fn<z.core.$ZodErrorMap>(issue => {
+   if (issue.code === 'unrecognized_keys') captured = issue.inst
+   return 'fixed'
+  })
+  const original = { ...z.config() }
+  try {
+   if (hook === 'global') z.config({ customError: error })
+   const settings = hook === 'per-parse' ? { error, reportInput: true } : undefined
+   const parsed = kind === 'request' ? Reflect.apply(parseSummaryRequest, undefined, [config, 'sales', input, settings])
+    : Reflect.apply(parseSummaryResult, undefined, [config, 'sales', options, input, settings])
+   expect(parsed.ok).toBe(false)
+   expect(JSON.stringify(parsed)).not.toContain('CANARY')
+  } finally { z.config({ ...original, customError: original.customError }) }
+  const schema = captured as z.ZodType | undefined
+  const escaped = typeof schema?.safeParse === 'function'
+  // Confirm the consequence before asserting the intended isolation invariant.
+  if (escaped) for (const derive of [(s: z.ZodType) => s, (s: z.ZodType) => s.describe('consumer'),
+   (s: z.ZodType) => s.meta({ description: 'consumer' }), (s: z.ZodType) => s.clone()]) {
+   const parsed = derive(schema!).safeParse(input, { reportInput: true })
+   expect(parsed.success).toBe(false)
+   if (!parsed.success) {
+    expect(JSON.stringify(parsed.error.issues)).toContain('UNSAFE_KEY_CANARY')
+    expect(JSON.stringify(parsed.error.issues)).toContain('UNSAFE_VALUE_CANARY')
+    expect(parsed.error.issues[0]).toHaveProperty('input')
+   }
+  }
+  expect(error).toHaveBeenCalledTimes(0)
+  expect(captured).toBeUndefined()
+  expect(escaped, 'Raw issue.inst crossed the supposedly private boundary').toBe(false)
+ })
+}
+
+it('never invokes global error or locale hooks on any summary validation path', () => {
+  const original = { ...z.config() }
+  const customError = vi.fn<z.core.$ZodErrorMap>(() => undefined)
+  const localeError = vi.fn<z.core.$ZodErrorMap>(() => 'consumer locale message')
+  try {
+    z.config({ customError, localeError })
+    for (const [, parse, input] of unknownKeyCases) expect(parse(input).ok).toBe(false)
+    for (const [, input] of [...invalidRequests, ...semanticInvalid]) expect(parseRequest(input).ok).toBe(false)
+    for (const input of invalidResults) expect(resultParser(config, 'sales', grouped)(input).ok).toBe(false)
+    // Nested metric and predicate unions finalize child issues before the root.
+    expect(parseRequest(request({ metrics: [{ op: 'unknown', alias: unsafeValue }] })).ok).toBe(false)
+    expect(parseRequest({ ...request(), where: { amount: { eq: unsafeValue }, and: [null] } }).ok).toBe(false)
+    const invalid = { ...options, metrics: [{ op: 'sum', field: 'calculated', alias: 'total' }] } as const
+    expect(parseSummaryResult(config, 'sales', invalid, ungroupedResult).ok).toBe(false)
+    expect(() => summaryContract(config, 'sales', invalid)).toThrow('Invalid summary options')
+    expect(parseSummaryRequest(config, 'missing', request()).ok).toBe(false)
+    expect(parseRequest(request()).ok).toBe(true)
+    expect(resultParser(config, 'sales', options)(ungroupedResult).ok).toBe(true)
+    expect(customError).toHaveBeenCalledTimes(0)
+    expect(localeError).toHaveBeenCalledTimes(0)
+    expect(z.config().customError).toBe(customError)
+    expect(z.config().localeError).toBe(localeError)
+  } finally {
+    z.config({ customError: original.customError, localeError: original.localeError })
+  }
+  expect(z.config().customError).toBe(original.customError)
+  expect(z.config().localeError).toBe(original.localeError)
+})
+
+it('pins error-map precedence for root and nested union finalization', () => {
+  const original = { ...z.config() }
+  const customError = vi.fn<z.core.$ZodErrorMap>(() => 'global')
+  const localeError = vi.fn<z.core.$ZodErrorMap>(() => 'locale')
+  const error = vi.fn<z.core.$ZodErrorMap>(() => 'SDK-owned constant')
+  try {
+    z.config({ customError, localeError })
+    const schema = z.union([z.strictObject({ number: z.number() }), z.strictObject({ flag: z.boolean() })])
+    const parsed = schema.safeParse({ number: 'invalid', flag: 'invalid' }, { error })
+    expect(parsed.success).toBe(false)
+    if (parsed.success) throw new Error('Expected invalid union')
+    const issue = parsed.error.issues[0]
+    expect(issue.code).toBe('invalid_union')
+    expect(issue.message).toBe('SDK-owned constant')
+    if (issue.code !== 'invalid_union') throw new Error('Expected invalid union issue')
+    for (const child of issue.errors.flat()) expect(child.message).toBe('SDK-owned constant')
+    expect(error.mock.calls.length).toBeGreaterThan(1)
+    expect(customError).toHaveBeenCalledTimes(0)
+    expect(localeError).toHaveBeenCalledTimes(0)
+    // Positive control: without a per-parse map the shared global hook runs.
+    expect(z.number().safeParse('invalid').error?.issues[0].message).toBe('global')
+    expect(customError).toHaveBeenCalledTimes(1)
+    z.config({ customError: undefined })
+    expect(z.number().safeParse('invalid').error?.issues[0].message).toBe('locale')
+    expect(localeError).toHaveBeenCalledTimes(1)
+  } finally {
+    z.config({ customError: original.customError, localeError: original.localeError })
+  }
 })

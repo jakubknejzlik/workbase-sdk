@@ -108,7 +108,11 @@ function summaryResultSchema<C extends InstanceConfig, E extends keyof C['entiti
 
 /** The boundary returns plain data, never a schema or a Zod error. */
 export type SummaryValidation<T> = { ok: true; data: T } | { ok: false; issues: SafeIssue[] }
-export type SummaryParseSettings = Pick<z.core.ParseContext<z.core.$ZodIssue>, 'reportInput' | 'error'>
+
+// Zod 4.6.7 finalizeIssue uses the first defined message: schema, per-parse,
+// global customError, locale. Always return a constant so consumer hooks cannot
+// receive raw issues (including issue.inst) before the SafeIssue mapper runs.
+const internalError = () => 'Invalid summary'
 
 function operandReason(config: InstanceConfig, entity: string, input: unknown, issue: z.core.$ZodIssue): SummaryOperandReason | undefined {
   if (issue.code !== 'invalid_value' || issue.path[0] !== 'summary') return
@@ -135,21 +139,21 @@ function operandReason(config: InstanceConfig, entity: string, input: unknown, i
 
 /** Canonical request validation only; does not authorize or execute a query. */
 export function parseSummaryRequest<C extends InstanceConfig, E extends keyof C['entities'] & string>(
-  config: C, entity: E, input: unknown, settings?: SummaryParseSettings,
+  config: C, entity: E, input: unknown,
 ): SummaryValidation<SummaryQuery<C, E>> {
   if (!Object.hasOwn(config.entities, entity)) return { ok: false, issues: [summaryIssue({ code: 'invalid_summary', path: ['entity'] })] }
-  const parsed = summaryQuerySchema(config, entity).safeParse(input, settings)
+  const parsed = summaryQuerySchema(config, entity).safeParse(input, { error: internalError })
   return parsed.success ? { ok: true, data: parsed.data }
     : { ok: false, issues: parsed.error.issues.map(issue => summaryIssue(issue, operandReason(config, entity, input, issue))) }
 }
 
 /** Validate options through the same safe boundary before constructing a result. */
 export function parseSummaryResult<C extends InstanceConfig, E extends keyof C['entities'] & string, const S extends SummaryOptions<C, E>>(
-  config: C, entity: E, options: S, input: unknown, settings?: SummaryParseSettings,
+  config: C, entity: E, options: S, input: unknown,
 ): SummaryValidation<SummaryResult<C, E, S>> {
-  const request = parseSummaryRequest(config, entity, { entity, summary: options }, settings)
+  const request = parseSummaryRequest(config, entity, { entity, summary: options })
   if (!request.ok) return request
-  const parsed = summaryResultSchema(config, entity, request.data.summary).safeParse(input, settings)
+  const parsed = summaryResultSchema(config, entity, request.data.summary).safeParse(input, { error: internalError })
   return parsed.success ? { ok: true, data: parsed.data as SummaryResult<C, E, S> }
     : { ok: false, issues: parsed.error.issues.map(issue => summaryIssue(issue)) }
 }
