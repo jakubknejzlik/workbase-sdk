@@ -75,6 +75,45 @@ it('compiles the initial graph and preserves physical schema, domain migration b
   } finally { await baseline.app.server.close(); await custom.app.server.close() }
 })
 
+it('carries the bootstrap role/access graph through fresh composition verification and exact promotion', async () => {
+  const custom = await fixture(initialComposition)
+  try {
+    const call = (name: string, input: Record<string, unknown>) => custom.app.workflow.call(name, input) as Promise<any>
+    const sources = await Promise.all(['config.ts', 'access.ts', 'schema/worker.ts'].map(path => readFile(join(custom.root, path), 'utf8')))
+    const runtime = await readFile(join(custom.root, 'runtime.ts'), 'utf8')
+    const composition = { interactive: false, plugins: [
+      { plugin: 'identity' }, { plugin: 'permissions' }, { plugin: 'members' },
+      { plugin: 'organizations', options: { allowCreate: true } },
+    ] }
+    // A custom role graph permits only the exact bootstrap runtime, not authored additions.
+    await writeFile(join(custom.root, 'runtime.ts'), runtime + '// authored\n')
+    expect(await call('propose_initial_composition', { instance: 'initial-roles', composition }))
+      .toMatchObject({ ok: false, error: { code: 'fresh_state_conflict', details: { conflicts: ['runtime.ts'] } } })
+    await writeFile(join(custom.root, 'runtime.ts'), runtime)
+    const proposed = await call('propose_initial_composition', { instance: 'initial-roles', composition })
+    expect(proposed, JSON.stringify(proposed)).toMatchObject({ ok: true, kind: 'initial_composition', revision: 1 })
+    const args = { proposalId: proposed.proposalId }
+    expect(await call('validate', args)).toMatchObject({ ok: true })
+    const preview = await call('preview_migration', args)
+    expect(preview).toMatchObject({ ok: true, resolvedOptions: { plugins: expect.arrayContaining([
+      { plugin: 'permissions', options: { roles, ownerRole: 'owner' } },
+    ]) } })
+    expect(await call('apply_to_disposable', args)).toMatchObject({ ok: true, verified: true, diffs: [] })
+    expect(await call('promote', { ...args, expectedRevision: 1 })).toMatchObject({ ok: true, status: 'promoted', revision: 1 })
+    for (const file of preview.files) expect(await readFile(join(custom.root, file.path), 'utf8')).toBe(file.data)
+    expect(await Promise.all(['config.ts', 'access.ts', 'schema/worker.ts'].map(path => readFile(join(custom.root, path), 'utf8')))).toEqual(sources)
+    const loaded = await loadConfig(join(custom.root, 'config.ts'))
+    expect(loaded.config).toMatchObject({ roles, organizationOwnerRole: 'owner', revision: 1 })
+    expect(loaded.authoredAccess.shared?.accountLinks?.worker.invitationRole).toBe('member')
+    expect(effectiveEntityGrants(loaded.config.effectiveAccess!, ['member'], 'worker', 'read')).toEqual([
+      expect.objectContaining({ where: { user: { eq: '$actor.id' } }, fields: ['id', 'name'] }),
+    ])
+    const initialized = await custom.call()
+    expect(initialized).toMatchObject({ ok: true, conflicts: [] })
+    expect(await custom.call('apply', initialized.planHash)).toMatchObject({ ok: true, status: 'unchanged' })
+  } finally { await custom.app.server.close() }
+})
+
 it.each([
   { ...initialComposition, organizationOwnerRole: 'missing' },
   { ...initialComposition, roles: [...roles, 'owner'] },

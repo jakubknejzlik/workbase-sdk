@@ -21,6 +21,7 @@ import { versionHistory } from '@workbasehq/core/migrations/versions'
 import { inspectInstance, isDisplayFieldError } from '@workbasehq/core/config'
 import { parseProposal, proposalRecord, type Proposal, type ConfigChangeProposal, type LegacyConfigProposal } from './proposals.ts'
 import { executeSdkUpgrade, proposeSdkUpgrade, sdkWorkflowError } from './sdk-upgrade.ts'
+import { executeInitialComposition, proposeInitialComposition } from './composition/initial-workflow.ts'
 import { executeComposition, proposeComposition } from './composition/workflow.ts'
 
 function requireConfigChange(proposal: Proposal): asserts proposal is ConfigChangeProposal {
@@ -41,7 +42,7 @@ export class Workflow {
   constructor(public store: Store, private github?: GitHubConfiguration) {}
   async call(name: string, raw: unknown, signal?: AbortSignal): Promise<ToolResult> {
     const callId = crypto.randomUUID()
-    let proposalId: string | undefined = ['propose_change', 'propose_composition', 'upgrade_sdk'].includes(name) ? crypto.randomUUID() : undefined
+    let proposalId: string | undefined = ['propose_change', 'propose_composition', 'propose_initial_composition', 'upgrade_sdk'].includes(name) ? crypto.randomUUID() : undefined
     const args = raw && typeof raw === 'object' ? raw as Record<string, unknown> : {}
     let instance = this.store.allowed.values().next().value as string | undefined
     let sdk = name === 'upgrade_sdk' || Object.hasOwn(args, 'proposalId') && ['validate', 'preview_migration', 'apply_to_disposable', 'discard', 'promote', 'submit_change'].includes(name)
@@ -132,6 +133,19 @@ export class Workflow {
             name === 'promote' ? await this.store.sdkProposalSource(input.proposalId) : undefined, input.expectedRevision)
         })
       }
+      if (input.proposalId && (await this.store.find(input.proposalId)).proposal?.kind === 'initial_composition') {
+        const result = await this.store.lockedProposal(targetInstance, async recover => {
+          await recover()
+          const path = join(await this.store.proposalDirectory(targetInstance), 'proposals', `${input.proposalId}.json`)
+          await noLink(path, true)
+          const source = await readFile(path)
+          const p = parseProposal(JSON.parse(source.toString('utf8')))
+          if (p.kind !== 'initial_composition' || p.instance !== targetInstance || p.proposalId !== input.proposalId) fail('invalid_proposal', 'Proposal identity mismatch', 409)
+          return executeInitialComposition(this.store, p, source, name, input, signal)
+        })
+        if (name === 'promote' && result.ok === true) await this.store.init()
+        return result
+      }
       if (input.proposalId && (await this.store.find(input.proposalId)).proposal?.kind === 'composition_change') {
         return await this.store.lockedProposal(targetInstance, async recover => {
           const p = parseProposal((await this.store.find(input.proposalId)).proposal)
@@ -140,6 +154,8 @@ export class Workflow {
         })
       }
       return await this.store.locked(targetInstance, async () => {
+        // Fresh selection precedes Store.load and its initialized-instance gate.
+        if (name === 'propose_initial_composition') return proposeInitialComposition(this.store, targetInstance, input.composition, proposalId!)
         if (name === 'upgrade_sdk') return proposeSdkUpgrade(this.store, targetInstance, input.baseRevision, input.targetVersion, proposalId!)
         if (name === 'propose_composition') return proposeComposition(this.store, targetInstance, input.baseRevision, input.changes, proposalId!)
         if (name === 'propose_change' && input.changes.some((change: { kind: string }) => !['set_locale', 'set_label'].includes(change.kind) && compositionChangeSchema.safeParse(change).success)) {

@@ -1,7 +1,8 @@
 import { z } from 'zod'
-import { changeSchema, compositionChangeSchema, exactVersion, fail } from './schemas.ts'
+import { changeSchema, compositionChangeSchema, initialCompositionSchema, exactVersion, fail } from './schemas.ts'
 import { migrationPreviewSchema, promotedFilesSchema } from './submit-change.ts'
 import { digestBytes, inputHashesSchema, inputPath, resultSchema, sha256Schema } from './sdk-upgrade-protocol.ts'
+import { hash } from './planning.ts'
 import { sdkNames } from './sdk-registry.ts'
 
 const envelope = {
@@ -27,6 +28,44 @@ const compositionProposalSchema = z.strictObject({
   verification: proofSchema.extend({ openapiHash: sha256Schema.nullable() }).optional(),
   promotedFiles: promotedFilesSchema.optional(), migrationPreview: migrationPreviewSchema.optional(), promotionHash: z.string().optional(),
   dependencyDigest: z.string().optional(), promotedRevision: z.number().int().optional(),
+})
+// Captured fresh plans are a closed protocol, separate from initialized-instance edits.
+const initialFileSchema = z.strictObject({
+  path: z.enum(['runtime.ts', 'schema.lock.json', 'migrations/0001_r1.sql', 'openapi.json', 'access.lock.json', 'access.lock.md']),
+  data: z.string(), hash: sha256Schema, status: z.enum(['create', 'replace']),
+})
+export const initialPlanSchema = z.strictObject({
+  instance: z.string(), planHash: sha256Schema,
+  model: z.strictObject({ plugins: z.array(z.strictObject({
+    plugin: z.enum(['identity', 'permissions', 'members', 'organizations', 'local-auth', 'machine-credentials', 'mail-outbox', 'audit', 'console']),
+    options: z.json().optional(),
+  })).max(9), interactive: z.boolean() }),
+  files: z.array(initialFileSchema).length(6),
+  guards: z.record(z.string(), sha256Schema.nullable()), dependencies: z.record(z.string(), sha256Schema),
+  requirements: z.array(z.strictObject({ plugin: z.string(), requirement: z.string(), satisfied: z.boolean(),
+    severity: z.enum(['error', 'warning']), message: z.string() })),
+}).superRefine((plan, ctx) => {
+  const paths = ['runtime.ts', 'schema.lock.json', 'migrations/0001_r1.sql', 'openapi.json', 'access.lock.json', 'access.lock.md']
+  if (plan.files.some((file, index) => file.path !== paths[index] || file.hash !== hash(file.data)
+    || file.status !== (index === 0 ? 'replace' : 'create'))
+    || plan.planHash !== hash({ version: 1, kind: 'initial_composition', instance: plan.instance, model: plan.model,
+      sources: plan.guards, dependencies: plan.dependencies, requirements: plan.requirements,
+      files: plan.files.map(({ path, hash }) => ({ path, hash })) })) {
+    ctx.addIssue({ code: 'custom', message: 'Inconsistent initial composition plan' })
+  }
+})
+const initialReceiptSchema = z.strictObject({ ok: z.literal(true), proposalId: z.uuid(), status: z.literal('promoted'),
+  revision: z.literal(1), planHash: sha256Schema, appliesToDatabase: z.literal(false) })
+const initialCompositionProposalSchema = z.strictObject({
+  ...envelope, baseRevision: z.literal(1), kind: z.literal('initial_composition'),
+  status: z.enum(['proposed', 'validated', 'verified', 'promoted', 'discarded']),
+  composition: initialCompositionSchema, plan: initialPlanSchema,
+  validation: proofSchema.optional(), verification: proofSchema.optional(), receipt: initialReceiptSchema.optional(),
+}).superRefine((proposal, ctx) => {
+  if (proposal.instance !== proposal.plan.instance || (proposal.status === 'promoted') !== !!proposal.receipt
+    || proposal.receipt && (proposal.receipt.proposalId !== proposal.proposalId || proposal.receipt.planHash !== proposal.plan.planHash)) {
+    ctx.addIssue({ code: 'custom', message: 'Inconsistent initial composition identity or receipt' })
+  }
 })
 const digest = z.string().regex(/^[a-f0-9]{64}$/).refine(value => !/\s/.test(value))
 const packageName = z.enum(['@workbasehq/core', '@workbasehq/plugins', '@workbasehq/mcp'])
@@ -90,7 +129,8 @@ const sdkUpgradeSchema = z.strictObject({
       || Object.entries(expected).some(([path, digest]) => actual[path] !== digest)) reject()
   }
 })
-export const proposalSchema = z.discriminatedUnion('kind', [configChangeSchema, sdkUpgradeSchema, compositionProposalSchema])
+export const proposalSchema = z.discriminatedUnion('kind', [configChangeSchema, sdkUpgradeSchema, compositionProposalSchema, initialCompositionProposalSchema])
+export type InitialCompositionProposal = z.infer<typeof initialCompositionProposalSchema>
 export type CompositionProposal = z.infer<typeof compositionProposalSchema>
 export type ConfigChangeProposal = z.infer<typeof configChangeSchema>
 export type SdkUpgradeProposal = z.infer<typeof sdkUpgradeSchema>
