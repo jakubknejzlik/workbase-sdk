@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { Button } from '../../src/components/ui/button'
 import '../../src/styles.css'
+import { Calendar } from '../../src/components/ui/calendar'
 
 const params = new URLSearchParams(location.search)
 document.documentElement.classList.toggle('dark', params.get('theme') === 'dark')
@@ -17,6 +18,7 @@ function Proof() {
     </form>
     <Button type="button" variant={variant}>Enabled</Button>
     <Button asChild variant={variant}><a href="#destination">Back</a></Button>
+    <Calendar mode="single" defaultMonth={new Date(2026, 10, 18)} selected={new Date(2026, 10, 18)} disabled={new Date(2026, 10, 18)} />
     <output aria-label="Submissions">{submissions}</output>
   </main>
 }

@@ -47,7 +47,6 @@ function Button({
   VariantProps<typeof buttonVariants> & {
     asChild?: boolean
   }) {
-  const Comp = asChild ? Slot : "button"
   const child = asChild && React.isValidElement<React.ComponentProps<"button">>(props.children)
     ? props.children
     : null
@@ -55,43 +54,35 @@ function Button({
     props.disabled || props["aria-disabled"] === true || props["aria-disabled"] === "true" ||
     child?.props.disabled || child?.props["aria-disabled"] === true || child?.props["aria-disabled"] === "true"
   )
-  const disabledSlotProps = slotDisabled ? {
-    // Remove the destination from both Slot and child props. Native link actions
-    // (including the context menu) must have nothing to navigate to.
-    href: undefined,
-    "aria-disabled": true as const,
-    // Match native disabled controls' tab-order policy. Programmatic focus stays
-    // available for explanations; Tab still leaves normally (see the key guard).
-    tabIndex: -1,
-    onClickCapture: preventDisabledActivation,
-    onAuxClickCapture: preventDisabledActivation,
-    onKeyDownCapture: preventDisabledKeyActivation,
-    onKeyUpCapture: preventDisabledKeyActivation,
-  } : undefined
+  if (slotDisabled) {
+    // Do not mount the child: router Links can regenerate href from `to`.
+    // Keep its label/content and presentation, without forwarding interaction
+    // handlers, navigation props, roles, tabIndex or refs to the plain text.
+    return (
+      <span
+        data-slot="button"
+        aria-disabled="true"
+        id={child?.props.id ?? props.id}
+        title={child?.props.title ?? props.title}
+        aria-label={child?.props["aria-label"] ?? props["aria-label"]}
+        aria-labelledby={child?.props["aria-labelledby"] ?? props["aria-labelledby"]}
+        aria-describedby={child?.props["aria-describedby"] ?? props["aria-describedby"]}
+        className={cn(buttonVariants({ variant, size, className }), child?.props.className)}
+        style={{ ...props.style, ...child?.props.style }}
+      >
+        {child?.props.children}
+      </span>
+    )
+  }
 
+  const Comp = asChild ? Slot : "button"
   return (
     <Comp
       data-slot="button"
       className={cn(buttonVariants({ variant, size, className }))}
       {...props}
-      {...disabledSlotProps}
-    >
-      {/* Slot merges child handlers first, so replace child capture handlers too.
-          These guards also block custom activation on non-anchor children. */}
-      {child && disabledSlotProps
-        ? React.cloneElement(child, disabledSlotProps)
-        : props.children}
-    </Comp>
+    />
   )
-}
-
-function preventDisabledActivation(event: React.SyntheticEvent) {
-  event.preventDefault()
-  event.stopPropagation()
-}
-
-function preventDisabledKeyActivation(event: React.KeyboardEvent) {
-  if (event.key === "Enter" || event.key === " ") preventDisabledActivation(event)
 }
 
 export { Button, buttonVariants }

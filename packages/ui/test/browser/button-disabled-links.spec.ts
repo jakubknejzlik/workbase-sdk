@@ -1,65 +1,86 @@
 import { expect, test } from '@playwright/test'
 
-for (const theme of ['light', 'dark']) for (const mode of ['disabled', 'aria', 'both', 'child-aria']) {
-  test(`${theme} ${mode}: disabled links have no destination and re-enabled links open normally`, async ({ page, context }, testInfo) => {
-    await page.goto(`/button-disabled-links.html?theme=${theme}&mode=${mode}`)
+const cases = [
+  ...['default', 'destructive', 'outline', 'secondary', 'ghost', 'link'].map(variant => ({ mode: 'disabled', variant })),
+  ...['aria', 'aria-boolean', 'both', 'child-aria', 'child-disabled'].map(mode => ({ mode, variant: 'default' })),
+]
+for (const theme of ['light', 'dark']) for (const kind of ['anchor', 'router']) for (const { mode, variant } of cases) {
+  test(`${theme} ${kind} ${mode} ${variant}: plain disabled text and native enabled navigation`, async ({ page, context }, testInfo) => {
+    await page.goto(`/button-disabled-links.html?theme=${theme}&kind=${kind}&mode=${mode}&variant=${variant}`)
     const originalURL = page.url()
-    const link = page.getByText('Destination', { exact: true })
-    await expect(link).toHaveAttribute('aria-disabled', 'true')
-    await expect(link).not.toHaveAttribute('href')
-    await expect(link).toHaveAttribute('tabindex', '-1')
-    expect(await link.evaluate(element => element.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2 })))).toBe(true)
-    // Observe cancellation after React capture guards without relying on bubble
-    // handlers, which a disabled link must never reach.
-    await page.evaluate(() => {
-      const events: { type: string; prevented: boolean }[] = []
-      Object.assign(window, { auxiliaryEvents: events })
-      for (const type of ['mousedown', 'auxclick']) window.addEventListener(type, event => {
-        if ((event as MouseEvent).button !== 1) return
-        setTimeout(() => events.push({ type, prevented: event.defaultPrevented }), 0)
-      }, true)
+    const text = page.locator('[data-slot="button"]')
+    await expect(text).toBeVisible()
+    await expect(text).toHaveText('Destination')
+    expect(await text.evaluate(element => element.tagName)).toBe('SPAN')
+    await expect(page.locator('a, [href]')).toHaveCount(0)
+    await expect(text).toHaveAttribute('aria-disabled', 'true')
+    await expect(text).not.toHaveAttribute('tabindex')
+    await expect(text).toHaveCSS('cursor', 'not-allowed')
+    await expect(text).toHaveCSS('opacity', '1')
+    const appearance = () => text.evaluate(element => {
+      const style = getComputedStyle(element)
+      const canvas = document.createElement('canvas')
+      canvas.width = canvas.height = 1
+      const ctx = canvas.getContext('2d')!
+      const luminance = (color: string) => {
+        ctx.fillStyle = color; ctx.fillRect(0, 0, 1, 1)
+        const rgba = [...ctx.getImageData(0, 0, 1, 1).data]
+        const value = rgba.slice(0, 3).map(v => {
+          const s = v / 255
+          return s <= 0.04045 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4
+        }).reduce((sum, v, i) => sum + v * [0.2126, 0.7152, 0.0722][i], 0)
+        return { value, alpha: rgba[3] }
+      }
+      const fg = luminance(style.color), bg = luminance(style.backgroundColor)
+      return { color: style.color, background: style.backgroundColor, alpha: bg.alpha,
+        contrast: (Math.max(fg.value, bg.value) + 0.05) / (Math.min(fg.value, bg.value) + 0.05),
+        shadow: style.getPropertyValue('--tw-shadow').trim(), decoration: style.textDecorationLine }
     })
-    // Physical input bypasses Playwright's disabled-element actionability guard.
-    const middleClick = async () => {
-      const box = (await link.boundingBox())!
-      await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2, { button: 'middle' })
+    const before = await appearance()
+    expect(before.contrast).toBeGreaterThanOrEqual(4.5)
+    expect(before.alpha).toBe(255)
+    expect(before.shadow).toBe('0 0 #0000')
+    await text.hover()
+    await expect.poll(appearance).toEqual(before)
+    const click = async (button: 'left' | 'middle' | 'right') => {
+      const box = (await text.boundingBox())!
+      await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2, { button })
     }
-    await middleClick()
-    const events = () => page.evaluate(() => (window as unknown as { auxiliaryEvents: { type: string; prevented: boolean }[] }).auxiliaryEvents)
-    await expect.poll(events).toHaveLength(2)
-    // The disabled anchor has no native destination. The enabled control below
-    // must actually open a new tab.
+    for (const button of ['left', 'middle', 'right'] as const) await click(button)
+    await page.keyboard.press('Escape')
+    expect(await text.evaluate(element => element.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2 })))).toBe(true)
+    await text.evaluate(element => (element as HTMLElement).focus())
+    await expect(text).not.toBeFocused()
+    // Restore the real tab-order assertion weakened in fix3.
+    await page.getByLabel('Disable', { exact: true }).focus()
+    await page.keyboard.press('Tab')
+    await expect(page.getByRole('button', { name: 'Next', exact: true })).toBeFocused()
     await page.waitForTimeout(200)
-    const disabled = { events: await events(), pages: context.pages().map(tab => tab.url()), handlers: await page.getByLabel('Handlers').textContent() }
-    await testInfo.attach('disabled-auxclick', { body: JSON.stringify(disabled), contentType: 'application/json' })
+    expect(context.pages().map(tab => tab.url())).toEqual([originalURL])
+    await expect(page).toHaveURL(originalURL)
+    // Disabled mousedown must not run either child's or Button's handlers.
+    await expect(page.getByLabel('Handlers')).toHaveText('[]')
+    await testInfo.attach('disabled-proof', { body: JSON.stringify({ theme, kind, mode, variant, ...before, html: await text.evaluate(element => element.outerHTML), handlers: [] }), contentType: 'application/json' })
+    await page.evaluate(() => window.getSelection()?.removeAllRanges())
     await page.screenshot({ path: testInfo.outputPath('disabled-link.png'), fullPage: true })
-    expect(disabled.pages).toEqual([originalURL])
-    expect(disabled.events).toEqual([{ type: 'mousedown', prevented: false }, { type: 'auxclick', prevented: true }])
-    expect(disabled.handlers).toBe(JSON.stringify(['child-mousedown-capture', 'button-mousedown-capture', 'child-mousedown', 'button-mousedown']))
 
     await page.getByLabel('Disable', { exact: true }).uncheck()
+    const link = page.getByRole('link', { name: 'Destination', exact: true })
     await expect(link).toHaveAttribute('href', '/button-disabled-links.html?destination=1')
     const popupPromise = context.waitForEvent('page')
-    await middleClick()
+    await click('middle')
     const popup = await popupPromise
     await expect(popup).toHaveURL(/button-disabled-links\.html\?destination=1$/)
     await expect(page).toHaveURL(originalURL)
-    await expect.poll(events).toHaveLength(4)
-    expect((await events()).slice(2)).toEqual([{ type: 'mousedown', prevented: false }, { type: 'auxclick', prevented: false }])
     const handlers = ['child-mousedown-capture', 'button-mousedown-capture', 'child-mousedown', 'button-mousedown', 'child-auxclick-capture', 'button-auxclick-capture', 'child-auxclick', 'button-auxclick']
     await expect(page.getByLabel('Handlers')).toHaveText(JSON.stringify(handlers))
-    await testInfo.attach('enabled-auxclick', { body: JSON.stringify({ events: await events(), popup: popup.url(), handlers }), contentType: 'application/json' })
-
     await popup.close()
-    await page.getByLabel('Disable', { exact: true }).check()
-    await page.evaluate(() => {
-      const next = document.createElement('button')
-      next.textContent = 'Next'
-      document.querySelector('[data-slot="button"]')!.after(next)
-    })
-    await link.focus()
-    await expect(link).toBeFocused()
-    await page.keyboard.press('Tab')
-    await expect(page.getByRole('button', { name: 'Next', exact: true })).toBeFocused()
+    expect(await link.evaluate(element => element.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2 })))).toBe(true)
+    await click('right')
+    await page.keyboard.press('Escape')
+    await expect(link).toHaveAttribute('href', '/button-disabled-links.html?destination=1')
+    await testInfo.attach('enabled-proof', { body: JSON.stringify({ href: await link.getAttribute('href'), middleClickOpenedTab: true, contextMenuUncancelled: true }), contentType: 'application/json' })
+    await link.click()
+    await expect(page).toHaveURL(/button-disabled-links\.html\?destination=1$/)
   })
 }

@@ -14,14 +14,15 @@ const content = (mode: typeof modes[number], disabled: boolean) => {
   </Button>
 }
 
-it.each(modes)('207 %s disabled slots remove href before native navigation can use it', mode => {
+it.each(modes)('207 %s disabled slots render plain text without a link or destination', mode => {
   render(content(mode, true))
   const anchor = screen.getByText('Destination')
-  expect(anchor.tagName).toBe('A')
+  expect(anchor.tagName).toBe('SPAN')
+  expect(document.querySelector('a')).toBeNull()
   expect(anchor.hasAttribute('href')).toBe(false)
   expect(anchor.getAttribute('aria-disabled')).toBe('true')
   expect(anchor.tabIndex).toBe(-1)
-  // No context-menu guard is needed: there is no link destination to open.
+  // Plain text has no native navigation behavior to cancel.
   expect(fireEvent.contextMenu(anchor)).toBe(true)
 })
 
@@ -38,17 +39,19 @@ it.each(modes)('207 %s re-enabled slots restore href and native navigation event
   expect(fireEvent.contextMenu(anchor)).toBe(true)
 })
 
-it('207 disabled non-anchor children still block custom activation handlers', () => {
+it('207 disabled non-anchor children become plain text without activation handlers', () => {
   const child = vi.fn(), parent = vi.fn()
   render(<Button asChild disabled onClick={parent} onAuxClick={parent} onKeyDown={parent} onKeyUp={parent}>
     <span role="button" onClick={child} onAuxClick={child} onKeyDown={child} onKeyUp={child}>Action</span>
   </Button>)
-  const action = screen.getByRole('button', { name: 'Action' })
-  expect(fireEvent.click(action)).toBe(false)
-  expect(fireEvent(action, new MouseEvent('auxclick', { button: 1, bubbles: true, cancelable: true }))).toBe(false)
+  const action = screen.getByText('Action')
+  expect(action.tagName).toBe('SPAN')
+  expect(action.hasAttribute('role')).toBe(false)
+  expect(fireEvent.click(action)).toBe(true)
+  expect(fireEvent(action, new MouseEvent('auxclick', { button: 1, bubbles: true, cancelable: true }))).toBe(true)
   for (const key of ['Enter', ' ']) {
-    expect(fireEvent.keyDown(action, { key })).toBe(false)
-    expect(fireEvent.keyUp(action, { key })).toBe(false)
+    expect(fireEvent.keyDown(action, { key })).toBe(true)
+    expect(fireEvent.keyUp(action, { key })).toBe(true)
   }
   expect(child).not.toHaveBeenCalled()
   expect(parent).not.toHaveBeenCalled()

@@ -64,3 +64,18 @@ for (const theme of ['light', 'dark']) for (const variant of ['default', 'destru
     await expect(page).toHaveURL(/#destination$/)
   })
 }
+
+for (const theme of ['light', 'dark']) {
+  test(`${theme}: selected disabled Calendar date retains its appearance on hover`, async ({ page }) => {
+    await page.goto(`/button-disabled.html?theme=${theme}&variant=ghost`)
+    const day = page.locator('button:disabled[data-selected-single="true"]')
+    await expect(day).toHaveCount(1)
+    const appearance = () => day.evaluate(element => {
+      const style = getComputedStyle(element)
+      return { foreground: style.color, background: style.backgroundColor, shadow: style.boxShadow }
+    })
+    const before = await appearance()
+    await day.hover()
+    await expect.poll(appearance).toEqual(before)
+  })
+}

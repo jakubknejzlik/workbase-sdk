@@ -4,7 +4,7 @@ import { fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { Button } from '../src/components/ui/button'
 
-it.each(['disabled', 'aria-boolean', 'aria-string', 'child-aria'] as const)('207 %s slotted links block activation before child and Button handlers', async mode => {
+it.each(['disabled', 'aria-boolean', 'aria-string', 'child-aria'] as const)('207 %s slotted children are replaced by unfocusable text without activation handlers', async mode => {
   const childClick = vi.fn(), buttonClick = vi.fn(), childKey = vi.fn(), buttonKey = vi.fn()
   const childCapture = vi.fn(), buttonCapture = vi.fn()
   const ref = createRef<HTMLButtonElement>()
@@ -13,25 +13,26 @@ it.each(['disabled', 'aria-boolean', 'aria-string', 'child-aria'] as const)('207
     <a href="#destination" tabIndex={0} aria-disabled={mode === 'child-aria' ? true : undefined} onClick={childClick} onKeyDown={childKey} onKeyUp={childKey} onClickCapture={childCapture} onKeyDownCapture={childCapture} onKeyUpCapture={childCapture}>Unavailable</a>
   </Button><button>Next</button></>)
   const link = screen.getByText('Unavailable')
-  expect(ref.current).toBe(link)
-  expect(fireEvent.click(link)).toBe(false)
+  expect(ref.current).toBeNull()
+  expect(link.tagName).toBe('SPAN')
+  expect(document.querySelector('a')).toBeNull()
+  expect(fireEvent.click(link)).toBe(true)
   expect(link.getAttribute('aria-disabled')).toBe('true')
   expect(link.tabIndex).toBe(-1)
   const user = userEvent.setup()
   await user.tab()
   expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Next' }))
-  // Programmatic focus is allowed, but neither Enter nor Space may activate it.
+  // Plain text cannot receive focus, including programmatic focus.
   link.focus()
+  expect(document.activeElement).not.toBe(link)
   for (const key of ['Enter', ' ']) {
-    expect(fireEvent.keyDown(link, { key })).toBe(false)
-    expect(fireEvent.keyUp(link, { key })).toBe(false)
+    expect(fireEvent.keyDown(link, { key })).toBe(true)
+    expect(fireEvent.keyUp(link, { key })).toBe(true)
   }
   for (const handler of [childClick, buttonClick, childKey, buttonKey, childCapture, buttonCapture]) expect(handler).not.toHaveBeenCalled()
-  // user-event's tab selector excludes [disabled] anchors without href even
-  // after programmatic focus. Verify Tab is unguarded here; the Chromium probe
-  // verifies that native Tab actually leaves the focused anchor in every mode.
-  expect(fireEvent.keyDown(link, { key: 'Tab' })).toBe(true)
-  expect(fireEvent.keyUp(link, { key: 'Tab' })).toBe(true)
+  await user.tab({ shift: true })
+  await user.tab()
+  expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Next' }))
 })
 
 it('207 re-enabled slotted links restore focus, handlers and uncancelled navigation', async () => {
@@ -60,14 +61,13 @@ const auxiliaryProps = (mode: typeof auxiliaryModes[number], disabled: boolean) 
 })
 
 for (const mode of auxiliaryModes) {
-  it.each(['auxclick', 'mousedown'] as const)(`207 ${mode} slotted links guard auxiliary activation and allow ordinary %s`, event => {
+  it.each(['auxclick', 'mousedown'] as const)(`207 ${mode} disabled slots never run middle-button %s handlers`, event => {
     const childCapture = vi.fn(), buttonCapture = vi.fn(), childHandler = vi.fn(), buttonHandler = vi.fn()
     render(<Button asChild {...auxiliaryProps(mode, true)} onAuxClickCapture={buttonCapture} onMouseDownCapture={buttonCapture} onAuxClick={buttonHandler} onMouseDown={buttonHandler}>
       <a href="#destination" aria-disabled={mode === 'child-aria' ? 'true' : undefined} onAuxClickCapture={childCapture} onMouseDownCapture={childCapture} onAuxClick={childHandler} onMouseDown={childHandler}>Unavailable</a>
     </Button>)
-    // Mousedown no longer needs a navigation guard: disabled anchors have no href.
-    expect(fireEvent(screen.getByText('Unavailable'), new MouseEvent(event, { button: 1, bubbles: true, cancelable: true }))).toBe(event === 'mousedown')
-    for (const handler of [childCapture, buttonCapture, childHandler, buttonHandler]) expect(handler).toHaveBeenCalledTimes(event === 'mousedown' ? 1 : 0)
+    expect(fireEvent(screen.getByText('Unavailable'), new MouseEvent(event, { button: 1, bubbles: true, cancelable: true }))).toBe(true)
+    for (const handler of [childCapture, buttonCapture, childHandler, buttonHandler]) expect(handler).not.toHaveBeenCalled()
   })
 
   it(`207 ${mode} re-enabled slotted links preserve middle-button events and Slot handlers`, () => {
