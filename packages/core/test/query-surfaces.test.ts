@@ -4,7 +4,7 @@ import { setup, runtime, policyGraph, roles } from './fixtures/policy-graph/setu
 import { request, json } from '@workbasehq/test-support/helpers'
 import { queryClient } from '../../mcp/test/data/query-client'
 import { queryMetrics, recordQuery, emptyQueryLog, QUERY_DURATION_SAMPLES } from '../src/query/observability'
-import { summaryQuerySchema } from '@workbasehq/core/query/schema'
+import { parseSummaryRequest } from '@workbasehq/core/query/schema'
 
 let app: Awaited<ReturnType<typeof setup>>
 beforeEach(async () => { app = await setup() })
@@ -45,7 +45,7 @@ it.each(['reviewer', 'coordinator'])('MCP/HTTP byte parity matrix under %s polic
 })
 it('keeps valid summary contracts inactive with the same safe HTTP/MCP envelope and row-only discovery', async () => {
   const summary = { entity: 'records', summary: { version: 1, metrics: [{ op: 'count', alias: 'rows' }] } }
-  expect(summaryQuerySchema(policyGraph, 'records').safeParse(summary).success).toBe(true)
+  expect(parseSummaryRequest(policyGraph, 'records', summary).ok).toBe(true)
   const { client, close } = await connect('reviewer')
   try {
     const http = await request(app, '/query', 'POST', summary, 'reviewer')

@@ -1,9 +1,11 @@
 import { createRequire } from 'node:module'
 import { expect, it } from 'vitest'
-import { z } from 'zod'
 import SwaggerParser from '@apidevtools/swagger-parser'
-import { instanceConfigSchema } from '../../src/config'
-import { SUMMARY_LIMITS, SUMMARY_VERSION, summaryQuerySchema, summaryResultSchema } from '@workbasehq/core/query/schema'
+import { instanceConfigSchema, type InstanceConfig } from '../../src/config'
+import * as publicSummary from '@workbasehq/core/query/schema'
+import * as internalSummary from '../../src/query/summary-schema'
+import { summaryIssue } from '../../src/query/summary-issues'
+import { SUMMARY_LIMITS, SUMMARY_VERSION, parseSummaryRequest, parseSummaryResult, type SummaryParseSettings, type SummaryValidation, type SummaryOptions } from '@workbasehq/core/query/schema'
 import { summaryContract } from '../../src/openapi/summary-contract'
 
 const require = createRequire(import.meta.url)
@@ -19,7 +21,9 @@ const options = { version: SUMMARY_VERSION, metrics } as const
 const request = (summary = {}) => ({ entity: 'sales', summary: { ...options, ...summary } })
 const window = { field: 'at', from: '2026-01-01T00:00:00Z', to: '2026-01-02T00:00:00Z', timeZone: 'UTC', bucket: 'day' } as const
 const grouped = { ...options, groupBy: ['category', 'enabled'], window } as const
-const schema = summaryQuerySchema(config, 'sales')
+const parseRequest = (input: unknown, settings?: SummaryParseSettings) => parseSummaryRequest(config, 'sales', input, settings)
+const resultParser = (model: InstanceConfig, entity: string, summary: SummaryOptions<InstanceConfig, string>) =>
+  (input: unknown, settings?: SummaryParseSettings) => parseSummaryResult(model, entity, summary, input, settings)
 const ungroupedResult = { kind: 'summary', version: 1, data: [{ groups: {}, metrics: { rows: 0, total: null, cost: null } }] }
 const groupRow = { groups: { category: null, enabled: false, at: '2026-01-01T00:00:00Z' }, metrics: { rows: 2, total: 7, cost: 1.5 } }
 const groupedResult = { kind: 'summary', version: 1, data: [groupRow] }
@@ -27,29 +31,29 @@ const groupedResult = { kind: 'summary', version: 1, data: [groupRow] }
 const unsafeKey = 'UNSAFE_KEY_CANARY', unsafeValue = 'UNSAFE_VALUE_CANARY'
 const unknownKeys = { [unsafeKey]: unsafeValue, [`second_${unsafeKey}`]: { nested: unsafeValue } }
 const unknownKeyCases = [
-  ['request root', schema, { ...request(), ...unknownKeys }],
-  ['summary options', schema, request(unknownKeys)],
-  ['count metric', schema, request({ metrics: [{ ...metrics[0], ...unknownKeys }] })],
-  ['sum metric', schema, request({ metrics: [{ ...metrics[1], ...unknownKeys }] })],
-  ['window', schema, request({ window: { ...window, ...unknownKeys } })],
-  ['result root', summaryResultSchema(config, 'sales', grouped), { ...groupedResult, ...unknownKeys }],
-  ['result row', summaryResultSchema(config, 'sales', grouped), { ...groupedResult, data: [{ ...groupRow, ...unknownKeys }] }],
-  ['group map', summaryResultSchema(config, 'sales', grouped), { ...groupedResult, data: [{ ...groupRow, groups: { ...groupRow.groups, ...unknownKeys } }] }],
-  ['empty group map', summaryResultSchema(config, 'sales', options), { ...ungroupedResult, data: [{ ...ungroupedResult.data[0], groups: unknownKeys }] }],
-  ['metric map', summaryResultSchema(config, 'sales', grouped), { ...groupedResult, data: [{ ...groupRow, metrics: { ...groupRow.metrics, ...unknownKeys } }] }],
-  ['unknown keys with an invalid sibling', schema, { ...request({ version: 2 }), ...unknownKeys }],
+  ['request root', parseRequest, { ...request(), ...unknownKeys }],
+  ['summary options', parseRequest, request(unknownKeys)],
+  ['count metric', parseRequest, request({ metrics: [{ ...metrics[0], ...unknownKeys }] })],
+  ['sum metric', parseRequest, request({ metrics: [{ ...metrics[1], ...unknownKeys }] })],
+  ['window', parseRequest, request({ window: { ...window, ...unknownKeys } })],
+  ['result root', resultParser(config, 'sales', grouped), { ...groupedResult, ...unknownKeys }],
+  ['result row', resultParser(config, 'sales', grouped), { ...groupedResult, data: [{ ...groupRow, ...unknownKeys }] }],
+  ['group map', resultParser(config, 'sales', grouped), { ...groupedResult, data: [{ ...groupRow, groups: { ...groupRow.groups, ...unknownKeys } }] }],
+  ['empty group map', resultParser(config, 'sales', options), { ...ungroupedResult, data: [{ ...ungroupedResult.data[0], groups: unknownKeys }] }],
+  ['metric map', resultParser(config, 'sales', grouped), { ...groupedResult, data: [{ ...groupRow, metrics: { ...groupRow.metrics, ...unknownKeys } }] }],
+  ['unknown keys with an invalid sibling', parseRequest, { ...request({ version: 2 }), ...unknownKeys }],
 ] as const
 it.each(unknownKeyCases.flatMap(([name, contract, input]) => [false, true].map(reportInput => ({ name, contract, input, reportInput }))))(
   'rejects unknown keys without disclosing keys or values: $name (reportInput=$reportInput)', ({ contract, input, reportInput }) => {
     // Opting into Zod input diagnostics must not reintroduce rejected unknown data.
-    const parsed = contract.safeParse(input, { reportInput })
-    expect(parsed.success).toBe(false)
-    if (parsed.success) throw new Error('Expected unknown-key rejection')
-    const serialized = JSON.stringify(parsed.error.issues)
+    const parsed = contract(input, { reportInput })
+    expect(parsed.ok).toBe(false)
+    if (parsed.ok) throw new Error('Expected unknown-key rejection')
+    const serialized = JSON.stringify(parsed.issues)
     expect(serialized).not.toContain(unsafeKey)
     expect(serialized).not.toContain(unsafeValue)
-    expect(parsed.error.issues).toContainEqual(expect.objectContaining({ code: 'unrecognized_keys', message: 'Unknown summary properties are unsupported' }))
-    for (const issue of parsed.error.issues) expect(issue).not.toHaveProperty('keys')
+    expect(parsed.issues).toContainEqual(expect.objectContaining({ code: 'unrecognized_keys', message: 'Unknown summary properties are unsupported' }))
+    for (const issue of parsed.issues) expect(issue).not.toHaveProperty('keys')
     expect(JSON.stringify(input)).toContain(unsafeKey)
     expect(JSON.stringify(input)).toContain(unsafeValue)
   },
@@ -57,7 +61,7 @@ it.each(unknownKeyCases.flatMap(([name, contract, input]) => [false, true].map(r
 
 // Deterministic property-style generation: vary keys, values, containers and
 // nesting while requiring coverage of every summary-owned issue code.
-it.each([false, true])('projects every summary diagnostic without input data (reportInput=%s)', async reportInput => {
+it.each([false, true])('projects every summary diagnostic without input data (reportInput=%s)', reportInput => {
   const reached = new Set<string>(), messages = new Map<string, string>()
   for (let seed = 0; seed < 8; seed++) {
     const key = `diagnostic_key_canary_${seed}`, value = `diagnostic_value_canary_${seed}`
@@ -66,75 +70,75 @@ it.each([false, true])('projects every summary diagnostic without input data (re
       fields: { ...config.entities.sales.fields, [key]: { type: 'enum', values: [value] } },
     } } })
     const resultOptions = { version: 1, metrics: [{ op: 'count', alias: key }], groupBy: [key] } as const
-    const resultSchema = summaryResultSchema(model, 'sales', resultOptions)
+    const resultSchema = resultParser(model, 'sales', resultOptions)
     const result = { kind: 'summary', version: 1, data: [{ groups: { [key]: value }, metrics: { [key]: 1 } }] }
     const row = result.data[0]
-    const cases: [z.ZodType, unknown, string][] = [
-      [schema, request({ metrics: [{ op: value, alias: key, ...poison }] }), 'invalid_union'],
-      [schema, { ...request(), ...poison }, 'unrecognized_keys'],
-      [schema, request({ metrics: Array.from({ length: SUMMARY_LIMITS.metrics + 1 + seed }, () => ({ op: 'count', alias: key, ...poison })) }), 'too_big'],
-      [schema, request({ groupBy: Array.from({ length: SUMMARY_LIMITS.groupBy + 1 + seed }, () => value), ...poison }), 'too_big'],
-      [schema, request({ groupBy: [value], ...poison }), 'invalid_value'],
-      [schema, request({ maxGroups: SUMMARY_LIMITS.groups + 1 + seed, ...poison }), 'too_big'],
-      [schema, request({ maxGroups: -seed, ...poison }), 'too_small'],
-      [schema, request({ metrics: [], ...poison }), 'too_small'],
-      [schema, request({ metrics: [{ op: 'count', alias: value.toUpperCase() }], ...poison }), 'invalid_format'],
-      [schema, request({ window: { ...window, from: value, ...poison } }), 'invalid_format'],
-      [schema, request({ metrics: [{ op: 'count', alias: key }, { op: 'count', alias: key }], ...poison }), 'custom'],
-      [schema, request({ window: { ...window, to: window.from, ...poison } }), 'custom'],
+    const cases: [(input: unknown, settings?: SummaryParseSettings) => SummaryValidation<unknown>, unknown, string][] = [
+      [parseRequest, request({ metrics: [{ op: value, alias: key, ...poison }] }), 'invalid_union'],
+      [parseRequest, { ...request(), ...poison }, 'unrecognized_keys'],
+      [parseRequest, request({ metrics: Array.from({ length: SUMMARY_LIMITS.metrics + 1 + seed }, () => ({ op: 'count', alias: key, ...poison })) }), 'too_big'],
+      [parseRequest, request({ groupBy: Array.from({ length: SUMMARY_LIMITS.groupBy + 1 + seed }, () => value), ...poison }), 'too_big'],
+      [parseRequest, request({ groupBy: [value], ...poison }), 'invalid_value'],
+      [parseRequest, request({ maxGroups: SUMMARY_LIMITS.groups + 1 + seed, ...poison }), 'too_big'],
+      [parseRequest, request({ maxGroups: -seed, ...poison }), 'too_small'],
+      [parseRequest, request({ metrics: [], ...poison }), 'too_small'],
+      [parseRequest, request({ metrics: [{ op: 'count', alias: value.toUpperCase() }], ...poison }), 'invalid_format'],
+      [parseRequest, request({ window: { ...window, from: value, ...poison } }), 'invalid_format'],
+      [parseRequest, request({ metrics: [{ op: 'count', alias: key }, { op: 'count', alias: key }], ...poison }), 'custom'],
+      [parseRequest, request({ window: { ...window, to: window.from, ...poison } }), 'custom'],
       [resultSchema, { ...result, data: Array.from({ length: SUMMARY_LIMITS.groups + 1 + seed }, () => ({ ...row, ...poison })) }, 'too_big'],
       [resultSchema, { ...result, data: [{ ...row, groups: {} }] }, 'invalid_value'],
       [resultSchema, { ...result, data: [{ ...row, metrics: { [key]: value } }] }, 'invalid_type'],
       [resultSchema, { ...result, data: [{ ...row, metrics: { [key]: -1 - seed } }] }, 'too_small'],
       [resultSchema, { ...result, data: [{ ...row, groups: { [key]: `${value}_rejected` } }] }, 'invalid_value'],
       [resultSchema, { ...result, data: [{ ...row, groups: { ...row.groups, ...poison }, metrics: { ...row.metrics, ...poison } }] }, 'invalid_type'],
-      [summaryResultSchema(config, 'sales', grouped), { ...groupedResult, data: [{ ...groupRow, groups: { ...groupRow.groups, ...poison }, metrics: { ...groupRow.metrics, ...poison } }] }, 'unrecognized_keys'],
+      [resultParser(config, 'sales', grouped), { ...groupedResult, data: [{ ...groupRow, groups: { ...groupRow.groups, ...poison }, metrics: { ...groupRow.metrics, ...poison } }] }, 'unrecognized_keys'],
     ]
     for (const container of [value, [poison], seed, null]) {
-      cases.push([schema, container, 'invalid_type'],
-        [schema, { ...request(), summary: container }, 'invalid_type'],
-        [schema, request({ metrics: container }), Array.isArray(container) ? 'invalid_union' : 'invalid_type'],
-        [schema, request({ metrics: [container] }), 'invalid_type'],
-        [schema, request({ window: container }), 'invalid_type'],
+      cases.push([parseRequest, container, 'invalid_type'],
+        [parseRequest, { ...request(), summary: container }, 'invalid_type'],
+        [parseRequest, request({ metrics: container }), Array.isArray(container) ? 'invalid_union' : 'invalid_type'],
+        [parseRequest, request({ metrics: [container] }), 'invalid_type'],
+        [parseRequest, request({ window: container }), 'invalid_type'],
         [resultSchema, container, 'invalid_type'],
         [resultSchema, { ...result, data: [{ ...row, groups: container, metrics: container }] }, 'invalid_type'])
     }
     for (const [contract, input, code] of cases) {
-      const parsed = contract.safeParse(input, { reportInput, error: () => value })
-      expect(parsed.success).toBe(false)
-      if (parsed.success) throw new Error('Expected invalid generated summary')
-      expect(parsed.error.issues.some(issue => issue.code === code), code).toBe(true)
-      for (const issue of parsed.error.issues) {
+      const parsed = contract(input, { reportInput, error: () => value })
+      expect(parsed.ok).toBe(false)
+      if (parsed.ok) throw new Error('Expected invalid generated summary')
+      expect(parsed.issues.some(issue => issue.code === code), code).toBe(true)
+      for (const issue of parsed.issues) {
         reached.add(issue.code)
-        if (messages.has(issue.code)) expect(issue.message).toBe(messages.get(issue.code))
-        else messages.set(issue.code, issue.message)
+        const messageKey = `${issue.code}:${issue.reason ?? ''}`
+        if (messages.has(messageKey)) expect(issue.message).toBe(messages.get(messageKey))
+        else messages.set(messageKey, issue.message)
         for (const bound of ['minimum', 'maximum'] as const) {
           if (bound in issue) expect(Number.isFinite(issue[bound as keyof typeof issue])).toBe(true)
         }
       }
-      const serialized = JSON.stringify(parsed.error.issues)
+      const serialized = JSON.stringify(parsed.issues)
       expect(serialized).not.toContain(key)
       expect(serialized).not.toContain(value)
       // Enforce the allowlist itself, including fields added by future Zod versions.
-      for (const issue of parsed.error.issues) {
-        expect(Object.keys(issue).every(field => ['code', 'path', 'message', 'minimum', 'maximum'].includes(field))).toBe(true)
+      for (const issue of parsed.issues) {
+        expect(Object.keys(issue).every(field => ['code', 'path', 'message', 'reason'].includes(field))).toBe(true)
       }
-      // All supported parse entry points share the same projection.
-      expect((await contract.safeParseAsync(input, { reportInput })).error?.issues).toEqual(parsed.error.issues)
-      expect(z.safeParse(contract, input, { reportInput }).error?.issues).toEqual(parsed.error.issues)
-      expect((await z.safeParseAsync(contract, input, { reportInput })).error?.issues).toEqual(parsed.error.issues)
-      expect((await contract['~standard'].validate(input)).issues).toEqual(parsed.error.issues)
-      expect(() => contract.parse(input, { reportInput })).toThrowError(expect.objectContaining({ issues: parsed.error.issues }))
+      // Only plain functions cross the boundary, with plain, freshly built data.
+      expect(Object.keys(parsed)).toEqual(['ok', 'issues'])
+      expect(structuredClone(parsed)).toEqual(parsed)
+      expect(contract(input, { reportInput: !reportInput })).toEqual(parsed)
+      expect(parsed).not.toHaveProperty('error')
     }
   }
   expect([...reached].sort()).toEqual(['custom', 'invalid_format', 'invalid_type', 'invalid_union', 'invalid_value', 'too_big', 'too_small', 'unrecognized_keys'])
 })
 
 it('masks result map keys even when they match grammar tokens', () => {
-  const result = summaryResultSchema(config, 'sales', { ...options, metrics: [{ op: 'count', alias: 'version' }], groupBy: ['version'] })
-  const parsed = result.safeParse({ kind: 'summary', version: 1, data: [{ groups: { version: 'invalid' }, metrics: { version: 'invalid' } }] })
-  expect(parsed.success).toBe(false)
-  if (!parsed.success) expect(parsed.error.issues.map(issue => issue.path)).toEqual([
+  const result = resultParser(config, 'sales', { ...options, metrics: [{ op: 'count', alias: 'version' }], groupBy: ['version'] })
+  const parsed = result({ kind: 'summary', version: 1, data: [{ groups: { version: 'invalid' }, metrics: { version: 'invalid' } }] })
+  expect(parsed.ok).toBe(false)
+  if (!parsed.ok) expect(parsed.issues.map(issue => issue.path)).toEqual([
     ['data', 0, 'groups', '[key]'], ['data', 0, 'metrics', '[key]'],
   ])
 })
@@ -183,36 +187,40 @@ const semanticInvalid: [string, unknown][] = [
   ['daily buckets cap+1 within duration cap', request({ window: { ...window, from: '2024-01-01T12:00:00Z', to: '2025-01-01T12:00:00Z' } })],
 ]
 it.each(validRequests.map((value, i) => [i, value] as const))('accepts valid summary request %i', (_, value) => {
-  expect(schema.safeParse(value).success).toBe(true)
+  expect(parseRequest(value).ok).toBe(true)
 })
 it.each([...invalidRequests, ...semanticInvalid])('rejects %s', (_, value) => {
-  expect(schema.safeParse(value).success).toBe(false)
+  expect(parseRequest(value).ok).toBe(false)
 })
 it.each([
-  'owner', 'parent', 'calculated', 'SUM(amount)', 'missing',
-])('rejects unsupported operands with fixed diagnostics for %s', field => {
+  ['owner', 'reference', 'Summary reference operands are unsupported'],
+  ['parent', 'reference', 'Summary reference operands are unsupported'],
+  ['calculated', 'computed', 'Summary computed operands are unsupported'],
+  ['SUM(amount)', 'expression', 'Summary expressions are unsupported'],
+  ['missing', 'unknown_field', 'Unknown summary field'],
+])('rejects unsupported operands with fixed diagnostics for %s', (field, reason, message) => {
   for (const summary of [{ groupBy: [field] }, { metrics: [{ op: 'sum', field, alias: 'total' }] }, { window: { ...window, field } }]) {
-    const parsed = schema.safeParse(request(summary))
-    expect(parsed.success).toBe(false)
-    if (!parsed.success) expect(parsed.error.issues[0].message).toBe('Unsupported summary value')
+    const parsed = parseRequest(request(summary))
+    expect(parsed.ok).toBe(false)
+    if (!parsed.ok) expect(parsed.issues[0]).toMatchObject({ reason, message })
   }
 })
 it('rejects an unknown schema entity and does not disclose computed expressions', () => {
-  expect(() => summaryQuerySchema(config, 'missing')).toThrow('Unknown summary entity')
+  expect(parseSummaryRequest(config, 'missing', request())).toEqual({ ok: false, issues: [{ code: 'invalid_summary', path: ['entity'], message: 'Invalid summary' }] })
   expect(JSON.stringify(summaryContract(config, 'sales', grouped))).not.toContain('PRIVATE_EXPRESSION_CANARY')
 })
 it('validates exact empty-input shapes, null groups and safe numeric results', () => {
-  const plain = summaryResultSchema(config, 'sales', options), groups = summaryResultSchema(config, 'sales', grouped)
-  expect(plain.safeParse(ungroupedResult).success).toBe(true)
-  expect(groups.safeParse(groupedResult).success).toBe(true)
-  expect(groups.safeParse({ kind: 'summary', version: 1, data: [] }).success).toBe(true)
-  expect(plain.safeParse({ kind: 'summary', version: 1, data: [] }).success).toBe(false)
+  const plain = resultParser(config, 'sales', options), groups = resultParser(config, 'sales', grouped)
+  expect(plain(ungroupedResult).ok).toBe(true)
+  expect(groups(groupedResult).ok).toBe(true)
+  expect(groups({ kind: 'summary', version: 1, data: [] }).ok).toBe(true)
+  expect(plain({ kind: 'summary', version: 1, data: [] }).ok).toBe(false)
   for (const [key, values] of Object.entries({ rows: [-1, 1.5, null, Number.MAX_SAFE_INTEGER + 1, Infinity, NaN], total: [1.5, Number.MAX_SAFE_INTEGER + 1, -Infinity], cost: [Infinity, NaN] })) {
-    for (const value of values) expect(plain.safeParse({ ...ungroupedResult, data: [{ groups: {}, metrics: { rows: 0, total: null, cost: null, [key]: value } }] }).success).toBe(false)
+    for (const value of values) expect(plain({ ...ungroupedResult, data: [{ groups: {}, metrics: { rows: 0, total: null, cost: null, [key]: value } }] }).ok).toBe(false)
   }
-  expect(plain.safeParse({ ...ungroupedResult, data: [{ groups: {}, metrics: { rows: Number.MAX_SAFE_INTEGER, total: Number.MIN_SAFE_INTEGER, cost: Number.MAX_VALUE } }] }).success).toBe(true)
+  expect(plain({ ...ungroupedResult, data: [{ groups: {}, metrics: { rows: Number.MAX_SAFE_INTEGER, total: Number.MIN_SAFE_INTEGER, cost: Number.MAX_VALUE } }] }).ok).toBe(true)
   for (const groupsValue of [{ ...groupRow.groups, category: 'missing' }, { ...groupRow.groups, enabled: 0 }, { ...groupRow.groups, at: null }, { ...groupRow.groups, at: '2026-01-01T01:00:00Z' }]) {
-    expect(groups.safeParse({ ...groupedResult, data: [{ ...groupRow, groups: groupsValue }] }).success).toBe(false)
+    expect(groups({ ...groupedResult, data: [{ ...groupRow, groups: groupsValue }] }).ok).toBe(false)
   }
 })
 const invalidResults = [
@@ -237,35 +245,35 @@ it.each([
   { fields: ['name', 'at'], groups: { name: 'Sale', at: '2026-01-01T00:00:00Z' } },
   { fields: ['id', 'version'], groups: { id: 'sale-1', version: 1 } },
 ])('preserves stored scalar group types for $fields', ({ fields, groups }) => {
-  const result = summaryResultSchema(config, 'sales', { ...options, groupBy: fields })
+  const result = resultParser(config, 'sales', { ...options, groupBy: fields })
   const row = { ...ungroupedResult.data[0], groups }
-  expect(result.safeParse({ ...ungroupedResult, data: [row] }).success).toBe(true)
-  expect(result.safeParse({ ...ungroupedResult, data: [{ ...row, groups: Object.fromEntries(fields.map(field => [field, null])) }] }).success).toBe(true)
+  expect(result({ ...ungroupedResult, data: [row] }).ok).toBe(true)
+  expect(result({ ...ungroupedResult, data: [{ ...row, groups: Object.fromEntries(fields.map(field => [field, null])) }] }).ok).toBe(true)
 })
 it.each(invalidResults.map((value, i) => [i, value] as const))('rejects malformed summary result %i', (_, value) => {
-  expect(summaryResultSchema(config, 'sales', grouped).safeParse(value).success).toBe(false)
+  expect(resultParser(config, 'sales', grouped)(value).ok).toBe(false)
 })
 it.each([1, SUMMARY_LIMITS.groups])('enforces requested output group cap %i and cap+1', maxGroups => {
-  const result = summaryResultSchema(config, 'sales', { ...grouped, maxGroups })
-  expect(result.safeParse({ ...groupedResult, data: Array.from({ length: maxGroups }, () => groupRow) }).success).toBe(true)
-  expect(result.safeParse({ ...groupedResult, data: Array.from({ length: maxGroups + 1 }, () => groupRow) }).success).toBe(false)
+  const result = resultParser(config, 'sales', { ...grouped, maxGroups })
+  expect(result({ ...groupedResult, data: Array.from({ length: maxGroups }, () => groupRow) }).ok).toBe(true)
+  expect(result({ ...groupedResult, data: Array.from({ length: maxGroups + 1 }, () => groupRow) }).ok).toBe(false)
 })
 it('projects deterministic OpenAPI and MCP-style fragments from the same canonical request and result', async () => {
   const fragments = summaryContract(config, 'sales', grouped)
   expect(summaryContract(config, 'sales', grouped)).toEqual(fragments)
   const ajv = new Ajv({ strict: false, validateFormats: false, allErrors: true })
-  for (const input of [fragments.request, z.toJSONSchema(schema, { io: 'input' })]) {
+  for (const input of [fragments.request]) {
     const check = ajv.compile(input)
     for (const value of validRequests) expect(check(value), JSON.stringify(check.errors)).toBe(true)
     for (const [name, value] of invalidRequests) expect(check(value), name).toBe(false)
     for (const [name, value] of semanticInvalid) expect(check(value), `semantic-only: ${name}`).toBe(true)
   }
-  for (const input of [fragments.result, z.toJSONSchema(summaryResultSchema(config, 'sales', grouped))]) {
+  for (const input of [fragments.result]) {
     const check = ajv.compile(input)
     for (const value of [groupedResult, { ...groupedResult, data: [] }]) expect(check(value), JSON.stringify(check.errors)).toBe(true)
     for (const value of invalidResults) expect(check(value), JSON.stringify(value)).toBe(false)
   }
-  for (const input of [summaryContract(config, 'sales', options).result, z.toJSONSchema(summaryResultSchema(config, 'sales', options))]) {
+  for (const input of [summaryContract(config, 'sales', options).result]) {
     const check = ajv.compile(input)
     expect(check(ungroupedResult), JSON.stringify(check.errors)).toBe(true)
     expect(check({ ...ungroupedResult, data: [] })).toBe(false)
@@ -276,4 +284,71 @@ it('projects deterministic OpenAPI and MCP-style fragments from the same canonic
   await SwaggerParser.validate({ openapi: '3.1.0', info: { title: 'Detached summary contract', version: '1' },
     paths: {}, components: { schemas: { SummaryRequest: embed(fragments.request, 'SummaryRequest'), SummaryResult: embed(fragments.result, 'SummaryResult') } },
   })
+})
+
+// Review3's six annotation/clone regressions now assert construction isolation:
+// callers may annotate/clone JSON projections, but cannot obtain a Zod schema.
+for (const kind of ['request', 'result'] as const) {
+  for (const method of ['describe', 'meta', 'clone'] as const) it(`isolates ${kind} validation from projection ${method}`, () => {
+    for (const module of [publicSummary, internalSummary]) {
+      expect(module).not.toHaveProperty('summaryQuerySchema')
+      expect(module).not.toHaveProperty('summaryResultSchema')
+      for (const exported of Object.values(module)) expect(exported).not.toHaveProperty('_zod')
+    }
+    const parse = kind === 'request' ? parseRequest : resultParser(config, 'sales', options)
+    expect(typeof parse).toBe('function')
+    for (const name of ['describe', 'meta', 'clone', 'safeParse', 'parse', '_zod']) expect(parse).not.toHaveProperty(name)
+    const projection = summaryContract(config, 'sales', options)[kind]
+    const annotated = method === 'clone' ? structuredClone(projection)
+      : { ...projection, ...(method === 'describe' ? { description: unsafeValue } : { meta: { description: unsafeValue } }) }
+    expect(JSON.parse(JSON.stringify(annotated))).toEqual(annotated)
+    expect(annotated).not.toHaveProperty('_zod')
+    const input = kind === 'request' ? { ...request(), ...unknownKeys } : { ...ungroupedResult, ...unknownKeys }
+    for (const reportInput of [false, true]) {
+      const parsed = parse(input, { reportInput, error: () => unsafeValue })
+      expect(parsed.ok).toBe(false)
+      expect(JSON.stringify(parsed)).not.toContain('CANARY')
+    }
+  })
+  // Reviewer's raw-issue injection is now aimed directly at the ONE mapper,
+  // without needing or exposing a mutable parser. Exercise prototype names too.
+  it(`fails closed for unknown and prototype issue codes (${kind})`, () => {
+    for (const code of ['UNKNOWN_CODE_CANARY', '__proto__', 'constructor', 'toString']) {
+      const raw = { code, path: kind === 'request' ? ['summary', 'groupBy', 0] : ['data', 0, 'metrics', unsafeKey],
+        message: unsafeValue, input: unknownKeys, received: unsafeValue, keys: [unsafeKey], options: [unsafeValue],
+        params: { reason: unsafeValue }, minimum: unsafeValue, maximum: unsafeValue, future: unknownKeys }
+      const issue = summaryIssue(raw)
+      expect(issue).toEqual({ code: 'invalid_summary', message: 'Invalid summary',
+        path: kind === 'request' ? ['summary', 'groupBy', 0] : ['data', 0, 'metrics', '[key]'] })
+      expect(issue).not.toBe(raw)
+      expect(JSON.stringify(issue)).not.toContain('CANARY')
+    }
+  })
+}
+it('maps invalid result options through the request boundary', () => {
+  const invalid = { ...options, metrics: [{ op: 'sum', field: 'calculated', alias: 'total' }] } as const
+  const parsed = parseSummaryResult(config, 'sales', invalid, ungroupedResult, { reportInput: true })
+  expect(parsed).toEqual(parseSummaryRequest(config, 'sales', { entity: 'sales', summary: invalid }, { reportInput: true }))
+  expect(JSON.stringify(parsed)).not.toContain('PRIVATE_EXPRESSION_CANARY')
+  expect(() => summaryContract(config, 'sales', invalid)).toThrow('Invalid summary options')
+})
+
+it('selects operand reasons from trusted metadata and ignores supplied reasons', () => {
+  for (const [field, reason] of [
+    [{ type: 'int', computed: 'PRIVATE_EXPRESSION_CANARY' }, 'computed'],
+    [{ type: 'ref', entity: 'sales' }, 'reference'],
+    [{ type: 'text' }, 'unsupported_type'],
+  ] as const) {
+    const model = instanceConfigSchema.parse({ ...config, entities: { sales: { ...config.entities.sales,
+      fields: { ...config.entities.sales.fields, operand: field },
+    } } })
+    const parsed = parseSummaryRequest(model, 'sales', request({
+      metrics: [{ op: 'sum', field: 'operand', alias: 'total', reason: unsafeValue }], reason: unsafeValue,
+    }), { reportInput: true })
+    expect(parsed.ok).toBe(false)
+    if (!parsed.ok) expect(parsed.issues).toContainEqual(expect.objectContaining({ reason }))
+    expect(JSON.stringify(parsed)).not.toContain('CANARY')
+  }
+  const raw = { code: 'invalid_value', path: ['summary', 'groupBy', 0], params: { reason: 'reference' }, reason: 'computed' }
+  expect(summaryIssue(raw)).toEqual({ code: 'invalid_value', path: raw.path, message: 'Unsupported summary value' })
 })

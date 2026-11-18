@@ -1,4 +1,4 @@
-import { summaryQuerySchema, summaryResultSchema, type QueryInput, type SummaryQuery, type SummaryOptions, type SummaryResult } from '@workbasehq/core/query/schema'
+import { parseSummaryRequest, parseSummaryResult, type QueryInput, type SummaryQuery, type SummaryOptions, type SummaryResult } from '@workbasehq/core/query/schema'
 import type { InstanceConfig } from '../../src/config'
 
 // Retain the authored field literals; defineInstance's normalized output is wider.
@@ -47,17 +47,18 @@ const nullBucket: typeof result = { kind: 'summary', version: 1, data: [{ groups
 // @ts-expect-error metric aliases come from the request
 const unknownAlias: typeof result = { kind: 'summary', version: 1, data: [{ groups: { enabled: true, at: '' }, metrics: { rows: 1, total: 1, other: 2 } }] }
 
-// Schema inference preserves field restrictions for a literal normalized model too.
+// Boundary inference preserves field restrictions for a literal normalized model too.
 function schemaTypes(normalized: InstanceConfig) {
   const config = { ...normalized, entities: { sales: { ...normalized.entities.sales, fields: {
     amount: { type: 'int', required: false }, price: { type: 'float', required: false }, name: { type: 'string', required: false },
     enabled: { type: 'bool', required: false }, at: { type: 'datetime', required: false }, owner: { type: 'ref', required: false },
     calculated: { type: 'int', required: false, computed: 'amount + 1' },
   } } } } as const
-  const request = summaryQuerySchema(config, 'sales')
-  const response = summaryResultSchema(config, 'sales', summary)
-  const parsed = request.parse(query)
-  const parsedResult: typeof result = response.parse(result)
+  const request = parseSummaryRequest(config, 'sales', query)
+  const response = parseSummaryResult(config, 'sales', summary, result)
+  if (!request.ok || !response.ok) throw new Error('Invalid summary fixture')
+  const parsed = request.data
+  const parsedResult: typeof result = response.data
   // @ts-expect-error schema inference retains the numeric operand inventory
   const invalid: typeof parsed = { entity: 'sales', summary: { version: 1, metrics: [{ op: 'sum', field: 'name', alias: 'total' }] } }
   return { parsed, parsedResult, invalid }

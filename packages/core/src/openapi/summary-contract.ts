@@ -1,16 +1,5 @@
-import type { InstanceConfig } from '../config'
-import { summaryQuerySchema, summaryResultSchema, type SummaryOptions } from '../query/summary-schema'
-import { publicInputSchema } from './input-projection'
-
-/** Detached component fragments only. No registration in served OpenAPI or MCP.
+/** Detached JSON fragments only; no registration in served OpenAPI or MCP.
  * Local recursive refs remain fragment-local; rebase them when embedding later.
- * Zod refinements (unique aliases, time arithmetic, etc.) require runtime validation.
+ * Runtime uniqueness and time arithmetic still require the plain parse functions.
  */
-export function summaryContract<C extends InstanceConfig, E extends keyof C['entities'] & string, const S extends SummaryOptions<C, E>>(
-  config: C, entity: E, summary: S,
-) {
-  return {
-    request: publicInputSchema(summaryQuerySchema(config, entity)),
-    result: publicInputSchema(summaryResultSchema(config, entity, summary)),
-  }
-}
+export { projectSummaryContract as summaryContract } from '../query/summary-schema'

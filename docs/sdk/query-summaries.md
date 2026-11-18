@@ -95,8 +95,8 @@ at noon intersects 367 days and is invalid when daily bucketing is requested.
 contains separate, exact `groups` and `metrics` maps. Group keys are the requested
 field names (plus the bucket field); metric keys are exactly the requested
 aliases. Aliases may equal a group field name because these maps are separate.
-There is no cursor or pagination contract. A request-specific result schema is
-built with `summaryResultSchema(config, entity, summary)`.
+There is no cursor or pagination contract. Validate a result against its request
+with `parseSummaryResult(config, entity, summary, input)`.
 
 Null grouping values form a single group per otherwise equal tuple. Scalar
 types are preserved, including booleans and enum values. Datetime group values
@@ -145,10 +145,21 @@ then follow the model at compile time. A normalized `InstanceConfig` whose
 fields have widened to string keys necessarily relies on runtime validation.
 Alias syntax, nonempty arrays and numeric caps also require runtime validation.
 
-`summaryQuerySchema(config, entity)` and `summaryResultSchema` are the canonical
-runtime schemas. The detached build helper `openapi/summary-contract.ts` projects
-their request/result fragments through the existing `publicInputSchema`
-conventions. MCP-style fragments use `z.toJSONSchema` on those same schemas.
+`parseSummaryRequest(config, entity, input)` and
+`parseSummaryResult(config, entity, summary, input)` are the only runtime
+validation entry points, exported from `@workbasehq/core/query/schema`. They
+return `{ ok: true, data }` or `{ ok: false, issues: SafeIssue[] }`. Issues contain
+only an allowlisted code, a structural path, a fixed message and, for unsupported
+operands, a finite reason (`reference`, `computed`, `expression`, `unknown_field`
+or `unsupported_type`). Dynamic map and predicate path keys become `[key]`.
+Unknown diagnostic codes become `invalid_summary` with a fixed message; raw
+messages, rejected values, key inventories and Zod errors never cross this
+boundary, including when `reportInput` or a custom error map is supplied.
+
+The Zod schemas are private to their construction module. The detached build
+helper `openapi/summary-contract.ts` exports only JSON request/result fragments,
+projected through the existing `publicInputSchema` conventions. Annotating or
+cloning a fragment cannot change the runtime validation boundary.
 Fragments own local recursive references; embedding them in OpenAPI components
 requires rebasing those references to the component location. Neither helper
 registers a live operation or tool.
