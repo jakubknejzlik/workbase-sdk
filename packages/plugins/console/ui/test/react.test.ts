@@ -3,10 +3,10 @@ import { createElement as h } from 'react'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, expect, test, vi } from 'vitest'
 import { grants } from './grants'
-import { ConsoleProvider, PageView } from '../src/react'
+import { AccessCard, ConsoleProvider, PageView, useRuntime } from '../src/react'
 import { entityCreatePage, entityDetailPage, entityEditPage, entityListPage, type Node, page, list } from '../src/index'
 import type { Manifest } from '../src/check'
-import type { ClientRequestInit } from '../src/client'
+import type { Client, ClientRequestInit } from '../src/client'
 import { createI18n } from '../src/i18n'
 const fields = Object.fromEntries(['name', 'extra', 'user', 'locked'].map(name => [name, { type: name === 'user' ? 'ref' : 'string', required: name === 'name', readOnly: name === 'locked', userLink: name === 'user', computed: false }]))
 const meta = { displayField: 'name', fields }
@@ -97,7 +97,7 @@ test('conflict retains draft; explicit reload and resave diffs against fresh ser
   render(view(fetch, 'edit'))
   fireEvent.change(await screen.findByLabelText('domain:field.probe.name'), { target: { value: 'Draft' } }); fireEvent.click(screen.getByText('sdk:save'))
   expect(await screen.findByText('sdk:conflict')).toBeTruthy(); expect((screen.getByLabelText('domain:field.probe.name') as unknown as { value: string }).value).toBe('Draft')
-  expect(fetch).toHaveBeenCalledTimes(2)
+  expect(fetch.mock.calls.filter(([, init]) => init.method === 'GET').length).toBeGreaterThanOrEqual(2)
   fireEvent.click(screen.getByText('sdk:reloadServerCopy'))
   await waitFor(() => expect((screen.getByLabelText('domain:field.probe.name') as unknown as { value: string }).value).toBe('Other session'))
   conflict = false
@@ -230,4 +230,61 @@ test('returning to an earlier search starts at page one, including after a host 
   expect(screen.queryByText('A second')).toBeNull()
   mounted.rerender(view(fetch, 'list', { layout: [], metadata: { ...meta, fields: { ...fields } } }))
   fireEvent.click(screen.getByText('sdk:loadMore')); expect(await screen.findByText('A second')).toBeTruthy()
+})
+
+const available = { ...row, access: { state: 'no_account', account: null, invitation: null }, actions: { close: { enabled: true }, invite: { enabled: true } } }
+function availabilityView(fetch: (url: string, init: ClientRequestInit) => Promise<Response>, mode: 'detail' | 'edit', capture: (client: Client) => void) {
+  function Inspector() { capture(useRuntime().client); return null }
+  const definition = route(mode, ['name', { kind: 'action', name: 'close' }, { kind: 'slot', id: 'access', props: {} }])
+  return h(ConsoleProvider, { caps: grants({ probe: meta }), identity: { actorId: 'a', orgId: 'one' }, t, fetch,
+    slots: { access: { contexts: ['record'], props: { access: { kind: 'access' } }, component: AccessCard } },
+  }, h(Inspector), h(PageView, { definition, route: definition, entities: { probe: meta }, params: { itemId: 'x' }, search: {}, navigate }))
+}
+function expectNoExecutableAvailability() {
+  for (const name of ['ui:actions.close', 'sdk:card.invite']) {
+    const button = screen.queryByRole('button', { name })
+    expect(button === null || button.hasAttribute('disabled')).toBe(true)
+  }
+}
+test.each([0, 403, 404, 503])('mounted invalidation hides generic/access actions during pending and failed refresh (%s)', async status => {
+  let finish: (value: Response) => void = () => {}, fail: (error: Error) => void = () => {}, client!: Client
+  const fetch = vi.fn().mockResolvedValueOnce(json(available)).mockImplementation(() => new Promise<Response>((resolve, reject) => { finish = resolve; fail = reject }))
+  render(availabilityView(fetch, 'detail', value => { client = value }))
+  await screen.findByRole('button', { name: 'ui:actions.close' }); await screen.findByRole('button', { name: 'sdk:card.invite' })
+  act(() => client.invalidate())
+  expectNoExecutableAvailability()
+  await waitFor(() => expect(fetch).toHaveBeenCalledTimes(2))
+  await act(async () => { if (status) finish(json({ error: 'failure' }, status)); else fail(new TypeError('offline')) })
+  expectNoExecutableAvailability()
+  expect(screen.getByText('Server')).toBeTruthy()
+  expect(fetch).toHaveBeenCalledTimes(2)
+})
+test.each([409, 403, 404, 0])('failed save (%s) and background owner refresh preserve drafts and use fresh availability', async status => {
+  let client!: Client, finishWrite: (value: Response) => void = () => {}, failWrite: (error: Error) => void = () => {}, finishRefresh: (value: Response) => void = () => {}
+  const fetch = vi.fn((_url: string, init: ClientRequestInit) => {
+    if (init.method === 'PATCH') return new Promise<Response>((resolve, reject) => { finishWrite = resolve; failWrite = reject })
+    if (fetch.mock.calls.length === 1) return Promise.resolve(json(available))
+    return new Promise<Response>(resolve => { finishRefresh = resolve })
+  })
+  render(availabilityView(fetch, 'edit', value => { client = value }))
+  const input = await screen.findByLabelText('domain:field.probe.name')
+  await screen.findByRole('button', { name: 'ui:actions.close' })
+  fireEvent.change(input, { target: { value: 'Unsaved' } }); fireEvent.click(screen.getByText('sdk:save'))
+  expectNoExecutableAvailability()
+  await act(async () => { if (status) finishWrite(json({ error: status === 409 ? 'version_conflict' : 'refused' }, status)); else failWrite(new TypeError('offline')) })
+  await waitFor(() => expect(fetch).toHaveBeenCalledTimes(3))
+  expectNoExecutableAvailability()
+  expect((input as unknown as { value: string }).value).toBe('Unsaved')
+  await act(async () => finishRefresh(json({ ...available, name: 'New server', version: 2, actions: { close: { enabled: false, reason: 'record.closed' } } })))
+  await screen.findByText('ui:record.closed')
+  expect((screen.getByLabelText('domain:field.probe.name') as unknown as { value: string }).value).toBe('Unsaved')
+  expect(screen.getByLabelText('domain:field.probe.name')).toBe(input)
+  expectNoExecutableAvailability()
+  expect(await client.one('probe', { id: 'x' }, new AbortController().signal, true)).toMatchObject({ name: 'New server' })
+  expect(fetch).toHaveBeenCalledTimes(3)
+})
+test.each([undefined, null, [], { close: { enabled: 'yes' } }])('invalid detail metadata %j cannot enable generic/access actions', async actions => {
+  render(availabilityView(async () => json({ ...available, actions }), 'detail', () => {}))
+  await screen.findByText('Server')
+  expectNoExecutableAvailability()
 })

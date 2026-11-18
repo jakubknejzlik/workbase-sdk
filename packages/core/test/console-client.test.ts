@@ -67,12 +67,13 @@ it('native D1: editing name leaves an unchanged padded enum literal intact', asy
   expect(await client().api.one('probe', { id: initial.id }, signal())).toMatchObject({ name: 'Changed', status: ' closed ', version: 2 })
   expect(await env.DB.prepare('SELECT status FROM probe WHERE id=?').bind(initial.id).first('status')).toBe(' closed ')
 })
-it('native D1: stale version retains cache/draft, reload then resave sends only changed keys', async () => {
+it('native D1: stale version refreshes detail and retains draft, explicit reload then resave sends only changed keys', async () => {
   const first = client(), second = client(), initial = await first.api.create('probe', { name: 'A', extra: 'set' }, 'draft-3', signal())
   await second.api.update('probe', initial.id, 1, { name: 'Other' }, signal())
   const draft = { ...initial, name: 'Mine' }
   await expect(first.api.update('probe', initial.id, 1, diff(meta, ['name', 'extra'], initial, draft), signal())).rejects.toMatchObject({ status: 409, code: 'version_conflict' })
-  expect(draft.name).toBe('Mine'); expect(await first.api.one('probe', { id: initial.id }, signal())).toEqual(initial)
+  expect(draft.name).toBe('Mine'); expect(await first.api.one('probe', { id: initial.id }, signal())).toMatchObject({ name: 'Other', version: 2 })
+  expect(first.fetch.mock.calls.filter(([, init]) => init.method === 'GET')).toHaveLength(1)
   first.api.invalidate()
   const reloaded = await first.api.one('probe', { id: initial.id }, signal())
   await first.api.update('probe', initial.id, reloaded.version, diff(meta, ['name', 'extra'], reloaded, { ...reloaded, name: 'Mine' }), signal())
