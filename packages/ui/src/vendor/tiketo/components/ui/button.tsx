@@ -61,6 +61,8 @@ function Button({
     // available for explanations; Tab still leaves normally (see the key guard).
     tabIndex: -1,
     onClickCapture: preventDisabledActivation,
+    onAuxClickCapture: preventDisabledActivation,
+    onMouseDownCapture: preventDisabledMiddleMouseActivation,
     onKeyDownCapture: preventDisabledKeyActivation,
     onKeyUpCapture: preventDisabledKeyActivation,
   } : undefined
@@ -88,6 +90,10 @@ function preventDisabledActivation(event: React.SyntheticEvent) {
 
 function preventDisabledKeyActivation(event: React.KeyboardEvent) {
   if (event.key === "Enter" || event.key === " ") preventDisabledActivation(event)
+}
+
+function preventDisabledMiddleMouseActivation(event: React.MouseEvent) {
+  if (event.button === 1) preventDisabledActivation(event)
 }
 
 export { Button, buttonVariants }
