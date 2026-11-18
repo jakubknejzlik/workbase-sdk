@@ -90,3 +90,40 @@ it('detects missing, nonunique, partial and changed generated indexes as schema 
     await expect(pluginMigrationStatus(env.DB, config.plugins ?? [], config)).rejects.toThrow('Schema drift')
   }
 })
+
+// The DSL permits long identifiers and a maximum 16-field authored tuple.
+// This produces a real D1 wrapper above the former fixed 4,096-character cap.
+it('maps long accepted identifiers at the maximum tuple size on CRUD and atomic D1 writes', async () => {
+  const table = 'assignment_' + 't'.repeat(117)
+  const keys = Array.from({ length: 16 }, (_, i) => `field_${String(i).padStart(2, '0')}_` + 'f'.repeat(119))
+  const selected = defineInstance({ ...sample,
+    entities: { ...sample.entities, [table]: { displayField: keys[0], fields: Object.fromEntries(keys.map(key => [key, { type: 'text' as const }])), constraints: [{ kind: 'unique', name: 'tuple_unique', fields: keys }] } },
+    policies: { ...sample.policies, [table]: { owner: 'all', dispatcher: 'all', viewer: 'all' } },
+    permissions: Object.fromEntries(sample.roles.map(role => [role, { ...sample.permissions[role], [table]: ['read' as const, 'create' as const] }])),
+    commands: [...sample.commands, 'long/insert'],
+  })
+  const sql = `INSERT INTO "${table}" (id,organization_id,created_at,updated_at,${keys.map(key => `"${key}"`).join(',')}) VALUES (${Array.from({ length: 20 }, () => '?').join(',')})`
+  const insert = defineCommand({ name: 'long/insert', permission: { entity: table, operation: 'create' }, idempotency: 'required', input: z.strictObject({}),
+    plan: ctx => ({ rules: [{ name: 'insert', statements: [{ sql, bindings: [ctx.newId, ctx.scope.organizationId, ctx.now, ctx.now, ...keys.map(() => 'same')], expectRows: 1 }] }], result: { status: 201, body: {} }, event: { entity: table, entityId: ctx.newId, operation: 'assignment.created' } }),
+  })
+  await setup(selected)
+  const app = createApp(selected, runtime(), { commands: createCommandRegistry([insert]) })
+  const data = Object.fromEntries(keys.map(key => [key, 'same']))
+  expect((await request(app, `/api/${table}`, 'POST', data)).status).toBe(201)
+  const native = await env.DB.prepare(sql).bind('native-probe', 'org-a', 'now', 'now', ...keys.map(() => 'same')).run().catch(error => error)
+  expect(native).toBeInstanceOf(Error)
+  expect(native.message.length).toBeGreaterThan(4096)
+  expect(native.cause.message.length).toBeGreaterThan(4096)
+  const crud = await request(app, `/api/${table}`, 'POST', data)
+  const atomic = await request(app, '/commands/long/insert', 'POST', { idempotencyKey: 'long-conflict' })
+  expect([crud.status, atomic.status]).toEqual([409, 409])
+  const expected = { error: 'unique_conflict', detail: { constraintId: `${table}.tuple_unique` } }
+  expect([await json(crud), await json(atomic)]).toEqual([expected, expected])
+  expect(uniqueConflict(native, selected)).toMatchObject({ code: 'unique_conflict', detail: { constraintId: `${table}.tuple_unique` } })
+  // The longest accepted wrapper must fit; extra DB text still cannot be a code.
+  const identity = ['organization_id', ...keys].map(key => `${table}.${key}`).join(', ')
+  const diagnostic = `D1_ERROR: UNIQUE constraint failed: ${identity}: SQLITE_CONSTRAINT (extended: SQLITE_CONSTRAINT_UNIQUE)`
+  expect(uniqueConflict(new Error(diagnostic), selected)).toMatchObject({ code: 'unique_conflict' })
+  expect(uniqueConflict(new Error(diagnostic + ' arbitrary text'), selected)).toBeUndefined()
+  expect(uniqueConflict(new Error(diagnostic.replace(keys[0], 'unknown_field')), selected)).toBeUndefined()
+})

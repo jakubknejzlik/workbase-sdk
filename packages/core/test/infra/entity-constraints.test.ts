@@ -33,6 +33,12 @@ it('rejects duplicate names and computed fields at the shared declaration bounda
   expect(() => defineEntity({ fields, constraints: [unique, unique] } as any)).toThrow('Duplicate constraint name')
   expect(() => defineEntity({ fields: { ...fields, derived: { type: 'text', computed: 'slot' } }, constraints: [{ ...unique, fields: ['derived'] }] } as any)).toThrow('stored')
 })
+it('accepts the maximum 16-field tuple and rejects a seventeenth authored field', () => {
+  const keys = Array.from({ length: 17 }, (_, i) => `field_${i}`)
+  const declaration = (fields: string[]) => defineEntity({ fields: Object.fromEntries(keys.map(key => [key, { type: 'text' as const }])), constraints: [{ kind: 'unique', name: 'tuple_unique', fields }] })
+  expect(declaration(keys.slice(0, 16)).constraints[0].fields).toHaveLength(16)
+  expect(() => declaration(keys)).toThrow()
+})
 it('keeps released v2 bytes unchanged and opts constrained schemas into v3', () => {
   const old = schemaLock(config()), bytes = lockBytes(old)
   expect(old.lockVersion).toBe(2)

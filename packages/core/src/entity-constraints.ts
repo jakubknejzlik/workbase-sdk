@@ -1,16 +1,22 @@
 import { z } from 'zod'
 
 const identifier = z.string().regex(/^[a-z][a-z0-9_]*$/)
+export const MAX_UNIQUE_CONSTRAINT_FIELDS = 16
 /** Discriminated data contract: future kinds can add their own typed payloads.
  * NULLs are distinct: a tuple containing any NULL does not conflict. All stored
  * scalar field types are supported; mixed types occupy separate tuple positions.
  * Organization scope is supplied by the SDK and cannot be authored here.
  */
 export const entityConstraintSchema = z.discriminatedUnion('kind', [
-  z.strictObject({ kind: z.literal('unique'), name: identifier.max(63), fields: z.array(identifier).min(1).max(16) }),
+  z.strictObject({ kind: z.literal('unique'), name: identifier.max(63), fields: z.array(identifier).min(1).max(MAX_UNIQUE_CONSTRAINT_FIELDS) }),
 ])
 export const entityConstraintsSchema = z.array(entityConstraintSchema).max(32)
 export type EntityConstraint = z.infer<typeof entityConstraintSchema>
+
+/** SQLite's generated column identity includes the SDK-owned organization scope. */
+export function uniqueConstraintIdentity(entity: string, fields: readonly string[]) {
+  return ['organization_id', ...fields].map(field => `${entity}.${field}`).join(', ')
+}
 
 /** Shared by the literal DSL, normalized configs and lock validation. */
 export function validateEntityConstraints(constraints: readonly EntityConstraint[], fields: Record<string, { computed?: unknown; implicit?: boolean }>, fail: (path: (string | number)[], message: string) => never) {
