@@ -13,7 +13,8 @@ For a fresh root, call `bootstrap_instance`, then `initialize_instance` with
 artifacts (schema lock, initial migration, OpenAPI and both access locks), their
 exact bytes, hashes, conflicts and `planHash`. Apply with
 `{ "instance": "my-instance", "mode": "apply", "planHash": "<preview planHash>" }`.
-Then continue with `inspect_schema` in the same stdio session or after restart.
+Then explicitly create the independent local target as described below and continue
+with `inspect_schema` in the same stdio session or after restart.
 Initialization holds the instance lock and publishes all files through guarded
 recovery. A matching completed initialization is unchanged; partial or differing
 artifacts return `initialization_conflict` and are preserved. Source or dependency
@@ -79,10 +80,36 @@ four graph sources and generated OpenAPI/access projections; runtime permissions
 must agree with config roles and owner. Existing generated artifacts still conflict
 if their bytes differ.
 
-This only authors and initializes source. It does not create or attest a persistent
-local target. Server-managed local-target creation and the full empty-root MCP
-acceptance flow are deferred to the next slice of #225. Existing target role-usage
-and owner-change safety checks continue to apply to later proposals.
+Bootstrap and initialization author source. Target creation is a separate explicit
+operation. Call `create_local_target` with `{ "instance": "fieldops", "mode": "preview" }`,
+then apply with `{ "instance": "fieldops", "mode": "apply", "planHash": "<preview planHash>" }`.
+It requires initialized V3 sources and available dependencies, runs the supported
+SDK/plugin/domain migration chain for the selected graph, and returns durable
+`instanceId`, `targetId` and `creationPlanHash` attestation. No host-side SQLite
+setup, manual environment mapping, network or deployment credentials are needed.
+The server chooses `.local/mcp-target/` inside the instance root; back up this
+directory with the instance. It is independent of disposable verification state
+and survives disposable cleanup and server restart. Do not move or substitute its
+receipt, root or database: the association binds root and database file identities.
+It does not configure Wrangler deployment or a running app's database binding.
+
+Completed creation is idempotent and reports `unchanged`, including when the target
+has since gained records. The receipt records creation provenance, never current
+emptiness. Normal migrations seed the `instance` organization, so a subsequent
+owner replacement is rejected. Select initial roles during bootstrap, rather than
+using a later owner-replacement proposal. Other composition proposals continue
+through `validate` → `preview_migration` → `apply_to_disposable` → `promote`.
+Target creation does not promote source or apply subsequent proposals to that target.
+
+Apply requires the exact preview plan; source or dependency changes return
+`stale_plan`. Creation records intent before migration, stages each attempt in a
+new exclusive file, and publishes without replacement only after a durable ready
+receipt. Retry interrupted creation using its original source/dependency inputs.
+Interrupted attempts remain preserved in `.local/mcp-target/`; no retry overwrites
+or deletes a database. A substituted/changed pending target returns
+`local_target_conflict` and needs operator review. Pending creation cannot attest
+role safety. Keep receipts and associated files together; do not use the disposable
+as a target or supply paths, SQL or `fresh: true` in tool arguments.
 
 Normal config calls on an incomplete scaffold return `initialization_required`
 with this next step. Bootstrap retains its file-copy and conflict contract.
@@ -147,7 +174,8 @@ The access compiler checks roles, actions and entity matrices. Composition and
 access kinds can share a proposal; `propose_change` also accepts these V3 kinds.
 Mixing them with legacy kinds is rejected with `mixed_change_kinds`.
 
-For example, replace a fresh scaffold's roles with
+For an initial graph, use bootstrap's `initialComposition` above. For a later
+role proposal, use
 `{ "kind": "set_roles", "roles": ["owner", "dispatcher", "viewer", "member"],
 "organizationOwnerRole": "owner" }`, together with explicit owner and restricted
 role grants and `set_account_link` for each affected invitation mapping. Unresolved
@@ -159,8 +187,13 @@ At disposable verification and again immediately before promotion, removed roles
 (old set minus final set) must be unused in the **target** database's memberships,
 invitations and access tokens, including revoked, expired and historical rows.
 An owner-role change additionally requires no target organizations or memberships.
-The operator supplies `WORKBASE_MCP_ROLE_DATABASES`, a JSON object mapping the
-instance selector to the absolute local target SQLite path. Missing/inaccessible
+A completed `create_local_target` association supplies this evidence automatically.
+Existing operator mappings remain supported: `WORKBASE_MCP_ROLE_DATABASES` is a JSON
+object mapping the instance selector to the absolute local target SQLite path; an
+explicit mapping takes precedence. An invalid explicit mapping never falls back
+to the server-managed target. Verification binds target file identity and contents,
+and promotion rechecks them; target substitution or changes require verification
+again. Missing/inaccessible
 or incomplete evidence fails closed with `role_usage_unverified`; a populated
 owner transition returns `owner_change_requires_fresh_target`. Neither the empty
 verification disposable nor a caller's freshness assertion establishes target

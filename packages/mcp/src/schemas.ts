@@ -152,6 +152,8 @@ export const changeSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('add_index'), entity: identifier, name: identifier, fields: z.array(identifier).min(1).max(8) }),
 ])
 export const schemas = {
+  create_local_target: z.strictObject({ instance, mode: z.enum(['preview', 'apply']).default('preview'), planHash: z.string().regex(/^[a-f0-9]{64}$/).optional() })
+    .refine(input => input.mode !== 'apply' || input.planHash !== undefined, 'Apply requires the preview planHash'),
   initialize_instance: z.strictObject({ instance, mode: z.enum(['preview', 'apply']).default('preview'), planHash: z.string().regex(/^[a-f0-9]{64}$/).optional() })
     .refine(input => input.mode !== 'apply' || input.planHash !== undefined, 'Apply requires the preview planHash'),
   bootstrap_instance: z.strictObject({ root: z.string().min(1).optional(), id: z.string(), displayName: instanceDisplayName.optional(), initialComposition: bootstrapInitialCompositionSchema.optional().describe('Create-only initial role/access graph: ordered roles, organizationOwnerRole and explicit access operations. Validated together before any scaffold publication. Omit for byte-identical admin/staff defaults. Existing roots or targets conflict.'), target: z.literal('cloudflare-github').describe('Standalone registry SDK packages, packaged console and SST Cloudflare deployment with GitHub workflows') }),
