@@ -78,8 +78,8 @@ it('serves all config tools over a real stdio subprocess and shuts down', async 
   try {
     await client.connect(transport)
     const listed = (await client.listTools()).tools
-    expect(listed).toHaveLength(14)
-    expect(listed.map(tool => tool.name)).toEqual(['initialize_instance', 'bootstrap_instance', 'list_versions', 'rollback', 'inspect_schema', 'upgrade_sdk', 'propose_change', 'propose_composition', 'validate', 'preview_migration', 'apply_to_disposable', 'promote', 'submit_change', 'discard'])
+    expect(listed).toHaveLength(15)
+    expect(listed.map(tool => tool.name)).toEqual(['initialize_instance', 'bootstrap_instance', 'list_versions', 'rollback', 'inspect_schema', 'upgrade_sdk', 'propose_change', 'propose_initial_composition', 'propose_composition', 'validate', 'preview_migration', 'apply_to_disposable', 'promote', 'submit_change', 'discard'])
   } finally { await client.close(); await transport.close() }
 })
 

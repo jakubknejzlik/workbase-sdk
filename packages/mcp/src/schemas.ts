@@ -160,6 +160,7 @@ export const schemas = {
   inspect_schema: z.strictObject({ instance }),
   upgrade_sdk: z.strictObject({ instance, baseRevision: revision, targetVersion: z.string().regex(exactVersion).refine(value => !/\s/.test(value)) }),
   propose_change: z.strictObject({ instance, baseRevision: revision, changes: z.array(z.union([changeSchema, compositionChangeSchema])).min(1).max(50) }),
+  propose_initial_composition: z.strictObject({ instance, composition: initialCompositionSchema }),
   propose_composition: z.strictObject({ instance, baseRevision: revision, changes: z.array(compositionChangeSchema).min(1).max(50) }),
   validate: z.strictObject({ proposalId: proposalId.optional(), instance: instance.optional() })
     .refine(input => !!input.proposalId !== !!input.instance, 'Provide exactly one of instance or proposalId'),

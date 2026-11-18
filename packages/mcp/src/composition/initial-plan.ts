@@ -5,7 +5,7 @@ import { WorkflowError, initialCompositionSchema } from '../schemas.ts'
 import { initializationPaths, initializationSnapshot, loadInitializationInputs, planInitialization } from '../initialization-plan.ts'
 import { hash } from '../planning.ts'
 import { hydrateRuntimePlugins } from './registry.ts'
-import { parseRuntimeSource, printRuntimeSource } from './runtime-source.ts'
+import { parseRuntimeSource, printRuntimeSource, rewritePermissionsSource } from './runtime-source.ts'
 import { assertCompositionRequirements, compositionRequirements, type CompositionRequirement } from './requirements.ts'
 
 // Options records have no authored ordering. Canonicalize recursively before rendering.
@@ -36,7 +36,6 @@ export async function planInitialComposition(root: string, instance: string, inp
   const conflicts = [
     ...initializationPaths.filter(path => before.inputs[path] !== undefined),
     ...before.migrations.map(name => `migrations/${name}`),
-    ...(!before.inputs['runtime.ts']?.equals(template) ? ['runtime.ts'] : []),
   ]
   if (conflicts.length) freshStateConflict(conflicts)
   const captured = await loadInitializationInputs(root, instance, before).catch(error => {
@@ -44,6 +43,9 @@ export async function planInitialComposition(root: string, instance: string, inp
       || (error as NodeJS.ErrnoException | undefined)?.code === 'ENOENT') freshStateConflict(['config.ts'])
     throw error
   })
+  // Bootstrap may derive only permissions options from its initial role graph.
+  const bootstrapRuntime = Buffer.from(rewritePermissionsSource(template.toString(), captured.loaded.config))
+  if (!before.inputs['runtime.ts']?.equals(template) && !before.inputs['runtime.ts']?.equals(bootstrapRuntime)) freshStateConflict(['runtime.ts'])
   const source = printRuntimeSource(canonical(parsed.data) as typeof parsed.data, captured.loaded.config)
   const model = parseRuntimeSource(source)
   const plugins = hydrateRuntimePlugins(model, captured.loaded.config)

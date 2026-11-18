@@ -19,7 +19,7 @@ import { verifyAgent } from './fixtures/verify-agent.ts'
 let root: string
 let client: Client
 let application: Awaited<ReturnType<typeof createServer>>
-const tools = ['initialize_instance', 'bootstrap_instance', 'list_versions', 'rollback', 'inspect_schema', 'upgrade_sdk', 'propose_change', 'propose_composition', 'validate', 'preview_migration', 'apply_to_disposable', 'promote', 'submit_change', 'discard']
+const tools = ['initialize_instance', 'bootstrap_instance', 'list_versions', 'rollback', 'inspect_schema', 'upgrade_sdk', 'propose_change', 'propose_initial_composition', 'propose_composition', 'validate', 'preview_migration', 'apply_to_disposable', 'promote', 'submit_change', 'discard']
 const addition = { kind: 'add_field', entity: 'jobs', field: 'notes', definition: { type: 'text' } }
 async function call(name: string, args: Record<string, unknown>) {
   const response = await client.callTool({ name, arguments: args }, undefined, { timeout: 120000 })
