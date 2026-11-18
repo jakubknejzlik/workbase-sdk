@@ -3,7 +3,8 @@ import { readFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import ts from 'typescript'
 import { noLink } from '../paths.ts'
-import { hash } from '../planning.ts'
+import { byteHash } from '../byte-digest.ts'
+import { decodeSource } from '@workbasehq/core/schema/load'
 import { WorkflowError } from '../schemas.ts'
 import type { RuntimeModel } from './runtime-source.ts'
 
@@ -22,9 +23,9 @@ export async function compositionRequirements(root: string, model: RuntimeModel)
     await noLink(dirname(join(root, path)), true)
     await noLink(join(root, path), true)
     try {
-      const source = await readFile(join(root, path), { encoding: 'utf8', flag: constants.O_RDONLY | constants.O_NOFOLLOW })
-      guards[path] = hash(source)
-      return source
+      const bytes = await readFile(join(root, path), { flag: constants.O_RDONLY | constants.O_NOFOLLOW })
+      guards[path] = byteHash(bytes)
+      return path.endsWith('.ts') ? decodeSource(bytes, join(root, path)) : bytes.toString('utf8')
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
       guards[path] = null

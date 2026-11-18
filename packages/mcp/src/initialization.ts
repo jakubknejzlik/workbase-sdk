@@ -5,7 +5,7 @@ import { readFile, readdir } from 'node:fs/promises'
 import { isAbsolute, join } from 'node:path'
 import { execute } from './sdk-process.ts'
 import { bindSchemaLock } from '@workbasehq/core/schema'
-import { isLiteralConfig, loadConfig } from '@workbasehq/core/schema/load'
+import { decodeSource, isLiteralConfig, loadConfig } from '@workbasehq/core/schema/load'
 import { plan } from '@workbasehq/core/migrations/schema-plan'
 import { generate } from '@workbasehq/core/openapi/generate'
 import { KernelRegistry } from '@workbasehq/core/kernel/registry'
@@ -15,6 +15,7 @@ import type { Store } from './storage.ts'
 import { WorkflowError, instanceSelector, fail } from './schemas.ts'
 import { noLink } from './paths.ts'
 import { hash } from './planning.ts'
+import { byteHash, byteManifest } from './byte-digest.ts'
 import { replaySources } from './replay-sources.ts'
 import { parseRuntimeSource, type RuntimeModel } from './composition/runtime-source.ts'
 import { hydrateRuntimePlugins } from './composition/registry.ts'
@@ -161,11 +162,10 @@ async function snapshot(root: string) {
   }
   const migrations = (await readdir(join(root, 'migrations'))).filter(name => name !== '.gitkeep').sort()
   for (const name of migrations) inputs[`migrations/${name}`] = (await bytes(root, `migrations/${name}`))!
-  const guards: Record<string, string | null> = Object.fromEntries(Object.entries(inputs).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)
-    .map(([path, data]) => [path, hash(data.toString('utf8'))]))
+  const guards: Record<string, string | null> = byteManifest(inputs)
   for (const path of ['package.json', 'bun.lock']) {
     const data = await bytes(root, path)
-    guards[path] = data === null ? null : hash(data.toString('base64'))
+    guards[path] = data === null ? null : byteHash(data)
   }
   for (const path of initializationPaths) guards[path] ??= null
   return { inputs, guards, migrations }
@@ -180,7 +180,7 @@ export async function initializeInstance(store: Store, instance: string, input: 
     if (instanceSelector(loaded.config.id) !== instance) fail('invalid_instance_id', 'Config id does not match the selected instance', 409)
     const runtimeSource = before.inputs['runtime.ts']
     if (!runtimeSource) fail('runtime_not_canonical', 'Fresh initialization requires canonical runtime.ts', 422)
-    const model = parseRuntimeSource(runtimeSource.toString('utf8'))
+    const model = parseRuntimeSource(decodeSource(runtimeSource, join(root, 'runtime.ts')))
     const dependencyGuards = await dependencies(root, model)
     const schema = await plan({ config: loaded.config, sources: loaded.sources, baseMigrations: {} })
     if (!schema.bundle || schema.bundle.filename !== '0001_r1.sql') fail('initialization_unsupported', 'Fresh initialization requires the first domain revision', 422)
@@ -215,6 +215,6 @@ export async function initializeInstance(store: Store, instance: string, input: 
   }
   if (input.mode === 'preview') return run()
   // Fail before creating even lock metadata when the consumer graph is broken.
-  await dependencies(root, parseRuntimeSource((await bytes(root, 'runtime.ts'))?.toString('utf8') ?? ''))
+  await dependencies(root, parseRuntimeSource(decodeSource(await bytes(root, 'runtime.ts') ?? Buffer.alloc(0), join(root, 'runtime.ts'))))
   return store.locked(instance, run)
 }
