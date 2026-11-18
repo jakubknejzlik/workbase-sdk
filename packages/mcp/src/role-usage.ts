@@ -1,27 +1,41 @@
 import { DatabaseSync } from 'node:sqlite'
+import { lstat, readFile } from 'node:fs/promises'
+import { managedLocalTarget } from './local-target.ts'
+import { hash } from './planning.ts'
+import { byteHash } from './byte-digest.ts'
 import { isAbsolute } from 'node:path'
 import { z } from 'zod'
 import { noLink } from './paths'
 import { fail, WorkflowError, type Change } from './schemas'
 
-/** Trusted operator mapping to the target local D1 SQLite files. Never a tool input,
- * never the empty disposable DB. Open read-only afresh at verification AND promotion.
+/** Trusted operator mapping or durable server-managed association, never a tool
+ * freshness assertion or the empty disposable DB. Open read-only afresh at verification AND promotion.
  * A missing/inaccessible target (including a remote-only deployment) fails closed.
  */
-export async function assertRemovedRolesUnused(instance: string, changes: Change[]) {
+export async function assertRemovedRolesUnused(instance: string, changes: Change[], root?: string) {
   const roles = [...new Set(changes.filter(c => c.kind === 'remove_role').map(c => c.role))]
-  return assertRoleTargetSafe(instance, roles, false)
+  return assertRoleTargetSafe(instance, roles, false, root)
 }
 
 /** Composition computes removals from the complete old/final role sets. Owner
  * replacement additionally requires no organizations or memberships at all. */
-export async function assertRoleTargetSafe(instance: string, roles: string[], ownerChanged: boolean) {
-  if (!roles.length && !ownerChanged) return
+export async function assertRoleTargetSafe(instance: string, roles: string[], ownerChanged: boolean, root?: string) {
   try {
     const databases = z.record(z.string(), z.string()).parse(JSON.parse(process.env.WORKBASE_MCP_ROLE_DATABASES ?? '{}'))
-    const path = databases[instance]
+    const managed = root && !Object.hasOwn(databases, instance) ? await managedLocalTarget(root, instance) : undefined
+    if (!roles.length && !ownerChanged && !managed) return
+    const path = Object.hasOwn(databases, instance) ? databases[instance] : managed?.path
     if (!path || !isAbsolute(path)) throw new Error('Target database unavailable')
     await noLink(path)
+    const evidence = async () => {
+      await noLink(path)
+      const stat = await lstat(path, { bigint: true })
+      const bytes = await readFile(path)
+      await noLink(`${path}-wal`, true)
+      const wal = await readFile(`${path}-wal`).catch(error => { if (error.code === 'ENOENT') return null; throw error })
+      return hash({ path, dev: String(stat.dev), ino: String(stat.ino), bytes: byteHash(bytes), wal: wal ? byteHash(wal) : null, ...managed })
+    }
+    const before = await evidence()
     const db = new DatabaseSync(path, { readOnly: true })
     try {
       db.exec('BEGIN')
@@ -41,8 +55,11 @@ export async function assertRoleTargetSafe(instance: string, roles: string[], ow
         if (row) fail('role_in_use', `Role ${row.role} is held in target database ${table}`, 409)
       }
     } finally { db.close() }
+    const after = await evidence()
+    if (before !== after) fail('role_usage_unverified', 'Target changed while checking role evidence; retry verification', 409)
+    return after
   } catch (error) {
     if (error instanceof WorkflowError && ['role_in_use', 'owner_change_requires_fresh_target'].includes(error.code)) throw error
-    fail('role_usage_unverified', 'Cannot verify role removal or owner-role freshness against the target D1 database; configure WORKBASE_MCP_ROLE_DATABASES with its absolute SQLite path', 409)
+    fail('role_usage_unverified', 'Cannot verify role removal or owner-role freshness against the target D1 database; create_local_target or configure WORKBASE_MCP_ROLE_DATABASES with its absolute SQLite path', 409)
   }
 }

@@ -2,6 +2,7 @@ import { guardV3LegacyWrite } from './v3-guard.ts'
 import { SourceError } from '@workbasehq/core/schema/load'
 import { submitChange, promotionHash } from './submit-change.ts'
 import type { GitHubConfiguration } from './github.ts'
+import { createLocalTarget } from './local-target.ts'
 import { initializeInstance } from './initialization.ts'
 import { bootstrapInstance } from './bootstrap.ts'
 import { appendFile, readFile, readdir } from 'node:fs/promises'
@@ -111,6 +112,7 @@ export class Workflow {
       if (!Object.hasOwn(schemas, name)) fail('unknown_tool', 'Unknown tool', 404)
       const input = schemas[name as ToolName].parse(raw) as Record<string, any>
       const targetInstance = input.instance ?? (await this.store.find(input.proposalId)).instance
+      if (name === 'create_local_target') return await createLocalTarget(this.store, targetInstance, input as z.infer<typeof schemas.create_local_target>)
       if (name === 'rollback') {
         const result = await rollback(this.store, targetInstance, Number(input.to.slice(1)), input)
         if (result.written === true) {

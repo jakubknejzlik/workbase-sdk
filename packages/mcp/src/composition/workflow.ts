@@ -81,6 +81,7 @@ export async function executeComposition(store: Store, proposal: CompositionProp
   // Persist revocation before reading runtime, config, dependencies or migrations.
   // Failed revalidation must never leave an earlier verification consumable.
   if (name === 'validate' || name === 'apply_to_disposable') {
+    delete proposal.targetEvidence
     delete proposal.verification
     if (name === 'validate') delete proposal.validation
     proposal.status = proposal.validation ? 'validated' : 'proposed'
@@ -135,11 +136,11 @@ export async function executeComposition(store: Store, proposal: CompositionProp
     sql: '', files: prepared.files, composition: prepared.model, pluginMigrations: prepared.pluginMigrations, pluginSql: prepared.pluginSql,
     ...(prepared.roleDiff ? { roleDiff: prepared.roleDiff } : {}) }
   if (name === 'apply_to_disposable') {
-    await assertRoleTargetSafe(proposal.instance, bundle.config.roles.filter(role => !prepared.target.config.roles.includes(role)),
-      bundle.config.organizationOwnerRole !== prepared.target.config.organizationOwnerRole)
+    const targetEvidence = await assertRoleTargetSafe(proposal.instance, bundle.config.roles.filter(role => !prepared.target.config.roles.includes(role)),
+      bundle.config.organizationOwnerRole !== prepared.target.config.organizationOwnerRole, root)
     const verification = await applyDisposable(prepared.target,
       { target: bundle.config, indexes: bundle.indexes, sql: '', composition: { statements: prepared.statements, ledger: prepared.ledger } }, expected, input.keep ?? false, signal)
-    if (verification.verified) { proposal.verification = currentProof; proposal.status = 'verified' }
+    if (verification.verified) { proposal.verification = currentProof; proposal.targetEvidence = targetEvidence; proposal.status = 'verified' }
     await save(store, proposal)
     return { ok: verification.verified, ...verification }
   }
@@ -149,8 +150,9 @@ export async function executeComposition(store: Store, proposal: CompositionProp
     revision(latest, input.expectedRevision!)
     if (latest.fingerprint !== bundle.fingerprint) fail('stale_revision', 'Instance files changed since verification', 409)
     if (latest.dependencyDigest !== bundle.dependencyDigest) fail('dependencies_changed', 'Dependencies changed since verification; validate and verify again', 409)
-    await assertRoleTargetSafe(proposal.instance, bundle.config.roles.filter(role => !prepared.target.config.roles.includes(role)),
-      bundle.config.organizationOwnerRole !== prepared.target.config.organizationOwnerRole)
+    const targetEvidence = await assertRoleTargetSafe(proposal.instance, bundle.config.roles.filter(role => !prepared.target.config.roles.includes(role)),
+      bundle.config.organizationOwnerRole !== prepared.target.config.organizationOwnerRole, root)
+    if (targetEvidence !== proposal.targetEvidence) fail('role_usage_unverified', 'Target identity or contents changed since verification; validate and verify again', 409)
     proposal.status = 'promoted'; proposal.promotedFiles = prepared.files
     proposal.promotedRevision = bundle.config.revision
     proposal.migrationPreview = { sql: prepared.pluginSql, configDiff: { composition: prepared.model, pluginMigrations: prepared.pluginMigrations, ...(prepared.roleDiff ? { roleDiff: prepared.roleDiff } : {}) }, revision: bundle.config.revision }
