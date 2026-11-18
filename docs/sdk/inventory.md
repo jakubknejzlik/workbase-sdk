@@ -8,7 +8,7 @@ remote acceptance belongs to the [instance checklist](phase-2-checklist.md).
 
 | Field | Value | Command / source |
 | --- | --- | --- |
-| Coordinated SDK version | `0.3.0` for core, plugins and mcp | `node -e 'for (const p of ["core","plugins","mcp"]) console.log(p,require("./packages/"+p+"/package.json").version)'` |
+| Coordinated SDK version | `0.3.1` for core, plugins and mcp | `node -e 'for (const p of ["core","plugins","mcp"]) console.log(p,require("./packages/"+p+"/package.json").version)'` |
 | Integration SHA | `f9b800e93cdf0350c6518e4b825e606f0022c34f` | `git rev-parse f9b800e` |
 | Producer `bun.lock` sha256 (hex) | `180184306f610836f4cdf16d2a8029c45c15926f8260de439282dc7f989fadf9` | `shasum -a 256 bun.lock` |
 
@@ -39,9 +39,9 @@ are computed; it does not claim that a hosted run has passed or captured them.
 
 | Field | Value | Computation within that CI step |
 | --- | --- | --- |
-| `workbasehq-core-0.3.0.tgz` sha512 | computed in CI | `sdkArchives()` in `scripts/sdk-provenance.ts`; base64 SRI in `dist-sdk/PROVENANCE.json`. |
-| `workbasehq-plugins-0.3.0.tgz` sha512 | computed in CI | Same `sdkArchives()` computation. |
-| `workbasehq-mcp-0.3.0.tgz` sha512 | computed in CI | Same `sdkArchives()` computation. |
+| `workbasehq-core-0.3.1.tgz` sha512 | computed in CI | `sdkArchives()` in `scripts/sdk-provenance.ts`; base64 SRI in `dist-sdk/PROVENANCE.json`. |
+| `workbasehq-plugins-0.3.1.tgz` sha512 | computed in CI | Same `sdkArchives()` computation. |
+| `workbasehq-mcp-0.3.1.tgz` sha512 | computed in CI | Same `sdkArchives()` computation. |
 | Consumer `package-lock.json` sha256 | computed in CI | `scripts/smoke-template.ts` step 2 hashes lock bytes before/after npm ci; the final success line prints the hex hash. |
 | Consumer `openapi.json` `x-workbase-config-hash` | computed in CI | Smoke step 3 runs `bun run openapi:write` and compares the property with packaged `loadConfig('./config.ts').configHash`. |
 
