@@ -84,6 +84,19 @@ export const setPluginSchema = z.discriminatedUnion('plugin', [
   ...(['members', 'mail-outbox', 'audit', 'machine-credentials', 'console'] as const).map(plugin =>
     z.strictObject({ kind: z.literal('set_plugin'), plugin: z.literal(plugin) })),
 ])
+// Initial selection is exhaustive: omissions are intentional, and permissions are config-derived.
+// Keep this closed data boundary independent of the implementation registry (which imports it).
+export const initialCompositionSchema = z.strictObject({
+  interactive: z.boolean(),
+  plugins: z.array(z.discriminatedUnion('plugin', [
+    z.strictObject({ plugin: z.literal('identity'), options: identityOptionsSchema.optional() }),
+    z.strictObject({ plugin: z.literal('organizations'), options: organizationsOptionsSchema.optional() }),
+    z.strictObject({ plugin: z.literal('local-auth'), options: localAuthOptionsSchema.optional() }),
+    ...(['permissions', 'members', 'machine-credentials', 'mail-outbox', 'audit', 'console'] as const).map(plugin =>
+      z.strictObject({ plugin: z.literal(plugin) })),
+  ])).max(9).refine(plugins => new Set(plugins.map(item => item.plugin)).size === plugins.length, 'Select each plugin only once'),
+})
+export type InitialComposition = z.infer<typeof initialCompositionSchema>
 export const setInteractiveSchema = z.strictObject({ kind: z.literal('set_interactive'), interactive: z.boolean() })
 export const runtimeChangeSchema = z.union([setPluginSchema, setInteractiveSchema])
 export type RuntimeChange = z.infer<typeof runtimeChangeSchema>

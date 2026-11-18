@@ -6,7 +6,7 @@ import { pathToFileURL } from 'node:url'
 import { tsImport } from 'tsx/esm/api'
 import { applyRuntimeChanges, parseRuntimeSource, printRuntimeSource, rewriteRuntimeSource } from '../src/composition/runtime-source.ts'
 import { hydrateRuntimePlugins } from '../src/composition/registry.ts'
-import { changeSchema, compositionChangeSchema, setPluginSchema, type CompositionChange } from '../src/schemas.ts'
+import { changeSchema, compositionChangeSchema, initialCompositionSchema, setPluginSchema, type CompositionChange } from '../src/schemas.ts'
 import type { WorkbasePlugin } from '@workbasehq/core/plugins'
 
 const config = { roles: ['admin', 'staff'], organizationOwnerRole: 'admin' }
@@ -180,4 +180,31 @@ it('exports strict composition schemas without changing the legacy proposal unio
     { plugin: 'local-auth', options: { methods: ['password'] } }, { plugin: 'local-auth', options: { methods: ['magic-link', 'magic-link'] } },
     { plugin: 'identity', options: { trustedIssuers: { invalid: ['example.test'] } } },
   ]) expect(setPluginSchema.safeParse({ kind: 'set_plugin', ...change }).success).toBe(false)
+})
+
+it('exports the closed initial selection schema and prints the seven-plugin golden', async () => {
+  const input = { interactive: false, plugins: [
+    { plugin: 'identity' }, { plugin: 'permissions' }, { plugin: 'members' },
+    { plugin: 'organizations', options: { allowCreate: true } },
+    { plugin: 'local-auth', options: { methods: ['magic-link'] } },
+    { plugin: 'machine-credentials' }, { plugin: 'mail-outbox' },
+  ] }
+  const model = initialCompositionSchema.parse(input)
+  const golden = (await template()).replace(/import \{ (audit|consoleUI) \} from '@workbasehq\/plugins\/(audit|console)'\n/g, '')
+    .replace('interactive: true', 'interactive: false').replace('allowCreate: false', 'allowCreate: true').replace(', audit(), consoleUI()', '')
+  expect(printRuntimeSource(model, config)).toBe(golden)
+  expect(parseRuntimeSource(golden)).toEqual({ ...model, plugins: model.plugins.map(plugin => plugin.plugin === 'permissions'
+    ? { plugin: 'permissions', options: { roles: config.roles, ownerRole: config.organizationOwnerRole } } : plugin) })
+  for (const bad of [
+    { plugins: [] }, { interactive: false, plugins: [{ plugin: 'custom' }] },
+    { ...input, plugins: [{ plugin: 'permissions', options: {} }] },
+    { ...input, plugins: [{ plugin: 'organizations', options: { other: true } }] },
+    { ...input, plugins: [{ plugin: 'identity' }, { plugin: 'identity' }] },
+    { ...input, plugins: [{ plugin: 'local-auth', options: { methods: ['password'] } }] },
+    { ...input, plugins: Array.from({ length: 10 }, () => ({ plugin: 'identity' })) },
+  ]) expect(initialCompositionSchema.safeParse(bad).success).toBe(false)
+  expect(initialCompositionSchema.safeParse({ interactive: false, plugins: ['identity', 'permissions', 'members', 'organizations', 'local-auth', 'machine-credentials', 'mail-outbox', 'audit', 'console'].map(plugin => ({ plugin })) }).success).toBe(true)
+  const source = await readFile(resolve('packages/mcp/src/schemas.ts'), 'utf8')
+  expect(source).not.toMatch(/from ['"](?:@workbasehq\/(?:core|plugins)|\.\/composition\/registry)/)
+  expect(compositionChangeSchema.safeParse({ kind: 'remove_plugin', plugin: 'audit' }).success).toBe(false)
 })
