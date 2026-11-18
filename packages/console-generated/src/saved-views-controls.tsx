@@ -42,7 +42,7 @@ function Catalogue({ scope, entity, state, onApply }: Parameters<typeof SavedVie
   return <section aria-label={t('savedViews')} className="space-y-2 py-2">
     <p className="text-sm text-muted-foreground">{t('savedViewsBrowserOnly')}</p>
     <div className="flex flex-wrap items-center gap-2">
-      <select ref={select} aria-label={t('savedViews')} className="rounded-md border bg-background p-2 text-sm" value={entry?.id ?? ''} disabled={disabled} onChange={event => { setSelected(event.target.value); setEditing(undefined); setMessage('') }}>
+      <select ref={select} aria-label={t('savedViews')} className="w-80 min-w-0 max-w-full rounded-md border bg-background p-2 text-sm" value={entry?.id ?? ''} disabled={disabled} onChange={event => { setSelected(event.target.value); setEditing(undefined); setMessage('') }}>
         <option value="">{t('savedViewsChoose')}</option>
         {catalogue.entries.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
       </select>
@@ -53,7 +53,7 @@ function Catalogue({ scope, entity, state, onApply }: Parameters<typeof SavedVie
       <Button variant="outline" disabled={disabled || !entry} onClick={() => { if (entry) mutate({ kind: 'delete', id: entry.id }) }}>{t('savedViewsDelete')}</Button>
     </div>
     {editing && <form className="flex flex-wrap items-center gap-2" onSubmit={event => { event.preventDefault(); if (editing === 'save') mutate({ kind: 'save', name, state }); else if (entry) mutate({ kind: 'rename', id: entry.id, name }) }}>
-      <label className="text-sm">{t('savedViewsName')} <input autoFocus className="rounded-md border bg-background p-2" value={name} onChange={event => setName(event.target.value)} /></label>
+      <label className="flex w-80 min-w-0 max-w-full flex-col gap-1 text-sm">{t('savedViewsName')} <input autoFocus className="w-full min-w-0 rounded-md border bg-background p-2" value={name} onChange={event => setName(event.target.value)} /></label>
       <Button type="submit">{t('savedViewsConfirm')}</Button>
       <Button type="button" variant="ghost" onClick={() => { setEditing(undefined); (entry ? select.current : save.current)?.focus() }}>{t('cancel')}</Button>
     </form>}
