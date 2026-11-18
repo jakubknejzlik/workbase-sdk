@@ -1,4 +1,4 @@
-# Authoring V3 composition, access and presentation through MCP
+# Authoring V3 composition, access, presentation and constraints through MCP
 
 The standalone `.mcp.json` registers `workbase_config` alongside `workbase_data`
 and `workbase_ops`. After provisioning dependencies, launch it from the Instance
@@ -305,15 +305,17 @@ Promotion returns `appliesToDatabase: false`; plugin migrations run through the
 normal SDK migration engine at deploy. Promotion does not install dependencies,
 configure infrastructure, send mail or apply a live database migration.
 
-V3 domain-change promotion is unsupported and returns `v3_promote_unsupported`.
-Physical schema changes require reviewed source edits and migration generation.
+Legacy V3 domain-change promotion is unsupported and returns `v3_promote_unsupported`.
+The constraint-only flow below supports named unique constraints through authored
+schema files and the bundle/lock planner. Other physical schema changes require
+reviewed source edits and migration generation.
 Custom plugins/commands and plugin removal require reviewed
 source changes. Runtime authoring accepts only the canonical built-in composition
 shape; noncanonical sources fail closed with `runtime_not_canonical`.
 
 ### V3 entity constraints
 
-Use `propose_change` with a constraint-only proposal to replace an entity's complete
+Use `propose_change` with a constraint-only `set_constraints` proposal to replace an entity's complete
 constraint list. This uses the typed unique constraint contract and the shared
 bundle/lock planner; it preserves the authored module, imports and unrelated
 literal properties.
