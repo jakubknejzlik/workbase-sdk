@@ -294,3 +294,62 @@ it('keeps schema inspection available with located diagnostics when UI declarati
     })
   } finally { await session.close() }
 })
+
+it.each(['locales/en/domain.json', 'ui/nav.ts'])('binds exact %s bytes during staging, verification and publication', async path => {
+  const root = await fixture(), app = await createServer({ root })
+  const call = (name: string, args: Record<string, unknown>) => app.workflow.call(name, args) as Promise<any>
+  try {
+    const file = join(root, path)
+    const original = await fs.readFile(file, 'utf8')
+    const valid = Buffer.from(path.endsWith('.json') ? original.replace('Name', 'Name \ufffd') : original + '\n// authored \ufffd\n')
+    const position = valid.indexOf(Buffer.from('\ufffd'))
+    expect(position).toBeGreaterThanOrEqual(0)
+    const changed = (value: number) => Buffer.concat([valid.subarray(0, position), Buffer.from([value]), valid.subarray(position + 3)])
+    await fs.writeFile(file, valid)
+    const args = await propose(call)
+    const load = app.store.load.bind(app.store)
+    let staged = false
+    const snapshot = vi.spyOn(app.store, 'load').mockImplementation(async (instance, options) => {
+      const bundle = await load(instance, options)
+      if (options?.canonicalRuntime && !staged) { staged = true; await fs.writeFile(file, changed(0x80)) }
+      return bundle
+    })
+    expect(await call('validate', args)).toMatchObject({ ok: false, error: { code: 'stale_revision', message: expect.stringContaining(path) } })
+    expect(staged).toBe(true)
+    snapshot.mockRestore()
+    const saved = JSON.parse(await fs.readFile(join(root, 'proposals', `${args.proposalId}.json`), 'utf8'))
+    expect(saved.validation).toBeUndefined()
+    expect(saved.verification).toBeUndefined()
+    await fs.writeFile(file, valid)
+    await validate(call, args)
+    expect(await call('apply_to_disposable', args)).toMatchObject({ ok: true, verified: true })
+    for (const value of [0x80, 0x81]) {
+      await fs.writeFile(file, changed(value))
+      const restarted = await stdio(root)
+      try { expect(await restarted.call('promote', { ...args, expectedRevision: 1 })).toMatchObject({ ok: false, error: { code: 'stale_revision' } }) }
+      finally { await restarted.close() }
+      expect(await fs.readFile(file)).toEqual(changed(value))
+    }
+    await fs.writeFile(file, valid)
+    const config = await fs.readFile(join(root, 'config.ts'))
+    const link = fs.link
+    let published = false
+    const boundary = vi.spyOn(fs, 'link').mockImplementation(async (from, to) => {
+      await link(from, to)
+      if (!published && String(to) === join(root, 'proposals/.promotion.json')) {
+        published = true
+        await fs.writeFile(file, changed(0x81))
+      }
+    })
+    syncBuiltinESMExports()
+    expect(await call('promote', { ...args, expectedRevision: 1 })).toMatchObject({ ok: false, error: { code: 'concurrent_modification', message: expect.stringContaining(path) } })
+    boundary.mockRestore(); syncBuiltinESMExports()
+    expect(published).toBe(true)
+    expect(await fs.readFile(file)).toEqual(changed(0x81))
+    expect(await fs.readFile(join(root, 'config.ts'))).toEqual(config)
+    await expect(fs.stat(join(root, 'proposals/.promotion.json'))).rejects.toMatchObject({ code: 'ENOENT' })
+    expect(JSON.parse(await fs.readFile(join(root, 'proposals', `${args.proposalId}.json`), 'utf8')).status).toBe('verified')
+    await fs.writeFile(file, valid)
+    expect(await call('promote', { ...args, expectedRevision: 1 })).toMatchObject({ ok: true, status: 'promoted' })
+  } finally { await app.server.close() }
+})

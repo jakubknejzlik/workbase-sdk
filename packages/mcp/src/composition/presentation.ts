@@ -3,7 +3,7 @@ import { dirname, join, relative } from 'node:path'
 import { stateRoot } from '../disposable.ts'
 import { noLink, json, type Bundle } from '../storage.ts'
 import { fail, WorkflowError, type CatalogChange } from '../schemas.ts'
-import { hash } from '../planning.ts'
+import { byteHash } from '../byte-digest.ts'
 import { replaySources } from '../replay-sources.ts'
 
 export async function catalogPlan(root: string, changes: CatalogChange[]) {
@@ -34,7 +34,7 @@ export async function validatePresentation(root: string, files: { path: string; 
     // including deletions and files that appeared between load and staging.
     const stagedInput = /^(?:config\.ts$|runtime\.ts$|access\.ts$|schema\/|schema\.lock\.json$|access\.lock\.(?:json|md)$|openapi\.json$|ui\/|locales\/|proposals\/)/
     for (const path of new Set([...Object.keys(inputs), ...Object.keys(guards).filter(path => stagedInput.test(path))])) {
-      const actual = inputs[path] === undefined ? null : hash(inputs[path].toString('utf8'))
+      const actual = inputs[path] === undefined ? null : byteHash(inputs[path])
       if (actual !== (guards[path] ?? null)) fail('stale_revision', `Presentation input changed while staging: ${path}; inspect and recreate the proposal`, 409)
     }
     const edits = new Map(files.map(file => [file.path, file.data]))
