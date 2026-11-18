@@ -1,3 +1,4 @@
+import { checkEntityConstraints } from './schema-check'
 import { sdkMigrations, SDK_NAMESPACE } from '../migrations/sdk-baseline'
 import { assertResetEra, usesSdkBaseline, type MigrationConfig } from '../migrations/reset-era'
 import { coreMigrations } from '../migrations/model-b'
@@ -84,6 +85,7 @@ export async function expectedPluginMigrations(plugins: readonly WorkbasePlugin[
   return rows.sort((a, b) => a.namespace < b.namespace ? -1 : a.namespace > b.namespace ? 1 : a.position - b.position)
 }
 export async function pluginMigrationStatus(db: D1Database, plugins: readonly WorkbasePlugin[], config: MigrationConfig) {
+  await checkEntityConstraints(db, config)
   for (const plugin of plugins) {
     try { await plugin.checkSchema?.(db, config) }
     catch (error) { throw new PluginMigrationError(plugin.name, 'checkSchema', error) }

@@ -1,3 +1,4 @@
+import { uniqueConflict } from './constraint-errors'
 import { eventDeliveryContext } from './event-delivery'
 import { capabilityRoutes } from './capabilities'
 import { consoleModelRoutes } from './console-model'
@@ -64,7 +65,8 @@ function buildApp(input: InstanceInput, env: RuntimeEnv, options: RuntimeOptions
     await next()
     c.header('X-Correlation-Id', c.get('correlationId'))
   })
-  app.onError(async (error, c) => {
+  app.onError(async (caught, c) => {
+    const error = caught instanceof ApiError ? caught : uniqueConflict(caught, config) ?? caught
     const known = error instanceof ApiError
     const constraint = /SQLITE_CONSTRAINT|constraint failed/i.test(error.message)
     const status = known ? error.status : error instanceof ZodError || error instanceof SyntaxError ? 400 : constraint ? 409 : 500

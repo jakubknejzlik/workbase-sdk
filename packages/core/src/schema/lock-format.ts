@@ -1,3 +1,4 @@
+import { entityConstraintsSchema, validateEntityConstraints, uniqueIndexName } from '../entity-constraints'
 import { z } from 'zod'
 import type { TableSpec } from '../migrations/schema'
 
@@ -14,7 +15,7 @@ export interface RenameTransition {
   phase: 'expanded' | 'switched' | 'contracted'
 }
 export interface SchemaLock {
-  lockVersion: 2; revision: number; parent: string | null; tables: TableSpec[]
+  lockVersion: 2 | 3; revision: number; parent: string | null; tables: TableSpec[]
   entities: EntityLineage[]; transitions: RenameTransition[]
 }
 
@@ -33,12 +34,14 @@ const table = z.strictObject({
 const header = { revision: z.number().int().positive().max(Number.MAX_SAFE_INTEGER), parent: z.string().regex(/^[a-f0-9]{64}$/).nullable(), tables: z.array(table) }
 const field = z.strictObject({ id: fieldId, logicalName: name, physicalName: name })
 const names = z.strictObject({ logical: name, physical: name })
+const lineage = {
+  entities: z.array(z.strictObject({ id: entityId, logicalName: name, physicalName: name, fields: z.array(field) })),
+  transitions: z.array(z.strictObject({ id: z.string().regex(/^tr_[a-z0-9_]+$/), entityId, fieldIds: z.array(fieldId).length(1).optional(), from: names, to: names, bridge: z.enum(['field', 'entity']), phase: z.enum(['expanded', 'switched', 'contracted']) })),
+}
 const format = z.discriminatedUnion('lockVersion', [
   z.strictObject({ lockVersion: z.literal(1), ...header }),
-  z.strictObject({ lockVersion: z.literal(2), ...header,
-    entities: z.array(z.strictObject({ id: entityId, logicalName: name, physicalName: name, fields: z.array(field) })),
-    transitions: z.array(z.strictObject({ id: z.string().regex(/^tr_[a-z0-9_]+$/), entityId, fieldIds: z.array(fieldId).length(1).optional(), from: names, to: names, bridge: z.enum(['field', 'entity']), phase: z.enum(['expanded', 'switched', 'contracted']) })),
-  }),
+  z.strictObject({ lockVersion: z.literal(2), ...header, ...lineage }),
+  z.strictObject({ lockVersion: z.literal(3), ...header, tables: z.array(table.extend({ constraints: entityConstraintsSchema.optional() })), ...lineage }),
 ])
 // Injective encoding, rather than random IDs or a platform-specific hash. The
 // initial physical path is an identity seed only; IDs never follow later names.
@@ -65,6 +68,8 @@ export function validateLock(input: unknown): SchemaLock {
     ? { ...value, lockVersion: 2, entities: initialLineage(value.tables), transitions: [] }
     : value
   unique(lock.tables.map(t => t.name), 'physical table')
+  unique(lock.tables.flatMap(t => [...t.indexes.map(i => i.name), ...(t.constraints ?? []).map(c => uniqueIndexName(t.name, c.name))]), 'index name')
+  for (const table of lock.tables) validateEntityConstraints(table.constraints ?? [], Object.fromEntries(table.columns.map(c => [c.name, c])), (_path, message) => invalid(`${table.name}: ${message}`))
   unique(lock.entities.map(e => e.id), 'entity ID')
   unique(lock.entities.flatMap(e => e.fields.map(f => f.id)), 'field ID')
   unique(lock.entities.map(e => e.logicalName), 'logical entity')

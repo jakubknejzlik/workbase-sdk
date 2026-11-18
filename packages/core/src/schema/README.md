@@ -321,3 +321,68 @@ Unlink clears links and pending account invitations, retaining membership and
 independently granted access. `client.actWith(entity, id, name, body, signal)`
 returns `{record, result}` after the same cache refresh as `act()`; credentials
 stay in the result and are never cached as record data.
+
+### Named entity constraints
+
+Author stored-field uniqueness next to an entity's fields:
+
+```ts
+export default defineEntity({
+  fields: {
+    slot: { type: 'ref', entity: 'slot', required: true },
+    worker: { type: 'ref', entity: 'worker' },
+  },
+  constraints: [
+    { kind: 'unique', name: 'assignment_slot_worker_unique', fields: ['slot', 'worker'] },
+  ],
+})
+```
+
+The SDK prepends `organization_id`. Do not include organization or other implicit
+fields. Each name is a stable lower-case SQL identifier (at most 63 characters),
+unique within its entity. Each constraint contains 1–16 distinct stored field
+keys; an entity may declare at most 32 constraints. All supported scalar types,
+including references, can occupy a tuple position. Fields in different positions
+need not have matching types. Computed fields, relation paths, predicates and raw
+SQL are rejected. Names are sorted for deterministic SQL and lock output; field
+order is retained. Changing the fields of an existing name requires a new name.
+
+**Null policy:** SQLite's NULL-distinct semantics apply. If any tuple field is
+`NULL`, multiple such rows are allowed. Empty strings are ordinary values. Text
+comparison uses SQLite's default BINARY collation; reference foreign keys and
+organization boundaries continue to apply independently.
+
+The bundle/lock planner generates a named `CREATE UNIQUE INDEX` for new or existing
+tables. Adding a constraint does not rebuild the table. Existing duplicates cause
+migration application to fail; no rows are cleaned up. Review and resolve duplicate
+data before retrying. Removing a declaration generates `DROP INDEX`. Index names
+encode the physical entity name and the authored constraint name injectively in
+SQLite's global index namespace.
+
+Constrained schemas use **lockVersion 3**, carrying normalized typed constraints on
+physical table specs. Readers still accept v1 (with the existing v2 lineage
+bootstrap) and v2. Unconstrained v2 locks retain their bytes and SQL; once upgraded,
+a lock remains v3 even if its last constraint is removed. Further constraint kinds
+can extend the discriminated contract without replacing this lock envelope.
+
+Current rename publication remains explicitly blocked by the rename-intent gate;
+constraint fields are projected to their original physical names in the intent
+lock. The legacy nullable-reference planner explicitly blocks rebuilding or
+renaming fields of a constrained table, including removing a constraint in the
+same operation. A manually reviewed migration is required; constraints cannot be
+silently dropped during a rebuild. Runtime schema checks verify generated unique
+indexes, their column order, collation, uniqueness and absence of a predicate.
+
+CRUD and atomic writes map exact declared column identities from bounded SQLite/D1
+uniqueness diagnostics to `409 unique_conflict`. HTTP includes
+`detail.constraintId: '<entity>.<constraint-name>'` only when exactly one declared
+constraint matches. Equivalent declarations with different names return the code
+without an ID. Unknown constraints keep `409 constraint_conflict`; arbitrary trigger
+text never becomes a public domain code. Authorization/version errors retain their
+existing precedence. The data MCP adapter retains the HTTP status/code contract.
+
+This core slice does not add a V3 MCP constraint editor or localized console conflict
+UX. Those remain explicit follow-ups: authoring must use schema files plus the
+bundle/lock planner until the supported V3 editing flow is delivered. Existing
+non-unique MCP `add_index` keeps its semantics. Partial uniqueness, cross-relation
+equality and referenced-field immutability belong to later slices of #198.

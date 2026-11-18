@@ -1,3 +1,4 @@
+import { uniqueIndexName } from '../entity-constraints'
 import { baseFields, type InstanceConfig } from '../config'
 import { quote } from '../migrations/schema'
 
@@ -9,5 +10,23 @@ export async function checkInstanceSchema(db: D1Database, config: Pick<InstanceC
     // Qualify identifiers so SQLite cannot treat an absent quoted column as a string.
     const columns = [...fields].map(field => `${quote(table)}.${quote(field)}`).join(',')
     await db.prepare(`SELECT ${columns} FROM ${quote(table)} LIMIT 0`).all()
+  }
+  await checkEntityConstraints(db, config)
+}
+
+/** Used by health and deployment verification, independently of plugin checks. */
+export async function checkEntityConstraints(db: D1Database, config: Pick<InstanceConfig, 'entities'>) {
+  for (const [table, entity] of Object.entries(config.entities)) {
+    for (const constraint of entity.constraints ?? []) {
+      const index = uniqueIndexName(table, constraint.name)
+      const meta = await db.prepare('SELECT * FROM pragma_index_list(?) WHERE name=?').bind(table, index).first<{ unique: number; partial: number; origin: string }>()
+      const columns = await db.prepare('SELECT * FROM pragma_index_xinfo(?) ORDER BY seqno').bind(index).all<{ name: string; coll: string; desc: number; key: number }>()
+      const keys = columns.results.filter(column => column.key === 1)
+      const expected = ['organization_id', ...constraint.fields]
+      if (meta?.unique !== 1 || meta.partial !== 0 || meta.origin !== 'c' || keys.length !== expected.length
+        || keys.some((key, i) => key.name !== expected[i] || key.coll !== 'BINARY' || key.desc !== 0)) {
+        throw new Error(`Schema drift: missing or changed unique constraint ${table}.${constraint.name}`)
+      }
+    }
   }
 }

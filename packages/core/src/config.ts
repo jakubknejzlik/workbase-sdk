@@ -1,3 +1,4 @@
+import { entityConstraintsSchema, validateEntityConstraints } from './entity-constraints'
 import { baseFields } from './model-inputs'
 export { baseFields, bodyValidator } from './model-inputs'
 import { recordActionsSchema } from './record-actions-data'
@@ -113,6 +114,7 @@ const schema = z.object({
       z.custom<ISequelizable & ISerializable>(value => !!value && typeof (value as ISequelizable).toSQL === 'function' && typeof (value as ISerializable).serialize === 'function'),
       z.string().transform(value => Q.expr(value)),
     ]).optional(),
+    constraints: entityConstraintsSchema.optional(),
     checks: z.array(z.object({ left: identifier, op: z.enum(['<=', '>=']), right: identifier })).default([]),
   })),
   roles: z.array(identifier).min(1),
@@ -249,6 +251,11 @@ export function normalizeInstance(input: InstanceDefinitionInput, exactRoles = f
           if (!inverse) throw new Error(`Missing inverse pure join relation on ${name}`)
         }
       }
+      if (entity.constraints?.length && name === config.account?.entity) throw new Error('Constraints on the SDK account entity are unsupported')
+      validateEntityConstraints(entity.constraints ?? [], entity.fields, (relative, message) => {
+        path = ['entities', name, 'constraints', ...relative]
+        throw new Error(message)
+      })
       for (const [i, c] of entity.checks.entries()) {
         path = ['entities', name, 'checks', i, !entity.fields[c.left] || entity.fields[c.left].computed ? 'left' : 'right']
         if (!entity.fields[c.left] || !entity.fields[c.right] || entity.fields[c.left].computed || entity.fields[c.right].computed) throw new Error('Unknown check field')
