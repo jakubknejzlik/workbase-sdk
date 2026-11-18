@@ -24,6 +24,36 @@ const ungroupedResult = { kind: 'summary', version: 1, data: [{ groups: {}, metr
 const groupRow = { groups: { category: null, enabled: false, at: '2026-01-01T00:00:00Z' }, metrics: { rows: 2, total: 7, cost: 1.5 } }
 const groupedResult = { kind: 'summary', version: 1, data: [groupRow] }
 
+const unsafeKey = 'UNSAFE_KEY_CANARY', unsafeValue = 'UNSAFE_VALUE_CANARY'
+const unknownKeys = { [unsafeKey]: unsafeValue, [`second_${unsafeKey}`]: { nested: unsafeValue } }
+const unknownKeyCases = [
+  ['request root', schema, { ...request(), ...unknownKeys }],
+  ['summary options', schema, request(unknownKeys)],
+  ['count metric', schema, request({ metrics: [{ ...metrics[0], ...unknownKeys }] })],
+  ['sum metric', schema, request({ metrics: [{ ...metrics[1], ...unknownKeys }] })],
+  ['window', schema, request({ window: { ...window, ...unknownKeys } })],
+  ['result root', summaryResultSchema(config, 'sales', grouped), { ...groupedResult, ...unknownKeys }],
+  ['result row', summaryResultSchema(config, 'sales', grouped), { ...groupedResult, data: [{ ...groupRow, ...unknownKeys }] }],
+  ['group map', summaryResultSchema(config, 'sales', grouped), { ...groupedResult, data: [{ ...groupRow, groups: { ...groupRow.groups, ...unknownKeys } }] }],
+  ['empty group map', summaryResultSchema(config, 'sales', options), { ...ungroupedResult, data: [{ ...ungroupedResult.data[0], groups: unknownKeys }] }],
+  ['metric map', summaryResultSchema(config, 'sales', grouped), { ...groupedResult, data: [{ ...groupRow, metrics: { ...groupRow.metrics, ...unknownKeys } }] }],
+  ['unknown keys with an invalid sibling', schema, { ...request({ version: 2 }), ...unknownKeys }],
+] as const
+it.each(unknownKeyCases.flatMap(([name, contract, input]) => [false, true].map(reportInput => ({ name, contract, input, reportInput }))))(
+  'rejects unknown keys without disclosing keys or values: $name (reportInput=$reportInput)', ({ contract, input, reportInput }) => {
+    // Opting into Zod input diagnostics must not reintroduce rejected unknown data.
+    const parsed = contract.safeParse(input, { reportInput })
+    expect(parsed.success).toBe(false)
+    if (parsed.success) throw new Error('Expected unknown-key rejection')
+    const serialized = JSON.stringify(parsed.error.issues)
+    expect(serialized).not.toContain(unsafeKey)
+    expect(serialized).not.toContain(unsafeValue)
+    expect(parsed.error.issues).toContainEqual(expect.objectContaining({ code: 'unrecognized_keys', keys: [] }))
+    expect(JSON.stringify(input)).toContain(unsafeKey)
+    expect(JSON.stringify(input)).toContain(unsafeValue)
+  },
+)
+
 const validRequests = [
   request(), request({ metrics: [{ op: 'count', alias: 'rows' }] }),
   { ...request(), where: { and: [{ amount: { gte: 0 } }, { parent: { name: { contains: 'A' } } }] } },
