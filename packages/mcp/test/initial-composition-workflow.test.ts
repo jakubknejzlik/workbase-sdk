@@ -146,6 +146,30 @@ it('revokes verification on revalidation, closes discarded proposals and rejects
   expect(await call('discard', args)).toMatchObject({ ok: true, status: 'discarded' })
   expect(await call('validate', args)).toMatchObject({ ok: false, error: { code: 'proposal_closed' } })
 })
+it.each(['discarded', 'proofs deleted', 'selection changed', 'bytes changed'])
+('refuses publication when proposal %s immediately before commit', async change => {
+  const { root, app, original, verify, promote, proposal } = await fixture()
+  await verify()
+  const path = join(root, 'proposals', `${proposal.proposalId}.json`)
+  const entries = await readdir(join(root, 'proposals'))
+  const commit = app.store.commit.bind(app.store)
+  let changed: string | undefined
+  app.store.commit = async (id, files, guards, verifyInputs) => {
+    const record = JSON.parse(await readFile(path, 'utf8'))
+    if (change === 'discarded') record.status = 'discarded'
+    if (change === 'discarded' || change === 'proofs deleted') { delete record.validation; delete record.verification }
+    if (change === 'selection changed') record.composition.interactive = true
+    changed = JSON.stringify(record, null, 2) + (change === 'bytes changed' ? '\n\n' : '\n')
+    await writeFile(path, changed)
+    return commit(id, files, guards, verifyInputs)
+  }
+  expect(await promote()).toMatchObject({ ok: false, error: { code: 'concurrent_modification' } })
+  await unpublished(root, original)
+  expect(changed).toBeDefined()
+  expect(await readFile(path, 'utf8')).toBe(changed)
+  expect(JSON.parse(changed!).status).not.toBe('promoted')
+  expect(await readdir(join(root, 'proposals'))).toEqual(entries)
+})
 it('recovers interrupted runtime, artifacts and receipt together before retrying the verified proposal', async () => {
   const { root, args, original, verify, promote } = await fixture()
   await verify()

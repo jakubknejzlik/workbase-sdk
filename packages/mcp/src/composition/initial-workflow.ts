@@ -78,7 +78,7 @@ async function published(root: string, p: InitialCompositionProposal) {
   for (const file of p.plan.files) if (!(await readFile(join(root, file.path))).equals(Buffer.from(file.data))) fail('stale_plan', 'Published composition changed', 409)
 }
 
-export async function executeInitialComposition(store: Store, p: InitialCompositionProposal, name: string,
+export async function executeInitialComposition(store: Store, p: InitialCompositionProposal, source: Buffer, name: string,
   input: Record<string, any>, signal?: AbortSignal) {
   const root = await store.directory(p.instance)
   if (name === 'promote' && input.expectedRevision !== 1) fail('stale_revision', 'Fresh composition publishes revision 1', 409)
@@ -112,10 +112,11 @@ export async function executeInitialComposition(store: Store, p: InitialComposit
       if (hash(await initializationDependencies(root, p.plan.model)) !== hash(p.plan.dependencies)) fail('stale_plan', 'Installed SDK changed during publication', 409)
     }
     await verify()
+    // Status, selection and both accepted proofs came from these exact bytes.
     await store.commit(p.instance, [
       ...p.plan.files.map(({ path, data }) => ({ path, data, create: path !== 'runtime.ts' })),
       { path: `proposals/${p.proposalId}.json`, data: json(promoted) },
-    ], p.plan.guards, verify)
+    ], { ...p.plan.guards, [`proposals/${p.proposalId}.json`]: byteHash(source) }, verify)
     return receipt
   }
   const prepared = await replay(root, p)

@@ -134,9 +134,12 @@ export class Workflow {
       if (input.proposalId && (await this.store.find(input.proposalId)).proposal?.kind === 'initial_composition') {
         const result = await this.store.lockedProposal(targetInstance, async recover => {
           await recover()
-          const p = parseProposal((await this.store.find(input.proposalId)).proposal)
+          const path = join(await this.store.proposalDirectory(targetInstance), 'proposals', `${input.proposalId}.json`)
+          await noLink(path, true)
+          const source = await readFile(path)
+          const p = parseProposal(JSON.parse(source.toString('utf8')))
           if (p.kind !== 'initial_composition' || p.instance !== targetInstance || p.proposalId !== input.proposalId) fail('invalid_proposal', 'Proposal identity mismatch', 409)
-          return executeInitialComposition(this.store, p, name, input, signal)
+          return executeInitialComposition(this.store, p, source, name, input, signal)
         })
         if (name === 'promote' && result.ok === true) await this.store.init()
         return result
