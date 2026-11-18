@@ -270,7 +270,7 @@ export function GeneratedInlineEdit(props: Context & InlineField & { row: Record
   useEffect(() => { if (!allowed) setOpen(false) }, [allowed])
   if (!allowed) return props.children
   return <div className="group space-y-2" data-inline-field={props.field}>
-    <div className={open ? 'hidden' : 'flex items-start gap-2'}>{props.children}<Button ref={trigger} type="button" variant="ghost" size="icon" className="size-7 shrink-0 sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100 focus:opacity-100" aria-label={t('inlineEditField', { field: props.label })} onClick={() => setOpen(true)}><svg className="size-4" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m16 3 5 5-13 13H3v-5L16 3ZM14 5l5 5" /></svg></Button></div>
+    <div className={open ? 'hidden' : 'flex items-start gap-2'}>{props.children}<Button ref={trigger} type="button" variant="ghost" size="icon" className="size-7 shrink-0 sm:opacity-0 sm:not-disabled:not-aria-disabled:group-hover:opacity-100 sm:group-focus-within:opacity-100 focus:opacity-100" aria-label={t('inlineEditField', { field: props.label })} onClick={() => setOpen(true)}><svg className="size-4" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m16 3 5 5-13 13H3v-5L16 3ZM14 5l5 5" /></svg></Button></div>
     {open && <div ref={editor} className="space-y-3" onKeyDown={event => {
       if (event.defaultPrevented || event.nativeEvent.isComposing) return
       if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); editor.current?.querySelector<HTMLButtonElement>('button[data-inline-cancel]')?.click() }
