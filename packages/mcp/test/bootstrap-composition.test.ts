@@ -10,6 +10,8 @@ import { effectiveEntityGrants, effectiveSystemGrant } from '../../core/src/acce
 import { bootstrapInstance } from '../src/bootstrap.ts'
 import { createServer } from '../src/server.ts'
 import { parseRuntimeSource } from '../src/composition/runtime-source.ts'
+import { errorResult } from '../src/workflow.ts'
+import { stateRoot } from '../src/disposable.ts'
 
 const roots: string[] = []
 afterEach(async () => { for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true }) })
@@ -84,6 +86,33 @@ it.each([
   const root = await empty()
   await expect(bootstrapInstance(root, { ...input, initialComposition: composition })).rejects.toBeDefined()
   expect(await readdir(root)).toEqual([])
+})
+
+it.each([
+  { kind: 'set_entity_access', entity: 'missing', role: 'owner', access: all },
+  { kind: 'set_system_access', role: 'owner', grants: { 'unknown.action': 'allow' } },
+  { kind: 'set_system_access', role: 'missing', grants: { 'members.update': 'allow' } },
+])('returns stable scaffold diagnostics for an invalid graph (%#)', async change => {
+  const diagnostics = []
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const root = await empty()
+    const diagnostic = await bootstrapInstance(root, {
+      ...input, initialComposition: { ...initialComposition, access: [...initialComposition.access, change] },
+    }).then(() => { throw new Error('Expected graph validation to reject') }, errorResult)
+    expect(await readdir(root)).toEqual([])
+    diagnostics.push(diagnostic)
+  }
+  expect(diagnostics[1]).toEqual(diagnostics[0])
+  for (const diagnostic of diagnostics) {
+    expect(diagnostic).toMatchObject({ ok: false, error: {
+      code: 'invalid_access', status: 422, details: { file: 'access.ts', line: expect.any(Number), column: expect.any(Number) },
+    } })
+    const serialized = JSON.stringify(diagnostic)
+    for (const path of [tmpdir(), await realpath(tmpdir()), stateRoot, await realpath(stateRoot)]) {
+      expect(serialized).not.toContain(path)
+    }
+    expect(serialized).not.toMatch(/(?:bootstrap|access)-[A-Za-z0-9]{6}/)
+  }
 })
 
 it('keeps every omitted-input scaffold byte identical to the shipped template', async () => {

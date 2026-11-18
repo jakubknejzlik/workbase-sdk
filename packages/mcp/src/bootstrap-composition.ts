@@ -1,6 +1,6 @@
 import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises'
-import { dirname, join } from 'node:path'
-import { loadConfig } from '@workbasehq/core/schema/load'
+import { dirname, join, relative, sep } from 'node:path'
+import { loadConfig, SourceError } from '@workbasehq/core/schema/load'
 import { bindSchemaLock } from '@workbasehq/core/schema'
 import { plan } from '@workbasehq/core/migrations/schema-plan'
 import { KernelRegistry } from '@workbasehq/core/kernel/registry'
@@ -46,5 +46,14 @@ export async function renderInitialComposition(files: Map<string, string>, initi
     const runtime = parseRuntimeSource(source)
     new KernelRegistry({ ...final.config, interactive: runtime.interactive, plugins: hydrateRuntimePlugins(runtime, final.config) })
     return files
+  } catch (error) {
+    // All staged graph compiler diagnostics must use logical scaffold paths in
+    // both locations and message text: private staging is random and deleted.
+    if (error instanceof SourceError) {
+      const { file, line, column } = error.location
+      const message = error.message.slice(`${file}:${line}:${column}: `.length).replaceAll(staging + sep, '')
+      throw new SourceError({ ...error.location, file: relative(staging, file) }, message)
+    }
+    throw error
   } finally { await rm(staging, { recursive: true, force: true }) }
 }
