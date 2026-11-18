@@ -3,6 +3,7 @@
   "empty": "Žádné záznamy",
   "notFound": "Nenalezeno",
   "forbidden": "Přístup odepřen",
+  "uniqueConflict": "Záznam se stejnou kombinací hodnot již existuje. Změňte hodnoty a zkuste to znovu.",
   "network": "Chyba sítě",
   "validation": "Zkontrolujte formulář",
   "unsupported": "Nepodporováno",
