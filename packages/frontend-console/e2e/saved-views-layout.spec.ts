@@ -79,7 +79,7 @@ for (const language of ['en', 'cs'] as const) for (const width of [390, 1440]) {
         const bounds = await box(menu)
         expect(bounds.y, 'saved-view menu top stays in viewport').toBeGreaterThanOrEqual(0)
         expect(bounds.y + bounds.height, 'saved-view menu bottom stays in viewport').toBeLessThanOrEqual(page.viewportSize()!.height + 1)
-        expect(await menu.evaluate(node => node.scrollWidth), 'saved-view menu has no horizontal overflow').toBeLessThanOrEqual(Math.ceil(bounds.width))
+        expect(await menu.evaluate(node => node.scrollWidth <= node.clientWidth), 'saved-view menu has no horizontal overflow').toBe(true)
       }
       const item = async (name: string) => { await open(); await menu.getByRole('button', { name, exact: true }).click() }
 
@@ -101,6 +101,8 @@ for (const language of ['en', 'cs'] as const) for (const width of [390, 1440]) {
       await input.fill(`${longName} second`)
       await shot('save')
       await reachable(page, input)
+      await page.keyboard.press('Tab')
+      await expect(naming.getByRole('button', { name: t.cancel, exact: true })).toBeFocused()
       await page.keyboard.press('Tab')
       await expect(confirm).toBeFocused()
       await reachable(page, confirm)
@@ -126,14 +128,12 @@ for (const language of ['en', 'cs'] as const) for (const width of [390, 1440]) {
       await expect(trigger).toHaveText(t.savedViewsMenu)
       await expect(trigger).toBeFocused()
     } finally {
-      if (testInfo.status !== testInfo.expectedStatus) {
-        await page.screenshot({ path: testInfo.outputPath('failure.png'), fullPage: true, timeout: 5000 }).catch(() => {})
-        const overlays = await page.locator('[role="dialog"]').evaluateAll(nodes => nodes.map(node => {
-          const { x, y, width, height } = node.getBoundingClientRect()
-          return { x, y, width, height, scrollWidth: node.scrollWidth, scrollHeight: node.scrollHeight }
-        })).catch(() => [])
-        await writeFile(testInfo.outputPath('failure-overlays.json'), JSON.stringify(overlays, null, 2))
-      }
+      await page.screenshot({ path: testInfo.outputPath('final-state.png'), fullPage: true, timeout: 5000 }).catch(() => {})
+      const overlays = await page.locator('[role="dialog"]').evaluateAll(nodes => nodes.map(node => {
+        const { x, y, width, height } = node.getBoundingClientRect()
+        return { x, y, width, height, scrollWidth: node.scrollWidth, scrollHeight: node.scrollHeight }
+      })).catch(() => [])
+      await writeFile(testInfo.outputPath('final-overlays.json'), JSON.stringify(overlays, null, 2))
       const path = testInfo.outputPath('geometry.json')
       await writeFile(path, JSON.stringify(measurements, null, 2))
       await testInfo.attach('geometry', { path, contentType: 'application/json' })

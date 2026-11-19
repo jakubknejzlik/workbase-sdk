@@ -67,7 +67,6 @@ function Catalogue({ scope, entity, state, current, initial, fingerprint, onAppl
     if (!active.current || !target) return
     setActiveId(target.id); setSettling(true); setOpen(false)
     void Promise.resolve(onApply(target.search)).finally(() => setSettling(false))
-    trigger.current?.focus()
   }
   const submit = () => {
     if (dialogue?.kind === 'rename' && entry) mutate({ kind: 'rename', id: entry.id, name })
@@ -87,7 +86,7 @@ function Catalogue({ scope, entity, state, current, initial, fingerprint, onAppl
         {dirty && <span role="img" aria-label={t('savedViewsUnsaved')} title={t('savedViewsUnsaved')} className="size-2 shrink-0 rounded-full bg-amber-500" />}
 
       </Button></PopoverTrigger>
-      <PopoverContent role="dialog" aria-label={t('savedViews')} align="end" className="grid w-80 max-w-[calc(100vw-1.5rem)] max-h-[var(--radix-popover-content-available-height)] gap-2 overflow-y-auto">
+      <PopoverContent onCloseAutoFocus={event => { event.preventDefault(); if (!dialogue) trigger.current?.focus() }} role="dialog" aria-label={t('savedViews')} align="end" className="grid w-80 max-w-[calc(100vw-1.5rem)] max-h-[var(--radix-popover-content-available-height)] gap-2 overflow-y-auto">
         <div><p className="text-sm font-semibold">{t('savedViewsHeading')}</p><p className="text-xs text-muted-foreground">{t('savedViewsHint')}</p></div>
         {catalogue.entries.length ? <ul className="grid min-w-0 gap-1" aria-label={t('savedViewsHeading')}>{catalogue.entries.map(item => <li key={item.id} className="min-w-0">
           <button type="button" aria-pressed={selected === item.id} className="flex min-h-9 min-w-0 w-full items-center justify-between gap-2 rounded-md px-2 text-left text-sm hover:bg-muted aria-pressed:bg-muted aria-pressed:font-semibold" onClick={() => { setCandidate(item.id); setMessage('') }}><span className="min-w-0 [overflow-wrap:anywhere]">{item.name}</span>{selected === item.id && <span aria-hidden="true">✓</span>}</button>

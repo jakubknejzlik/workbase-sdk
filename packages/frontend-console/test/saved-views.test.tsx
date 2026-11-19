@@ -72,6 +72,7 @@ it.each(['en', 'cs'] as const)('%s saves, applies at page one, renames, updates 
   await user.click(screen.getByRole('button', { name: copy.nextPage }))
   await waitFor(() => expect(request.mock.lastCall?.[0].offset).toBe(30))
   await applyView(user, 'Renamed', copy)
+  await waitFor(() => expect(document.activeElement).toBe(viewsTrigger(copy)))
   await waitFor(() => expect(request.mock.lastCall?.[0]).toMatchObject({ limit: 30, orderBy: [{ field: 'created', dir: 'desc' }], where: { and: [{ name: { contains: 'Saved' } }] } }))
   expect(request.mock.lastCall?.[0].cursor).toBeUndefined()
   expect(router.state.location.search).toMatchObject({ sort: 'created', direction: 'desc', view: 'all', pageSize: 30 })
