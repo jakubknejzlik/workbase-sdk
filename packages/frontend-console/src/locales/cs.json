@@ -1,4 +1,7 @@
 {
+  "listIdentifierCopy": "Kopírovat identifikátor",
+  "listIdentifierCopied": "Identifikátor zkopírován",
+  "listIdentifierCopyFailed": "Identifikátor se nepodařilo zkopírovat",
   "inlineEditField": "Upravit {{field}}",
   "inlineFreshValue": "Aktuální hodnota",
   "detailNotProvided": "Neuvedeno",
