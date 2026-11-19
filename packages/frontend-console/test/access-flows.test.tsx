@@ -247,7 +247,7 @@ it.each(['Invite to application', 'Cancel invitation', 'Change invitation email'
   await waitFor(() => expect(write).toHaveBeenCalledWith('/api/entries/one', 'PATCH', { name: 'Unsaved draft', version: label === 'Change invitation email' ? 3 : 2 }, undefined))
 })
 it.each(['access_link_account', 'access_unlink_account'] as const)('V3 explicit %s is individually gated and lives inside the shared card', async grant => {
-  await mount('detail', { grants: [grant], state: grant === 'access_unlink_account' ? 'signed_in' : 'no_account' }); await screen.findByText(grant === 'access_unlink_account' ? 'Signed in' : 'No access')
+  await mount('detail', { grants: [grant], state: grant === 'access_unlink_account' ? 'signed_in' : 'no_account' }); await screen.findByText(grant === 'access_unlink_account' ? 'Linked account' : 'No access')
   const label = grant === 'access_link_account' ? 'Find member or invite' : 'Remove access'
   expect(screen.getAllByRole('button', { name: label })).toHaveLength(1)
   const card = screen.getByText('Application access').closest('[data-application-access]') as HTMLElement
@@ -258,7 +258,7 @@ it.each(['access_link_account', 'access_unlink_account'] as const)('V3 explicit 
 it('create reconciles a lost invitation response before retry and never invites twice', async () => {
   const { user, write } = await mount('create', { uncertainInvite: true })
   await user.click(screen.getByRole('checkbox', { name: 'Invite now' })); await user.type(screen.getByLabelText('Invitation email'), 'recipient@example.test'); await user.click(screen.getByRole('button', { name: 'Create' }))
-  await screen.findByText(en.rowInviteSavedFailed); await screen.findByText('Invited')
+  await screen.findByText(en.rowInviteSavedFailed); await screen.findByText('Invitation sent')
   await user.click(screen.getByRole('button', { name: 'Retry invitation' }))
   await waitFor(() => expect(screen.queryByText(en.rowInviteSavedFailed)).toBeNull())
   expect(write.mock.calls.filter(([path, method]) => path.endsWith('/actions/invite') && method === 'POST')).toHaveLength(1)
@@ -276,7 +276,7 @@ it('create and detail omit invitation controls without the matching V3 grant', a
 it('created invitation with failed delivery remains visible and never creates another invitation', async () => {
   const { user, write } = await mount('create', { v3: false, deliveryFailure: true })
   await user.click(screen.getByRole('checkbox', { name: 'Invite now' })); await user.type(screen.getByLabelText('Invitation email'), 'recipient@example.test'); await user.click(screen.getByRole('button', { name: 'Create' }))
-  await screen.findByText('Invited'); await screen.findAllByText(en.rowInviteDeliveryFailed)
+  await screen.findByText('Invitation sent'); await screen.findAllByText(en.rowInviteDeliveryFailed)
   expect(screen.queryByText(en.rowInviteSavedFailed)).toBeNull()
   expect(screen.getByRole('button', { name: 'Resend' })).toBeTruthy()
   expect(write.mock.calls.filter(([path, method]) => path === '/orgs/org/invitations' && method === 'POST')).toHaveLength(1)
@@ -313,18 +313,18 @@ it.each(['access_link_account', 'access_unlink_account'] as const)('V3 %s remain
   expect(write.mock.calls.every(([path]) => path === '/api/entries/one')).toBe(true)
 })
 it.each(['detail', 'edit'] as const)('%s shows an existing invitation with delivery trouble', async surface => {
-  await mount(surface, { state: 'invited', deliveryFailure: true }); await screen.findByText(en.rowInviteDeliveryFailed); expect(screen.getByText('Invited')).toBeTruthy(); expect(screen.queryByRole('button', { name: 'Invite to application' })).toBeNull()
+  await mount(surface, { state: 'invited', deliveryFailure: true }); await screen.findByText(en.rowInviteDeliveryFailed); expect(screen.getByText('Invitation sent')).toBeTruthy(); expect(screen.queryByRole('button', { name: 'Invite to application' })).toBeNull()
 })
 it('create preserves the saved record and existing invitation when delivery fails', async () => {
   const { user, write } = await mount('create', { v3: false, deliveryFailure: true })
   await user.click(screen.getByRole('checkbox', { name: 'Invite now' })); await user.type(screen.getByLabelText('Invitation email'), 'recipient@example.test'); await user.click(screen.getByRole('button', { name: 'Create' }))
-  await screen.findByText('Invited'); await screen.findAllByText(en.rowInviteDeliveryFailed)
+  await screen.findByText('Invitation sent'); await screen.findAllByText(en.rowInviteDeliveryFailed)
   expect(write.mock.calls.filter(([path, method]) => path === '/api/entries' && method === 'POST')).toHaveLength(1)
   expect(write.mock.calls.filter(([path, method]) => path === '/orgs/org/invitations' && method === 'POST')).toHaveLength(1)
 })
 it('178 linked account cannot be silently changed or invited over', async () => {
   const { write } = await mount('edit', { state: 'signed_in' })
-  await screen.findByText('Signed in')
+  await screen.findByText('Linked account')
   expect(screen.queryByRole('button', { name: 'Change invitation email' })).toBeNull()
   expect(screen.queryByRole('button', { name: 'Find member or invite' })).toBeNull()
   expect(screen.getByRole('button', { name: 'Remove access' })).toBeTruthy()
@@ -355,7 +355,7 @@ for (const surface of ['detail', 'menu', 'edit', 'create'] as const) {
   it.each(['no_account', 'invited', 'expired', 'signed_in'] as const)(`${surface} renders known %s state and authorized controls`, async state => {
     const { user } = await mount(surface, { state, failure: surface === 'create', accounts: state === 'signed_in' ? [{ id: 'account', label: 'Authorized linked account' }] : [] })
     if (surface === 'create') { await user.click(screen.getByRole('checkbox', { name: 'Invite now' })); await user.type(screen.getByLabelText('Invitation email'), 'recipient@example.test'); await user.click(screen.getByRole('button', { name: 'Create' })) }
-    await screen.findByText({ no_account: 'No access', invited: 'Invited', expired: 'Expired', signed_in: 'Signed in' }[state])
+    await screen.findByText({ no_account: 'No access', invited: 'Invitation sent', expired: 'Invitation expired', signed_in: 'Linked account' }[state])
     const label = state === 'no_account' ? 'Find member or invite' : state === 'signed_in' ? 'Remove access' : 'Resend'
     await waitFor(() => expect((screen.getByRole('button', { name: label }) as HTMLButtonElement).disabled).toBe(false))
     if (state === 'signed_in') expect(screen.getByText('Authorized linked account')).toBeTruthy()
@@ -444,7 +444,7 @@ it.each(['en', 'cs'].flatMap(language => [true, false].map(v3 => ({ language: la
   expect(field).not.toHaveProperty('value', 'Workspace member · member@example.test')
   const memberReads = () => write.mock.calls.filter(([path]) => path.includes('/members?'))
   await waitFor(() => expect(memberReads().length).toBeGreaterThanOrEqual(2))
-  expect(client.getQueryCache().getAll().find(q => q.queryKey[0] === 'account-link-members' && q.queryKey[2] === 'entries' && q.queryKey[5] === 'member')?.queryKey).toEqual(['account-link-members', 'org', 'entries', 'one', expect.any(Object), 'member'])
+  expect(client.getQueryCache().getAll().find(q => q.queryKey[0] === 'account-link-members' && q.queryKey[3] === 'entries' && q.queryKey[6] === 'member')?.queryKey).toEqual(['account-link-members', null, 'org', 'entries', 'one', expect.any(Object), 'member'])
   await user.click(field)
   expect(screen.queryByRole('option', { name: 'Workspace member · member@example.test' })).toBeNull()
   await user.click(await screen.findByRole('option', { name: 'Free member · free@example.test' }))
@@ -611,7 +611,7 @@ it('178 invite-only errors stay visible in the unified dialog', async () => {
 it.each([[], ['access_invite'], ['access_cancel_invite'], ['access_invite', 'access_cancel_invite']].flatMap(grants => [true, false].map(liveCancel => ({ grants, liveCancel }))))
 ('209 V3 pending row filters grants=$grants and live cancel=$liveCancel', async ({ grants, liveCancel }) => {
   const { user, write } = await mount('row', { state: 'invited', grants, liveCancel })
-  await user.click(await screen.findByRole('button', { name: /Invited, Application access actions/ }))
+  await user.click(await screen.findByRole('button', { name: /Invitation sent, Application access actions/ }))
   const invite = grants.includes('access_invite'), cancel = grants.includes('access_cancel_invite') && liveCancel
   expect(screen.queryAllByRole('menuitem').map(item => item.textContent)).toEqual([
     ...(invite ? [en.rowInvite_resend, en.rowInvite_copy] : []),

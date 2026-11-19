@@ -1,4 +1,5 @@
 import type { Field, Model, Capabilities } from './read'
+import { instanceTimeZone } from './labels'
 export type FilterKind = 'text' | 'enum' | 'relation' | 'number' | 'date' | 'boolean'
 export const selectionCap = 20
 export interface RangeValue { from?: string; to?: string; value?: string }
@@ -9,10 +10,29 @@ export interface FilterMapping {
   label(value: any, translate: (value: string) => string): string
 }
 const day = (value: unknown): value is string => typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(`${value}T12:00:00Z`)) && new Date(`${value}T12:00:00Z`).toISOString().slice(0, 10) === value
-const localDay = (value: string, next = false) => { const [y, m, d] = value.split('-').map(Number); return new Date(y, m - 1, d + Number(next)).toISOString() }
-const localDate = (instant: string, previous = false) => { const d = new Date(instant); if (previous) d.setDate(d.getDate() - 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` }
+/** Offset (ms) of an IANA zone at an instant, from the formatter rather than the host's own zone. */
+function zoneOffset(instant: number, timeZone: string) {
+  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone, hourCycle: 'h23', year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric', second: 'numeric' }).formatToParts(new Date(instant)).map(part => [part.type, Number(part.value)]))
+  return Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour % 24, parts.minute, parts.second) - Math.floor(instant / 1000) * 1000
+}
+/** First instant of a calendar day in the instance zone; `next` yields the following day's start. */
+const localDay = (value: string, next = false, zone?: string) => {
+  const timeZone = instanceTimeZone(zone)
+  const [y, m, d] = value.split('-').map(Number)
+  const wall = Date.UTC(y, m - 1, d + Number(next))
+  // Two passes settle offsets that change between the guess and the real instant (DST).
+  let instant = wall - zoneOffset(wall, timeZone)
+  instant = wall - zoneOffset(instant, timeZone)
+  return new Date(instant).toISOString()
+}
+const localDate = (instant: string, previous = false, zone?: string) => {
+  const timeZone = instanceTimeZone(zone)
+  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone, year: 'numeric', month: 'numeric', day: 'numeric' }).formatToParts(new Date(instant)).map(part => [part.type, Number(part.value)]))
+  const wall = new Date(Date.UTC(parts.year, parts.month - 1, parts.day - Number(previous)))
+  return wall.toISOString().slice(0, 10)
+}
 /** One reversible mapping per kind. Predicates stay root scalar predicates, including refs. */
-function rawFilterMapping(kind: FilterKind, field?: Pick<Field, 'type' | 'required' | 'values'>, locale?: string): FilterMapping {
+function rawFilterMapping(kind: FilterKind, field?: Pick<Field, 'type' | 'required' | 'values'>, locale?: string, timeZone?: string): FilterMapping {
   if (kind === 'text') return {
     toPredicate: value => typeof value === 'string' && value.length > 0 && value.length <= 2000 ? { contains: value } : undefined,
     fromPredicate: p => Object.keys(p).join() === 'contains' && typeof p.contains === 'string' ? p.contains : undefined,
@@ -36,27 +56,27 @@ function rawFilterMapping(kind: FilterKind, field?: Pick<Field, 'type' | 'requir
       const v = value as RangeValue; const result: Record<string, unknown> = {}
       if (v.value) {
         if (!valid(v.value)) return undefined
-        return datetime && instants ? { gte: localDay(v.value), lt: localDay(v.value, true) } : { eq: kind === 'number' ? Number(v.value) : v.value }
+        return datetime && instants ? { gte: localDay(v.value, false, timeZone), lt: localDay(v.value, true, timeZone) } : { eq: kind === 'number' ? Number(v.value) : v.value }
       }
-      if (v.from) { if (!valid(v.from)) return undefined; result.gte = datetime && instants ? localDay(v.from) : kind === 'number' ? Number(v.from) : v.from }
-      if (v.to) { if (!valid(v.to)) return undefined; result[datetime && instants ? 'lt' : 'lte'] = datetime && instants ? localDay(v.to, true) : kind === 'number' ? Number(v.to) : v.to }
+      if (v.from) { if (!valid(v.from)) return undefined; result.gte = datetime && instants ? localDay(v.from, false, timeZone) : kind === 'number' ? Number(v.from) : v.from }
+      if (v.to) { if (!valid(v.to)) return undefined; result[datetime && instants ? 'lt' : 'lte'] = datetime && instants ? localDay(v.to, true, timeZone) : kind === 'number' ? Number(v.to) : v.to }
       if (v.from && v.to && (kind === 'number' ? Number(v.from) > Number(v.to) : v.from > v.to)) return undefined
       return Object.keys(result).length ? result : undefined
     },
     fromPredicate: p => {
       if (!Object.keys(p).length || Object.keys(p).some(key => !['eq', 'gte', 'lte', ...(datetime ? ['lt'] : [])].includes(key))) return undefined
       if (p.eq !== undefined) return Object.keys(p).length === 1 ? { value: String(p.eq) } : undefined
-      return { ...(p.gte !== undefined ? { from: datetime && !day(p.gte) ? localDate(String(p.gte)) : String(p.gte) } : {}), ...(p.lte !== undefined ? { to: String(p.lte) } : datetime && p.lt !== undefined ? { to: localDate(String(p.lt), true) } : {}) }
+      return { ...(p.gte !== undefined ? { from: datetime && !day(p.gte) ? localDate(String(p.gte), false, timeZone) : String(p.gte) } : {}), ...(p.lte !== undefined ? { to: String(p.lte) } : datetime && p.lt !== undefined ? { to: localDate(String(p.lt), true, timeZone) } : {}) }
     },
     label: (value: RangeValue, translate) => {
-      const format = (v: string) => !locale ? v : kind === 'number' ? new Intl.NumberFormat(locale).format(Number(v)) : new Intl.DateTimeFormat(locale, { dateStyle: 'medium' }).format(new Date(`${v}T12:00:00`))
+      const format = (v: string) => !locale ? v : kind === 'number' ? new Intl.NumberFormat(locale).format(Number(v)) : new Intl.DateTimeFormat(locale, { dateStyle: 'medium', timeZone: 'UTC' }).format(new Date(`${v}T12:00:00Z`))
       return value.value ? format(value.value) : value.from && value.from === value.to ? format(value.from) : `${value.from ? format(value.from) : translate('filterMinimum')} – ${value.to ? format(value.to) : translate('filterMaximum')}`
     },
   }
 }
 /** Validate the backend operators too: local day/nullable-bool state has compound emissions. */
-export function filterMapping(kind: FilterKind, field?: Pick<Field, 'type' | 'required' | 'values'>, locale?: string, operators?: readonly string[]): FilterMapping {
-  const mapping = rawFilterMapping(kind, field, locale)
+export function filterMapping(kind: FilterKind, field?: Pick<Field, 'type' | 'required' | 'values'>, locale?: string, operators?: readonly string[], timeZone?: string): FilterMapping {
+  const mapping = rawFilterMapping(kind, field, locale, timeZone)
   if (!operators) return mapping
   const permitted = (value: unknown) => {
     const predicate = mapping.toPredicate(value, true)

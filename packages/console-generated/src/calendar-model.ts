@@ -53,7 +53,7 @@ export function calendarTitle(model: Model, entity: string, caps: Capabilities, 
   if (!fields.length || fields.some(field => !detailReadableField(model, entity, caps, field))) return fallback()
   const parts = fields.map(field => {
     const spec = model.entities[entity].fields[field]
-    if (spec.type !== 'ref') return row[field] == null || !String(row[field]).trim() ? undefined : formatFieldValue(row[field], spec, locale, t)
+    if (spec.type !== 'ref') return row[field] == null || !String(row[field]).trim() ? undefined : formatFieldValue(row[field], spec, locale, t, model.timeZone)
     const label = row.__labels?.[field]
     const target = spec.entity!
     const display = caps.entities[target]?.displayField ?? model.entities[target].displayField

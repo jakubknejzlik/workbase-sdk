@@ -71,7 +71,7 @@ function AuditContent({ value, depth = 0 }: { value: AuditNode; depth?: number }
   </div>)}</dl>
 }
 
-export function AuditDiff({ event, fieldLabel, fields, referenceLabel }: { event: AuditEvent; fields?: Record<string, Field>; referenceLabel?: (field: string, id: unknown) => string; fieldLabel?: (field: string) => string | undefined }) {
+export function AuditDiff({ event, fieldLabel, fields, referenceLabel, timeZone }: { event: AuditEvent; timeZone?: string; fields?: Record<string, Field>; referenceLabel?: (field: string, id: unknown) => string; fieldLabel?: (field: string) => string | undefined }) {
   const { t, i18n } = useTranslation()
   const changes = Object.entries(event.changes ?? {})
   const label = (field: string) => {
@@ -88,7 +88,7 @@ export function AuditDiff({ event, fieldLabel, fields, referenceLabel }: { event
     const masked = maskValue(value, label, copy)
     const spec = path.length === 1 ? fields?.[path[0]] : undefined
     if (!spec || value == null || value === '' || typeof value === 'object' || typeof value === 'string' && isCredentialShaped(value)) return masked
-    const text = spec.type === 'ref' ? referenceLabel?.(path[0], value) ?? t('unavailableRecord') : formatFieldValue(value, spec, i18n.language, (key, options) => String(t(key, { context: event.entity, ...options })))
+    const text = spec.type === 'ref' ? referenceLabel?.(path[0], value) ?? t('unavailableRecord') : formatFieldValue(value, spec, i18n.language, (key, options) => String(t(key, { context: event.entity, ...options })), timeZone)
     return maskValue(text, label, copy)
   }
   return <>

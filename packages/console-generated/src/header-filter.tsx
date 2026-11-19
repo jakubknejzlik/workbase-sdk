@@ -17,7 +17,7 @@ export function HeaderFilter(props: Props) {
 export function ToolbarFilter(props: Props) {
   const { t } = useEntityTranslation(props.entity)
   const { descriptor } = props
-  const mapping = filterMapping(descriptor.kind, props.model.entities[props.entity].fields[descriptor.field], undefined, descriptor.operators)
+  const mapping = filterMapping(descriptor.kind, props.model.entities[props.entity].fields[descriptor.field], undefined, descriptor.operators, props.model.timeZone)
   return <fieldset className="min-w-40 space-y-1 text-sm [&_.wb-picker>label]:sr-only">
     <legend className={descriptor.kind === 'relation' ? 'sr-only' : 'px-1'}>{descriptor.label ?? t(`field_${descriptor.field}`)}</legend>
     <FilterInput {...props} value={props.predicate ? mapping.fromPredicate(props.predicate) : undefined} onChange={value => props.onChange(mapping.toPredicate(value))} />
@@ -26,7 +26,7 @@ export function ToolbarFilter(props: Props) {
 function FilterEditor(props: Props & { close: () => void }) {
   const { t } = useEntityTranslation(props.entity)
   const { field, kind, operators } = props.descriptor
-  const mapping = filterMapping(kind, props.model.entities[props.entity].fields[field], undefined, operators)
+  const mapping = filterMapping(kind, props.model.entities[props.entity].fields[field], undefined, operators, props.model.timeZone)
   const [value, setValue] = useState<FilterValue | undefined>(() => props.predicate ? mapping.fromPredicate(props.predicate) : undefined)
   const predicate = mapping.toPredicate(value)
   return <form className="grid gap-3" onSubmit={event => { event.preventDefault(); props.onChange(predicate); props.close() }}>

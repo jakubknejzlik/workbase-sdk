@@ -52,7 +52,7 @@ async function reachable(page: Page, control: Locator) {
 }
 
 for (const language of ['en', 'cs'] as const) for (const width of [390, 1440]) {
-  test(`${language} ${width}: wrapping shell and saved-view actions, save and rename stay contained`, async ({ browser }, testInfo) => {
+  test(`${language} ${width}: wrapping shell and the saved-views menu, save and rename stay contained`, async ({ browser }, testInfo) => {
     const t = language === 'cs' ? cs : en
     const context = await browser.newContext({ baseURL: origin, viewport: { width, height: 540 }, extraHTTPHeaders: { Authorization: 'Bearer access-admin-session' } })
     await context.addInitScript(lang => localStorage.setItem('console-language', lang), language)
@@ -64,30 +64,32 @@ for (const language of ['en', 'cs'] as const) for (const width of [390, 1440]) {
       await expect(page.getByRole('link', { name: 'No account', exact: true })).toBeVisible()
       await expect(page.locator('[data-slot="breadcrumb"]')).toContainText('Synthetic saved view navigation')
       const section = page.getByRole('region', { name: t.savedViews, exact: true })
-      const select = section.getByRole('combobox', { name: t.savedViews, exact: true })
-      const input = section.getByRole('textbox', { name: t.savedViewsName, exact: true })
-      const confirm = section.getByRole('button', { name: t.savedViewsConfirm, exact: true })
+      const trigger = section.locator('button[aria-haspopup="dialog"]')
+      const menu = page.getByRole('dialog', { name: t.savedViews, exact: true })
+      const naming = page.getByRole('dialog').filter({ has: page.getByRole('textbox', { name: t.savedViewsName, exact: true }) })
+      const input = naming.getByRole('textbox', { name: t.savedViewsName, exact: true })
+      const confirm = naming.getByRole('button', { name: t.savedViewsConfirm, exact: true })
       const shot = async (state: string) => {
         measurements.push({ state, ...await geometry(page, section) })
         await page.screenshot({ path: testInfo.outputPath(`${language}-${width}-${state}.png`), animations: 'disabled', fullPage: true })
       }
+      const open = async () => { if (!await menu.isVisible()) await trigger.click(); await expect(menu).toBeVisible() }
+      const item = async (name: string) => { await open(); await menu.getByRole('button', { name, exact: true }).click() }
 
-      // Create through the real form, then keep a long option present in every acceptance capture.
-      await section.getByRole('button', { name: t.savedViewsSave, exact: true }).click()
+      // Create through the real menu and dialog, then keep a long view name present in every acceptance capture.
+      await item(t.savedViewsSaveNew)
       await expect(input).toBeFocused()
       await input.fill(longName)
       await confirm.click()
-      await expect(select).toBeFocused()
-      await expect(select.locator('option:checked')).toHaveText(longName)
-      for (const name of [t.savedViewsApply, t.savedViewsRename, t.savedViewsUpdate, t.savedViewsDelete]) {
-        await expect(section.getByRole('button', { name, exact: true })).toBeEnabled()
-      }
+      await expect(trigger).toContainText(longName)
+      await expect(trigger).toBeFocused()
       await shot('selected')
-      await section.getByRole('button', { name: t.savedViewsApply, exact: true }).click()
-      await section.getByRole('button', { name: t.savedViewsUpdate, exact: true }).click()
-      await expect(select).toBeFocused()
+      await open()
+      await expect(menu.getByRole('button', { name: longName, exact: true })).toHaveAttribute('aria-pressed', 'true')
+      await menu.getByRole('button', { name: t.savedViewsApplyView, exact: true }).click()
+      await expect(trigger).toBeFocused()
 
-      await section.getByRole('button', { name: t.savedViewsSave, exact: true }).click()
+      await item(t.savedViewsSaveNew)
       await expect(input).toBeFocused()
       await input.fill(`${longName} second`)
       await shot('save')
@@ -95,27 +97,27 @@ for (const language of ['en', 'cs'] as const) for (const width of [390, 1440]) {
       await page.keyboard.press('Tab')
       await expect(confirm).toBeFocused()
       await reachable(page, confirm)
-      await section.getByRole('button', { name: t.cancel, exact: true }).click()
-      await expect(select).toBeFocused()
+      await naming.getByRole('button', { name: t.cancel, exact: true }).click()
+      await expect(trigger).toBeFocused()
 
-      await section.getByRole('button', { name: t.savedViewsRename, exact: true }).click()
+      await item(t.savedViewsRenameThis)
       await expect(input).toBeFocused()
       await expect(input).toHaveValue(longName)
       await input.fill(`${longName} renamed`)
       await shot('rename')
       await reachable(page, input)
       await confirm.click()
-      await expect(select).toBeFocused()
-      await expect(select.locator('option:checked')).toHaveText(`${longName} renamed`)
+      await expect(trigger).toContainText(`${longName} renamed`)
 
       // Distinguish intentional sticky-header overlay after scrolling from scroll-zero layout.
       await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight))
       expect(await page.evaluate(() => scrollY)).toBeGreaterThan(0)
-      for (const control of await section.locator('select, button').all()) await reachable(page, control)
+      for (const control of await section.locator('button').all()) await reachable(page, control)
       await shot('renamed')
-      await section.getByRole('button', { name: t.savedViewsDelete, exact: true }).click()
-      await expect(section.getByRole('button', { name: t.savedViewsSave, exact: true })).toBeFocused()
-      await expect(select.locator('option')).toHaveCount(1)
+      await item(t.savedViewsDeleteThis)
+      await page.getByRole('dialog').getByRole('button', { name: t.savedViewsDelete, exact: true }).click()
+      await expect(trigger).toHaveText(t.savedViewsMenu)
+      await expect(trigger).toBeFocused()
     } finally {
       const path = testInfo.outputPath('geometry.json')
       await writeFile(path, JSON.stringify(measurements, null, 2))

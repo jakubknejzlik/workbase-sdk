@@ -22,7 +22,7 @@ export function FilterPanel(props: Props) {
 }
 function PanelDraft(props: Props & { close: () => void }) {
   const { t } = useEntityTranslation(props.entity)
-  const mapping = (descriptor: FilterDescriptor) => filterMapping(descriptor.kind, props.model.entities[props.entity].fields[descriptor.field], undefined, descriptor.operators)
+  const mapping = (descriptor: FilterDescriptor) => filterMapping(descriptor.kind, props.model.entities[props.entity].fields[descriptor.field], undefined, descriptor.operators, props.model.timeZone)
   const [draft, setDraft] = useState<Record<string, FilterValue | undefined>>(() => Object.fromEntries(props.descriptors.map(descriptor => {
     const filter = props.filters.find(filter => filter.field === descriptor.field)
     return [descriptor.field, filter ? mapping(descriptor).fromPredicate(filter.predicate) : undefined]

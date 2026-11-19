@@ -26,3 +26,11 @@ export function restoreSavedView(search: unknown, model: Model, entity: string, 
     return { search: searchFromState(restored.state), dropped: true }
   }
 }
+
+const stable = (value: unknown): unknown => Array.isArray(value) ? value.map(stable) : value && typeof value === 'object'
+  ? Object.fromEntries(Object.entries(value).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).map(([key, item]) => [key, stable(item)])) : value
+/** Order-independent identity of exactly the settings D7 persists (never search, page, page size or columns). */
+export function savedFingerprint(search: ListSearch) {
+  const { filters, sort, direction, view, rowAccess } = search
+  return JSON.stringify(stable({ filters: [...(filters ?? [])].sort((a, b) => a.field < b.field ? -1 : a.field > b.field ? 1 : 0), sort, direction: sort && sort !== 'none' ? direction : undefined, view: view === 'all' ? undefined : view, rowAccess }))
+}

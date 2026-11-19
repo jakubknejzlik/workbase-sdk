@@ -89,7 +89,7 @@ export function stateFromSearch(search: ListSearch, model: Model, entity: string
   const filters: ListFilter[] = []
   for (const filter of search.filters ?? []) {
     const descriptor = allowedFilters.get(filter.field)
-    const mapping = descriptor && filterMapping(descriptor.kind, model.entities[entity].fields[filter.field], undefined, descriptor.operators)
+    const mapping = descriptor && filterMapping(descriptor.kind, model.entities[entity].fields[filter.field], undefined, descriptor.operators, model.timeZone)
     const value = mapping && mapping.fromPredicate(filter.predicate)
     const predicate = value !== undefined && mapping ? mapping.toPredicate(value) : undefined
     if (!predicate || filters.some(item => item.field === filter.field)) { dropped = true; continue }
@@ -118,7 +118,7 @@ export function toQueryDocument(state: ListState, model: Model, entity: string, 
     const descriptor = allowedFilters.get(filter.field)
     if (!descriptor) return false
     if (Array.isArray(filter.predicate.in) && filter.predicate.in.length > selectionCap) throw new RangeError(`Select at most ${selectionCap} values per filter`)
-    return filterMapping(descriptor.kind, model.entities[entity].fields[filter.field], undefined, descriptor.operators).fromPredicate(filter.predicate) !== undefined
+    return filterMapping(descriptor.kind, model.entities[entity].fields[filter.field], undefined, descriptor.operators, model.timeZone).fromPredicate(filter.predicate) !== undefined
   })
   const labelWhere: Record<string, { contains: string; locale?: 'en' | 'cs' }> = {}
   for (const filter of userFilters) if (allowedFilters.get(filter.field)?.kind === 'text' && labelColumns(model, entity, caps).includes(filter.field) && typeof filter.predicate.contains === 'string') labelWhere[filter.field] = { contains: filter.predicate.contains, ...(locale === 'cs' ? { locale } : {}) }
@@ -126,7 +126,7 @@ export function toQueryDocument(state: ListState, model: Model, entity: string, 
     const spec = model.entities[entity].fields[filter.field]
     if (spec?.type === 'bool' && JSON.stringify(filter.predicate) === '{"in":[false,null]}') return { or: [{ [filter.field]: { eq: false } }, { [filter.field]: { isNull: true } }] }
     // Shared state stores local calendar days; only the request carries instants.
-    const mapping = spec?.type === 'datetime' && Object.values(filter.predicate).some(value => typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)) ? filterMapping('date', spec, undefined, allowedFilters.get(filter.field)?.operators) : undefined
+    const mapping = spec?.type === 'datetime' && Object.values(filter.predicate).some(value => typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)) ? filterMapping('date', spec, undefined, allowedFilters.get(filter.field)?.operators, model.timeZone) : undefined
     return { [filter.field]: mapping?.toPredicate(mapping.fromPredicate(filter.predicate), true) ?? filter.predicate }
   })
   const view = model.entities[entity].list?.views?.find(view => view.id === state.view)
