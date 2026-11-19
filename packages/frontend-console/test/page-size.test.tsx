@@ -23,7 +23,7 @@ it.each(['en', 'cs'] as const)('%s page-size keyboard selection resets generated
   const caps: Capabilities = { revision: 1, entities: { entries: { readable: ['id'], writable: [], operations: ['read'] } } }
   const request = vi.fn(async (query: ReadQuery) => ({ data: [{ id: query.cursor ? 'second' : 'first' }], next_cursor: query.cursor ? null : 'opaque-next' }))
   function Fixture() {
-    const list = useGeneratedList({ model, caps, orgId: 'org', entity: 'entries', request })
+    const list = useGeneratedList({ model, caps, orgId: 'org', entity: 'entries', request, contextList: { entity: 'parents', id: 'parent', list: 'entries' } })
     return <DataTable
       rows={list.data?.data ?? []} columns={[{ id: 'id', label: 'ID', cell: row => row.id }]}
       state={list.state} onStateChange={list.onStateChange} page={list.page} range={list.range}

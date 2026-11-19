@@ -43,6 +43,16 @@ it('calendar range and tri-state Select preserve staged host values without nati
   await user.click(screen.getByRole('combobox')); await user.click(screen.getByRole('option', { name: 'No' }))
   expect(change).toHaveBeenLastCalledWith(false)
 })
+it('lower-bound calendar selects one date and emits no equality or upper bound', async () => {
+  const user = userEvent.setup(), change = vi.fn()
+  render(<RangeFilter lowerBoundOnly value={{ from: '2026-11-19', to: '2026-11-25', value: '2026-11-01' }} onChange={change} type="date" labels={{ single: 'Single', from: 'From', to: 'To' }} />)
+  expect((screen.getByLabelText('Single') as HTMLInputElement).value).toBe('')
+  expect((screen.getByLabelText('To') as HTMLInputElement).value).toBe('')
+  await user.click(screen.getByRole('button', { name: 'Select date range' }))
+  await user.click(screen.getByRole('button', { name: /November 20th, 2026/ }))
+  expect(change).toHaveBeenLastCalledWith({ from: '2026-11-20' })
+  expect(screen.queryByRole('grid')).toBeNull()
+})
 it('C7b empty recovery preserves the exact No results message and removes the empty range', () => {
   const clear = vi.fn()
   render(<DataTable rows={[]} columns={[]} state={{ search: 'missing', sort: null, limit: 30 }} onStateChange={vi.fn()} page={0} onPage={vi.fn()} isFetching={false} label="Records" labels={{ search: 'Search', clearSearch: 'Clear search', noResults: 'No results', previous: 'Previous', next: 'Next', pageSize: 'Rows per page', sort: String, range: (start, end) => `${start}–${end}` }} onRowClick={vi.fn()} clearFilters="Clear search and filters" onClearFilters={clear} />)
