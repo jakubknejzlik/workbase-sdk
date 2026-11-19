@@ -176,6 +176,20 @@ test('personal views: update current view through the naming dialog and reload',
   await savedTrigger(page).click(); await savedMenu(page).getByRole('button', { name: 'Update me', exact: true }).click(); await savedMenu(page).getByRole('button', { name: en.savedViewsApplyView, exact: true }).click(); await rows(page, { view: 'active' })
 })
 
+test('personal views: rename then update in the same mounted session (#233 regression candidate)', async ({ page }) => {
+  await page.goto(route); await settled(page); await tab(page, 'inactive'); await rows(page, { view: 'inactive' }); await save(page, 'Compound inactive')
+  await page.reload(); await settled(page); await tab(page, 'active'); await rows(page, { view: 'active' })
+  await savedTrigger(page).click(); await savedMenu(page).getByRole('button', { name: 'Compound inactive', exact: true }).click(); await savedMenu(page).getByRole('button', { name: en.savedViewsApplyView, exact: true }).click(); await rows(page, { view: 'inactive' })
+  await savedTrigger(page).click(); await savedMenu(page).getByRole('button', { name: en.savedViewsRenameThis, exact: true }).click()
+  await page.getByRole('textbox', { name: en.savedViewsName, exact: true }).fill('Compound renamed')
+  const naming = () => page.getByRole('dialog').filter({ has: page.getByRole('textbox', { name: en.savedViewsName, exact: true }) })
+  await naming().getByRole('button', { name: en.savedViewsConfirm, exact: true }).click()
+  await tab(page, 'active'); await rows(page, { view: 'active' }); await page.getByRole('button', { name: en.savedViewsSaveChanges, exact: true }).click()
+  // Preserve the original pointer-interaction oracle; never force past an overlay.
+  await naming().getByRole('button', { name: en.savedViewsConfirm, exact: true }).click({ timeout: 5000 })
+  await page.reload(); await settled(page); await tab(page, 'inactive'); await rows(page, { view: 'inactive' }); await savedTrigger(page).click(); await savedMenu(page).getByRole('button', { name: 'Compound renamed', exact: true }).click(); await savedMenu(page).getByRole('button', { name: en.savedViewsApplyView, exact: true }).click(); await rows(page, { view: 'active' })
+})
+
 test('same mounted tab: admin → staff → admin must replace rows, totals, counts and personal namespace', async ({ page, context }) => {
   test.setTimeout(120_000)
   await page.goto(route); await settled(page); await rows(page); await save(page, 'Admin private view')
