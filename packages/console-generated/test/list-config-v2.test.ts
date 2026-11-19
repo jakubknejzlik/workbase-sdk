@@ -26,7 +26,7 @@ it('honors explicit relation filters while unconfigured references retain label-
   expect(filterKind(model, 'workers', 'team_id', denied)).toBeUndefined()
 })
 it('discovers and restores configured non-column and related-column filters, without changing search scope', () => {
-  expect(filterableFields(model, 'workers', caps)).toEqual(['name', 'team_id', 'enabled', 'created_at', 'location'])
+  expect(filterableFields(model, 'workers', caps)).toEqual(['team_id', 'enabled', 'created_at', 'location', 'name'])
   expect(listSearchableFields(model, 'workers', caps)).toEqual(['name'])
   const { state, dropped } = stateFromSearch({ filters: [{ field: 'team_id', predicate: { in: ['team'] } }, { field: 'location', predicate: { contains: 'Place' } }] }, model, 'workers', caps)
   expect(dropped).toBe(false)
@@ -51,4 +51,32 @@ it('applies view rowAccess with precedence and drops inaccessible views as a who
   const restored = stateFromSearch({ view: 'invited' }, model, 'workers', denied)
   expect(restored.dropped).toBe(true); expect(restored.state.view).toBe('all')
   expect(toQueryDocument({ ...state, view: 'invited' }, model, 'workers', denied)).not.toHaveProperty('rowAccess')
+})
+
+it('URL and saved-view restore share pruning of removed definitions, kinds and source permissions', async () => {
+  const { restoreSavedView } = await import('../src/saved-views')
+  const filters = [{ field: 'team_id', predicate: { in: ['target-a', 'target-b'] } }, { field: 'enabled', predicate: { eq: true } }]
+  for (const changed of ['none', 'removed', 'kind', 'unreadable', 'disabled'] as const) {
+    const next = structuredClone(model), grant = structuredClone(caps)
+    if (changed === 'removed') delete next.entities.workers.list!.filter!.team_id
+    if (changed === 'kind') next.entities.workers.list!.filter!.team_id = { kind: 'text', placement: 'panel', operators: ['contains'] }
+    if (changed === 'unreadable') grant.entities.workers.readable = grant.entities.workers.readable.filter(field => field !== 'team_id')
+    if (changed === 'disabled') next.entities.workers.list!.filter!.team_id = false
+    const url = stateFromSearch({ filters }, next, 'workers', grant)
+    const saved = restoreSavedView({ filters }, next, 'workers', grant)
+    expect(saved.dropped).toBe(url.dropped)
+    expect(saved.search.filters).toEqual(url.state.userFilters)
+    expect(url.state.userFilters).toEqual(changed === 'none' ? filters : filters.slice(1))
+    expect(url.state.cursor).toBeUndefined()
+  }
+})
+it('never converts label text to IDs or emits a stale kind after configuration changes', () => {
+  const text = { field: 'team_id', predicate: { contains: 'Same label' } }
+  const restored = stateFromSearch({ filters: [text] }, model, 'workers', caps)
+  expect(restored.dropped).toBe(true)
+  const query = toQueryDocument({ ...restored.state, userFilters: [text] }, model, 'workers', caps)
+  expect(query.labelWhere).toBeUndefined()
+  expect(JSON.stringify(query.where)).not.toContain('Same label')
+  const exact = stateFromSearch({ filters: [{ field: 'team_id', predicate: { in: ['target-a', 'target-b'] } }] }, model, 'workers', caps)
+  expect(toQueryDocument(exact.state, model, 'workers', caps).where).toMatchObject({ and: [{}, { team_id: { in: ['target-a', 'target-b'] } }] })
 })

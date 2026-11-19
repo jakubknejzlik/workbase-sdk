@@ -12,8 +12,9 @@ import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@work
 import { Badge } from '@workbasehq/ui/components/ui/badge'
 import { Button as PrimitiveButton } from '@workbasehq/ui/components/ui/button'
 import { useGeneratedList, useRelationLabels } from './useGeneratedList'
-import { filterKind, filterOperators, filterMapping } from './filter-kinds'
-import { HeaderFilter } from './header-filter'
+import { filterMapping } from './filter-kinds'
+import { FilterPanel } from './filter-panel'
+import { HeaderFilter, ToolbarFilter } from './header-filter'
 import { readableWhere, sortableFields } from './list-model'
 import { SavedViewsControls } from './saved-views-controls'
 import type { SavedViewsScope } from './saved-views'
@@ -119,15 +120,20 @@ function GeneratedListPage({ savedViewsScope, model, caps, orgId, entity, reques
   const primary = listFields[0]
   const rows = list.data?.data ?? []
   const setFilter = (field: string, predicate?: Record<string, unknown>) => list.onStateChange({ ...list.state, userFilters: [...list.state.userFilters.filter(filter => filter.field !== field), ...(predicate ? [{ field, predicate }] : [])] }, 'filter')
-  const chips = list.state.userFilters.map(filter => {
-    const spec = definition.fields[filter.field]; const mapping = filterMapping(filterKind(model, entity, filter.field, caps)!, spec, i18n.language, filterOperators(model, entity, filter.field))
+  const relationFilters = list.filters.filter(filter => filter.kind === 'relation')
+  const selectedLabels = useRelationLabels(model, entity, caps, orgId, relationFilters.map(filter => filter.field), list.state.userFilters.flatMap(filter => Array.isArray(filter.predicate.in) ? filter.predicate.in.map(id => ({ [filter.field]: id })) : []), request)
+  const chips = list.state.userFilters.flatMap(filter => {
+    const descriptor = list.filters.find(descriptor => descriptor.field === filter.field)
+    if (!descriptor) return []
+    const spec = definition.fields[filter.field]; const mapping = filterMapping(descriptor.kind, spec, i18n.language, descriptor.operators)
     const value = mapping.fromPredicate(filter.predicate)
     const label = mapping.label(value, key => {
+      if (descriptor.kind === 'relation') { const record = selectedLabels(filter.field, key); return record ? recordLabel(model, record.entity, record.row, caps, i18n.language, t) : t('unavailableRecord') }
       if (spec?.type === 'ref') return key
       return t(spec?.type === 'enum' ? `value_${key}` : key, { defaultValue: key })
     })
-    const column = t(`field_${filter.field}`)
-    return { id: filter.field, column, value: label, removeLabel: t('removeFilter', { column, value: label }), onRemove: () => setFilter(filter.field) }
+    const column = descriptor.label ?? t(`field_${filter.field}`)
+    return [{ id: filter.field, column, value: label, removeLabel: t('removeFilter', { column, value: label }), onRemove: () => setFilter(filter.field) }]
   })
   const views = definition.list?.views?.filter(view => readableWhere(view.where, model, entity, caps) && (!view.rowAccess || definition.rowInvitations && caps.resources?.['invitations.read'] === true)) ?? []
 
@@ -159,11 +165,12 @@ function GeneratedListPage({ savedViewsScope, model, caps, orgId, entity, reques
     {views.length > 0 && <div role="group" aria-label={t('listViews')} className="flex flex-wrap gap-2 py-2">{[...(!views.some(view => view.id === 'all') ? [{ id: 'all', label: 'viewAll' }] : []), ...views].map(view => <PrimitiveButton key={view.id} className="border border-transparent aria-pressed:border-foreground aria-pressed:font-semibold" variant={(list.state.view ?? 'all') === view.id ? 'secondary' : 'ghost'} aria-pressed={(list.state.view ?? 'all') === view.id} onClick={() => list.onStateChange({ ...list.state, view: view.id }, 'view')}>{t(view.label)}</PrimitiveButton>)}</div>}
     {availableCalendar(model, entity, caps) && <div role="group" aria-label={t('listPresentation')} className="flex flex-wrap gap-2 py-2">{(['table', 'calendar'] as const).map(presentation => <PrimitiveButton key={presentation} variant={list.state.presentation === presentation ? 'secondary' : 'ghost'} aria-pressed={list.state.presentation === presentation} onClick={() => list.onStateChange({ ...list.state, presentation }, 'view')}>{t(`${presentation}View`)}</PrimitiveButton>)}</div>}
     <DataTableActiveFilters filters={chips} label={t('activeFilters')} clearLabel={t('clearAllFilters')} onClear={() => list.onStateChange({ ...list.state, userFilters: [] }, 'filter')} />
+    <div className="flex flex-wrap gap-2">{list.filters.filter(filter => filter.placement === 'toolbar').map(descriptor => <ToolbarFilter key={descriptor.field} model={model} caps={caps} orgId={orgId} entity={entity} descriptor={descriptor} request={request} predicate={list.state.userFilters.find(filter => filter.field === descriptor.field)?.predicate} onChange={predicate => setFilter(descriptor.field, predicate)} />)}</div>
+    <FilterPanel model={model} caps={caps} orgId={orgId} entity={entity} request={request} descriptors={list.filters} filters={list.state.userFilters} onChange={userFilters => list.onStateChange({ ...list.state, userFilters }, 'filter')} />
     {list.state.presentation === 'calendar' ? <>
-      <div className="flex flex-wrap gap-2" aria-label={t('activeFilters')}>{listFields.map(field => <div key={field} className="flex items-center rounded-md border pl-2 text-xs"><span>{t(`field_${field}`)}</span><HeaderFilter model={model} caps={caps} orgId={orgId} entity={entity} field={field} request={request} predicate={list.state.userFilters.find(filter => filter.field === field)?.predicate} onChange={predicate => setFilter(field, predicate)} /></div>)}</div>
       <EntityCalendar model={model} entity={entity} caps={caps} orgId={orgId} state={list.state} data={list.data} pending={list.result.isFetching} error={error ? t(queryCodes.includes(error.code as any) ? `query_${error.code}` : 'requestFailed') : undefined} onChange={state => list.onStateChange(state, 'view')} onCreate={calendarCreate} onPage={list.onPage} previous={list.page > 0} />
     </> : <div className="caption-bottom"><DataTable compact={definition.list?.compact} mobileCards={definition.list?.mobileCards} rows={rows} columns={[
-      ...listFields.map((field, index) => ({ id: field, label: field === 'id' || field === primary ? t(`field_${field}`) : t(`listField_${field}`, { defaultValue: t(`field_${field}`) }), sortable: sortable.includes(field), filter: <HeaderFilter model={model} caps={caps} orgId={orgId} entity={entity} field={field} request={request} predicate={list.state.userFilters.find(filter => filter.field === field)?.predicate} onChange={predicate => setFilter(field, predicate)} />, cell: (row: Record<string, any>) => index === 0 ? <Link data-row-name="" title={String(row.id)} to="/o/$orgId/e/$entity/$id" params={{ orgId, entity, id: String(row.id) }}>{fieldValue(row, field)}</Link> : fieldValue(row, field) })),
+      ...listFields.map((field, index) => ({ id: field, label: field === 'id' || field === primary ? t(`field_${field}`) : t(`listField_${field}`, { defaultValue: t(`field_${field}`) }), sortable: sortable.includes(field), filter: list.filters.some(filter => filter.field === field) ? <HeaderFilter model={model} caps={caps} orgId={orgId} entity={entity} descriptor={list.filters.find(filter => filter.field === field)!} request={request} predicate={list.state.userFilters.find(filter => filter.field === field)?.predicate} onChange={predicate => setFilter(field, predicate)} /> : undefined, cell: (row: Record<string, any>) => index === 0 ? <Link data-row-name="" title={String(row.id)} to="/o/$orgId/e/$entity/$id" params={{ orgId, entity, id: String(row.id) }}>{fieldValue(row, field)}</Link> : fieldValue(row, field) })),
       ...((definition.accountLink || definition.rowInvitations) && write && canReadApplicationAccess(caps) ? [{ id: '_access', keepOnNarrow: true, wrap: true, label: t('rowAccess'), cell: (row: Record<string, any>) => <GeneratedRowInvitation model={model} caps={caps} orgId={orgId} entity={entity} request={request} write={write} onDenied={onDenied} row={row} disabled={list.stale || list.result.isFetching || searchPending} /> }] : []),
       ...(rowActions && hasRowActions(model, entity, caps) ? [{ id: '_actions', label: t('actions'), cell: (row: Record<string, any>) => <>{rowActions!(row, list.stale || list.result.isFetching || searchPending)}</> }] : []),
     ]} state={list.state} onStateChange={list.onStateChange} page={list.page} range={list.range} onPage={list.onPage} nextCursor={error ? null : list.data?.next_cursor} isFetching={list.result.isFetching} error={error ? new Error(t(queryCodes.includes(error.code as any) ? `query_${error.code}` : 'requestFailed')) : null}

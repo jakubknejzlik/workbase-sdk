@@ -1,3 +1,4 @@
+import { filterDescriptors } from './filter-kinds'
 import { availableCalendar } from './calendar-model'
 import { useTranslation } from 'react-i18next'
 import { useEffect, useRef, useState } from 'react'
@@ -21,12 +22,16 @@ export function useGeneratedList({ model, caps, orgId, entity, request, contextL
   // Read search and cursor state from one Router location snapshot. Separate match/search
   // subscriptions can briefly combine old search with new history state during navigation.
   const search = contextList ? local.search : validateListSearch(location.search as Record<string, unknown>)
-  const { state, dropped } = stateFromSearch(search, model, entity, caps)
+  const filters = filterDescriptors(model, entity, caps)
+  const { state, dropped } = stateFromSearch(search, model, entity, caps, filters)
+  // Slice 2: put fresh selected-ID reconciliation between this shared restore and
+  // toQueryDocument. Saved views enter this same search path via applySavedView;
+  // cached picker hydration must never certify readability for that stage.
   const canonicalFiltersChanged = JSON.stringify(search.filters ?? []) !== JSON.stringify(state.userFilters)
   const scope = JSON.stringify([model.instance, orgId, entity, caps, contextList])
   const signature = JSON.stringify(searchFromState(state))
   const history = contextList ? local.history : (location.state as { generatedList?: PageHistory }).generatedList
-  const cursors = history?.scope === scope && history.signature === signature && Array.isArray(history.cursors) && history.cursors.every(cursor => typeof cursor === 'string') ? history.cursors : []
+  const cursors = !dropped && !canonicalFiltersChanged && history?.scope === scope && history.signature === signature && Array.isArray(history.cursors) && history.cursors.every(cursor => typeof cursor === 'string') ? history.cursors : []
   state.cursor = cursors.at(-1)
   const notice = dropped ? 'listStateDropped' : history?.scope === scope && history.signature === signature && ['listStateDropped', 'listCursorRestarted'].includes(history.notice ?? '') ? history.notice : null
   const previous = useRef<PreviousState | undefined>(undefined)
@@ -34,10 +39,11 @@ export function useGeneratedList({ model, caps, orgId, entity, request, contextL
   const go = (next: ListSearch, nextCursors: string[], replace = false, notice?: ListNotice) => contextList ? Promise.resolve(setLocal({ search: next, history: { scope, signature: JSON.stringify(searchFromState(stateFromSearch(next, model, entity, caps).state)), cursors: nextCursors, notice } })) : currentRoute ? navigate({ to: '.', search: next as any, replace, resetScroll: false,
     state: old => ({ ...old, generatedList: { scope, signature: JSON.stringify(searchFromState(stateFromSearch(next, model, entity, caps).state)), cursors: nextCursors, notice } }) }) : Promise.resolve()
   useEffect(() => {
-    if (!contextList && (dropped || canonicalFiltersChanged || Object.hasOwn(location.search, 'cursor'))) void go(searchFromState(state), [], true, dropped ? 'listStateDropped' : Object.hasOwn(location.search, 'cursor') ? 'listCursorRestarted' : undefined)
+    const legacyCursor = !contextList && Object.hasOwn(location.search, 'cursor')
+    if (dropped || canonicalFiltersChanged || legacyCursor) void go(searchFromState(state), [], true, dropped ? 'listStateDropped' : legacyCursor ? 'listCursorRestarted' : undefined)
   }, [currentRoute, dropped, canonicalFiltersChanged, signature, location.searchStr])
   const { i18n } = useTranslation()
-  const document = toQueryDocument(state, model, entity, caps, i18n.language?.startsWith('cs') ? 'cs' : 'en')
+  const document = toQueryDocument(state, model, entity, caps, i18n.language?.startsWith('cs') ? 'cs' : 'en', filters)
   if (contextList) {
     document.contextList = contextList
     const definition = model.entities[entity]
@@ -72,7 +78,7 @@ export function useGeneratedList({ model, caps, orgId, entity, request, contextL
     previous.current = undefined
     void go(restored.search, [], false, restored.dropped ? 'listStateDropped' : undefined)
   }
-  return { applySavedView, stale: failure?.code === 'query_too_expensive' && !!data, state, document, result, data, notice, onStateChange, onPage, page: cursors.length, range: lastGood.current?.scope === scope ? { page: lastGood.current.page, limit: lastGood.current.limit } : { page: 0, limit: state.limit }, undo: previous.current?.scope === scope ? undo : undefined }
+  return { filters, applySavedView, stale: failure?.code === 'query_too_expensive' && !!data, state, document, result, data, notice, onStateChange, onPage, page: cursors.length, range: lastGood.current?.scope === scope ? { page: lastGood.current.page, limit: lastGood.current.limit } : { page: 0, limit: state.limit }, undo: previous.current?.scope === scope ? undo : undefined }
 }
 /** Detail and picker labels only. Lists receive their labels in the content response. */
 export function useRelationLabels(model: Model, entity: string, caps: Capabilities, orgId: string, columns: string[], rows: Record<string, any>[], request: (query: ReadQuery) => Promise<Result>) {
