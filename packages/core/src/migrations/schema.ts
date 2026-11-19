@@ -62,7 +62,7 @@ export function physicalTable(name: string, entity: InstanceConfig['entities'][s
   }
 }
 export function renderUniqueConstraint(table: string, constraint: EntityConstraint) {
-  return `CREATE UNIQUE INDEX ${quote(uniqueIndexName(table, constraint.name))} ON ${quote(table)}(${['organization_id', ...constraint.fields].map(quote).join(', ')});`
+  return `CREATE UNIQUE INDEX ${quote(uniqueIndexName(table, constraint.name))} ON ${quote(table)}(${['organization_id', ...constraint.fields].map(quote).join(', ')})${constraint.where ? ` WHERE ${quote(constraint.where.field)} = ${literal(constraint.where.value)}` : ''};`
 }
 export function renderTable(table: TableSpec) {
   const q = (name: string) => table.columns.find(c => c.name === name)?.implicit ? name : quote(name)
