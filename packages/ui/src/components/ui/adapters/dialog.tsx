@@ -21,4 +21,9 @@ export function Content({ ref, onKeyDown, onInteractOutside, ...props }: Compone
     onInteractOutside?.(event)
   }} />
 }
-export { Trigger, Close, Portal, Title, Description } from '@radix-ui/react-dialog'
+export function Portal({ children, ...props }: ComponentProps<typeof Radix.Portal>) {
+  // One portal lifetime keeps the backdrop before retained Content on rapid reopen.
+  // Separate portals can append a new backdrop after Content's exit was cancelled.
+  return <Radix.Portal {...props}><div className="contents">{children}</div></Radix.Portal>
+}
+export { Trigger, Close, Title, Description } from '@radix-ui/react-dialog'

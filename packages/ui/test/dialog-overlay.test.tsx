@@ -13,6 +13,10 @@ it('removes the closed backdrop even while a force-mounted portal retains exitin
   expect(screen.queryByTestId('backdrop')).toBeNull()
   view.rerender(<Dialog open />)
   expect(screen.getAllByTestId('backdrop')).toHaveLength(1)
+  const content = screen.getByRole('dialog')
+  // An exiting Content can remain while the next backdrop is mounted. Separate
+  // portals must not append that backdrop above the retained Content.
+  expect(screen.getByTestId('backdrop').compareDocumentPosition(content) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   expect(screen.getByRole('button', { name: 'Save view' })).toBeTruthy()
 })
 it('tracks uncontrolled trigger and close transitions without leaving a backdrop', async () => {
