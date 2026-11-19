@@ -36,8 +36,8 @@ beforeEach(async () => {
   await env.DB.batch(fixture.map(row => env.DB.prepare("INSERT INTO jobs(id,organization_id,title,client_id,priority,status,created_at,updated_at) VALUES (?,'org-a',?,?,?,?,datetime('now'),datetime('now'))").bind(row.id, row.title, row.client, row.priority, row.status)))
 })
 
-// Every subset of the four conditions, including each alone and all together.
-it.each(Array.from({ length: 16 }, (_, mask) => mask))('exact authorized total equals all offset pages, condition mask %i', async mask => {
+const conditionMasks = Array.from({ length: 16 }, (_, mask) => mask)
+async function totalCase(mask: number) {
   const current = mask & 4 ? await requireScope(await resolveActor(new Request('http://localhost', { headers: { Authorization: 'Bearer synthetic-viewer-a' } }), runtime(), kernel.config), 'org-a', kernel.config) : scope
   const input = { ...base,
     ...(mask & 1 ? { search: { text: 'match', fields: ['title'] } } : {}),
@@ -45,6 +45,24 @@ it.each(Array.from({ length: 16 }, (_, mask) => mask))('exact authorized total e
     ...(mask & 8 ? { where: { status: { eq: 'done' } } } : {}),
   }
   const expected = fixture.filter(row => (!(mask & 1) || row.title === 'Match') && (!(mask & 2) || row.client === 'client-org-a') && (!(mask & 4) || row.priority === 'high') && (!(mask & 8) || row.status === 'done')).map(row => row.id)
+  return { current, input, expected }
+}
+
+// Every subset of the four conditions, including each alone and all together.
+// Cursor requests isolate total-value evidence from acceptance of offset paging.
+it.each(conditionMasks)('exact authorized total equals all cursor pages, condition mask %i', async mask => {
+  const { current, input, expected } = await totalCase(mask)
+  const seen: string[] = []; let cursor: string | undefined
+  do {
+    const page = await run({ ...input, ...(cursor ? { cursor } : {}) }, current)
+    expect(page.data.map(row => row.id)).toEqual(expected.slice(seen.length, seen.length + base.limit))
+    expect(page.total).toBe(expected.length)
+    seen.push(...page.data.map(row => row.id)); cursor = page.next_cursor ?? undefined
+  } while (cursor)
+  expect(seen).toEqual(expected)
+})
+it.each(conditionMasks)('exact authorized total equals all offset pages, condition mask %i', async mask => {
+  const { current, input, expected } = await totalCase(mask)
   const seen: string[] = []
   for (let offset = 0; offset <= expected.length; offset += base.limit) {
     const page = await run({ ...input, offset }, current)
