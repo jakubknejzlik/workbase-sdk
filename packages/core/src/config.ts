@@ -250,7 +250,10 @@ export function normalizeInstance(input: InstanceDefinitionInput, exactRoles = f
       validateEntityConstraints(entity.constraints ?? [], entity.fields, (relative, message) => {
         path = ['entities', name, 'constraints', ...relative]
         throw new Error(message)
-      }, config.entities)
+      }, config.entities, name)
+      for (const [i, c] of (entity.constraints ?? []).entries()) {
+        if (c.kind === 'ref_immutable' && c.referencedBy.entity === config.account?.entity) { path = ['entities', name, 'constraints', i, 'referencedBy', 'entity']; throw new Error('Immutability cannot be referenced by the SDK account entity') }
+      }
       for (const [i, c] of entity.checks.entries()) {
         path = ['entities', name, 'checks', i, !entity.fields[c.left] || entity.fields[c.left].computed ? 'left' : 'right']
         if (!entity.fields[c.left] || !entity.fields[c.right] || entity.fields[c.left].computed || entity.fields[c.right].computed) throw new Error('Unknown check field')

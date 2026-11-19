@@ -3,10 +3,10 @@ import { createElement as h } from 'react'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, expect, test, vi } from 'vitest'
 import { grants } from './grants'
-import { AccessCard, ConsoleProvider, PageView, useRuntime } from '../src/react'
+import { AccessCard, ConsoleProvider, PageView, failureState, useRuntime } from '../src/react'
 import { entityCreatePage, entityDetailPage, entityEditPage, entityListPage, type Node, page, list } from '../src/index'
 import type { Manifest } from '../src/check'
-import type { Client, ClientRequestInit } from '../src/client'
+import { ApiFailure, type Client, type ClientRequestInit } from '../src/client'
 import { createI18n } from '../src/i18n'
 const fields = Object.fromEntries(['name', 'extra', 'user', 'locked'].map(name => [name, { type: name === 'user' ? 'ref' : 'string', required: name === 'name', readOnly: name === 'locked', userLink: name === 'user', computed: false }]))
 const meta = { displayField: 'name', fields }
@@ -324,6 +324,29 @@ test.each(['en', 'cs'] as const)('ref equality mismatch is localized, retains dr
   fireEvent.change(name, { target: { value: 'Corrected' } }); fireEvent.click(screen.getByText(i18n.t('sdk:save')))
   await waitFor(() => expect(navigate).toHaveBeenCalledWith('/items/x'))
   expect(JSON.parse(String(fetch.mock.calls.filter(([, init]) => init.method === 'PATCH').at(-1)![1].body))).toEqual({ name: 'Corrected' })
+})
+test.each(['en', 'cs'] as const)('ref immutable conflict is localized, retains draft and permits corrected retry (%s)', async language => {
+  const i18n = createI18n({ languages: ['en', 'cs'], profile: { language }, catalogs: {} })
+  const fetch = vi.fn(async (_url: string, init: ClientRequestInit) => {
+    if (init.method !== 'PATCH') return json(row)
+    const data = JSON.parse(String(init.body))
+    return data.name === 'Locked' ? json({ error: 'ref_immutable', detail: { constraintId: 'probe.name_locked' } }, 409) : json({ ...row, ...data, version: 2 })
+  })
+  render(h(ConsoleProvider, { caps: grants({ probe: meta }), identity: { actorId: 'a', orgId: 'one' }, t: i18n.t, fetch }, h(PageView, { definition: route('edit'), route: route('edit'), entities: { probe: meta }, params: { itemId: 'x' }, search: {}, navigate })))
+  const name = await screen.findByLabelText(i18n.t('domain:field.probe.name'))
+  fireEvent.change(name, { target: { value: 'Locked' } }); fireEvent.click(screen.getByText(i18n.t('sdk:save')))
+  const message = language === 'cs' ? 'Tento záznam používají jiné záznamy, proto už nelze tuto hodnotu změnit. Ponechte původní hodnotu a zkuste to znovu.' : 'This record is referenced by other records, so this value can no longer be changed. Keep the original value and try again.'
+  expect(await screen.findByText(message)).toBeTruthy()
+  expect(screen.queryByText(i18n.t('sdk:network'))).toBeNull()
+  expect((name as unknown as { value: string }).value).toBe('Locked'); expect(navigate).not.toHaveBeenCalled()
+  fireEvent.change(name, { target: { value: 'Corrected' } }); fireEvent.click(screen.getByText(i18n.t('sdk:save')))
+  await waitFor(() => expect(navigate).toHaveBeenCalledWith('/items/x'))
+  expect(JSON.parse(String(fetch.mock.calls.filter(([, init]) => init.method === 'PATCH').at(-1)![1].body))).toEqual({ name: 'Corrected' })
+})
+test('ref immutable code is bound to status 409 and does not widen other conflicts', () => {
+  expect(failureState(new ApiFailure(409, 'ref_immutable'))).toEqual({ kind: 'refImmutable' })
+  expect(failureState(new ApiFailure(422, 'ref_immutable'))).toEqual({ kind: 'network' })
+  expect(failureState(new ApiFailure(409, 'constraint_conflict'))).toEqual({ kind: 'network' })
 })
 test('generic constraint_conflict retains the current network fallback', async () => {
   render(view(async (_url, init) => init.method === 'PATCH' ? json({ error: 'constraint_conflict' }, 409) : json(row), 'edit'))

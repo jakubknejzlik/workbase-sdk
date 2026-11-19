@@ -73,7 +73,7 @@ export function validateLock(input: unknown): SchemaLock {
     const ref = table.foreignKeys.find(f => f.columns.length === 2 && f.columns[0] === 'organization_id' && f.columns[1] === c.name && f.targetColumns.join(',') === 'organization_id,id')
     return [c.name, { ...c, ...(ref ? { type: 'ref', entity: ref.table } : {}) }]
   })) }]))
-  for (const table of lock.tables) validateEntityConstraints(table.constraints ?? [], entities[table.name].fields, (_path, message) => invalid(`${table.name}: ${message}`), entities)
+  for (const table of lock.tables) validateEntityConstraints(table.constraints ?? [], entities[table.name].fields, (_path, message) => invalid(`${table.name}: ${message}`), entities, table.name)
   unique(lock.entities.map(e => e.id), 'entity ID')
   unique(lock.entities.flatMap(e => e.fields.map(f => f.id)), 'field ID')
   unique(lock.entities.map(e => e.logicalName), 'logical entity')

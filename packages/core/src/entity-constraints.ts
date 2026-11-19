@@ -7,7 +7,12 @@ export const MAX_UNIQUE_CONSTRAINT_FIELDS = 16
 export const uniquePredicateSchema = z.strictObject({
   field: identifier, op: z.literal('eq'), value: z.union([z.string().refine(value => !value.includes('\u0000'), 'SQL literals cannot contain NUL'), z.number().finite(), z.boolean()]),
 })
-/** Typed one-hop ref equality uses `field == through.targetField`: both endpoints
+/** Typed referenced-field immutability: stored ref `field` of the constrained entity
+ * cannot change (IS NOT semantics: NULL<->value changes, NULL->NULL is a no-op)
+ * while at least one same-organization row of `referencedBy.entity` points at the
+ * row through its stored ref `referencedBy.field`. No status filter, no expressions.
+ *
+ * Typed one-hop ref equality uses `field == through.targetField`: both endpoints
  * are stored refs to the same entity. Null equals null; a null hop projects null,
  * while a non-null hop must resolve in the same organization. No expressions.
  * Unique NULLs are distinct: a tuple containing any NULL does not conflict. All stored
@@ -15,6 +20,7 @@ export const uniquePredicateSchema = z.strictObject({
  * Organization scope is supplied by the SDK and cannot be authored here.
  */
 export const entityConstraintSchema = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('ref_immutable'), name: identifier.max(63), field: identifier, referencedBy: z.strictObject({ entity: identifier, field: identifier }) }),
   z.strictObject({ kind: z.literal('ref_equality'), name: identifier.max(63), field: identifier, through: identifier, targetField: identifier }),
   z.strictObject({ kind: z.literal('unique'), name: identifier.max(63), fields: z.array(identifier).min(1).max(MAX_UNIQUE_CONSTRAINT_FIELDS), where: uniquePredicateSchema.optional() }),
 ])
@@ -22,8 +28,10 @@ export const entityConstraintsSchema = z.array(entityConstraintSchema).max(32)
 export type EntityConstraint = z.infer<typeof entityConstraintSchema>
 export type UniqueConstraint = Extract<EntityConstraint, { kind: 'unique' }>
 export type RefEqualityConstraint = Extract<EntityConstraint, { kind: 'ref_equality' }>
+export type RefImmutableConstraint = Extract<EntityConstraint, { kind: 'ref_immutable' }>
 type ConstraintField = { computed?: unknown; implicit?: boolean; type?: string; entity?: string; values?: string[]; sqlType?: string; checks?: string[] }
 export const refEqualityToken = (table: string, name: string) => uniqueIndexName(table, name).replace('workbase_unique_', 'workbase_ref_equality_')
+export const refImmutableToken = (table: string, name: string) => uniqueIndexName(table, name).replace('workbase_unique_', 'workbase_ref_immutable_')
 
 /** SQLite's generated column identity includes the SDK-owned organization scope. */
 export function uniqueConstraintIdentity(entity: string, fields: readonly string[]) {
@@ -31,11 +39,21 @@ export function uniqueConstraintIdentity(entity: string, fields: readonly string
 }
 
 /** Shared by the literal DSL, normalized configs and lock validation. */
-export function validateEntityConstraints(constraints: readonly EntityConstraint[], fields: Record<string, ConstraintField>, fail: (path: (string | number)[], message: string) => never, entities?: Record<string, { fields: Record<string, ConstraintField> }>) {
+export function validateEntityConstraints(constraints: readonly EntityConstraint[], fields: Record<string, ConstraintField>, fail: (path: (string | number)[], message: string) => never, entities?: Record<string, { fields: Record<string, ConstraintField> }>, self?: string) {
   const names = new Set<string>()
   for (const [i, constraint] of constraints.entries()) {
     if (names.has(constraint.name)) fail([i, 'name'], 'Duplicate constraint name')
     names.add(constraint.name)
+    if (constraint.kind === 'ref_immutable') {
+      const field = fields[constraint.field]
+      if (!field || field.computed || field.implicit || field.type !== 'ref' || !field.entity) fail([i, 'field'], 'Immutability requires a stored authored ref field')
+      if (entities) {
+        const referencing = entities[constraint.referencedBy.entity]?.fields[constraint.referencedBy.field]
+        if (!entities[constraint.referencedBy.entity]) fail([i, 'referencedBy', 'entity'], 'Unknown referencing entity')
+        if (!referencing || referencing.computed || referencing.implicit || referencing.type !== 'ref' || referencing.entity !== self) fail([i, 'referencedBy', 'field'], 'Immutability requires a stored authored ref field that targets the constrained entity')
+      }
+      continue
+    }
     if (constraint.kind === 'ref_equality') {
       for (const key of ['field', 'through'] as const) {
         const field = fields[constraint[key]]

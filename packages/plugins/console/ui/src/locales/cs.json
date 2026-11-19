@@ -4,6 +4,7 @@
   "notFound": "Nenalezeno",
   "forbidden": "Přístup odepřen",
   "refEqualityMismatch": "Vybrané odkazy si neodpovídají. Změňte hodnoty a zkuste to znovu.",
+  "refImmutable": "Tento záznam používají jiné záznamy, proto už nelze tuto hodnotu změnit. Ponechte původní hodnotu a zkuste to znovu.",
   "uniqueConflict": "Záznam se stejnou kombinací hodnot již existuje. Změňte hodnoty a zkuste to znovu.",
   "network": "Chyba sítě",
   "validation": "Zkontrolujte formulář",

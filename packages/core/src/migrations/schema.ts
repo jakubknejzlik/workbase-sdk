@@ -1,4 +1,4 @@
-import { uniqueIndexName, refEqualityToken, type EntityConstraint, type UniqueConstraint, type RefEqualityConstraint } from '../entity-constraints'
+import { uniqueIndexName, refEqualityToken, refImmutableToken, type EntityConstraint, type UniqueConstraint, type RefEqualityConstraint, type RefImmutableConstraint } from '../entity-constraints'
 import { systemSchema } from './system-schema'
 export { systemSchema } from './system-schema'
 import { workflowSchema } from '../workflow-schema'
@@ -99,8 +99,8 @@ export function initialSchema(config: InstanceConfig) {
   const legacy = !usesSdkBaseline(config)
     ? configuredSystemSchema(config) + opsSchema + (config.account?.entity === 'users' ? betterAuthSchema.replace('user_id TEXT NOT NULL REFERENCES users(id)', 'user_id TEXT NOT NULL REFERENCES "user"(id)') : betterAuthSchema) + emailDeliverySchema + workflowSchema
     : ''
-  if (usesSdkBaseline(config)) return physicalTables(config).map(renderTable).join('\n') + renderRefEqualities(physicalTables(config)) + '\n'
-  return legacy + Object.entries(config.entities).filter(([n]) => !(n === 'users' && config.account?.entity === n)).map(([n, e]) => createEntity(n, e)).join('\n') + renderRefEqualities(physicalTables(config)) + '\n' + revisionSQL(config.revision) + '\n'
+  if (usesSdkBaseline(config)) return physicalTables(config).map(renderTable).join('\n') + renderConstraintTriggers(physicalTables(config)) + '\n'
+  return legacy + Object.entries(config.entities).filter(([n]) => !(n === 'users' && config.account?.entity === n)).map(([n, e]) => createEntity(n, e)).join('\n') + renderConstraintTriggers(physicalTables(config)) + '\n' + revisionSQL(config.revision) + '\n'
 }
 
 /** Fresh schemas support configured application roles and the explicit users/account extension.
@@ -120,7 +120,7 @@ function configuredSystemSchema(config: InstanceConfig) {
 /** Null equals null. A null hop projects null; a non-null hop must resolve in the
  * same organization. Missing/foreign refs never pass, and composite FKs remain.
  * The reverse guard preserves equality, not slice 4's stricter immutability. */
-export function refEqualityDefinition(table: TableSpec, constraint: RefEqualityConstraint) {
+export function refEqualityDefinition(table: TableSpec, constraint: RefEqualityConstraint, tables: readonly TableSpec[] = []) {
   const target = table.foreignKeys.find(f => f.columns.length === 2 && f.columns[0] === 'organization_id' && f.columns[1] === constraint.through)!.table
   const token = refEqualityToken(table.name, constraint.name)
   const source = quote(table.name), parent = quote(target)
@@ -128,13 +128,18 @@ export function refEqualityDefinition(table: TableSpec, constraint: RefEqualityC
   const mismatch = (row: string) => `(${row}.${hop} IS NULL AND ${row}.${field} IS NOT NULL) OR (${row}.${hop} IS NOT NULL AND NOT EXISTS (SELECT 1 FROM ${parent} AS target WHERE target."organization_id" = ${row}."organization_id" AND target."id" = ${row}.${hop} AND target.${targetField} IS ${row}.${field}))`
   const reverseMismatch = (row: string) => `EXISTS (SELECT 1 FROM ${source} AS source WHERE source."organization_id" = ${row}."organization_id" AND source.${hop} = ${row}."id" AND source.${field} IS NOT NEW.${targetField})`
   const abort = `SELECT RAISE(ABORT, ${literal(token)});`
+  // A replacement has no OLD row in AFTER INSERT. Consult its captured state
+  // here too, so equality cannot win merely because its AFTER trigger runs first.
+  const pendingImmutableChecks = (table: TableSpec | undefined) => table?.constraints?.filter((c): c is RefImmutableConstraint => c.kind === 'ref_immutable').map(c => refImmutableDefinition(table, c).check).join(' ') ?? ''
+  const sourceChecks = pendingImmutableChecks(table)
+  const immutableChecks = pendingImmutableChecks(tables.find(t => t.name === target))
   const triggers = [
-    { name: `${token}_insert`, sql: `CREATE TRIGGER ${quote(`${token}_insert`)} AFTER INSERT ON ${source} WHEN ${mismatch('NEW')} BEGIN ${abort} END;` },
-    { name: `${token}_update`, sql: `CREATE TRIGGER ${quote(`${token}_update`)} AFTER UPDATE OF ${field}, ${hop}, "organization_id" ON ${source} WHEN ${mismatch('NEW')} BEGIN ${abort} END;` },
+    { name: `${token}_insert`, sql: `CREATE TRIGGER ${quote(`${token}_insert`)} AFTER INSERT ON ${source} WHEN ${mismatch('NEW')} BEGIN ${sourceChecks}${sourceChecks ? ' ' : ''}${abort} END;` },
+    { name: `${token}_update`, sql: `CREATE TRIGGER ${quote(`${token}_update`)} AFTER UPDATE OF ${field}, ${hop}, "organization_id" ON ${source} WHEN ${mismatch('NEW')} BEGIN ${sourceChecks}${sourceChecks ? ' ' : ''}${abort} END;` },
     { name: `${token}_reverse`, sql: `CREATE TRIGGER ${quote(`${token}_reverse`)} AFTER UPDATE OF ${targetField} ON ${parent} WHEN NEW.${targetField} IS NOT OLD.${targetField} AND ${reverseMismatch('OLD')} BEGIN ${abort} END;` },
     // INSERT OR REPLACE can change a target field without firing UPDATE. The
     // distinct single-word role suffix keeps the global trigger names injective.
-    { name: `${token}_replace`, sql: `CREATE TRIGGER ${quote(`${token}_replace`)} AFTER INSERT ON ${parent} WHEN ${reverseMismatch('NEW')} BEGIN ${abort} END;` },
+    { name: `${token}_replace`, sql: `CREATE TRIGGER ${quote(`${token}_replace`)} AFTER INSERT ON ${parent} WHEN ${reverseMismatch('NEW')} BEGIN ${immutableChecks}${immutableChecks ? ' ' : ''}${abort} END;` },
   ]
   // CHECK preflight reads existing data without touching domain or audit rows.
   const guard = quote(`${token}_guard`)
@@ -143,11 +148,43 @@ INSERT INTO ${guard} SELECT 0 FROM ${source} AS source WHERE ${mismatch('source'
 DROP TABLE ${guard};`
   return { token, target, triggers, preflight }
 }
-export function renderRefEqualities(tables: readonly TableSpec[]) {
-  const sql = tables.flatMap(table => (table.constraints ?? []).flatMap(c => c.kind === 'ref_equality' ? refEqualityDefinition(table, c).triggers.map(t => t.sql) : []))
+/** Guard actual writes. BEFORE INSERT snapshots conflicting referenced identities;
+ * AFTER INSERT validates the stored result, so UPSERT proposals alone never fail.
+ * The snapshot also detects a row removed by a unique-key REPLACE before the next
+ * row of a multi-row statement can reuse its id. No recursive DELETE trigger is used.
+ * Ordinary field changes still fail BEFORE UPDATE, ahead of equality's AFTER guards.
+ */
+export function refImmutableDefinition(table: TableSpec, constraint: RefImmutableConstraint) {
+  const token = refImmutableToken(table.name, constraint.name)
+  const self = quote(table.name), source = quote(constraint.referencedBy.entity)
+  const field = quote(constraint.field), hop = quote(constraint.referencedBy.field)
+  const guardName = `${token}_snapshot`, guard = quote(guardName)
+  const referenced = (row: string) => `EXISTS (SELECT 1 FROM ${source} AS referrer WHERE referrer."organization_id" = ${row}."organization_id" AND referrer.${hop} = ${row}."id")`
+  const setup = [{ name: guardName, sql: `CREATE TABLE ${guard} ("id" TEXT PRIMARY KEY, "organization_id" TEXT NOT NULL, "value" TEXT);` }]
+  // Match SQLite UNIQUE semantics: NULLs do not conflict, and partial keys only
+  // collide when both stored and proposed rows satisfy the declared predicate.
+  const conflicts = [`previous."id" = NEW."id"`, ...table.constraints?.filter((c): c is UniqueConstraint => c.kind === 'unique').map(c => `(${['organization_id', ...c.fields].map(f => `previous.${quote(f)} = NEW.${quote(f)}`).join(' AND ')}${c.where ? ` AND previous.${quote(c.where.field)} = ${literal(c.where.value)} AND NEW.${quote(c.where.field)} = ${literal(c.where.value)}` : ''})`) ?? []].join(' OR ')
+  const capture = (updating: boolean) => `DELETE FROM ${guard}; INSERT INTO ${guard} SELECT previous."id", previous."organization_id", previous.${field} FROM ${self} AS previous WHERE (${conflicts})${updating ? ' AND previous."id" IS NOT OLD."id"' : ''} AND ${referenced('previous')};`
+  const mismatch = `EXISTS (SELECT 1 FROM ${guard} AS previous WHERE NOT EXISTS (SELECT 1 FROM ${self} AS current WHERE current."id" = previous."id" AND current."organization_id" = previous."organization_id" AND current.${field} IS previous."value"))`
+  const check = `SELECT RAISE(ABORT, ${literal(token)}) WHERE ${mismatch};`
+  const triggers = [
+    { name: `${token}_update`, sql: `CREATE TRIGGER ${quote(`${token}_update`)} BEFORE UPDATE ON ${self} BEGIN SELECT RAISE(ABORT, ${literal(token)}) WHERE NEW.${field} IS NOT OLD.${field} AND ${referenced('OLD')}; ${capture(true)} END;` },
+    { name: `${token}_capture`, sql: `CREATE TRIGGER ${quote(`${token}_capture`)} BEFORE INSERT ON ${self} BEGIN ${capture(false)} END;` },
+    { name: `${token}_replace`, sql: `CREATE TRIGGER ${quote(`${token}_replace`)} AFTER INSERT ON ${self} BEGIN ${check} DELETE FROM ${guard}; END;` },
+    { name: `${token}_updated`, sql: `CREATE TRIGGER ${quote(`${token}_updated`)} AFTER UPDATE ON ${self} BEGIN ${check} DELETE FROM ${guard}; END;` },
+  ]
+  return { token, setup, triggers, check }
+}
+/** Trigger-backed constraints install after every table exists; unique indexes are rendered inline. */
+export function constraintTriggers(table: TableSpec, constraint: EntityConstraint, tables: readonly TableSpec[] = []): { preflight?: string; setup?: { name: string; sql: string }[]; triggers: { name: string; sql: string }[] } {
+  return constraint.kind === 'ref_equality' ? refEqualityDefinition(table, constraint, tables) : constraint.kind === 'ref_immutable' ? refImmutableDefinition(table, constraint) : { triggers: [] }
+}
+export function renderConstraintTriggers(tables: readonly TableSpec[]) {
+  const definitions = tables.flatMap(table => (table.constraints ?? []).map(c => constraintTriggers(table, c, tables)))
+  const sql = [...definitions.flatMap(d => d.setup?.map(t => t.sql) ?? []), ...definitions.flatMap(d => d.triggers.map(t => t.sql))]
   return sql.length ? '\n' + sql.join('\n') : ''
 }
 export function dropConstraint(table: TableSpec, constraint: EntityConstraint) {
   return constraint.kind === 'unique' ? `DROP INDEX ${quote(uniqueIndexName(table.name, constraint.name))};`
-    : refEqualityDefinition(table, constraint).triggers.map(t => `DROP TRIGGER ${quote(t.name)};`).join('\n')
+    : [...constraintTriggers(table, constraint).triggers.map(t => `DROP TRIGGER ${quote(t.name)};`), ...constraintTriggers(table, constraint).setup?.map(t => `DROP TABLE ${quote(t.name)};`) ?? []].join('\n')
 }

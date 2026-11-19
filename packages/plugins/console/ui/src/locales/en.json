@@ -4,6 +4,7 @@
   "notFound": "Not found",
   "forbidden": "Access denied",
   "refEqualityMismatch": "The selected references do not agree. Change the values and try again.",
+  "refImmutable": "This record is referenced by other records, so this value can no longer be changed. Keep the original value and try again.",
   "uniqueConflict": "A record with the same combination of values already exists. Change the values and try again.",
   "network": "Network error",
   "validation": "Check the form",
