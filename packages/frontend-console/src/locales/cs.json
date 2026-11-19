@@ -65,6 +65,8 @@
   "invalidLink": "Odkaz vypršel nebo je neplatný",
   "invalidLinkDescription": "Pokračujte vyžádáním nového přihlašovacího odkazu.",
   "requestFailed": "Stránku nelze načíst",
+  "listRequestFailedDescription": "Zkuste načtení zopakovat. Vaše nastavení seznamu zůstává zachované.",
+  "listRetry": "Zkusit znovu",
   "requestFailedDescription": "Zkuste to znovu.",
   "skipContent": "Přejít na obsah",
   "search": "Hledat",

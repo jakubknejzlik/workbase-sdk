@@ -485,7 +485,7 @@ function ApplicationAccessBody(props: AccessContext & { rowMenu?: boolean }) {
         <Button type="button" variant="ghost" size="sm" className="relative h-6 max-w-full gap-1 px-1 py-0 has-[>svg]:px-1 pointer-coarse:after:absolute pointer-coarse:after:-inset-y-2.5 pointer-coarse:after:inset-x-0 pointer-coarse:after:min-w-11" disabled={blocked}
           aria-label={`${triggerText} – ${stateLabel}, ${t('rowAccessActions')}`} onFocus={event => { trigger.current = event.currentTarget }} onClick={event => { trigger.current = event.currentTarget }}>
           <span aria-hidden="true" className={`size-2 shrink-0 rounded-full ${dotClass}`} />
-          <span className="min-w-0 whitespace-normal text-left [overflow-wrap:anywhere]">{triggerText}</span>
+          <span className="min-w-0 truncate text-left">{triggerText}</span>
           <svg aria-hidden="true" className="size-3 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6" /></svg>
         </Button>
       </DropdownMenuTrigger></TooltipTrigger><TooltipContent>{stateLabel}</TooltipContent></Tooltip></TooltipProvider>

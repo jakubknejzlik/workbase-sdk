@@ -34,6 +34,7 @@ import {
 import { useDataTable } from './DataTableProvider'
 import { useTablePresentation, columnClass } from '../../../../data-table/presentation'
 import { AlertCircle } from 'lucide-react'
+import { Button } from '../ui/button'
 
 export const DataTableContent = <RecordType,>() => {
   const { table, isLoading, error, onRowClick, getRowTestId } = useDataTable<RecordType>()
@@ -50,7 +51,6 @@ export const DataTableContent = <RecordType,>() => {
 
   return (
     <div className="relative">
-      {showError && hasRows && <div role="alert" className="flex items-center gap-2 p-3 text-destructive"><AlertCircle aria-hidden="true" className="size-4" /><p>{error.message}</p></div>}
       <Table className={`table-fixed ${presentation.tableClass ?? 'min-w-[600px]'}`} aria-label={presentation.label}>
         <colgroup>
           {visibleColumns.map((column) => {
@@ -87,19 +87,7 @@ export const DataTableContent = <RecordType,>() => {
           ))}
         </TableHeader>
         <TableBody className={presentation.stale ? 'opacity-90' : undefined}>
-          {showError && !hasRows ? (
-            <TableRow>
-              <TableCell colSpan={Math.max(visibleColumns.length, 1)} className="h-32">
-                <div role="alert" className="flex flex-col items-center justify-center gap-2 text-destructive">
-                  <AlertCircle className="h-8 w-8" />
-                  <p className="font-medium">{presentation.errorLabel}</p>
-                  <p className="text-sm text-muted-foreground max-w-md text-center">
-                    {error.message}
-                  </p>
-                </div>
-              </TableCell>
-            </TableRow>
-          ) : hasRows ? (
+          {hasRows ? (
             table.getRowModel().rows.map((row) => (
               <TableRow
                 key={row.id}
@@ -136,13 +124,7 @@ export const DataTableContent = <RecordType,>() => {
                 })}
               </TableRow>
             ))
-          ) : showNoResults ? (
-            <TableRow>
-              <TableCell colSpan={Math.max(visibleColumns.length, 1)} className="h-24 text-center">
-                {presentation.emptyContent}
-              </TableCell>
-            </TableRow>
-          ) : (
+          ) : showNoResults || showError ? null : (
             // Show empty body during loading to maintain table height
             <TableRow>
               <TableCell colSpan={Math.max(visibleColumns.length, 1)} className="h-24">
@@ -152,6 +134,15 @@ export const DataTableContent = <RecordType,>() => {
           )}
         </TableBody>
       </Table>
+      {/* Feedback belongs to the visible panel, outside Table's x scroller. */}
+      {showNoResults && <div className="min-h-24 w-full text-center">{presentation.emptyContent}</div>}
+      {showError && <div role="alert" className="flex min-h-32 w-full flex-col items-center justify-center gap-2 p-4 text-center text-destructive">
+        <AlertCircle aria-hidden="true" className="h-8 w-8" />
+        <p className="font-medium">{presentation.errorLabel}</p>
+        {error.message !== presentation.errorLabel && <p className="max-w-md text-sm text-muted-foreground">{error.message}</p>}
+        {presentation.errorDescription && <p className="max-w-md text-sm text-muted-foreground">{presentation.errorDescription}</p>}
+        {presentation.onRetry && presentation.retryLabel && <Button type="button" variant="outline" onClick={presentation.onRetry}>{presentation.retryLabel}</Button>}
+      </div>}
       {isLoading && (
         <div
           data-testid="data-table-loading"

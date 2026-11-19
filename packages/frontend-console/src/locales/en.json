@@ -63,6 +63,8 @@
   "invalidLink": "Link expired or invalid",
   "invalidLinkDescription": "Request a new sign-in link to continue.",
   "requestFailed": "Unable to load this page",
+  "listRequestFailedDescription": "Try loading again. Your list settings are preserved.",
+  "listRetry": "Try again",
   "requestFailedDescription": "Please try again.",
   "skipContent": "Skip to content",
   "search": "Search",

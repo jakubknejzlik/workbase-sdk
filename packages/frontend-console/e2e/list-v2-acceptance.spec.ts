@@ -1,4 +1,4 @@
-import { test, expect, type Page } from '@playwright/test'
+import { test, expect, type Page, type Locator } from '@playwright/test'
 import setup from './runtime/setup'
 import { workers, expectedRows, expectedCounts, type Selection } from './runtime/list-v2-data'
 import { capture, provenance, result, record } from './list-v2-evidence'
@@ -38,6 +38,23 @@ async function counts(page: Page, selection: Selection = {}) {
   if (selection.actor === 'staff') await expect(page.getByRole('button', { name: /^Pending invitations/ })).toHaveCount(0)
 }
 async function tab(page: Page, view: string) { await page.getByRole('group', { name: en.listViews }).getByRole('button', { name: new RegExp(`^${labels[view]}`) }).click() }
+// DOM visibility does not prove intersection with a clipped table's visible area.
+async function insideViewport(locator: Locator) {
+  await expect(locator).toBeVisible()
+  const geometry = await locator.evaluate(element => {
+    const rect = element.getBoundingClientRect()
+    const clips = [document.documentElement.getBoundingClientRect(), ...Array.from((function* () { for (let parent = element.parentElement; parent; parent = parent.parentElement) yield parent })()).filter(parent => /auto|scroll|hidden|clip/.test(getComputedStyle(parent).overflowX)).map(parent => parent.getBoundingClientRect())]
+    return { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom, clipLeft: Math.max(0, ...clips.map(clip => clip.left)), clipRight: Math.min(innerWidth, ...clips.map(clip => clip.right)), height: innerHeight }
+  })
+  observations.push({ kind: 'viewport-intersection', geometry })
+  expect(geometry.left).toBeGreaterThanOrEqual(geometry.clipLeft)
+  expect(geometry.right).toBeLessThanOrEqual(geometry.clipRight)
+  expect(geometry.top).toBeGreaterThanOrEqual(0)
+  expect(geometry.bottom).toBeLessThanOrEqual(geometry.height)
+}
+async function atScrollStart(page: Page) {
+  await expect.poll(() => list(page).locator('[data-slot="table-container"]').evaluate(element => element.scrollLeft)).toBe(0)
+}
 async function openPanel(page: Page) { await page.getByRole('button', { name: en.sortAndFilter, exact: true }).click(); await expect(panel(page)).toBeVisible() }
 async function chooseTeam(page: Page, name: string) { await page.getByRole('combobox', { name: 'Team', exact: true }).click(); await page.getByRole('option', { name, exact: true }).click() }
 async function save(page: Page, name: string) {
@@ -86,6 +103,75 @@ test('paging: exact total, next, previous, last and page-size reset', async ({ p
   await footer(page).getByRole('button', { name: '5', exact: true }).click(); await rows(page, {}, 40)
   await expect(footer(page).getByRole('button', { name: en.nextPage, exact: true })).toBeDisabled()
   await footer(page).getByRole('combobox', { name: en.rowsPerPage, exact: true }).selectOption('20'); await rows(page, {}, 0, 20)
+})
+
+test('G1: desktop configured access column fits beside separate Actions without scrolling or coverage', async ({ page }) => {
+  await page.goto(route); await settled(page); await rows(page); await atScrollStart(page)
+  const headers = list(page).getByRole('columnheader')
+  await expect(headers).toHaveCount(6)
+  for (const header of await headers.all()) await insideViewport(header)
+  const accessHeader = list(page).getByRole('columnheader', { name: en.rowAccess, exact: true })
+  const actionsHeader = list(page).getByRole('columnheader', { name: en.actions, exact: true })
+  const access = await accessHeader.boundingBox(); const actions = await actionsHeader.boundingBox()
+  expect(access!.x + access!.width).toBeLessThanOrEqual(actions!.x + 1)
+  const buttons = page.getByRole('button', { name: new RegExp(en.rowAccessActions) })
+  await expect(buttons).toHaveCount(10)
+  for (const button of await buttons.all()) {
+    await insideViewport(button)
+    expect(await button.evaluate(element => {
+      const rect = element.getBoundingClientRect()
+      return [rect.left + 1, rect.right - 1].every(x => element.contains(document.elementFromPoint(x, rect.top + rect.height / 2)))
+    })).toBe(true)
+  }
+  await atScrollStart(page)
+})
+
+for (const state of ['empty', 'error'] as const) test(`G2: mobile ${state} message stays in the viewport at scrollLeft zero`, async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 900 })
+  if (state === 'error') await page.route('**/query', intercepted => {
+    const query = intercepted.request().postDataJSON()
+    return query.entity === 'worker' && query.includeTotal ? intercepted.fulfill({ status: 503, contentType: 'application/json', body: '{"error":"list_v2_injected_failure"}' }) : intercepted.continue()
+  })
+  await page.goto(route)
+  if (state === 'empty') { await settled(page); await tab(page, 'empty'); await rows(page, { view: 'empty' }) }
+  const message = list(page).getByText(state === 'empty' ? en.noResults : en.requestFailed, { exact: true }).first()
+  await expect(message).toBeVisible(); await atScrollStart(page); await insideViewport(message); await atScrollStart(page)
+  if (state === 'error') {
+    await insideViewport(list(page).getByRole('alert'))
+    await insideViewport(list(page).getByText(en.listRequestFailedDescription, { exact: true }))
+    await insideViewport(list(page).getByRole('button', { name: en.listRetry, exact: true }))
+    await atScrollStart(page)
+  }
+})
+
+test('G3: in-panel retry repeats the failed query and preserves committed settings and page', async ({ page }) => {
+  await page.goto(route); await settled(page)
+  await page.getByRole('searchbox', { name: en.search, exact: true }).fill('Worker')
+  await expect.poll(() => new URL(page.url()).searchParams.get('search')).toBe('Worker')
+  await rows(page, { search: 'Worker' }); await tab(page, 'inactive'); await rows(page, { view: 'inactive', search: 'Worker' })
+  await expect(footer(page).getByRole('button', { name: '2', exact: true })).toBeEnabled()
+  let failing = true
+  const queries: unknown[] = []
+  await page.route('**/query', intercepted => {
+    const query = intercepted.request().postDataJSON()
+    if (query.entity !== 'worker' || !query.includeTotal) return intercepted.continue()
+    queries.push(query)
+    return failing ? intercepted.fulfill({ status: 503, contentType: 'application/json', body: '{"error":"list_v2_injected_failure"}' }) : intercepted.continue()
+  })
+  await footer(page).getByRole('button', { name: '2', exact: true }).click()
+  const alert = list(page).getByRole('alert')
+  await expect.soft(alert.getByText(en.requestFailed, { exact: true })).toHaveCount(1)
+  await expect.soft(alert).toContainText('Your list settings are preserved.')
+  const retry = alert.getByRole('button', { name: 'Try again', exact: true })
+  await expect(retry).toBeVisible(); await insideViewport(retry)
+  const failedUrl = page.url(); expect(new URL(failedUrl).searchParams.get('page')).toBe('2')
+  expect(queries).toHaveLength(1)
+  failing = false; await retry.click()
+  await rows(page, { view: 'inactive', search: 'Worker' }, 10); await counts(page, { view: 'inactive', search: 'Worker' })
+  expect(queries).toHaveLength(2); expect(queries[1]).toEqual(queries[0]); expect(page.url()).toBe(failedUrl)
+  await expect(page.getByRole('searchbox', { name: en.search, exact: true })).toHaveValue('Worker')
+  await expect(page.getByRole('group', { name: en.listViews }).getByRole('button', { name: /^Inactive workers/ })).toHaveAttribute('aria-pressed', 'true')
+  await expect(alert).toHaveCount(0)
 })
 
 test('tab counts replace only the view under search, relation filter and restricted grants', async ({ page, context }) => {
