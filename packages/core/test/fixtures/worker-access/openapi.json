@@ -1444,6 +1444,9 @@
           "includeTotal": {
             "type": "boolean"
           },
+          "includeViewTotals": {
+            "type": "boolean"
+          },
           "limit": {
             "maximum": 100,
             "minimum": 1,
@@ -1554,6 +1557,11 @@
             "maxItems": 7,
             "minItems": 1,
             "type": "array"
+          },
+          "view": {
+            "maxLength": 100,
+            "minLength": 1,
+            "type": "string"
           },
           "where": {
             "$ref": "#/components/schemas/Query_users/$defs/__schema0"
@@ -2645,6 +2653,9 @@
           "includeTotal": {
             "type": "boolean"
           },
+          "includeViewTotals": {
+            "type": "boolean"
+          },
           "labelWhere": {
             "additionalProperties": {
               "additionalProperties": false,
@@ -2796,6 +2807,11 @@
             "minItems": 1,
             "type": "array"
           },
+          "view": {
+            "maxLength": 100,
+            "minLength": 1,
+            "type": "string"
+          },
           "where": {
             "$ref": "#/components/schemas/Query_worker/$defs/__schema0"
           }
@@ -2837,6 +2853,14 @@
             "description": "Exact authorized, filtered total when includeTotal is true; independent of paging.",
             "minimum": 0,
             "type": "integer"
+          },
+          "viewTotals": {
+            "additionalProperties": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "description": "Exact totals keyed by readable configured view ID when includeViewTotals is true. Unreadable views are omitted.",
+            "type": "object"
           }
         },
         "required": [
@@ -2876,6 +2900,14 @@
             "description": "Exact authorized, filtered total when includeTotal is true; independent of paging.",
             "minimum": 0,
             "type": "integer"
+          },
+          "viewTotals": {
+            "additionalProperties": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "description": "Exact totals keyed by readable configured view ID when includeViewTotals is true. Unreadable views are omitted.",
+            "type": "object"
           }
         },
         "required": [

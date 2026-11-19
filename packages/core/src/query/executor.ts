@@ -31,7 +31,7 @@ function projectLabel(value: string | null) {
   }
   return label
 }
-export interface QueryResult { data: Row[]; next_cursor: string | null; total?: number; offset?: number; limit?: number }
+export interface QueryResult { data: Row[]; next_cursor: string | null; total?: number; viewTotals?: Record<string, number>; offset?: number; limit?: number }
 export type { QueryLog } from './observability'
 import { emptyQueryLog, recordQuery, type QueryLog } from './observability'
 /** Count configured shape only after validation; never inspect policy trees or values. */
@@ -89,6 +89,14 @@ export async function executeQuery(kernel: KernelRegistry, scope: Scope, db: D1D
         total = Number(count[0].total)
       }
     }
+    let viewTotals: Record<string, number> | undefined
+    if (query.includeViewTotals) {
+      viewTotals = {}
+      if (kernel.tableFilter(query.entity, scope).kind !== 'none') {
+        const counts = await run(validated.viewQueries.map(view => compileListTotal(kernel, scope, view.query, cost)))
+        viewTotals = Object.fromEntries(validated.viewQueries.map((view, index) => [view.id, Number(counts[index][0].total)]))
+      }
+    }
     const data = rows.map(row => projectRootRow(kernel, scope, query!, row))
     type Job = { entity: string; node: Selection; raw: Row[]; out: Row[]; path: QueryPath }
     let level: Job[] = [{ entity: query.entity, node: query, raw: rows, out: data, path: [] }]
@@ -126,7 +134,8 @@ export async function executeQuery(kernel: KernelRegistry, scope: Scope, db: D1D
     resultRows = data.length
     outcome = 'ok'; return { data, next_cursor: nextCursor,
       ...(query.offset !== undefined ? { offset: query.offset, limit: query.limit } : {}),
-      ...(total !== undefined ? { total } : {}) }
+      ...(total !== undefined ? { total } : {}),
+      ...(viewTotals !== undefined ? { viewTotals } : {}) }
   } catch (error) {
     if (error instanceof QueryError && error.cost) cost = error.cost
     outcome = error instanceof ApiError ? error.code : 'query_invalid'
