@@ -149,7 +149,7 @@ test('URL: invalid and forbidden parameters and relation IDs are sanitized', asy
   await expect(page.getByText('North team', { exact: true })).toHaveCount(0)
 })
 
-test('personal views: save, apply, rename, update, delete and reload; settings only', async ({ page }) => {
+test('personal views: save, apply, rename, delete and reload; settings only', async ({ page }) => {
   await page.goto(route); await settled(page); await tab(page, 'inactive'); await rows(page, { view: 'inactive' }); await save(page, 'My inactive')
   await page.reload(); await settled(page); await expect(savedTrigger(page)).toHaveText(en.savedViewsMenu)
   await tab(page, 'active'); await rows(page, { view: 'active' }); await savedTrigger(page).click()
@@ -157,14 +157,23 @@ test('personal views: save, apply, rename, update, delete and reload; settings o
   await savedMenu(page).getByRole('button', { name: en.savedViewsApplyView, exact: true }).click(); await rows(page, { view: 'inactive' })
   await savedTrigger(page).click(); await savedMenu(page).getByRole('button', { name: en.savedViewsRenameThis, exact: true }).click()
   await page.getByRole('textbox', { name: en.savedViewsName, exact: true }).fill('Renamed inactive'); await page.getByRole('dialog').filter({ has: page.getByRole('textbox', { name: en.savedViewsName, exact: true }) }).getByRole('button', { name: en.savedViewsConfirm, exact: true }).click()
-  await tab(page, 'active'); await rows(page, { view: 'active' }); await page.getByRole('button', { name: en.savedViewsSaveChanges, exact: true }).click(); await page.getByRole('dialog').filter({ has: page.getByRole('textbox', { name: en.savedViewsName, exact: true }) }).getByRole('button', { name: en.savedViewsConfirm, exact: true }).click()
   const stored = await page.evaluate(() => Object.keys(localStorage).filter(key => key.startsWith('workbase:saved-views:')).map(key => JSON.parse(localStorage.getItem(key)!)))
   record('observations', 'personal-views-storage', stored)
   expect(stored).toHaveLength(1)
   for (const entry of stored[0].entries) expect(Object.keys(entry.search).sort()).toEqual(['direction', 'sort', 'view'])
-  await page.reload(); await settled(page); await savedTrigger(page).click(); await savedMenu(page).getByRole('button', { name: 'Renamed inactive', exact: true }).click(); await savedMenu(page).getByRole('button', { name: en.savedViewsApplyView, exact: true }).click(); await rows(page, { view: 'active' })
+  await page.reload(); await settled(page); await savedTrigger(page).click(); await savedMenu(page).getByRole('button', { name: 'Renamed inactive', exact: true }).click(); await savedMenu(page).getByRole('button', { name: en.savedViewsApplyView, exact: true }).click(); await rows(page, { view: 'inactive' })
   await savedTrigger(page).click(); await savedMenu(page).getByRole('button', { name: en.savedViewsDeleteThis, exact: true }).click(); await page.getByRole('button', { name: en.savedViewsDelete, exact: true }).click()
   await page.reload(); await settled(page); await savedTrigger(page).click(); await expect(savedMenu(page).getByRole('button', { name: 'Renamed inactive', exact: true })).toHaveCount(0)
+})
+
+test('personal views: update current view through the naming dialog and reload', async ({ page }) => {
+  await page.goto(route); await settled(page); await tab(page, 'inactive'); await rows(page, { view: 'inactive' }); await save(page, 'Update me')
+  await tab(page, 'active'); await rows(page, { view: 'active' })
+  await page.getByRole('button', { name: en.savedViewsSaveChanges, exact: true }).click()
+  const naming = page.getByRole('dialog').filter({ has: page.getByRole('textbox', { name: en.savedViewsName, exact: true }) })
+  await naming.getByRole('button', { name: en.savedViewsConfirm, exact: true }).click({ timeout: 5000 })
+  await page.reload(); await settled(page); await tab(page, 'inactive'); await rows(page, { view: 'inactive' })
+  await savedTrigger(page).click(); await savedMenu(page).getByRole('button', { name: 'Update me', exact: true }).click(); await savedMenu(page).getByRole('button', { name: en.savedViewsApplyView, exact: true }).click(); await rows(page, { view: 'active' })
 })
 
 test('same mounted tab: admin → staff → admin must replace rows, totals, counts and personal namespace', async ({ page, context }) => {
