@@ -80,7 +80,8 @@ isNull control must include eq. Invalid/duplicate/empty operator lists are
 rejected. Sources: [list-config.ts](../../packages/core/src/list-config.ts).
 
 Row access is opt-in (`rowAccess: { column: true, placement: 'panel' }`). The
-members provider, account user link, entity create capability and
+members provider, readable row ID, account user link, entity create capability,
+`invitations.create` grants, ability to grant the member role, and
 `invitations.read` gate its presentation; row invitation/query authority is
 checked separately. `signed_in` still means linked account, not a currently
 active session. Sources: [console-presentation.ts](../../packages/core/src/console-presentation.ts) and
