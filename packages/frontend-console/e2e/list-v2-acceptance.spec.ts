@@ -12,7 +12,7 @@ const labels: Record<string, string> = { all: 'All workers', active: 'Active wor
 test.beforeAll(async ({ browser }) => { stop = await setup({ worker: 'list-v2-worker.ts', seed: 'list-v2-seed.ts' }); provenance(browser.version()) })
 test.afterAll(async () => { await stop?.() })
 test.beforeEach(async ({ context, page }) => { observations = []; page.on('response', response => { if (new URL(response.url()).pathname === '/query') void response.json().then(body => observations.push({ kind: 'query', request: response.request().postDataJSON(), status: response.status(), response: body })).catch(() => {}) }); await context.addInitScript(() => localStorage.setItem('console-language', 'en')) })
-test.afterEach(async ({ page }, info) => { observations.push({ kind: 'final', url: page.url(), ids: await ids(page).catch(() => []), footer: await footer(page).textContent().catch(() => null), tabs: await page.getByRole('group', { name: en.listViews }).textContent().catch(() => null) }); record('functionalEvidence', info.title, observations); result(info) })
+test.afterEach(async ({ page }, info) => { observations.push({ kind: 'final', url: page.url(), ids: await ids(page).catch(() => []), footer: await footer(page).textContent().catch(() => null), tabs: await list(page).locator('[data-list-slot="tabs"]').textContent().catch(() => null) }); record('functionalEvidence', info.title, observations); result(info) })
 const list = (page: Page) => page.locator('[data-slot="list-page"]')
 const footer = (page: Page) => list(page).locator('footer')
 const panel = (page: Page) => page.getByRole('group', { name: en.sortAndFilter, exact: true })
@@ -356,7 +356,13 @@ for (const width of [1440, 390, 360]) for (const actor of ['admin', 'staff'] as 
     }
     await page.keyboard.press('Escape')
     await expect(cue).toHaveCount(0)
-  } else await expect(cue).toHaveCount(0)
+  } else {
+    await expect(cue).toHaveCount(0)
+    await page.setViewportSize({ width: 360, height: 1000 })
+    await expect(cue).toHaveAttribute('data-list-overflow', 'end')
+    await page.setViewportSize({ width, height: 1000 })
+    await expect(cue).toHaveCount(0)
+  }
   // Text enlargement may move whole groups, never split Previous/current/Next.
   await page.evaluate(() => { document.documentElement.style.fontSize = '20px' })
   const lookup = page.getByRole('combobox', { name: 'Team', exact: true })
@@ -367,8 +373,40 @@ for (const width of [1440, 390, 360]) for (const actor of ['admin', 'staff'] as 
   const prev = await paging.getByRole('button', { name: copy.previousPage, exact: true }).boundingBox()
   const next = await paging.getByRole('button', { name: copy.nextPage, exact: true }).boundingBox()
   expect(Math.abs(prev!.y - next!.y)).toBeLessThan(2)
+  expect(prev!.x).toBeGreaterThanOrEqual(0)
+  expect(next!.x + next!.width).toBeLessThanOrEqual(width)
   await expect(list(page).locator('[data-list-page-summary] select')).toBeVisible()
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+  // Every actor/locale/viewport exercises a held new key and contextual empty recovery.
+  let release: (() => void) | undefined
+  const hold = new Promise<void>(resolve => { release = resolve })
+  await page.route('**/query', async intercepted => {
+    const query = intercepted.request().postDataJSON()
+    if (query.entity === 'worker' && query.includeTotal) await hold
+    await intercepted.continue()
+  })
+  try {
+    await page.getByRole('group', { name: copy.listViews }).getByRole('button', { name: /^Archived workers/ }).click()
+    await expect(list(page).locator('[data-list-skeleton]')).toHaveCount(5)
+    await expect(footer(page).getByRole('status')).toHaveText(copy.loading)
+    await expect(list(page).locator('[data-list-range]')).toHaveCount(0)
+    const skeleton = list(page).locator('[data-list-skeleton]').first()
+    await expect(skeleton.locator('td')).toHaveCount(await table.getByRole('columnheader').count())
+    expect(Math.round((await skeleton.boundingBox())!.height)).toBe(actor === 'admin' ? 53 : 45)
+    release!()
+    await expect(list(page).getByRole('heading', { name: copy.noResults })).toBeVisible()
+    await insideViewport(list(page).getByText(copy.listEmptyViewDescription))
+    await expect(list(page).getByRole('button', { name: copy.clearSearchFilters })).toHaveCount(0)
+    await page.getByRole('searchbox', { name: copy.search, exact: true }).fill('missing')
+    await expect(list(page).getByText(copy.listEmptyFilteredDescription)).toBeVisible()
+    await list(page).getByRole('button', { name: copy.clearSearchFilters }).click()
+    await expect(list(page).getByText(copy.listEmptyViewDescription)).toBeVisible()
+    expect(new URL(page.url()).searchParams.get('view')).toBe('empty')
+    expect(new URL(page.url()).searchParams.has('search')).toBe(false)
+    await page.getByRole('group', { name: copy.listViews }).getByRole('button', { name: /^All workers/ }).click()
+    await expect(row).toBeVisible()
+    await page.screenshot({ path: `${process.env.LIST_V2_OUTPUT}/polish-${width}-${actor}-${language}.png`, fullPage: true })
+  } finally { release?.(); await page.unrouteAll({ behavior: 'wait' }) }
 })
 
 test('G6: held initial and new-query skeletons become results; filtered empty clears while preserving the configured view', async ({ page }) => {
@@ -397,20 +435,19 @@ test('G6: held initial and new-query skeletons become results; filtered empty cl
     expect(new URL(page.url()).searchParams.get('view')).toBe('active')
     const original = await list(page).locator('tbody tr[data-row-id]').first().elementHandle()
     hold = new Promise<void>(resolve => { release = resolve })
-    await page.clock.install()
-    await page.clock.fastForward(31_000)
-    await page.evaluate(() => {
-      Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' })
-      document.dispatchEvent(new Event('visibilitychange'))
-      Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' })
-      document.dispatchEvent(new Event('visibilitychange'))
-    })
-    await expect(footer(page).getByRole('status')).toHaveText(en.loading)
+    // A real row edit invalidates the list itself without refreshing authority (a new key).
+    await list(page).getByRole('row').filter({ has: page.getByRole('link', { name: 'Worker 001', exact: true }) }).getByRole('button', { name: 'Actions for Worker 001', exact: true }).click()
+    await page.getByRole('menuitem', { name: en.edit, exact: true }).click()
+    const edit = page.getByRole('dialog')
+    await edit.getByRole('textbox', { name: 'Name', exact: true }).fill('Worker 001 refreshed')
+    await edit.getByRole('button', { name: en.save, exact: true }).click()
+    await expect(footer(page).locator('[role="status"]')).toHaveText(en.loading)
     expect(await original!.evaluate(element => element.isConnected)).toBe(true)
     await expect(list(page).locator('[data-list-skeleton]')).toHaveCount(0)
-    release!(); await page.clock.resume()
+    release!()
+    await expect(edit).toHaveCount(0)
     await expect(footer(page).locator('[data-list-range]')).toHaveAttribute('role', 'status')
-    await expect(list(page).locator('[data-list-skeleton]')).toHaveCount(0)
+    expect(await original!.evaluate(element => element.isConnected)).toBe(true)
     await page.screenshot({ path: `${process.env.LIST_V2_OUTPUT}/polish-empty-recovery.png`, fullPage: true })
   } finally { release?.(); await page.unrouteAll({ behavior: 'wait' }) }
 })

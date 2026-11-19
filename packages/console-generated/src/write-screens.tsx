@@ -490,7 +490,7 @@ function ApplicationAccessBody(props: AccessContext & { rowMenu?: boolean }) {
         </Button>
       </DropdownMenuTrigger></TooltipTrigger><TooltipContent>{stateLabel}</TooltipContent></Tooltip></TooltipProvider>
         : <DropdownMenuTrigger asChild><Button type="button" variant="outline" size="sm" className="pointer-coarse:min-h-11 pointer-coarse:min-w-11" disabled={blocked} aria-label={t('rowInvitationActions')} onFocus={event => { trigger.current = event.currentTarget }} onClick={event => { trigger.current = event.currentTarget }}>⋯</Button></DropdownMenuTrigger>}
-      <DropdownMenuContent align="end" onCloseAutoFocus={event => { if (requested.current) { event.preventDefault(); setSelected(requested.current); requested.current = undefined } }}>
+      <DropdownMenuContent data-list-row-menu={props.rowMenu ? "" : undefined} align="end" onCloseAutoFocus={event => { if (requested.current) { event.preventDefault(); setSelected(requested.current); requested.current = undefined } }}>
         {props.rowMenu && <><DropdownMenuLabel className="flex items-center gap-2"><span aria-hidden="true" className={`size-2 shrink-0 rounded-full ${dotClass}`} />{stateLabel}</DropdownMenuLabel><DropdownMenuSeparator /></>}
         {overflow.map((action, index) => <div key={action}>{pendingMenu && action === 'cancel' && index > 0 && <DropdownMenuSeparator />}<DropdownMenuItem variant={action === 'cancel' ? 'destructive' : 'default'} className="pointer-coarse:min-h-11" onSelect={() => { requested.current = action }}>{label(action)}</DropdownMenuItem></div>)}
       </DropdownMenuContent>

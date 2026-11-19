@@ -133,3 +133,12 @@ main:has([data-slot="list-page"]) h1 { font-weight: 400; }
   .list-v2-search, .list-v2-lookup-panel { flex-basis: 100%; max-width: none; }
   [data-list-paging] [data-page-distance]:not([data-page-distance="0"]):not([data-page-distance="1"]) { display: none; }
 }
+
+[data-list-display],
+body:has([data-slot="list-page"]) [data-list-menu],
+body:has([data-slot="list-page"]) [data-list-row-menu] { font-size: .6875rem; }
+[data-list-display] :is(label, p, button),
+body:has([data-slot="list-page"]) [data-list-menu] :is(p, button),
+body:has([data-slot="list-page"]) [data-list-row-menu] :is([role="menuitem"], [data-slot="dropdown-menu-label"]) { font-size: inherit; }
+body:has([data-slot="list-page"]) [data-list-menu] { gap: .25rem; padding: .5rem; }
+body:has([data-slot="list-page"]) [data-list-row-menu] [role="menuitem"] { min-height: 2.0625rem; padding: .5625rem .625rem; }
