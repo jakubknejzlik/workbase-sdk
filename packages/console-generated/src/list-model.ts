@@ -96,9 +96,7 @@ export function stateFromSearch(search: ListSearch, model: Model, entity: string
   }
   if (search.rowAccess && model.entities[entity].rowInvitations && caps.resources?.['invitations.read'] === true) state.rowAccess = search.rowAccess
   else if (search.rowAccess) dropped = true
-  // Slice 2 seam: reconcile selected relation IDs with fresh authorized target reads
-  // after this shared synchronous restore, before applying restored predicates.
-  // Picker hydration (staleTime: Infinity) is label data, not proof of current authority.
+  // useGeneratedList follows this definition pruning with fresh selected-ID reconciliation.
   state.userFilters = filters
   const viewId = search.view ?? state.view
   const view = viewId === 'all' ? undefined : model.entities[entity].list?.views?.find(view => view.id === viewId)

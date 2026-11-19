@@ -7,7 +7,9 @@ import { useLocation, useNavigate } from '@tanstack/react-router'
 import { createDataTableQueryKey, type DataTableState } from '@workbasehq/ui'
 import { searchFromState, stateFromSearch, toQueryDocument, validateListSearch, type ListSearch, type ListState } from './list-model'
 import { restoreSavedView } from './saved-views'
-import { selectedReferenceOptions, selectedReferenceRow } from './use-selected-references'
+import { selectedReferenceOptions } from './use-selected-references'
+import { useReferenceAuthority } from './reference-authority'
+import { useReconciledFilters } from './use-reconciled-filters'
 import type { Capabilities, Model, ReadQuery, Result } from './read'
 type ListNotice = 'listStateDropped' | 'listCursorRestarted'
 interface PageHistory { scope: string; signature: string; cursors: string[]; notice?: ListNotice }
@@ -23,12 +25,16 @@ export function useGeneratedList({ model, caps, orgId, entity, request, contextL
   // subscriptions can briefly combine old search with new history state during navigation.
   const search = contextList ? local.search : validateListSearch(location.search as Record<string, unknown>)
   const filters = filterDescriptors(model, entity, caps)
-  const { state, dropped } = stateFromSearch(search, model, entity, caps, filters)
-  // Slice 2: put fresh selected-ID reconciliation between this shared restore and
-  // toQueryDocument. Saved views enter this same search path via applySavedView;
-  // cached picker hydration must never certify readability for that stage.
-  const canonicalFiltersChanged = JSON.stringify(search.filters ?? []) !== JSON.stringify(state.userFilters)
-  const scope = JSON.stringify([model.instance, orgId, entity, caps, contextList])
+  const restored = stateFromSearch(search, model, entity, caps, filters)
+  const [restoreAttempt, setRestoreAttempt] = useState(0)
+  const reconciled = useReconciledFilters(model, caps, orgId, entity, restored.state.userFilters, filters, request, currentRoute, restoreAttempt)
+  const state = { ...restored.state, userFilters: reconciled.filters }
+  const dropped = restored.dropped || reconciled.dropped
+  const authority = useReferenceAuthority()
+  const canonicalFiltersChanged = reconciled.ready && JSON.stringify(search.filters ?? []) !== JSON.stringify(state.userFilters)
+  // Fresh authority observations isolate query data without discarding unchanged paging history.
+  const scope = JSON.stringify([model.instance, model.revision, orgId, entity, caps, contextList, authority?.actor])
+  const queryScope = JSON.stringify([scope, model.entities[entity], authority?.observedAt])
   const signature = JSON.stringify(searchFromState(state))
   const history = contextList ? local.history : (location.state as { generatedList?: PageHistory }).generatedList
   const cursors = !dropped && !canonicalFiltersChanged && history?.scope === scope && history.signature === signature && Array.isArray(history.cursors) && history.cursors.every(cursor => typeof cursor === 'string') ? history.cursors : []
@@ -40,8 +46,8 @@ export function useGeneratedList({ model, caps, orgId, entity, request, contextL
     state: old => ({ ...old, generatedList: { scope, signature: JSON.stringify(searchFromState(stateFromSearch(next, model, entity, caps).state)), cursors: nextCursors, notice } }) }) : Promise.resolve()
   useEffect(() => {
     const legacyCursor = !contextList && Object.hasOwn(location.search, 'cursor')
-    if (dropped || canonicalFiltersChanged || legacyCursor) void go(searchFromState(state), [], true, dropped ? 'listStateDropped' : legacyCursor ? 'listCursorRestarted' : undefined)
-  }, [currentRoute, dropped, canonicalFiltersChanged, signature, location.searchStr])
+    if (reconciled.ready && (dropped || canonicalFiltersChanged || legacyCursor)) void go(searchFromState(state), [], true, dropped ? 'listStateDropped' : legacyCursor ? 'listCursorRestarted' : undefined)
+  }, [currentRoute, reconciled.ready, dropped, canonicalFiltersChanged, signature, location.searchStr])
   const { i18n } = useTranslation()
   const document = toQueryDocument(state, model, entity, caps, i18n.language?.startsWith('cs') ? 'cs' : 'en', filters)
   if (contextList) {
@@ -52,20 +58,25 @@ export function useGeneratedList({ model, caps, orgId, entity, request, contextL
     // Embedded cards fetch rendered values and identities; search/filter/sort stay server operands.
     document.select = [...new Set(['id', ...columns.flatMap(field => [definition.list?.relatedColumns?.[field]?.via ?? field, ...definition.fields[field]?.ui?.signedBy ? [definition.fields[field].ui!.signedBy!.field] : []])])].filter(field => caps.entities[entity]?.readable.includes(field))
   }
-  const key = createDataTableQueryKey(scope, 'list', document)
-  const result = useQuery({ queryKey: key, queryFn: () => request(document), retry: false, enabled: currentRoute,
-    placeholderData: (data, query) => state.presentation !== 'calendar' && query?.queryKey[1] === scope ? keepPreviousData(data) : undefined })
-  if (result.isSuccess && !result.isPlaceholderData) lastGood.current = { scope, data: result.data, page: cursors.length, limit: state.limit }
+  const key = createDataTableQueryKey(queryScope, 'list', document)
+  const queryResult = useQuery({ queryKey: key, queryFn: () => request(document), retry: false, enabled: currentRoute && reconciled.ready,
+    placeholderData: (data, query) => reconciled.ready && state.presentation !== 'calendar' && query?.queryKey[1] === queryScope ? keepPreviousData(data) : undefined })
+  const reconciling = !reconciled.ready && !reconciled.error
+  const result = { ...queryResult, error: reconciled.error ?? queryResult.error,
+    isPending: reconciling || queryResult.isPending, isFetching: reconciling || queryResult.isFetching }
+  if (reconciled.ready && result.isSuccess && !result.isPlaceholderData) lastGood.current = { scope: queryScope, data: result.data, page: cursors.length, limit: state.limit }
   const failure = result.error as { code?: string; details?: { path?: (string | number)[] } } | null
   useEffect(() => {
     if (state.cursor && failure?.code === 'query_invalid' && failure.details?.path?.includes('cursor')) {
       void go(searchFromState(state), [], true, 'listCursorRestarted')
     }
   }, [failure, state.cursor])
-  const data = result.data ?? (state.presentation !== 'calendar' && failure?.code === 'query_too_expensive' && lastGood.current?.scope === scope ? lastGood.current.data : undefined)
+  const data = reconciled.ready ? result.data ?? (state.presentation !== 'calendar' && failure?.code === 'query_too_expensive' && lastGood.current?.scope === queryScope ? lastGood.current.data : undefined) : undefined
   const onStateChange = (next: DataTableState & Partial<ListState>, change: 'search' | 'sort' | 'limit' | 'filter' | 'view') => {
     previous.current = { scope, search: searchFromState(state), cursors }
-    void go(searchFromState({ ...state, ...next, cursor: undefined }), [], change === 'search')
+    // A panel draft can outlive its authority; every submission needs fresh ID proof.
+    if (change === 'filter') setRestoreAttempt(value => value + 1)
+    void go(searchFromState({ ...state, ...next, ...(change !== 'filter' ? { userFilters: restored.state.userFilters } : {}), cursor: undefined }), [], change === 'search')
   }
   const onPage = (direction: 'previous' | 'next') => {
     previous.current = { scope, search: searchFromState(state), cursors }
@@ -74,15 +85,17 @@ export function useGeneratedList({ model, caps, orgId, entity, request, contextL
   }
   const undo = () => { const target = previous.current; if (target?.scope === scope) { previous.current = undefined; void go(target.search, target.cursors, true) } }
   const applySavedView = (search: unknown) => {
+    setRestoreAttempt(value => value + 1)
     const restored = restoreSavedView(search, model, entity, caps)
     previous.current = undefined
     void go(restored.search, [], false, restored.dropped ? 'listStateDropped' : undefined)
   }
-  return { filters, applySavedView, stale: failure?.code === 'query_too_expensive' && !!data, state, document, result, data, notice, onStateChange, onPage, page: cursors.length, range: lastGood.current?.scope === scope ? { page: lastGood.current.page, limit: lastGood.current.limit } : { page: 0, limit: state.limit }, undo: previous.current?.scope === scope ? undo : undefined }
+  return { filters, applySavedView, stale: failure?.code === 'query_too_expensive' && !!data, state, document, result, data, notice, onStateChange, onPage, page: cursors.length, range: lastGood.current?.scope === queryScope ? { page: lastGood.current.page, limit: lastGood.current.limit } : { page: 0, limit: state.limit }, undo: previous.current?.scope === scope ? undo : undefined }
 }
 /** Detail and picker labels only. Lists receive their labels in the content response. */
 export function useRelationLabels(model: Model, entity: string, caps: Capabilities, orgId: string, columns: string[], rows: Record<string, any>[], request: (query: ReadQuery) => Promise<Result>) {
   const client = useQueryClient()
+  const authority = useReferenceAuthority()
   const fields = columns.flatMap(field => {
     const target = model.entities[entity].fields[field]?.entity
     return target && caps.entities[entity]?.readable.includes(field) && caps.entities[target]?.operations.includes('read') && caps.entities[target].readable.includes('id') ? [{ field, target, display: caps.entities[target]?.displayField ?? model.entities[target].displayField }] : []
@@ -90,14 +103,13 @@ export function useRelationLabels(model: Model, entity: string, caps: Capabiliti
   const plans = [...new Set(fields.map(field => field.target))].flatMap(target => {
     const targetFields = fields.filter(field => field.target === target)
     const ids = [...new Set(targetFields.flatMap(({ field }) => rows.filter(row => !['empty', 'unavailable'].includes(row.__labels?.[field]?.status)).map(row => row[field]).filter((id): id is string => typeof id === 'string' && !!id)))]
-    const known = targetFields.flatMap(({ field }) => rows.flatMap(row => { const value = selectedReferenceRow(model, entity, field, row); return value ? [value] : [] }))
-    return ids.map(id => ({ target, id, known }))
+    return ids.map(id => ({ target, id }))
   })
-  const results = useQueries({ queries: plans.map(plan => selectedReferenceOptions(client, model, caps, orgId, plan.target, plan.id, plan.known, request)) })
+  const results = useQueries({ queries: plans.map(plan => selectedReferenceOptions(client, model, caps, orgId, plan.target, plan.id, request, authority)) })
   return (field: string, id: unknown) => {
     const definition = fields.find(plan => plan.field === field)
     const index = plans.findIndex(plan => plan.target === definition?.target && plan.id === id)
-    const row = index < 0 || results[index].error ? undefined : plans[index].known.find(row => row.id === id) ?? results[index].data
+    const row = index < 0 || results[index].error ? undefined : results[index].data
     return row && definition ? { entity: definition.target, row, display: definition.display && caps.entities[definition.target].readable.includes(definition.display) ? definition.display : undefined } : undefined
   }
 }

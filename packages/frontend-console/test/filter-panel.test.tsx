@@ -27,7 +27,10 @@ async function mount(options: { narrow?: boolean; calendar?: boolean; embedded?:
   const i18n = i18next.createInstance()
   await i18n.use(initReactI18next).init({ lng: 'en', resources: { en: { translation: { ...en, field_name: 'Name', field_status: 'Status', field_team_id: 'Team', value_active: 'Active', value_inactive: 'Inactive' } } } })
   const request = vi.fn(async (query: ReadQuery) => {
-    if (query.entity === 'teams') return { data: query.where?.id ? [{ id: 'team-b', name: 'Same label', secret: 'CUSTOM_TEMPLATE_CANARY' }] : [{ id: query.cursor ? 'team-b' : 'team-a', name: 'Same label', secret: 'CUSTOM_TEMPLATE_CANARY' }], next_cursor: query.cursor || query.where?.id ? null : 'target-next' }
+    if (query.entity === 'teams') {
+      const ids = query.where?.id ? (query.where.id as { in: string[] }).in : [query.cursor ? 'team-b' : 'team-a']
+      return { data: ids.filter(id => ['team-a', 'team-b'].includes(id)).map(id => ({ id, name: 'Same label', secret: 'CUSTOM_TEMPLATE_CANARY' })), next_cursor: query.cursor || query.where?.id ? null : 'target-next' }
+    }
     return { data: [{ id: query.cursor ? 'second' : 'first', name: 'Entry', created: '2026-11-17T00:00:00Z' }], next_cursor: query.cursor ? null : 'source-next' }
   })
   let update!: (value: { model: Model; caps: Capabilities }) => void
