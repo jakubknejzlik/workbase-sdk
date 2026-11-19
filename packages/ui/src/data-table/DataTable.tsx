@@ -26,11 +26,11 @@ function ServerCell<T>({ column, row }: CellContext<T, unknown>) {
   return column.id === '_actions' ? config.cell(row.original) : <div className={((column.columnDef.meta as ServerMeta<T>).compact || config.wrap) ? "whitespace-normal break-words" : "truncate"} ref={node => { if (node) node.title = node.textContent ?? '' }}>{config.cell(row.original)}</div>
 }
 /** Workbase owns server state; the source provider renders it without local filtering/paging. */
-export function DataTable<T extends { id?: unknown }>({ rows, columns, state, onStateChange, page, range, onPage, nextCursor, isFetching, label, labels, onRowClick, searchDescription, searchAvailable = true, pendingSearch = false, staleLabel, clearFilters, onClearFilters, error, onRetry, compact = false, mobileCards = false, hideFooter = false, scrollOnNarrow = false }: {
-  hideFooter?: boolean; scrollOnNarrow?: boolean; compact?: boolean; mobileCards?: boolean
+export function DataTable<T extends { id?: unknown }>({ rows, columns, state, onStateChange, page, range, onPage, nextCursor, isFetching, label, labels, onRowClick, searchDescription, searchAvailable = true, pendingSearch = false, staleLabel, clearFilters, onClearFilters, error, onRetry, compact = false, mobileCards = false, hideFooter = false, scrollOnNarrow = false, listV2 = false, fixedDensity = false }: {
+  fixedDensity?: boolean; listV2?: boolean; hideFooter?: boolean; scrollOnNarrow?: boolean; compact?: boolean; mobileCards?: boolean
   rows: T[]; columns: ServerColumn<T>[]; state: DataTableState; onStateChange: (state: DataTableState, change: 'search' | 'sort' | 'limit') => void
   page: number; range?: { page: number; limit: number }; onPage: (direction: 'previous' | 'next') => void; nextCursor?: string | null; isFetching: boolean; label: string
-  labels: PaginationLabels & { search: string; clearSearch: string; noResults: string; sort: (column: string) => string; sortAndFilter?: string; sortStates?: { asc: string; desc: string; none: string }; error?: string; errorDescription?: string; retry?: string }
+  labels: PaginationLabels & { search: string; clearSearch: string; noResults: string; emptyDescription?: string; scrollRegion?: string; scrollHint?: string; sort: (column: string) => string; sortAndFilter?: string; sortStates?: { asc: string; desc: string; none: string }; error?: string; errorDescription?: string; retry?: string }
   onRowClick: (row: T) => void; searchDescription?: string; searchAvailable?: boolean; pendingSearch?: boolean; staleLabel?: string; clearFilters?: string; onClearFilters?: () => void; error?: Error | null; onRetry?: () => void
 }) {
   const narrow = useSyncExternalStore(callback => {
@@ -48,7 +48,7 @@ export function DataTable<T extends { id?: unknown }>({ rows, columns, state, on
       ...(actions ? { size: 72 } : {}),
       // Explicit col widths let the browser derive the scrolling minimum from
       // the configured, visible columns instead of a column-count breakpoint.
-      meta: { compact, fixedWidth: actions, widthClass: scrollOnNarrow && !compact ? actions ? 'w-18' : column.id === '_access' ? 'w-48' : index === 0 ? 'w-56' : 'w-40' : undefined, serverColumn: column, labelId: `${labelPrefix}-${column.id}`, sortLabel: labels.sort(column.label) },
+      meta: { compact, fixedWidth: actions, widthClass: scrollOnNarrow ? actions ? 'w-18' : column.id === '_access' ? 'w-48' : index === 0 ? 'w-56' : 'w-40' : undefined, serverColumn: column, labelId: `${labelPrefix}-${column.id}`, sortLabel: labels.sort(column.label) },
       header: ServerHeader, cell: ServerCell,
     }
   })
@@ -62,13 +62,14 @@ export function DataTable<T extends { id?: unknown }>({ rows, columns, state, on
   // Keep the W44 primary + Actions layout without removing the other columns'
   // server sort/filter operations. Only authorized, configured columns reach here.
   const hiddenControls = narrow ? table.getAllLeafColumns().filter(column => !column.getIsVisible() && (column.getCanSort() || (column.columnDef.meta as ServerMeta<T>).serverColumn.filter)) : []
-  return <TablePresentationContext.Provider value={{ tableClass: narrow || scrollOnNarrow && !compact ? 'w-full' : compact ? 'w-full min-w-[900px] md:min-w-0' : visibleCount <= 2 ? 'min-w-[320px]' : visibleCount <= 3 ? 'min-w-[600px]' : visibleCount <= 5 ? 'min-w-[900px]' : visibleCount <= 8 ? 'min-w-[1400px]' : 'min-w-[2200px]', label, headerId: id => `${labelPrefix}-${id}`, stale, busy: stale,
+  return <TablePresentationContext.Provider value={{ tableClass: narrow || scrollOnNarrow ? 'w-full' : compact ? 'w-full min-w-[900px] md:min-w-0' : visibleCount <= 2 ? 'min-w-[320px]' : visibleCount <= 3 ? 'min-w-[600px]' : visibleCount <= 5 ? 'min-w-[900px]' : visibleCount <= 8 ? 'min-w-[1400px]' : 'min-w-[2200px]', label, headerId: id => `${labelPrefix}-${id}`, stale, busy: stale,
+    listV2, scrollRegion: labels.scrollRegion, scrollHint: labels.scrollHint,
     errorDescription: labels.errorDescription, retryLabel: labels.retry, onRetry,
-    errorLabel: labels.error ?? 'Failed to load data', emptyContent: <div className="space-y-2 p-6 text-center text-muted-foreground"><p>{labels.noResults}</p>{onClearFilters && <Button type="button" variant="outline" onClick={onClearFilters}>{clearFilters}</Button>}</div>,
+    errorLabel: labels.error ?? 'Failed to load data', emptyContent: <div className="space-y-2 p-6 text-center text-muted-foreground">{listV2 ? <><h2 className="text-lg font-medium text-foreground">{labels.noResults}</h2><p>{labels.emptyDescription}</p></> : <p>{labels.noResults}</p>}{onClearFilters && <Button type="button" variant="outline" onClick={onClearFilters}>{clearFilters}</Button>}</div>,
     pageSizeLabel: labels.pageSize, pageSizes: [10, 20, 30, 50, 100], pageSizeOption: size => labels.pageSizeOption?.(size) ?? String(size),
     pagination: <CursorPagination range={range} page={page} limit={state.limit} length={rows.length} hasNext={!!nextCursor} busy={stale} labels={labels} onPage={onPage} />,
   }}><DataTableProvider table={table} isLoading={isFetching} error={error} onRowClick={onRowClick}>
-    <div className={`w-full min-w-0 max-w-full ${compact ? 'compact-data-table' : ''}`} data-slot="data-table">
+    <div className={`w-full min-w-0 max-w-full ${compact ? 'compact-data-table' : ''}`} data-slot="data-table" data-list-density={listV2 ? compact ? 'compact' : 'comfortable' : undefined} data-list-access={listV2 && fixedDensity ? 'true' : undefined}>
       {searchAvailable && <div className="flex flex-wrap items-center gap-3 py-4"><DataTableSearch value={state.search} onChange={search => onStateChange({ ...state, search }, 'search')} label={labels.search} clearLabel={labels.clearSearch} description={searchDescription} onPendingChange={setSearchPending} /></div>}
       {hiddenControls.length > 0 && <div className="my-2">
         <Button type="button" variant="outline" aria-expanded={controlsOpen} aria-controls={`${labelPrefix}-controls`} onClick={() => setControlsOpen(open => !open)}>{labels.sortAndFilter ?? 'Sort and filter'}</Button>

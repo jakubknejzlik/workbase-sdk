@@ -78,3 +78,18 @@ it('shows date filter chips and sends day boundaries for the instance zone, not 
   await waitFor(() => expect(request.mock.calls.at(-1)![0].where).toEqual({ and: [{ created: { gte: '2026-11-16T15:00:00.000Z' } }] }))
   expect(await screen.findByRole('button', { name: /17\. 11\. 2026/ })).toBeTruthy()
 })
+
+it('uses an explicit list-v2 density variant without changing the query, URL or saved settings', async () => {
+  const { request, user } = await mount()
+  const table = document.querySelector('[data-slot="data-table"]')!
+  expect(table.getAttribute('data-list-density')).toBe('comfortable')
+  const calls = request.mock.calls.length, row = screen.getByText('Current')
+  const menu = await openMenu(user)
+  await user.click(within(menu).getByRole('checkbox', { name: en.listDisplayCompact }))
+  expect(table.getAttribute('data-list-density')).toBe('compact')
+  expect(request.mock.calls).toHaveLength(calls)
+  expect(screen.getByText('Current')).toBe(row)
+  expect(JSON.stringify(request.mock.calls)).not.toMatch(/compact|density/)
+  await user.click(within(menu).getByRole('button', { name: en.listDisplayReset }))
+  expect(table.getAttribute('data-list-density')).toBe('comfortable')
+})

@@ -1,3 +1,4 @@
+import { useTableOverflow } from '../../../../data-table/use-table-overflow'
 import { flexRender } from '@tanstack/react-table'
 
 import type { RowData } from '@tanstack/react-table'
@@ -48,10 +49,11 @@ export const DataTableContent = <RecordType,>() => {
 
   // Get all visible columns to create colgroup
   const visibleColumns = table.getVisibleLeafColumns()
+  const overflow = useTableOverflow(presentation.listV2, visibleColumns.map(column => column.id).join(','))
 
   return (
     <div className="relative">
-      <Table className={`table-fixed ${presentation.tableClass ?? 'min-w-[600px]'}`} aria-label={presentation.label}>
+      <Table containerProps={presentation.listV2 ? { ref: overflow.ref, role: 'region', tabIndex: 0, 'aria-label': presentation.scrollRegion, 'aria-describedby': overflow.edge ? overflow.hintId : undefined, 'data-overflow-edge': overflow.edge, onScroll: overflow.update, onKeyDown: overflow.onKeyDown } : undefined} className={`table-fixed ${presentation.tableClass ?? 'min-w-[600px]'}`} aria-label={presentation.label}>
         <colgroup>
           {visibleColumns.map((column) => {
             return <col key={column.id} className={columnClass(column)} />
@@ -124,7 +126,7 @@ export const DataTableContent = <RecordType,>() => {
                 })}
               </TableRow>
             ))
-          ) : showNoResults || showError ? null : (
+          ) : isLoading && presentation.listV2 ? Array.from({ length: 5 }, (_, index) => <TableRow key={index} data-list-skeleton="" aria-hidden="true">{visibleColumns.map(column => <TableCell key={column.id} className={columnClass(column, true)}><span className="list-v2-skeleton" /></TableCell>)}</TableRow>) : showNoResults || showError ? null : (
             // Show empty body during loading to maintain table height
             <TableRow>
               <TableCell colSpan={Math.max(visibleColumns.length, 1)} className="h-24">
@@ -134,6 +136,7 @@ export const DataTableContent = <RecordType,>() => {
           )}
         </TableBody>
       </Table>
+      {presentation.listV2 && overflow.edge && <p id={overflow.hintId} data-list-overflow={overflow.edge} className="list-v2-overflow-hint"><span aria-hidden="true">{overflow.edge === 'start' ? '←' : overflow.edge === 'end' ? '→' : '↔'}</span> {presentation.scrollHint}</p>}
       {/* Feedback belongs to the visible panel, outside Table's x scroller. */}
       {showNoResults && <div className="min-h-24 w-full text-center">{presentation.emptyContent}</div>}
       {showError && <div role="alert" className="flex min-h-32 w-full flex-col items-center justify-center gap-2 p-4 text-center text-destructive">
@@ -143,7 +146,7 @@ export const DataTableContent = <RecordType,>() => {
         {presentation.errorDescription && <p className="max-w-md text-sm text-muted-foreground">{presentation.errorDescription}</p>}
         {presentation.onRetry && presentation.retryLabel && <Button type="button" variant="outline" onClick={presentation.onRetry}>{presentation.retryLabel}</Button>}
       </div>}
-      {isLoading && (
+      {isLoading && !presentation.listV2 && (
         <div
           data-testid="data-table-loading"
           className="absolute inset-x-0 bottom-0 top-10 pointer-events-none flex items-center justify-center backdrop-blur-sm bg-background/50"

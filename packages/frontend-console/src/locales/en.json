@@ -633,5 +633,10 @@
   "rowFindRequired": "Select a member or enter a valid email address.",
   "rowAccountNotLinkable": "This account cannot be linked to this row.",
   "rowAccessActions": "Application access actions",
-  "rowChangeMemberOrEmail": "Change member or e-mail"
+  "rowChangeMemberOrEmail": "Change member or e-mail",
+  "listEmptyFilteredDescription": "Try changing or clearing your search and filters.",
+  "listEmptyViewDescription": "There are no records in this view yet.",
+  "listScrollRegion": "Scrollable list columns",
+  "listScrollHint": "Scroll horizontally for more columns.",
+  "listLookupPlaceholder": "Choose…"
 }

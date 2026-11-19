@@ -18,7 +18,7 @@ export function ToolbarFilter(props: Props) {
   const { t } = useEntityTranslation(props.entity)
   const { descriptor } = props
   const mapping = filterMapping(descriptor.kind, props.model.entities[props.entity].fields[descriptor.field], undefined, descriptor.operators, props.model.timeZone)
-  return <fieldset className="min-w-40 space-y-1 text-sm [&_.wb-picker>label]:sr-only">
+  return <fieldset className="list-toolbar-filter min-w-40 space-y-1 text-sm [&_.wb-picker>label]:sr-only">
     <legend className={descriptor.kind === 'relation' ? 'sr-only' : 'px-1'}>{descriptor.label ?? t(`field_${descriptor.field}`)}</legend>
     <FilterInput {...props} value={props.predicate ? mapping.fromPredicate(props.predicate) : undefined} onChange={value => props.onChange(mapping.toPredicate(value))} />
   </fieldset>
@@ -65,7 +65,7 @@ function RelationFilterInput(props: FilterContext & { descriptor: FilterDescript
   return <div className="grid gap-2">
     {(choices.result.error || selected.error) && <p role="alert">{t('requestFailed')}</p>}
     {values.length > 0 && <MultiSelectFilter options={values.map(id => { const row = selected.rows.find(row => row.id === id); return { id, label: row ? name(row) : t('unavailableRecord') } })} value={values} onChange={props.onChange} capLabel={t('filterCap', { count: selectionCap })} />}
-    {values.length < selectionCap && <EntityPicker remote label={descriptor.label ?? t(`field_${descriptor.field}`)} placeholder={t('chooseRelation', { context: descriptor.field })} options={choices.rows.map(row => ({ id: row.id, label: name(row) }))} value={pickerValue} selectedLabel="" onChange={id => {
+    {values.length < selectionCap && <EntityPicker remote label={descriptor.label ?? t(`field_${descriptor.field}`)} placeholder={t('listLookupPlaceholder')} options={choices.rows.map(row => ({ id: row.id, label: name(row) }))} value={pickerValue} selectedLabel="" onChange={id => {
       if (id && !values.includes(id)) { selected.seed(choices.rows.find(row => row.id === id)); props.onChange([...values, id]); setPickerValue(id) }
     }} onFocus={choices.focus} onSearch={choices.setSearch} onClose={choices.close} loading={choices.loading} hasMore={choices.hasMore} loadMore={choices.loadMore} loadingLabel={t('loading')} moreLabel={t('loadMore')} clearLabel={t('clearRelation')} emptyLabel={t('noResults')} />}
     {values.length > 0 && <Button type="button" variant="outline" onClick={() => { props.onChange([]); setPickerValue('') }}>{t('clearFilter')}</Button>}
