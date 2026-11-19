@@ -39,7 +39,12 @@ export function signedValue(row: Record<string, any>, field: Field, value: React
   return <span className={delta < 0 ? 'text-red-700 tabular-nums font-medium' : 'text-green-700 tabular-nums font-medium'}>{new Intl.NumberFormat(locale, { signDisplay: 'always' }).format(delta)}</span>
 }
 interface ReadPageProps { savedViewsScope?: SavedViewsScope; calendarCreate?: (values: Record<string, string>) => void; write?: WriteRequest; onDenied?: () => void; contextList?: ReadQuery['contextList']; title?: string; embeddedCreate?: (entity: string, values: Record<string, string>) => ReactNode; model: Model; caps: Capabilities; orgId: string; entity: string; id?: string; request: (input: ReadQuery) => Promise<Result>; primaryAction?: { label: string; onAction: () => void }; actions?: (row?: Record<string, any>) => ReactNode; rowActions?: (row: Record<string, any>, disabled: boolean) => ReactNode }
-export function GeneratedReadPage(props: ReadPageProps) { return props.id ? <GeneratedDetailPage {...props} /> : <GeneratedListPage {...props} /> }
+export function GeneratedReadPage(props: ReadPageProps) {
+  const authority = useReferenceAuthority()
+  // An unknown host actor has no verified namespace for identity-bearing reads.
+  if (props.id && authority && authority.actor === undefined) return null
+  return props.id ? <GeneratedDetailPage {...props} /> : <GeneratedListPage {...props} />
+}
 function GeneratedDetailPage({ model, caps, orgId, entity, id, request, actions, embeddedCreate, write, onDenied }: ReadPageProps) {
   const home = useScopeHome()
   const { t, i18n } = useEntityTranslation(entity); const definition = model.entities[entity]
@@ -116,7 +121,8 @@ function GeneratedDetailPage({ model, caps, orgId, entity, id, request, actions,
  */
 function GeneratedListPage(props: ReadPageProps) {
   const client = useQueryClient()
-  const actor = useReferenceAuthority()?.actor
+  const authority = useReferenceAuthority()
+  const actor = authority?.actor
   const [scope, setScope] = useState<{ owner: ListOwner; generation: number; discard: boolean; previous?: ListOwner }>({ owner: { instance: props.model.instance, orgId: props.orgId, actor }, generation: 0, discard: false })
   // `owner.actor` is the last verified actor: a transient unknown actor is not a change, but A -> unknown -> B is.
   const moved = scope.owner.instance !== props.model.instance || scope.owner.orgId !== props.orgId || actor !== undefined && scope.owner.actor !== undefined && scope.owner.actor !== actor
@@ -125,7 +131,7 @@ function GeneratedListPage(props: ReadPageProps) {
     setScope(old => ({ owner: { instance: props.model.instance, orgId: props.orgId, actor }, generation: old.generation + 1, discard: true, previous: old.owner }))
   } else if (actor !== undefined && scope.owner.actor === undefined) setScope(old => ({ ...old, owner: { ...old.owner, actor } }))
   useEffect(() => { if (scope.previous) teardownScope(client, scope.previous) }, [scope.generation])
-  if (moved) return null
+  if (moved || authority && actor === undefined) return null
   return <ListPageBody key={scope.generation} {...props} discard={scope.discard} onDiscarded={() => setScope(old => old.discard ? { ...old, discard: false } : old)} />
 }
 function ListPageBody({ discard, onDiscarded, savedViewsScope, model, caps, orgId, entity, request, actions, rowActions, primaryAction, contextList, title, calendarCreate, write, onDenied }: ReadPageProps & { discard: boolean; onDiscarded: () => void }) {

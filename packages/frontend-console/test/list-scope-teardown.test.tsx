@@ -7,7 +7,8 @@ import { createMemoryHistory, createRootRoute, createRoute, createRouter, Router
 import { I18nextProvider, initReactI18next } from 'react-i18next'
 import i18next from 'i18next'
 import { GeneratedReadPage } from '../../console-generated/src/screens'
-import { ReferenceAuthority } from '../../console-generated/src/reference-authority'
+import { ApplicationAccessCard } from '../../console-generated/src/write-screens'
+import { ReferenceAuthority, useScopeTeardown } from '../../console-generated/src/reference-authority'
 import { validateListSearch } from '../../console-generated/src/list-model'
 import { changeSavedViews } from '../../console-generated/src/saved-views'
 import type { Model, Capabilities, ReadQuery } from '../../console-generated/src/read'
@@ -28,25 +29,30 @@ beforeEach(() => {
 afterEach(() => { client?.clear(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 // Row text, totals and counts identify exactly which scope produced them.
 const totals: Record<string, number> = { 'A@org': 71, 'B@org': 12, 'A@other': 33 }
-async function mount(options: { actor?: string; search?: Record<string, unknown> } = {}) {
-  const world = { actor: options.actor, org: 'org' }; let gate: Promise<void> | undefined, release: (() => void) | undefined
-  const owner = () => `${world.actor ?? 'anon'}@${world.org}`
+async function mount(options: { actor?: string; search?: Record<string, unknown>; access?: boolean } = {}) {
+  const world = { actor: options.actor, sessionActor: options.actor, org: 'org' }; let gate: Promise<void> | undefined, release: (() => void) | undefined
+  const owner = () => `${world.actor ?? (options.access ? `unknown-${world.sessionActor}` : 'anon')}@${world.org}`
   const request = vi.fn(async (query: ReadQuery) => {
     const who = owner(); await gate
     const total = totals[who] ?? 5
     return { data: [{ id: '1', name: `Row of ${who}`, status: 'active' }], next_cursor: null, offset: query.offset, limit: query.limit, total, viewTotals: { all: total, active: total - 1 } }
   })
-  client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } })
+  client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: 30_000 } } })
+  const write = vi.fn(async () => ({ state: 'signed_in', inconsistency: null, can_invite: false, can_cancel: false, linked_accounts: [{ id: world.sessionActor, label: `ACCESS_OF_${world.sessionActor}` }] }))
+  const accessModel = { ...model, entities: { entries: { ...model.entities.entries, rowAccess: true } } }
+  const accessCaps = { ...caps, resources: { 'invitations.read': true } }
   const snapshots: { scope: string; text: string }[] = []; const current = { scope: '' }
   let update!: (value: { actor: string | undefined; org: string }) => void
   function Fixture() {
     const [context, setContext] = useState({ actor: options.actor, org: 'org' }); update = setContext
     // As in the console, the org comes from the route, so location and org change in one transition.
     const org = useParams({ strict: false }).orgId ?? context.org
+    useScopeTeardown(client, options.access ? { orgId: org, actor: context.actor } : {})
     current.scope = `${context.actor ?? 'anon'}@${org}`
     return <Profiler id="list" onRender={() => { snapshots.push({ scope: current.scope, text: document.body.textContent ?? '' }) }}>
       <ReferenceAuthority.Provider value={{ actor: context.actor, observedAt: 1 }}>
         <GeneratedReadPage model={model} caps={caps} orgId={org} entity="entries" request={request} savedViewsScope={context.actor ? { instance: model.instance, userId: context.actor, orgId: org } : undefined} />
+        {options.access && <ApplicationAccessCard model={accessModel} caps={accessCaps} orgId={org} entity="entries" row={{ id: 'earlier-row' }} request={request} write={write} />}
       </ReferenceAuthority.Provider>
     </Profiler>
   }
@@ -55,8 +61,8 @@ async function mount(options: { actor?: string; search?: Record<string, unknown>
   if (options.search) await router.navigate({ to: '.', search: options.search as any })
   const i18n = i18next.createInstance(); await i18n.use(initReactI18next).init({ lng: 'en', resources: { en: { translation: { ...en, field_name: 'Name', field_status: 'Status', value_active: 'Active', value_inactive: 'Inactive' } } } })
   render(<I18nextProvider i18n={i18n}><QueryClientProvider client={client}><RouterProvider router={router} /></QueryClientProvider></I18nextProvider>)
-  await screen.findByText(`Row of ${owner()}`)
-  return { request, router, snapshots, user: userEvent.setup(), world,
+  if (options.actor) await screen.findByText(`Row of ${owner()}`)
+  return { request, write, router, snapshots, user: userEvent.setup(), world,
     hold: () => { gate = new Promise(resolve => { release = resolve }) }, release: async () => { await act(async () => { release?.(); gate = undefined }) },
     switchTo: async (next: { actor?: string; org?: string }) => { Object.assign(world, { ...(next.org ? { org: next.org } : {}), actor: 'actor' in next ? next.actor : world.actor }); await act(async () => update({ actor: world.actor, org: world.org })) } }
 }
@@ -122,10 +128,11 @@ it('keeps a deep-linked state while the actor is only being established (unknown
   expect(test.router.state.location.search).toMatchObject({ view: 'active', filters: [{ field: 'status', predicate: { in: ['active'] } }] })
   expect(screen.getByRole('button', { name: /Remove.*Active/ })).toBeTruthy()
 })
-it('treats a transient unknown actor as no change, but unknown -> a different actor as a replacement', async () => {
+it('suspends a transient unknown actor without dropping URL state, but replaces a different verified actor', async () => {
   const test = await mount({ actor: 'A', search: { view: 'active' } })
   await test.switchTo({ actor: undefined })
-  expect(await screen.findByText('Row of anon@org')).toBeTruthy()
+  expect(screen.queryByText('Row of A@org')).toBeNull()
+  expect(test.request.mock.calls).toHaveLength(1)
   expect(test.router.state.location.search.view).toBe('active')
   await test.switchTo({ actor: 'A' })
   expect(await screen.findByText('Row of A@org')).toBeTruthy()
@@ -136,4 +143,50 @@ it('treats a transient unknown actor as no change, but unknown -> a different ac
   await waitFor(() => expect(test.router.state.location.search.view).toBeUndefined())
   expect(stale(test.snapshots, 'Row of A@org', 'B@org')).toEqual([])
   await test.release(); expect(await screen.findByText('Row of B@org')).toBeTruthy()
+})
+
+// The credential is still A while /me is unknown; it becomes B before B is verified.
+it('isolates A -> unknown -> B -> unknown with the production 30-second cache freshness', async () => {
+  const test = await mount({ actor: 'A', access: true })
+  await screen.findByText('ACCESS_OF_A')
+  await test.switchTo({ actor: undefined })
+  await waitFor(() => expect(client.isFetching()).toBe(0))
+  test.world.sessionActor = 'B'
+  await test.switchTo({ actor: 'B' })
+  await screen.findByText('Row of B@org')
+  await screen.findByText('ACCESS_OF_B')
+  test.hold(); test.snapshots.length = 0
+  await test.switchTo({ actor: undefined })
+  await waitFor(() => expect(client.isFetching()).toBe(0))
+  expect.soft(screen.queryByText('Row of unknown-A@org')).toBeNull()
+  expect.soft(screen.queryByText('ACCESS_OF_A')).toBeNull()
+  expect.soft(test.snapshots.filter(snapshot => snapshot.text.includes('Row of unknown-A@org') || snapshot.text.includes('ACCESS_OF_A'))).toEqual([])
+  // No cache owner from the outgoing credential, including the shared unknown owner, survives.
+  const old = client.getQueryCache().getAll().filter(query => {
+    if (query.queryKey[0] === 'data-table') return ['A', null].includes(JSON.parse(String(query.queryKey.at(-1)))[2])
+    return query.queryKey[0] === 'row-access' && ['A', null].includes(query.queryKey[1] as string | null) && query.state.data !== undefined
+  })
+  expect.soft(old.map(query => query.queryKey)).toEqual([])
+  await test.release()
+})
+
+it('discards every outgoing verified and unknown cache owner while preserving the incoming actor and other orgs', async () => {
+  const test = await mount({ actor: 'A', access: true })
+  const outgoing: unknown[][] = []
+  const preserved: unknown[][] = []
+  for (const actor of ['A', null, 'B']) for (const org of ['org', 'other']) {
+    const keys = [
+      ['data-table', 'earlier-view', 'list', {}, JSON.stringify([model.instance, org, actor])],
+      ...['row-access', 'row-access-delivery', 'account-link-members'].map(family => [family, actor, org, 'earlier-row']),
+    ]
+    for (const key of keys) {
+      client.setQueryData(key, { identity: 'cached', total: 71, viewTotals: { all: 71 } })
+      const owners = org === 'org' && actor !== 'B' ? outgoing : preserved
+      owners.push(key)
+    }
+  }
+  await test.switchTo({ actor: undefined })
+  await test.switchTo({ actor: 'B' })
+  expect(outgoing.every(queryKey => client.getQueryData(queryKey) === undefined)).toBe(true)
+  expect(preserved.every(queryKey => client.getQueryData(queryKey) !== undefined)).toBe(true)
 })

@@ -11,7 +11,7 @@ import { ContextCreateAction } from '../../console-generated/src/write-screens'
 import { listCommandActions } from '../../console-generated/src/write'
 import { useMe } from './api/queries'
 import { api } from './api/client'
-import { ReferenceAuthority, useScopeTeardown } from '../../console-generated/src/reference-authority'
+import { ReferenceAuthority } from '../../console-generated/src/reference-authority'
 import { useRuntimeModel, refreshRuntimeModel } from './api/runtime-model'
 import { Failure, Loading, QueryError } from './screens'
 export function ReadPage({ orgId, entity, id }: { orgId: string; entity: string; id?: string }) {
@@ -27,8 +27,6 @@ export function ReadPage({ orgId, entity, id }: { orgId: string; entity: string;
   const denied = useQuery({ queryKey: deniedKey, queryFn: () => false, initialData: false, enabled: false, gcTime: Infinity }).data
   const runtime = useRuntimeModel(orgId)
   const me = useMe()
-  // GeneratedReadPage is keyed by org, so the replaced org/actor's cached rows, counts and access identities are purged here.
-  useScopeTeardown(client, { orgId, actor: me.data?.user?.id })
   if (denied) return <ResourcePage title={t('forbidden')}><p>{t('resourceForbidden', { resource: t(`entity_${entity}`).toLocaleLowerCase(i18n.language) })}</p></ResourcePage>
   if (runtime.error) return <QueryError error={runtime.error} />
   if (!runtime.data) return <Loading />

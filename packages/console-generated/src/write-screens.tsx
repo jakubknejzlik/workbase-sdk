@@ -415,6 +415,11 @@ export function ApplicationAccessCard(props: AccessContext) {
   return <Card data-application-access=""><CardHeader><CardTitle>{t('rowAccess')}</CardTitle></CardHeader><CardContent><ApplicationAccess {...props} /></CardContent></Card>
 }
 function ApplicationAccess(props: AccessContext & { rowMenu?: boolean }) {
+  const authority = useReferenceAuthority()
+  // Standalone access controls must also suspend while the host establishes identity.
+  return authority && authority.actor === undefined ? null : <ApplicationAccessBody {...props} />
+}
+function ApplicationAccessBody(props: AccessContext & { rowMenu?: boolean }) {
   const actor = useReferenceAuthority()?.actor
   const [selected, setSelected] = useState<string>()
   const [menuOpen, setMenuOpen] = useState(false)
