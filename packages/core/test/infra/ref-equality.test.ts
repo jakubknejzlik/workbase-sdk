@@ -35,6 +35,7 @@ it('enforces inserts, every participating update, tenant isolation, FK and expli
     db.exec("UPDATE booking SET client='c2', location='l2' WHERE id='ok'")
     expect(() => db.exec("UPDATE location SET client='c1' WHERE id='l2'")).toThrow('workbase_ref_equality_')
     db.exec("UPDATE location SET client='c2' WHERE id='l2'")
+    expect(() => db.exec("INSERT OR REPLACE INTO location (id,organization_id,created_at,updated_at,client) VALUES ('l2','a','now','now','c1')")).toThrow('workbase_ref_equality_')
     for (const values of [{ client: 'c1', location: 'missing' }, { client: 'c1', location: 'lf' }, { client: 'foreign', location: 'l1' }, { client: null, location: 'l1' }, { client: 'c1', location: null }]) expect(() => insert('booking', 'invalid', values)).toThrow()
     insert('booking', 'null-target', { client: null, location: 'ln' }); insert('booking', 'both-null', { client: null, location: null })
     expect(() => db.exec("UPDATE location SET client='c1' WHERE id='ln'")).toThrow('workbase_ref_equality_')
@@ -81,7 +82,7 @@ it('rejects constrained graph rebuilds and target/source renames explicitly; rem
   const renamed = defineInstance({ ...raw, entities: { ...raw.entities, location: { ...raw.entities.location, fields: { ...raw.entities.location.fields, new_client: { type: 'ref', entity: 'client', renameFrom: 'client' } } } } })
   expect(() => schemaLock(renamed, lock)).toThrow('Renaming a ref equality graph')
   const removed = diffSpecs(lock.tables, schemaLock(config([]), lock).tables)
-  expect(removed.match(/DROP TRIGGER/g)).toHaveLength(3)
+  expect(removed.match(/DROP TRIGGER/g)).toHaveLength(4)
   const { db } = fixture()
   try { db.exec(removed); expect(db.prepare("SELECT * FROM sqlite_schema WHERE type='trigger'").all()).toEqual([]) } finally { db.close() }
 })

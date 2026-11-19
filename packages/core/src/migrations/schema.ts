@@ -126,11 +126,15 @@ export function refEqualityDefinition(table: TableSpec, constraint: RefEqualityC
   const source = quote(table.name), parent = quote(target)
   const field = quote(constraint.field), hop = quote(constraint.through), targetField = quote(constraint.targetField)
   const mismatch = (row: string) => `(${row}.${hop} IS NULL AND ${row}.${field} IS NOT NULL) OR (${row}.${hop} IS NOT NULL AND NOT EXISTS (SELECT 1 FROM ${parent} AS target WHERE target."organization_id" = ${row}."organization_id" AND target."id" = ${row}.${hop} AND target.${targetField} IS ${row}.${field}))`
+  const reverseMismatch = (row: string) => `EXISTS (SELECT 1 FROM ${source} AS source WHERE source."organization_id" = ${row}."organization_id" AND source.${hop} = ${row}."id" AND source.${field} IS NOT NEW.${targetField})`
   const abort = `SELECT RAISE(ABORT, ${literal(token)});`
   const triggers = [
     { name: `${token}_insert`, sql: `CREATE TRIGGER ${quote(`${token}_insert`)} AFTER INSERT ON ${source} WHEN ${mismatch('NEW')} BEGIN ${abort} END;` },
     { name: `${token}_update`, sql: `CREATE TRIGGER ${quote(`${token}_update`)} AFTER UPDATE OF ${field}, ${hop}, "organization_id" ON ${source} WHEN ${mismatch('NEW')} BEGIN ${abort} END;` },
-    { name: `${token}_reverse`, sql: `CREATE TRIGGER ${quote(`${token}_reverse`)} AFTER UPDATE OF ${targetField} ON ${parent} WHEN NEW.${targetField} IS NOT OLD.${targetField} AND EXISTS (SELECT 1 FROM ${source} AS source WHERE source."organization_id" = OLD."organization_id" AND source.${hop} = OLD."id" AND source.${field} IS NOT NEW.${targetField}) BEGIN ${abort} END;` },
+    { name: `${token}_reverse`, sql: `CREATE TRIGGER ${quote(`${token}_reverse`)} AFTER UPDATE OF ${targetField} ON ${parent} WHEN NEW.${targetField} IS NOT OLD.${targetField} AND ${reverseMismatch('OLD')} BEGIN ${abort} END;` },
+    // INSERT OR REPLACE can change a target field without firing UPDATE. The
+    // distinct single-word role suffix keeps the global trigger names injective.
+    { name: `${token}_replace`, sql: `CREATE TRIGGER ${quote(`${token}_replace`)} AFTER INSERT ON ${parent} WHEN ${reverseMismatch('NEW')} BEGIN ${abort} END;` },
   ]
   // CHECK preflight reads existing data without touching domain or audit rows.
   const guard = quote(`${token}_guard`)

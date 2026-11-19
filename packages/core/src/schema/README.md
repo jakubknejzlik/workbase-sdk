@@ -427,21 +427,21 @@ existing organization-scoped composite FKs remain enforced, including the direct
 client FK. Missing and foreign-organization references never gain a null escape.
 
 SDK-generated AFTER triggers check inserts and updates of either participating
-field (also organization_id), using the final row so self references work. A
-reverse trigger rejects target-field changes that would invalidate any incoming
-row in the same organization. Same-value updates and unreferenced target changes
+field (also organization_id), using the final row so self references work. Reverse
+triggers reject target-field changes (including INSERT OR REPLACE) that would
+invalidate any incoming row in the same organization. Same-value updates and unreferenced target changes
 are allowed. Slice 4 referenced-field immutability is a separate, stricter rule;
 this declaration does not implement it. Multi-row writes must preserve the rule
 at each row; the SDK does not defer equality checks to transaction commit.
 
 Lock v3 records the typed declaration and physical FK dependency, from which the
-three named trigger definitions are deterministically derived. Generated bundles
+four named trigger definitions are deterministically derived. Generated bundles
 and live schema verification include their exact definitions. Old v1/v2 and
 unique-only v3 locks retain their byte contract. Adding equality emits a read-only
 data preflight using an SDK-owned CHECK guard before installing triggers. Bad
 existing data fails migration validation without changing records; preview shows
-the exact failing guard and constraint identity. Removing equality drops all three
-triggers, including the reverse trigger. Renames in a constrained graph and schema
+the exact failing guard and constraint identity. Removing equality drops all four
+triggers, including both reverse guards. Renames in a constrained graph and schema
 changes requiring rebuilds are explicitly rejected for manual review.
 
 HTTP CRUD and atomic writes return `422 ref_equality_mismatch` with
