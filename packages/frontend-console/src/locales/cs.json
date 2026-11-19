@@ -653,5 +653,10 @@
   "rowFindRequired": "Vyberte člena nebo zadejte platnou e-mailovou adresu.",
   "rowAccountNotLinkable": "Tento účet nelze propojit s tímto záznamem.",
   "rowAccessActions": "Akce přístupu do aplikace",
-  "rowChangeMemberOrEmail": "Změnit člena nebo e-mail"
+  "rowChangeMemberOrEmail": "Změnit člena nebo e-mail",
+  "listEmptyFilteredDescription": "Zkuste změnit nebo vymazat hledání a filtry.",
+  "listEmptyViewDescription": "V tomto pohledu zatím nejsou žádné záznamy.",
+  "listScrollRegion": "Posuvné sloupce seznamu",
+  "listScrollHint": "Další sloupce zobrazíte vodorovným posunutím.",
+  "listLookupPlaceholder": "Vybrat…"
 }

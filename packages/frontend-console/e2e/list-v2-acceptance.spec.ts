@@ -3,6 +3,7 @@ import setup from './runtime/setup'
 import { workers, expectedRows, expectedCounts, type Selection } from './runtime/list-v2-data'
 import { capture, provenance, result, record } from './list-v2-evidence'
 import en from '../src/locales/en.json' with { type: 'json' }
+import cs from '../src/locales/cs.json' with { type: 'json' }
 
 let observations: unknown[] = []
 let stop: (() => Promise<void>) | undefined
@@ -11,7 +12,7 @@ const labels: Record<string, string> = { all: 'All workers', active: 'Active wor
 test.beforeAll(async ({ browser }) => { stop = await setup({ worker: 'list-v2-worker.ts', seed: 'list-v2-seed.ts' }); provenance(browser.version()) })
 test.afterAll(async () => { await stop?.() })
 test.beforeEach(async ({ context, page }) => { observations = []; page.on('response', response => { if (new URL(response.url()).pathname === '/query') void response.json().then(body => observations.push({ kind: 'query', request: response.request().postDataJSON(), status: response.status(), response: body })).catch(() => {}) }); await context.addInitScript(() => localStorage.setItem('console-language', 'en')) })
-test.afterEach(async ({ page }, info) => { observations.push({ kind: 'final', url: page.url(), ids: await ids(page).catch(() => []), footer: await footer(page).textContent().catch(() => null), tabs: await page.getByRole('group', { name: en.listViews }).textContent().catch(() => null) }); record('functionalEvidence', info.title, observations); result(info) })
+test.afterEach(async ({ page }, info) => { observations.push({ kind: 'final', url: page.url(), ids: await ids(page).catch(() => []), footer: await footer(page).textContent().catch(() => null), tabs: await list(page).locator('[data-list-slot="tabs"]').textContent().catch(() => null) }); record('functionalEvidence', info.title, observations); result(info) })
 const list = (page: Page) => page.locator('[data-slot="list-page"]')
 const footer = (page: Page) => list(page).locator('footer')
 const panel = (page: Page) => page.getByRole('group', { name: en.sortAndFilter, exact: true })
@@ -21,7 +22,7 @@ async function settled(page: Page) {
   await expect(list(page)).toBeVisible()
   await expect(list(page).getByText(en.loading, { exact: true })).toHaveCount(0)
   await expect(list(page).getByText(en.rowAccessRefreshing, { exact: true })).toHaveCount(0)
-  await expect(footer(page).getByRole('status')).toBeVisible()
+  await expect(footer(page).locator('[data-list-range]')).toBeVisible()
   await page.evaluate(async () => { await document.fonts.ready })
 }
 async function ids(page: Page) {
@@ -29,8 +30,8 @@ async function ids(page: Page) {
 }
 async function rows(page: Page, selection: Selection = {}, offset = 0, limit = 10) {
   const expected = expectedRows(selection)
-  try { await expect.poll(() => ids(page), { message: `seed IDs ${JSON.stringify({ selection, offset, limit })}` }).toEqual(expected.slice(offset, offset + limit).map(row => row.id)) } finally { observations.push({ kind: 'rows', selection, offset, limit, expectedIds: expected.slice(offset, offset + limit).map(row => row.id), observedIds: await ids(page), expectedTotal: expected.length, observedRange: await footer(page).getByRole('status').textContent() }) }
-  await expect(footer(page).getByRole('status')).toHaveText(en.listRangeTotal.replace('{{start}}', String(expected.length ? offset + 1 : 0)).replace('{{end}}', String(Math.min(offset + limit, expected.length))).replace('{{total}}', String(expected.length)))
+  try { await expect.poll(() => ids(page), { message: `seed IDs ${JSON.stringify({ selection, offset, limit })}` }).toEqual(expected.slice(offset, offset + limit).map(row => row.id)) } finally { observations.push({ kind: 'rows', selection, offset, limit, expectedIds: expected.slice(offset, offset + limit).map(row => row.id), observedIds: await ids(page), expectedTotal: expected.length, observedRange: await footer(page).locator('[data-list-range]').textContent() }) }
+  await expect(footer(page).locator('[data-list-range]')).toHaveText(en.listRangeTotal.replace('{{start}}', String(expected.length ? offset + 1 : 0)).replace('{{end}}', String(Math.min(offset + limit, expected.length))).replace('{{total}}', String(expected.length)))
 }
 async function counts(page: Page, selection: Selection = {}) {
   observations.push({ kind: 'counts', selection, expected: expectedCounts(selection), observed: await page.getByRole('group', { name: en.listViews }).textContent() })
@@ -79,8 +80,8 @@ for (const width of [1440, 390]) for (const scenario of scenarios) test(`capture
   }
   try {
     await page.goto(route)
-    if (scenario === 'loading') { await expect(list(page).locator('[aria-busy="true"]')).toBeVisible(); await expect(footer(page).getByRole('status')).toHaveCount(0); await expect(list(page).locator('[data-list-slot="tabs"] span')).toHaveCount(0) }
-    else if (scenario === 'error') { await expect(list(page).getByText(en.requestFailed, { exact: true }).first()).toBeVisible(); await expect(footer(page).getByRole('status')).toHaveCount(0); await expect(list(page).locator('[data-list-slot="tabs"] span')).toHaveCount(0) }
+    if (scenario === 'loading') { await expect(list(page).locator('[aria-busy="true"]')).toBeVisible(); await expect(footer(page).locator('[data-list-range]')).toHaveCount(0); await expect(list(page).locator('[data-list-slot="tabs"] span')).toHaveCount(0) }
+    else if (scenario === 'error') { await expect(list(page).getByText(en.requestFailed, { exact: true }).first()).toBeVisible(); await expect(footer(page).locator('[data-list-range]')).toHaveCount(0); await expect(list(page).locator('[data-list-slot="tabs"] span')).toHaveCount(0) }
     else {
       await settled(page)
       if (scenario !== 'populated-restricted-staff') { await expect(page.getByRole('button', { name: new RegExp(en.rowAccessActions) })).toHaveCount(10); await expect(page.getByText(en.rowAccessRefreshing, { exact: true })).toHaveCount(0) }
@@ -285,8 +286,8 @@ test('same mounted tab: admin → staff → admin must replace rows, totals, cou
       await context.setExtraHTTPHeaders({ Authorization: `Bearer list-v2-${actor}-session` })
       await expect.configure({ soft: true }).poll(() => ids(page), { timeout: 38_000, message: `real session transition to ${actor}: seeded first page` }).toEqual(expectedRows({ actor }).slice(0, 10).map(row => row.id))
       const expected = expectedRows({ actor }); const actualIds = await ids(page)
-      observations.push({ kind: 'actor', actor, expectedIds: expected.slice(0, 10).map(row => row.id), observedIds: actualIds, expectedTotal: expected.length, observedRange: await footer(page).getByRole('status').textContent(), expectedCounts: expectedCounts({ actor }), observedTabs: await page.getByRole('group', { name: en.listViews }).textContent() })
-      await expect.soft(footer(page).getByRole('status')).toHaveText(en.listRangeTotal.replace('{{start}}', '1').replace('{{end}}', '10').replace('{{total}}', String(expected.length)))
+      observations.push({ kind: 'actor', actor, expectedIds: expected.slice(0, 10).map(row => row.id), observedIds: actualIds, expectedTotal: expected.length, observedRange: await footer(page).locator('[data-list-range]').textContent(), expectedCounts: expectedCounts({ actor }), observedTabs: await page.getByRole('group', { name: en.listViews }).textContent() })
+      await expect.soft(footer(page).locator('[data-list-range]')).toHaveText(en.listRangeTotal.replace('{{start}}', '1').replace('{{end}}', '10').replace('{{total}}', String(expected.length)))
       for (const [view, count] of Object.entries(expectedCounts({ actor }))) await expect.soft(page.getByRole('group', { name: en.listViews }).getByRole('button', { name: new RegExp(`^${labels[view]}`) })).toHaveText(`${labels[view]}${count}`)
       await expect.soft(panel(page)).toHaveCount(0)
       if (actor === 'staff') { await expect.soft(page.getByRole('button', { name: /^Pending invitations/ })).toHaveCount(0); await expect.soft(page.getByRole('button', { name: new RegExp(en.rowAccessActions) })).toHaveCount(0) }
@@ -311,4 +312,276 @@ test('access: allowed admin actions; denied staff controls and real API authoriz
   const mutation = await request.post('/orgs/org-a/invitations', { headers, data: { email: 'denied@example.test', target: { entity: 'worker', row: 'w004' } } }); expect(mutation.status()).toBe(403)
   await context.setExtraHTTPHeaders({ Authorization: 'Bearer list-v2-staff-session' }); await page.goto(route); await settled(page); await rows(page, { actor: 'staff' })
   await expect(page.getByRole('columnheader', { name: en.rowAccess, exact: true })).toHaveCount(0); await expect(page.getByRole('button', { name: new RegExp(en.rowAccessActions) })).toHaveCount(0)
+})
+
+for (const width of [360, 390]) for (const language of ['en', 'cs'] as const) test(`paging: 200% text middle page ${width} ${language}`, async ({ page, context }) => {
+  const copy = language === 'cs' ? cs : en
+  await page.setViewportSize({ width, height: 1000 })
+  await context.addInitScript(language => localStorage.setItem('console-language', language), language)
+  await page.goto(`${route}?page=3`)
+  await expect(list(page).locator('[data-list-range]')).toBeVisible()
+  await page.evaluate(async () => {
+    document.documentElement.style.fontSize = '32px'
+    await document.fonts.ready
+    await Promise.all(document.getAnimations().filter(animation => animation.effect?.getComputedTiming().iterations !== Infinity).map(animation => animation.finished.catch(() => {})))
+  })
+  const paging = list(page).locator('[data-list-paging]')
+  const previous = paging.getByRole('button', { name: copy.previousPage, exact: true })
+  const current = paging.getByRole('button', { name: '3', exact: true })
+  const next = paging.getByRole('button', { name: copy.nextPage, exact: true })
+  await expect(current).toHaveAttribute('aria-current', 'page')
+  await expect(previous).toBeEnabled()
+  await expect(next).toBeEnabled()
+  await paging.scrollIntoViewIfNeeded()
+  // Based on the review's paging-focus/probe geometry: DOM visibility alone
+  // misses controls clipped by the paging group's own horizontal viewport.
+  const checkPaging = async (phase: string) => {
+    const viewport = await paging.evaluate(element => {
+      const box = element.getBoundingClientRect()
+      return { left: box.left + element.clientLeft, right: box.left + element.clientLeft + element.clientWidth, top: box.top, bottom: box.bottom, scrollLeft: element.scrollLeft, clientWidth: element.clientWidth, scrollWidth: element.scrollWidth }
+    })
+    for (const control of [previous, current, next]) {
+      await expect(control).toBeVisible()
+      const box = (await control.boundingBox())!
+      observations.push({ kind: 'paging-clip', phase, viewport, name: await control.getAttribute('aria-label') ?? await control.textContent(), box })
+      expect.soft(box.x).toBeGreaterThanOrEqual(viewport.left)
+      expect.soft(box.x + box.width).toBeLessThanOrEqual(viewport.right)
+      expect.soft(box.y).toBeGreaterThanOrEqual(viewport.top)
+      expect.soft(box.y + box.height).toBeLessThanOrEqual(viewport.bottom)
+    }
+    expect.soft(viewport.scrollWidth).toBeLessThanOrEqual(viewport.clientWidth)
+    expect.soft(viewport.scrollLeft).toBe(0)
+  }
+  await checkPaging('before focus')
+  await next.focus()
+  await expect(next).toBeFocused()
+  await checkPaging('after focusing Next')
+  await page.screenshot({ path: `${process.env.LIST_V2_OUTPUT}/paging-200-${width}-${language}.png` })
+  // Collapsed page numbers must also leave the keyboard order.
+  await previous.focus()
+  await page.keyboard.press('Tab'); await expect(current).toBeFocused()
+  await page.keyboard.press('Tab'); await expect(next).toBeFocused()
+  await page.keyboard.press('Enter')
+  await expect.poll(() => new URL(page.url()).searchParams.get('page')).toBe('4')
+})
+
+// The review's app-boundary probe uses synthetic rows/total to exercise the
+// supported offset bound without changing the backend pagination fixtures.
+for (const width of [1110, 1231, 1233]) for (const language of ['en', 'cs'] as const) for (const number of [900, 1000]) test(`paging: 200% text boundary ${width} ${language} page ${number}`, async ({ page, context }) => {
+  const copy = language === 'cs' ? cs : en
+  await page.setViewportSize({ width, height: 1000 })
+  await context.addInitScript(language => localStorage.setItem('console-language', language), language)
+  await page.route('**/query', async intercepted => {
+    const query = intercepted.request().postDataJSON()
+    if (query.entity !== 'worker' || !query.includeTotal) return intercepted.continue()
+    const response = await intercepted.fetch({ postData: JSON.stringify({ ...query, offset: 0 }) })
+    await intercepted.fulfill({ response, json: { ...await response.json(), total: 10010 } })
+  })
+  await page.goto(`${route}?page=${number}`)
+  await expect(list(page).locator('[data-list-range]')).toBeVisible()
+  await page.evaluate(async () => {
+    document.documentElement.style.fontSize = '32px'
+    await document.fonts.ready
+    await Promise.all(document.getAnimations().filter(animation => animation.effect?.getComputedTiming().iterations !== Infinity).map(animation => animation.finished.catch(() => {})))
+  })
+  const paging = list(page).locator('[data-list-paging]')
+  const previous = paging.getByRole('button', { name: copy.previousPage, exact: true })
+  const current = paging.getByRole('button', { name: String(number), exact: true })
+  const next = paging.getByRole('button', { name: copy.nextPage, exact: true })
+  await expect(current).toHaveAttribute('aria-current', 'page')
+  await expect(previous).toBeEnabled()
+  await expect(next).toBeEnabled()
+  await paging.scrollIntoViewIfNeeded()
+  // Check every clipping ancestor as well as the paging viewport; visible DOM
+  // alone missed the section's overflow:hidden in the review reproduction.
+  const checkPaging = async (phase: string, controls = [previous, current, next]) => {
+    for (const control of controls) {
+      const geometry = await control.evaluate(element => {
+        const box = element.getBoundingClientRect()
+        const clips = [{ left: 0, right: innerWidth }]
+        for (let parent = element.parentElement; parent; parent = parent.parentElement) {
+          if (/auto|scroll|hidden|clip/.test(getComputedStyle(parent).overflowX)) {
+            const rect = parent.getBoundingClientRect()
+            const style = getComputedStyle(parent)
+            clips.push({ left: rect.left + parseFloat(style.borderLeftWidth), right: rect.right - parseFloat(style.borderRightWidth) })
+          }
+        }
+        return { left: box.left, right: box.right, clipLeft: Math.max(...clips.map(clip => clip.left)), clipRight: Math.min(...clips.map(clip => clip.right)) }
+      })
+      observations.push({ kind: 'paging-boundary', phase, number, width, language, geometry })
+      await expect(control).toBeVisible()
+      expect.soft(geometry.left).toBeGreaterThanOrEqual(geometry.clipLeft)
+      expect.soft(geometry.right).toBeLessThanOrEqual(geometry.clipRight)
+    }
+  }
+  await checkPaging('before focus')
+  await next.focus()
+  await expect(next).toBeFocused()
+  await checkPaging('after focusing Next')
+  if (width === 1110 && number === 1000) {
+    // Below the supported layout widths, retain native focus/scroll recovery
+    // even when Previous/current/Next themselves cannot fit on one line.
+    await page.setViewportSize({ width: 320, height: 1000 })
+    await paging.scrollIntoViewIfNeeded()
+    await previous.focus()
+    const overflow = await paging.evaluate(element => ({ clientWidth: element.clientWidth, scrollWidth: element.scrollWidth }))
+    expect(overflow.scrollWidth).toBeGreaterThan(overflow.clientWidth)
+    await page.keyboard.press('Tab')
+    await expect(current).toBeFocused()
+    await page.keyboard.press('Tab')
+    await expect(next).toBeFocused()
+    expect.soft(await paging.evaluate(element => element.scrollLeft)).toBeGreaterThan(0)
+    await checkPaging('overflow fallback after focusing Next', [next])
+    await page.setViewportSize({ width, height: 1000 })
+  }
+  // Exercise the visible buttons in DOM order, excluding collapsed numbers.
+  const visible = paging.getByRole('button')
+  await expect(visible).toHaveCount(width < 1232 ? 3 : number === 900 ? 9 : 7)
+  await previous.focus()
+  for (let index = 1; index < await visible.count(); index++) {
+    await page.keyboard.press('Tab')
+    await expect(visible.nth(index)).toBeFocused()
+  }
+  await expect(next).toBeFocused()
+  await page.keyboard.press('Enter')
+  await expect.poll(() => new URL(page.url()).searchParams.get('page')).toBe(String(number + 1))
+  await page.unrouteAll({ behavior: 'wait' })
+})
+
+for (const width of [1440, 390, 360]) for (const actor of ['admin', 'staff'] as const) for (const language of ['en', 'cs'] as const) test(`G4–G6 polish ${width} ${actor} ${language}`, async ({ page, context }) => {
+  const copy = language === 'cs' ? cs : en
+  await page.setViewportSize({ width, height: 1000 })
+  await context.setExtraHTTPHeaders({ Authorization: `Bearer list-v2-${actor}-session` })
+  await context.addInitScript(language => localStorage.setItem('console-language', language), language)
+  await page.goto(route)
+  await expect(list(page).locator('[data-list-range]')).toBeVisible()
+  const table = list(page).locator('[data-slot="data-table"]')
+  const row = table.locator('tbody [data-row-id]').first()
+  await expect(table).toHaveAttribute('data-list-density', 'comfortable')
+  expect(await row.locator('td').first().evaluate(element => getComputedStyle(element).fontSize)).toBe('11px')
+  expect(Math.round((await row.boundingBox())!.height)).toBe(actor === 'admin' ? 53 : 61)
+  if (width === 1440) {
+    expect(await page.locator('h1').evaluate(element => [getComputedStyle(element).fontSize, getComputedStyle(element).fontWeight])).toEqual(['29px', '400'])
+    await expect.poll(async () => Math.round((await page.locator('[data-slot="sidebar-gap"]').boundingBox())!.width)).toBe(206)
+  }
+  await page.getByRole('button', { name: copy.listDisplay, exact: true }).click()
+  const display = page.getByRole('dialog', { name: copy.listDisplayHeading })
+  await display.getByRole('checkbox', { name: copy.listDisplayCompact }).click()
+  await expect(table).toHaveAttribute('data-list-density', 'compact')
+  expect(Math.round((await row.boundingBox())!.height)).toBe(actor === 'admin' ? 53 : 45)
+  expect(new URL(page.url()).searchParams.has('compact')).toBe(false)
+  await page.keyboard.press('Escape')
+  const scroller = list(page).getByRole('region', { name: copy.listScrollRegion })
+  await expect(scroller).toHaveAttribute('tabindex', '0')
+  const cue = list(page).locator('[data-list-overflow]')
+  if (width < 500) {
+    await expect(cue).toHaveAttribute('data-list-overflow', 'end')
+    await scroller.focus(); await page.keyboard.press('End')
+    await expect(cue).toHaveAttribute('data-list-overflow', 'start')
+    await page.keyboard.press('Home')
+    await expect(cue).toHaveAttribute('data-list-overflow', 'end')
+    await page.getByRole('button', { name: copy.listDisplay, exact: true }).click()
+    for (const checkbox of await display.getByRole('checkbox').all()) {
+      if (await checkbox.getAttribute('aria-checked') === 'true' && await checkbox.getAttribute('aria-label') !== copy.listDisplayCompact && await checkbox.textContent() !== copy.listDisplayCompact) {
+        // Compact is restored separately; configured data columns can all be hidden.
+        const label = await checkbox.evaluate(element => element.closest('label')?.textContent)
+        if (label !== copy.listDisplayCompact) await checkbox.click()
+      }
+    }
+    await page.keyboard.press('Escape')
+    await expect(cue).toHaveCount(0)
+  } else {
+    await expect(cue).toHaveCount(0)
+    await page.setViewportSize({ width: 360, height: 1000 })
+    await expect(cue).toHaveAttribute('data-list-overflow', 'end')
+    await page.setViewportSize({ width, height: 1000 })
+    await expect(cue).toHaveCount(0)
+  }
+  // Text enlargement may move whole groups, never split Previous/current/Next.
+  await page.evaluate(() => { document.documentElement.style.fontSize = '20px' })
+  const lookup = page.getByRole('combobox', { name: 'Team', exact: true })
+  await insideViewport(lookup)
+  expect((await lookup.boundingBox())!.width).toBeGreaterThanOrEqual(130)
+  await expect(lookup).toHaveAttribute('placeholder', copy.listLookupPlaceholder)
+  const paging = list(page).locator('[data-list-paging]')
+  const prev = await paging.getByRole('button', { name: copy.previousPage, exact: true }).boundingBox()
+  const next = await paging.getByRole('button', { name: copy.nextPage, exact: true }).boundingBox()
+  expect(Math.abs(prev!.y - next!.y)).toBeLessThan(2)
+  expect(prev!.x).toBeGreaterThanOrEqual(0)
+  expect(next!.x + next!.width).toBeLessThanOrEqual(width)
+  await expect(list(page).locator('[data-list-page-summary] select')).toBeVisible()
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+  // Every actor/locale/viewport exercises a held new key and contextual empty recovery.
+  let release: (() => void) | undefined
+  const hold = new Promise<void>(resolve => { release = resolve })
+  await page.route('**/query', async intercepted => {
+    const query = intercepted.request().postDataJSON()
+    if (query.entity === 'worker' && query.includeTotal) await hold
+    await intercepted.continue()
+  })
+  try {
+    await page.getByRole('group', { name: copy.listViews }).getByRole('button', { name: /^Archived workers/ }).click()
+    await expect(list(page).locator('[data-list-skeleton]')).toHaveCount(5)
+    await expect(footer(page).getByRole('status')).toHaveText(copy.loading)
+    await expect(list(page).locator('[data-list-range]')).toHaveCount(0)
+    const skeleton = list(page).locator('[data-list-skeleton]').first()
+    await expect(skeleton.locator('td')).toHaveCount(await table.getByRole('columnheader').count())
+    expect(Math.round((await skeleton.boundingBox())!.height)).toBe(actor === 'admin' ? 53 : 45)
+    release!()
+    await expect(list(page).getByRole('heading', { name: copy.noResults })).toBeVisible()
+    await insideViewport(list(page).getByText(copy.listEmptyViewDescription))
+    await expect(list(page).getByRole('button', { name: copy.clearSearchFilters })).toHaveCount(0)
+    await page.getByRole('searchbox', { name: copy.search, exact: true }).fill('missing')
+    await expect(list(page).getByText(copy.listEmptyFilteredDescription)).toBeVisible()
+    await list(page).getByRole('button', { name: copy.clearSearchFilters }).click()
+    await expect(list(page).getByText(copy.listEmptyViewDescription)).toBeVisible()
+    expect(new URL(page.url()).searchParams.get('view')).toBe('empty')
+    expect(new URL(page.url()).searchParams.has('search')).toBe(false)
+    await page.getByRole('group', { name: copy.listViews }).getByRole('button', { name: /^All workers/ }).click()
+    await expect(row).toBeVisible()
+    await page.screenshot({ path: `${process.env.LIST_V2_OUTPUT}/polish-${width}-${actor}-${language}.png`, fullPage: true })
+  } finally { release?.(); await page.unrouteAll({ behavior: 'wait' }) }
+})
+
+test('G6: held initial and new-query skeletons become results; filtered empty clears while preserving the configured view', async ({ page }) => {
+  let release: (() => void) | undefined
+  let hold = new Promise<void>(resolve => { release = resolve })
+  await page.route('**/query', async intercepted => {
+    const query = intercepted.request().postDataJSON()
+    if (query.entity === 'worker' && query.includeTotal) await hold
+    await intercepted.continue()
+  })
+  try {
+    await page.goto(route)
+    await expect(list(page).locator('[data-list-skeleton]')).toHaveCount(5)
+    await expect(footer(page).getByRole('status')).toHaveText(en.loading)
+    await expect(list(page).locator('[data-list-range]')).toHaveCount(0)
+    release!(); await settled(page)
+    await tab(page, 'empty'); await rows(page, { view: 'empty' })
+    await expect(list(page).getByRole('heading', { name: en.noResults })).toBeVisible()
+    await expect(list(page).getByText(en.listEmptyViewDescription)).toBeVisible()
+    await expect(list(page).getByRole('button', { name: en.clearSearchFilters })).toHaveCount(0)
+    await tab(page, 'active'); await rows(page, { view: 'active' })
+    await page.getByRole('searchbox', { name: en.search, exact: true }).fill('no such worker')
+    await expect(list(page).getByText(en.listEmptyFilteredDescription)).toBeVisible()
+    await list(page).getByRole('button', { name: en.clearSearchFilters }).click()
+    await rows(page, { view: 'active' })
+    expect(new URL(page.url()).searchParams.get('view')).toBe('active')
+    const original = await list(page).locator('tbody tr[data-row-id]').first().elementHandle()
+    hold = new Promise<void>(resolve => { release = resolve })
+    // A real row edit invalidates the list itself without refreshing authority (a new key).
+    await list(page).getByRole('row').filter({ has: page.getByRole('link', { name: 'Worker 001', exact: true }) }).getByRole('button', { name: 'Actions for Worker 001', exact: true }).click()
+    await page.getByRole('menuitem', { name: en.edit, exact: true }).click()
+    const edit = page.getByRole('dialog')
+    await edit.getByRole('textbox', { name: 'Name', exact: true }).fill('Worker 001 refreshed')
+    await edit.getByRole('button', { name: en.save, exact: true }).click()
+    await expect(footer(page).locator('[role="status"]')).toHaveText(en.loading)
+    expect(await original!.evaluate(element => element.isConnected)).toBe(true)
+    await expect(list(page).locator('[data-list-skeleton]')).toHaveCount(0)
+    release!()
+    await expect(edit).toHaveCount(0)
+    await expect(footer(page).locator('[data-list-range]')).toHaveAttribute('role', 'status')
+    expect(await original!.evaluate(element => element.isConnected)).toBe(true)
+    await page.screenshot({ path: `${process.env.LIST_V2_OUTPUT}/polish-empty-recovery.png`, fullPage: true })
+  } finally { release?.(); await page.unrouteAll({ behavior: 'wait' }) }
 })

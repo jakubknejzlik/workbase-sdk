@@ -7,12 +7,17 @@ separate published packages. See the [0.4.0 changelog](../../CHANGELOG.md),
 [migration notes](migration-0.4.0.md) and
 [runnable Workers configuration](../../packages/core/examples/README.md).
 
-The candidate starts at the accepted integration revision `a51c635eb84cf4e4bd128f28f4704e226fdf6e55`
-and merges main `cfef8a865331bb65f3a8f41adb2a1ecd7be9a03a`, following the
-`release/sdk-v0.3.1` → main pattern. Review
+The refreshed candidate starts at accepted integration revision
+`7209d5d0ccc774827040ab616a0398a12b6c0b28` ([PR #257](https://github.com/jakubknejzlik/workbase-sdk/pull/257))
+and retains the merge of main `cfef8a865331bb65f3a8f41adb2a1ecd7be9a03a`, following
+the `release/sdk-v0.3.1` → main pattern. Review
 [release PR #256](https://github.com/jakubknejzlik/workbase-sdk/pull/256) and
 [#233 ACCEPT](https://github.com/jakubknejzlik/workbase-sdk/issues/233#issuecomment-7018768570).
-The acceptance bundle applies to that integration SHA, not rebuilt 0.4.0 archives.
+The #233 ACCEPT and its acceptance bundle apply to integration revision
+`a51c635eb84cf4e4bd128f28f4704e226fdf6e55`. PR #257 is the #255 P3 polish
+follow-up (G4–G6), reviewed MERGE at `e28bdc23`. The earlier acceptance bundle
+and rubric score a51c635e; release-head screenshots carry their own source commit
+and console asset-tree identity and do not establish rebuilt-archive acceptance.
 Publication pending: tag + provenance after green CI and review.
 
 ## Preparation checks
