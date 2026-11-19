@@ -5,7 +5,7 @@ import { Button } from '@workbasehq/ui/components/ui/button'
 import { Calendar } from '@workbasehq/ui/components/ui/calendar'
 import { Popover, PopoverTrigger, PopoverContent } from '@workbasehq/ui/components/ui/popover'
 import { formatFieldValue, type Model, type Capabilities, type Result } from './read'
-import { availableCalendar, addDays, calendarCivilRange, dayKey, localDay, eventOnDay, calendarCreateField, calendarTitle } from './calendar-model'
+import { availableCalendar, addDays, calendarCivilRange, dayKey, localDay, calendarDayBounds, eventOnDay, calendarCreateField, calendarTitle } from './calendar-model'
 import { useEntityTranslation } from './entity-translation'
 import { civilInstant, instanceTimeZone } from './time-zone'
 import type { ListState } from './list-model'
@@ -63,7 +63,8 @@ export function EntityCalendar({ model, entity, caps, orgId, state, data, pendin
     <table ref={grid} className={`w-full table-fixed border-collapse ${mode === 'week' ? 'block md:table' : ''}`} aria-label={title} aria-describedby={`calendar-help-${entity}`}>
       <thead className={mode === 'week' ? 'hidden md:table-header-group' : undefined}><tr>{dates.slice(0, 7).map(day => <th key={dayKey(day)} scope="col" className="border p-1 text-xs font-medium"><abbr className="no-underline" title={day.toLocaleDateString(i18n.language, { timeZone: 'UTC', weekday: 'long' })}>{day.toLocaleDateString(i18n.language, { timeZone: 'UTC', weekday: 'short' })}</abbr></th>)}</tr></thead>
       <tbody className={mode === 'week' ? 'block md:table-row-group' : undefined}>{Array.from({ length: dates.length / 7 }, (_, week) => <tr key={week} className={mode === 'week' ? 'block md:table-row' : undefined}>{dates.slice(week * 7, week * 7 + 7).map(day => {
-        const key = dayKey(day); const events = rows.filter(row => eventOnDay(row, view, key, model.timeZone))
+        const key = dayKey(day); const bounds = calendarDayBounds(key, model.timeZone)
+        const events = rows.filter(row => eventOnDay(row, view, bounds))
         return <td key={key} onClick={event => { if (event.target === event.currentTarget) createDay(day) }} className={`${mode === 'week' ? 'block h-auto md:table-cell' : 'h-28'} min-w-0 border p-0.5 align-top md:h-36 md:p-2 ${day.getUTCMonth() !== localDay(date).getUTCMonth() && mode === 'month' ? 'bg-muted/40' : ''}`}>
           <button type="button" data-calendar-day={key} className={`mb-1 flex ${mode === 'week' ? 'h-8 px-2 md:size-8 md:px-0' : 'size-8'} items-center justify-center rounded-md text-sm hover:bg-muted focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring`} tabIndex={focused === key || !dates.some(value => dayKey(value) === focused) && key === dayKey(start) ? 0 : -1} aria-label={canCreate ? t('calendarCreateOn', { date: fullDate(day) }) : fullDate(day)} aria-current={key === dayKey(new Date(), model.timeZone) ? 'date' : undefined} onFocus={() => setFocused(key)} onKeyDown={event => keyboard(event, day)} onClick={() => createDay(day)}><span className={mode === 'week' ? 'hidden md:inline' : undefined}>{day.getUTCDate()}</span>{mode === 'week' && <span className="md:hidden">{fullDate(day)}</span>}</button>
           <ul className="space-y-1">{events.map(row => {

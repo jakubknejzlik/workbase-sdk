@@ -6,6 +6,7 @@ import { createMemoryHistory, createRootRoute, createRoute, createRouter, Router
 import { I18nextProvider, initReactI18next } from 'react-i18next'
 import i18next from 'i18next'
 import { EntityCalendar } from '../../console-generated/src/calendar'
+import * as timeZone from '../../console-generated/src/time-zone'
 import { stateFromSearch, type ListState } from '../../console-generated/src/list-model'
 import type { Model, Capabilities } from '../../console-generated/src/read'
 import en from '../src/locales/en.json'
@@ -14,11 +15,11 @@ const instant = '2026-10-24T22:30:00Z'
 const model: Model = { instance: 'calendar', revision: 1, timeZone: 'Europe/Prague', limits: { root: 100, children: 10, relations: 4, exists: 4 }, entities: { events: { displayField: 'name', fields: { id: { type: 'string' }, name: { type: 'string' }, starts: { type: 'datetime' }, ends: { type: 'datetime' }, updated: { type: 'datetime' } }, columns: ['name'], relations: {}, routes: { list: '', detail: '' }, writeSchema: { properties: { starts: { type: 'string' } } }, views: [{ kind: 'calendar', startField: 'starts', endField: 'ends', secondaryField: 'updated' }] } } }
 const caps: Capabilities = { revision: 1, entities: { events: { readable: ['id', 'name', 'starts', 'ends', 'updated'], writable: ['starts'], operations: ['read', 'create'] } } }
 afterEach(() => { vi.restoreAllMocks() })
-async function mount(language: 'en' | 'cs' = 'en', zone: string | undefined = 'Europe/Prague') {
+async function mount(language: 'en' | 'cs' = 'en', zone: string | undefined = 'Europe/Prague', performanceRows?: Record<string, string>[]) {
   const configured = { ...model, timeZone: zone }; const create = vi.fn(), change = vi.fn()
   const Harness = () => {
-    const [state, setState] = useState<ListState>(stateFromSearch({ presentation: 'calendar', calendarDate: '2026-10-25', calendarMode: 'week' }, configured, 'events', caps).state)
-    return <EntityCalendar model={configured} caps={caps} entity="events" orgId="org" state={state} pending={false} previous={false} onPage={() => {}} onCreate={create} onChange={next => { change(next); setState(next) }} data={{ next_cursor: null, data: [{ id: '1', name: 'Prague event', starts: instant, updated: instant }, { id: '2', name: 'Ends at midnight', starts: '2026-10-23T21:30:00Z', ends: '2026-10-24T22:00:00Z' }, { id: '3', name: 'Multiple days', starts: '2026-10-23T21:30:00Z', ends: '2026-10-25T23:00:00Z' }] }} />
+    const [state, setState] = useState<ListState>(stateFromSearch({ presentation: 'calendar', calendarDate: performanceRows ? '2026-03-15' : '2026-10-25', calendarMode: performanceRows ? 'month' : 'week' }, configured, 'events', caps).state)
+    return <EntityCalendar model={configured} caps={caps} entity="events" orgId="org" state={state} pending={false} previous={false} onPage={() => {}} onCreate={create} onChange={next => { change(next); setState(next) }} data={{ next_cursor: null, data: performanceRows ?? [{ id: '1', name: 'Prague event', starts: instant, updated: instant }, { id: '2', name: 'Ends at midnight', starts: '2026-10-23T21:30:00Z', ends: '2026-10-24T22:00:00Z' }, { id: '3', name: 'Multiple days', starts: '2026-10-23T21:30:00Z', ends: '2026-10-25T23:00:00Z' }] }} />
   }
   const root = createRootRoute(), route = createRoute({ getParentRoute: () => root, path: '/', component: Harness })
   const router = createRouter({ routeTree: root.addChildren([route]), history: createMemoryHistory({ initialEntries: ['/'] }) }); await router.load()
@@ -66,4 +67,14 @@ it.each(['Not/AZone', 'UTC'])('uses UTC fallback clock and create defaults for %
   const event = within(day('2026-10-24').closest('td')!).getByText('Prague event').closest('a')!
   expect(event.querySelector('time')?.textContent).toBe(new Intl.DateTimeFormat('en', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' }).format(new Date(instant)))
   await user.click(day('2026-10-25')); expect(create).toHaveBeenCalledWith({ starts: '2026-10-25T09:00:00.000Z' })
+})
+
+// Reviewer probe: six displayed weeks × 100 events; count conversions, not elapsed time.
+it('converts each displayed day boundary once outside the event loop', async () => {
+  const rows = Array.from({ length: 100 }, (_, i) => ({ id: String(i), name: i === 0 ? 'Prague event' : `Event ${i}`, starts: new Date(Date.UTC(2026, 2, 1 + i % 31, 9)).toISOString(), ends: new Date(Date.UTC(2026, 2, 1 + i % 31, 10)).toISOString() }))
+  const conversions = vi.spyOn(timeZone, 'civilInstant')
+  const { container } = await mount('en', 'Europe/Prague', rows)
+  expect(container.querySelectorAll('[data-calendar-day]')).toHaveLength(42)
+  expect(container.querySelectorAll('[data-calendar-event]')).toHaveLength(100)
+  expect(conversions.mock.calls.length).toBeLessThanOrEqual(42 * 2)
 })

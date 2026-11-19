@@ -30,6 +30,7 @@ function Catalogue({ scope, entity, state, current, initial, fingerprint, onAppl
   const [open, setOpen] = useState(false), [dialogue, setDialogue] = useState<Dialogue>(), [name, setName] = useState(''), [update, setUpdate] = useState(true)
   const [message, setMessage] = useState(''), [disabled, setDisabled] = useState(false), [settling, setSettling] = useState(false)
   const active = useRef(true), trigger = useRef<HTMLButtonElement>(null)
+  const outsideInteraction = useRef(false)
   const entry = catalogue.entries.find(item => item.id === activeId)
   useLayoutEffect(() => { active.current = true; return () => { active.current = false } }, [])
   useEffect(() => {
@@ -80,13 +81,13 @@ function Catalogue({ scope, entity, state, current, initial, fingerprint, onAppl
   const failed = message.startsWith('savedViewsError_') || !!catalogue.error
   return <section aria-label={t('savedViews')} className="flex min-w-0 max-w-full flex-wrap items-center gap-2">
     {dirty && <Button type="button" variant="outline" disabled={disabled} onClick={saveFromBar}>{entry ? t('savedViewsSaveChanges') : t('savedViewsSaveView')}</Button>}
-    <Popover open={open} onOpenChange={value => { if (value) { setCandidate(selected); setMessage('') } setOpen(value) }}>
+    <Popover open={open} onOpenChange={value => { if (value) { outsideInteraction.current = false; setCandidate(selected); setMessage('') } setOpen(value) }}>
       <PopoverTrigger asChild><Button ref={trigger} type="button" variant="outline" disabled={disabled} className="max-w-full min-w-0">
         <span className="min-w-0 truncate">{entry?.name ?? t('savedViewsMenu')}</span>
         {dirty && <span role="img" aria-label={t('savedViewsUnsaved')} title={t('savedViewsUnsaved')} className="size-2 shrink-0 rounded-full bg-amber-500" />}
 
       </Button></PopoverTrigger>
-      <PopoverContent onCloseAutoFocus={event => { event.preventDefault(); if (!dialogue) trigger.current?.focus() }} role="dialog" aria-label={t('savedViews')} align="end" className="grid w-80 max-w-[calc(100vw-1.5rem)] max-h-[var(--radix-popover-content-available-height)] gap-2 overflow-y-auto">
+      <PopoverContent onInteractOutside={() => { outsideInteraction.current = true }} onCloseAutoFocus={event => { event.preventDefault(); if (!dialogue && !outsideInteraction.current) trigger.current?.focus() }} role="dialog" aria-label={t('savedViews')} align="end" className="grid w-80 max-w-[calc(100vw-1.5rem)] max-h-[var(--radix-popover-content-available-height)] gap-2 overflow-y-auto">
         <div><p className="text-sm font-semibold">{t('savedViewsHeading')}</p><p className="text-xs text-muted-foreground">{t('savedViewsHint')}</p></div>
         {catalogue.entries.length ? <ul className="grid min-w-0 gap-1" aria-label={t('savedViewsHeading')}>{catalogue.entries.map(item => <li key={item.id} className="min-w-0">
           <button type="button" aria-pressed={selected === item.id} className="flex min-h-9 min-w-0 w-full items-center justify-between gap-2 rounded-md px-2 text-left text-sm hover:bg-muted aria-pressed:bg-muted aria-pressed:font-semibold" onClick={() => { setCandidate(item.id); setMessage('') }}><span className="min-w-0 [overflow-wrap:anywhere]">{item.name}</span>{selected === item.id && <span aria-hidden="true">✓</span>}</button>

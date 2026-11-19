@@ -259,3 +259,30 @@ it('a refused rename keeps the dialog open and leaves the stored view untouched 
   expect(screen.getByRole('dialog')).toBe(dialog)
   expect(loadSavedViews(scope, 'entries').entries[0]).toMatchObject({ name: 'Keep', search: { sort: 'created', direction: 'desc' } })
 })
+
+// Based on the review dismissal probe: clicking Search must leave it ready for typing.
+it('keeps the outside Search destination focused after dismissing personal views', async () => {
+  const { user } = await mount()
+  await openViewsMenu(user)
+  const search = screen.getByRole('searchbox', { name: en.search })
+  await user.click(search)
+  await waitFor(() => expect(screen.queryByRole('dialog', { name: en.savedViews })).toBeNull())
+  await waitFor(() => expect(document.activeElement).toBe(search))
+  await user.keyboard('outside search')
+  expect((search as HTMLInputElement).value).toBe('outside search')
+})
+it.each(['escape', 'close', 'apply'] as const)('restores personal views trigger focus after explicit %s', async action => {
+  const { user } = await mount()
+  if (action === 'apply') {
+    changeSavedViews(scope, 'entries', { kind: 'save', name: 'Mine', state: { search: '', sort: null, userFilters: [], presetFilters: [], limit: 30 } })
+    await act(async () => window.dispatchEvent(new StorageEvent('storage', { key: savedViewsKey(scope, 'entries') })))
+  }
+  await openViewsMenu(user)
+  await user.click(screen.getByRole('searchbox', { name: en.search }))
+  await waitFor(() => expect(screen.queryByRole('dialog', { name: en.savedViews })).toBeNull())
+  const menu = await openViewsMenu(user)
+  if (action === 'escape') await user.keyboard('{Escape}')
+  else await user.click(within(menu).getByRole('button', { name: action === 'close' ? en.savedViewsClose : en.savedViewsApplyView }))
+  await waitFor(() => expect(screen.queryByRole('dialog', { name: en.savedViews })).toBeNull())
+  await waitFor(() => expect(document.activeElement).toBe(viewsTrigger()))
+})

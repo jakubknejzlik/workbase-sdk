@@ -1,5 +1,5 @@
 import { expect, it, vi } from 'vitest'
-import { calendarRange, calendarQuery, dayKey, eventOnDay } from '../src/calendar-model'
+import { calendarRange, calendarQuery, dayKey, calendarDayBounds, eventOnDay } from '../src/calendar-model'
 import { stateFromSearch } from '../src/list-model'
 import { filterMapping } from '../src/filter-kinds'
 import type { Model, Capabilities } from '../src/read'
@@ -12,7 +12,7 @@ it.each([['2026-03-29', '2026-03-22T23:00:00.000Z', '2026-03-29T22:00:00.000Z', 
   expect(calendarQuery({ entity: 'events', select: ['id'], limit: 10 }, { kind: 'calendar', startField: 'starts' }, day, 'week', model).where).toEqual({ and: [{ starts: { gte: start, lt: end } }] })
 })
 it('places cross-midnight and multiday events with exclusive midnight ends', () => {
-  const on = (starts: string, ends: string | undefined, day: string) => eventOnDay({ starts, ends }, view, day, model.timeZone)
+  const on = (starts: string, ends: string | undefined, day: string) => eventOnDay({ starts, ends }, view, calendarDayBounds(day, model.timeZone))
   expect(on('2026-10-24T22:30:00Z', undefined, '2026-10-25')).toBe(true)
   expect(on('2026-10-24T22:30:00Z', undefined, '2026-10-24')).toBe(false)
   expect(on('2026-10-24T21:30:00Z', '2026-10-25T23:00:00Z', '2026-10-25')).toBe(true)

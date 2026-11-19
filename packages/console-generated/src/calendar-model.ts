@@ -42,10 +42,12 @@ export function calendarCreateField(model: Model, entity: string, caps: Capabili
   const definition = model.entities[entity]; const field = view.startField
   return !!caps.entities[entity]?.operations.includes('create') && caps.entities[entity].writable.includes(field) && !definition.fields[field]?.readOnly && !definition.fields[field]?.ui?.hidden && !!definition.writeSchema?.properties?.[field] && (!definition.form?.create || definition.form.create.fields.includes(field))
 }
-export function eventOnDay(row: Record<string, any>, view: ConsoleCalendarView, date: string | Date, zone?: string): boolean {
+// Convert both civil boundaries independently, once per displayed day, before checking rows.
+export function calendarDayBounds(day: string, zone?: string) {
+  return { from: +civilInstant(day, zone), to: +civilInstant(shiftCivilDay(day, 1), zone) }
+}
+export function eventOnDay(row: Record<string, any>, view: ConsoleCalendarView, { from, to }: ReturnType<typeof calendarDayBounds>): boolean {
   const start = Date.parse(row[view.startField]); const end = view.endField ? Date.parse(row[view.endField]) : NaN
-  const day = typeof date === 'string' ? date : dayKey(date)
-  const from = +civilInstant(day, zone); const to = +civilInstant(shiftCivilDay(day, 1), zone)
   return Number.isFinite(start) && start < to && (Number.isFinite(end) && end > start ? end > from : start >= from)
 }
 
