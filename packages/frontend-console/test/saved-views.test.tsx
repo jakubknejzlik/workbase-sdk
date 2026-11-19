@@ -271,7 +271,7 @@ it('keeps the outside Search destination focused after dismissing personal views
   await user.keyboard('outside search')
   expect((search as HTMLInputElement).value).toBe('outside search')
 })
-it.each(['escape', 'close', 'apply'] as const)('restores personal views trigger focus after explicit %s', async action => {
+it.each(['escape', 'close', 'apply', 'trigger'] as const)('restores personal views trigger focus after explicit %s', async action => {
   const { user } = await mount()
   if (action === 'apply') {
     changeSavedViews(scope, 'entries', { kind: 'save', name: 'Mine', state: { search: '', sort: null, userFilters: [], presetFilters: [], limit: 30 } })
@@ -281,7 +281,10 @@ it.each(['escape', 'close', 'apply'] as const)('restores personal views trigger 
   await user.click(screen.getByRole('searchbox', { name: en.search }))
   await waitFor(() => expect(screen.queryByRole('dialog', { name: en.savedViews })).toBeNull())
   const menu = await openViewsMenu(user)
+  // Let the menu receive focus before toggling it closed (the review-trigger probe).
+  await waitFor(() => expect(document.activeElement).toBe(within(menu).getAllByRole('button')[0]))
   if (action === 'escape') await user.keyboard('{Escape}')
+  else if (action === 'trigger') await user.click(viewsTrigger().querySelector('span')!)
   else await user.click(within(menu).getByRole('button', { name: action === 'close' ? en.savedViewsClose : en.savedViewsApplyView }))
   await waitFor(() => expect(screen.queryByRole('dialog', { name: en.savedViews })).toBeNull())
   await waitFor(() => expect(document.activeElement).toBe(viewsTrigger()))
