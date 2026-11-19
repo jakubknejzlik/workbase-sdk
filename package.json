@@ -31,7 +31,8 @@
     "sdk:pack": "bash scripts/sdk-pack.sh",
     "check:ui": "bun packages/plugins/console/ui/src/cli.ts",
     "check:openapi": "bun scripts/check-openapi.ts",
-    "openapi:write": "bun scripts/check-openapi.ts --write"
+    "openapi:write": "bun scripts/check-openapi.ts --write",
+    "test:list-v2-acceptance": "mkdir -p /tmp/codex-scratch/codex-wr-github-jakubknejzlik-workbase-sdk-233-s1-impl-wr-87bdd668/tmp && TMPDIR=/tmp/codex-scratch/codex-wr-github-jakubknejzlik-workbase-sdk-233-s1-impl-wr-87bdd668/tmp bun x --no-install playwright test --config packages/frontend-console/playwright.list-v2.config.ts"
   },
   "devDependencies": {
     "@apidevtools/swagger-parser": "13.1.0",
