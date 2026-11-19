@@ -174,7 +174,57 @@ it('keeps the MCP wire shape compatible with the shared constraint contract', as
   const { schemaChangeSchema } = await import('../src/schemas')
   const { declarationSchema } = await import('@workbasehq/core/schema')
   const shared = declarationSchema.shape.constraints.unwrap()
-  for (const constraints of [[constraint], [], Array.from({ length: 33 }, () => constraint), [{ ...constraint, fields: Array(17).fill('name') }], [{ ...constraint, where: '1=1' }], [{ ...constraint, kind: 'partial_unique' }]]) {
+  for (const constraints of [[constraint], [partial], [], Array.from({ length: 33 }, () => constraint), [{ ...constraint, fields: Array(17).fill('name') }], [{ ...constraint, where: '1=1' }], [{ ...constraint, kind: 'partial_unique' }]]) {
     expect(schemaChangeSchema.safeParse({ kind: 'set_constraints', entity: 'worker', constraints }).success).toBe(shared.safeParse(constraints).success)
   }
+})
+
+const partial = { ...constraint, where: { field: 'code', op: 'eq', value: 'active' } }
+it('authors and promotes a partial unique predicate and a predicate-only revision through V3', async () => {
+  const { root, server, store, call, propose } = await fixture()
+  try {
+    const first = await propose([partial]); expect(first, JSON.stringify(first)).toMatchObject({ ok: true })
+    const validation = await call('validate', { proposalId: first.proposalId }); expect(validation, JSON.stringify(validation)).toMatchObject({ ok: true })
+    expect(await call('preview_migration', { proposalId: first.proposalId })).toMatchObject({ sql: expect.stringContaining('WHERE "code" = \'active\'') })
+    expect(await call('apply_to_disposable', { proposalId: first.proposalId })).toMatchObject({ ok: true, verified: true })
+    expect(await call('promote', { proposalId: first.proposalId, expectedRevision: 1 })).toMatchObject({ ok: true, revision: 2 })
+    expect((await loadConfig(join(root, 'config.ts'))).config.entities.worker.constraints).toEqual([partial])
+    const changed = { ...partial, where: { ...partial.where, value: 'same' } }
+    const second = await call('propose_change', { instance: 'constraint-fixture', baseRevision: 2, changes: [{ kind: 'set_constraints', entity: 'worker', constraints: [changed] }] })
+    expect(second, JSON.stringify(second)).toMatchObject({ ok: true })
+    expect(await call('validate', { proposalId: second.proposalId })).toMatchObject({ ok: true })
+    const preview = await call('preview_migration', { proposalId: second.proposalId })
+    expect(preview.sql).toContain('DROP INDEX'); expect(preview.sql).toContain('WHERE "code" = \'same\'')
+    expect(await call('apply_to_disposable', { proposalId: second.proposalId })).toMatchObject({ ok: true, verified: true })
+    expect(await call('promote', { proposalId: second.proposalId, expectedRevision: 2 })).toMatchObject({ ok: true, revision: 3 })
+    await replayBundle(await store.load('constraint-fixture'), db => {
+      db.exec("INSERT INTO organizations VALUES ('org','Org')")
+      db.exec("INSERT INTO worker (id,organization_id,name,code,created_at,updated_at) VALUES ('one','org','Name','same','now','now'),('two','org','Name','inactive','now','now'),('three','org','Name','inactive','now','now')")
+      expect(() => db.exec("UPDATE worker SET code='same' WHERE id='two'")).toThrow(/UNIQUE/)
+    })
+  } finally { await server.close() }
+})
+it.each([
+  [{ field: 'missing', op: 'eq', value: 'same' }, 'Unknown predicate field'],
+  [{ field: 'code', op: 'eq', value: 1 }, 'type-compatible'],
+  [{ field: 'code', op: 'raw', value: 'same' }, 'Input does not match'],
+  [{ field: 'code', op: 'eq', value: 'same', sql: '1=1' }, 'Input does not match'],
+  ['code = \'same\'', 'Input does not match'],
+])('rejects invalid/raw MCP predicates with diagnostics and unchanged sources: %j', async (where, message) => {
+  const { root, server, propose } = await fixture()
+  try {
+    const source = await readFile(join(root, 'schema/worker.ts'), 'utf8')
+    expect(await propose([{ ...constraint, where }])).toMatchObject({ ok: false, error: { message: expect.stringContaining(message) } })
+    expect(await readFile(join(root, 'schema/worker.ts'), 'utf8')).toBe(source)
+  } finally { await server.close() }
+})
+it('rejects adding partial uniqueness over matching duplicate data without promoting or cleaning it', async () => {
+  const { root, server, call, propose } = await fixture(true)
+  try {
+    const source = await readFile(join(root, 'schema/worker.ts'), 'utf8')
+    const result = await propose([{ ...partial, where: { ...partial.where, value: 'same' } }]); expect(result, JSON.stringify(result)).toMatchObject({ ok: true })
+    expect(await call('validate', { proposalId: result.proposalId })).toMatchObject({ ok: false, error: { status: 422, message: expect.stringContaining('UNIQUE constraint failed') } })
+    expect(await call('promote', { proposalId: result.proposalId, expectedRevision: 1 })).toMatchObject({ ok: false })
+    expect(await readFile(join(root, 'schema/worker.ts'), 'utf8')).toBe(source)
+  } finally { await server.close() }
 })

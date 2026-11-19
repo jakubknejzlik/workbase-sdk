@@ -348,6 +348,25 @@ Fields must be distinct stored authored keys, and names must be distinct per ent
 Organization scoping and NULL-distinct behavior are supplied by the SDK. A constraint's
 fields cannot change under the same stable name; use a new name. An empty list removes
 all constraints. Propose constraint edits separately from runtime, access, presentation
-and legacy changes. Partial uniqueness, raw predicates and cross-relation constraints
-are not supported. The existing legacy `add_index` operation still creates an ordinary
+and legacy changes.
+
+Unique constraints also accept a single typed equality predicate, for example:
+
+```json
+{ "kind": "unique", "name": "confirmed_slot_unique", "fields": ["slot"],
+  "where": { "field": "status", "op": "eq", "value": "confirmed" } }
+```
+
+The predicate field must be stored and authored. Its literal must match the field type
+(and a declared enum value); `eq` accepts string, finite number or boolean literals,
+with safe integers for `int`. NULL literals, arbitrary SQL, extra predicate properties
+and other operators are rejected. Rows with NULL or nonmatching predicate values do
+not participate; NULL entries in the unique tuple remain distinct. The SDK supplies
+identifier quoting, literal escaping and organization scope. Adding, removing or
+changing only `where` under the same name produces a reviewed drop/create index
+migration. Existing matching duplicates reject validation without data cleanup.
+Constrained rebuilds and rename publication still require a manually reviewed
+migration. Violations use the existing `409 unique_conflict` API/MCP and console path.
+
+Raw predicates and cross-relation constraints are not supported. The existing legacy `add_index` operation still creates an ordinary
 non-unique index and accepts neither `unique` nor `where`.

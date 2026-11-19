@@ -48,10 +48,10 @@ export function plan(fromConfig: InstanceConfig | null, toConfig: InstanceConfig
     if (constrained && Object.values(next.fields).some(f => f.renameFrom)) blocked.push(`Renaming fields on a constrained table requires a manually reviewed migration: ${name}`)
     for (const old of previous.constraints ?? []) {
       const current = next.constraints?.find(c => c.name === old.name)
-      if (current && JSON.stringify(current) !== JSON.stringify(old)) blocked.push(`Changing constraint ${name}.${old.name} requires a new name`)
-      if (!current) sql.push(`DROP INDEX ${quote(uniqueIndexName(name, old.name))};`)
+      if (current && JSON.stringify(current.fields) !== JSON.stringify(old.fields)) blocked.push(`Changing constraint ${name}.${old.name} requires a new name`)
+      if (!current || JSON.stringify(current) !== JSON.stringify(old)) sql.push(`DROP INDEX ${quote(uniqueIndexName(name, old.name))};`)
     }
-    const constraintSQL = (next.constraints ?? []).filter(c => !previous.constraints?.some(old => old.name === c.name)).map(c => renderUniqueConstraint(name, c))
+    const constraintSQL = (next.constraints ?? []).filter(c => !previous.constraints?.some(old => JSON.stringify(old) === JSON.stringify(c))).map(c => renderUniqueConstraint(name, c))
     const renamed = new Set<string>()
     for (const [key, field] of Object.entries(next.fields)) {
       if (field.computed) {

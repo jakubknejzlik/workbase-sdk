@@ -31,10 +31,10 @@ export function diffSpecs(baseTables: readonly TableSpec[], tables: readonly Tab
     }
     for (const old of base.constraints ?? []) {
       const current = table!.constraints?.find(c => c.name === old.name)
-      if (current && !equal(old, current)) reject(base.name, undefined, `changing constraint ${old.name} is unsupported; use a new name`)
-      if (!current) sql.push(`DROP INDEX ${quote(uniqueIndexName(base.name, old.name))};`)
+      if (current && !equal(old.fields, current.fields)) reject(base.name, undefined, `changing constraint ${old.name} is unsupported; use a new name`)
+      if (!current || !equal(old, current)) sql.push(`DROP INDEX ${quote(uniqueIndexName(base.name, old.name))};`)
     }
-    for (const constraint of table!.constraints ?? []) if (!base.constraints?.some(c => c.name === constraint.name)) sql.push(renderUniqueConstraint(table!.name, constraint))
+    for (const constraint of table!.constraints ?? []) if (!base.constraints?.some(c => equal(c, constraint))) sql.push(renderUniqueConstraint(table!.name, constraint))
     for (const key of ['unique', 'checks', 'foreignKeys', 'indexes'] as const) {
       if (!equal(base[key], table![key])) {
         const changed = [...base.foreignKeys, ...table!.foreignKeys].find(f => !base.foreignKeys.some(b => equal(b, f)) || !table!.foreignKeys.some(b => equal(b, f)))
@@ -113,7 +113,7 @@ export function schemaLock(config: InstanceConfig, base?: SchemaLock, sources: S
         fields[physical] = { ...field, renameFrom: undefined }
       }
       normalized.entities[entity.physicalName] = { ...input, renameFrom: undefined, fields,
-        ...(input.constraints?.length ? { constraints: input.constraints.map(c => ({ ...c, fields: c.fields.map(key => fieldNames.get(key) ?? key) })) } : {}),
+        ...(input.constraints?.length ? { constraints: input.constraints.map(c => ({ ...c, fields: c.fields.map(key => fieldNames.get(key) ?? key), ...(c.where ? { where: { ...c.where, field: fieldNames.get(c.where.field) ?? c.where.field } } : {}) })) } : {}),
         checks: input.checks.map(c => ({ ...c, left: fieldNames.get(c.left) ?? c.left, right: fieldNames.get(c.right) ?? c.right })),
       }
       entities.push(entity)
