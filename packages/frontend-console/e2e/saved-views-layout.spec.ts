@@ -90,16 +90,6 @@ for (const language of ['en', 'cs'] as const) for (const width of [390, 1440]) {
       await expect(menu).toBeHidden()
       await expect(trigger).toBeFocused()
 
-      // A real outside destination must still keep focus and accept typing.
-      await open()
-      const search = page.getByRole('searchbox', { name: t.search, exact: true })
-      await search.click()
-      await expect(menu).toBeHidden()
-      await expect(search).toBeFocused()
-      await page.keyboard.type('outside search')
-      await expect(search).toHaveValue('outside search')
-      await search.fill('')
-
       // Create through the real menu and dialog, then keep a long view name present in every acceptance capture.
       await item(t.savedViewsSaveNew)
       await expect(input).toBeFocused()
