@@ -59,6 +59,15 @@ it('loads explicit worker imports into the canonical normalized schema snapshot'
   expect(config.languages[0]).toBe('cs')
 })
 
+it('loads a typed partial unique predicate through the authored literal boundary', () => {
+  const { run } = consumer(declaration.replace("displayField: 'name',", "displayField: 'name', constraints: [{ kind: 'unique', name: 'worker_unique', fields: ['user'], where: { field: 'name', op: 'eq', value: 'active' } }],"))
+  const result = run()
+  expect(result.status, result.stderr).toBe(0)
+  expect(JSON.parse(result.stdout).config.entities.worker.constraints).toEqual([
+    { kind: 'unique', name: 'worker_unique', fields: ['user'], where: { field: 'name', op: 'eq', value: 'active' } },
+  ])
+})
+
 describe('source diagnostics', () => {
   it.each([
     ['spread', declaration.replace("name: { type: 'text', required: true }", "...{ name: { type: 'text' } }"), 'schema/worker.ts:4:', 'Spread'],
@@ -102,7 +111,10 @@ it.each([
   ['constraint unknown field', declaration.replace("displayField: 'name',", "constraints: [{ kind: 'unique', name: 'worker_unique', fields: ['missing'] }],"), 'Unknown constraint field'],
   ['constraint duplicate field', declaration.replace("displayField: 'name',", "constraints: [{ kind: 'unique', name: 'worker_unique', fields: ['name', 'name'] }],"), 'distinct'],
   ['constraint duplicate name', declaration.replace("displayField: 'name',", "constraints: [{ kind: 'unique', name: 'worker_unique', fields: ['name'] }, { kind: 'unique', name: 'worker_unique', fields: ['user'] }],"), 'Duplicate constraint name'],
-  ['constraint raw predicate', declaration.replace("displayField: 'name',", "constraints: [{ kind: 'unique', name: 'worker_unique', fields: ['name'], where: '1=1' }],"), 'Unrecognized key'],
+  ['constraint raw predicate', declaration.replace("displayField: 'name',", "constraints: [{ kind: 'unique', name: 'worker_unique', fields: ['name'], where: '1=1' }],"), 'constraints.0.where: Invalid input: expected object'],
+  ['predicate unknown field', declaration.replace("displayField: 'name',", "constraints: [{ kind: 'unique', name: 'worker_unique', fields: ['name'], where: { field: 'missing', op: 'eq', value: 'active' } }],"), 'Unknown predicate field'],
+  ['predicate unknown operator', declaration.replace("displayField: 'name',", "constraints: [{ kind: 'unique', name: 'worker_unique', fields: ['name'], where: { field: 'name', op: 'raw', value: 'active' } }],"), 'constraints.0.where.op'],
+  ['predicate incompatible literal', declaration.replace("displayField: 'name',", "constraints: [{ kind: 'unique', name: 'worker_unique', fields: ['name'], where: { field: 'name', op: 'eq', value: 1 } }],"), 'type-compatible'],
   ['boolean alias', declaration.replace("type: 'text'", "type: 'boolean'"), 'type'],
   ['inline labels', declaration.replace("displayField: 'name',", "labels: { en: 'Sample' },"), 'Unrecognized key'],
   ['nonliteral declaration', `const fields = { name: { type: 'text' } }\nexport default defineEntity(fields)`, 'literal object'],
