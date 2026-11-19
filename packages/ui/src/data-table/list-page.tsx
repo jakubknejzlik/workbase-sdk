@@ -30,11 +30,14 @@ export function ListPageFooter({ total, page, limit, pageSize, maxOffset, busy, 
       {known && <p data-list-range="" role={busy ? undefined : "status"} aria-live="polite" className="tabular-nums text-muted-foreground">{labels.range(total === 0 ? 0 : Math.min(page * limit + 1, total!), Math.min((page + 1) * limit, total!), total!)}</p>}
       <label className="mr-auto flex items-center gap-2 sm:mr-3">{labels.pageSize}<select aria-label={labels.pageSize} className="rounded border bg-background p-1" value={pageSize} disabled={busy} onChange={event => onPageSize(Number(event.target.value))}>{[10, 20, 30, 50, 100].map(size => <option key={size} value={size}>{labels.pageSizeOption?.(size) ?? size}</option>)}</select></label>
     </div>
-    <div data-list-paging="" className="ml-auto flex max-w-full items-center gap-1">
+    <div data-list-paging="" className="ml-auto flex max-w-full items-center gap-1 overflow-x-auto" onFocusCapture={event => {
+      if (event.currentTarget.scrollWidth > event.currentTarget.clientWidth) event.target.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+    }}>
       <Button type="button" variant="ghost" size="icon" aria-label={labels.previous} disabled={busy || !known || page <= 0} onClick={() => onPage(page - 1)}><ChevronLeft aria-hidden="true" className="size-4" /></Button>
-      {/* Measure available footer space in rem so enlarged text also collapses
-          extra numbers; display:none removes their buttons from the tab order. */}
-      {numbers.map((number, index) => <span key={number} data-page-distance={Math.abs(number - page)} className={`${number === page ? 'inline-flex' : 'hidden @min-[24rem]/list-footer:inline-flex'} shrink-0 items-center`}>{index > 0 && number > numbers[index - 1] + 1 && <span aria-hidden="true" className="px-1">…</span>}<Button type="button" variant={number === page ? 'secondary' : 'ghost'} className="h-8 min-w-8 px-2" aria-current={number === page ? 'page' : undefined} disabled={busy} onClick={() => onPage(number)}>{number + 1}</Button></span>)}
+      {/* Reserve room for three/four-digit pages through the supported 10,000
+          offset at 10 rows/page, scaling with enlarged text. display:none
+          removes collapsed numbers from the tab order; overflow stays scrollable. */}
+      {numbers.map((number, index) => <span key={number} data-page-distance={Math.abs(number - page)} className={`${number === page ? 'inline-flex' : 'hidden @min-[28rem]/list-footer:inline-flex'} shrink-0 items-center`}>{index > 0 && number > numbers[index - 1] + 1 && <span aria-hidden="true" className="px-1">…</span>}<Button type="button" variant={number === page ? 'secondary' : 'ghost'} className="h-8 min-w-8 px-2" aria-current={number === page ? 'page' : undefined} disabled={busy} onClick={() => onPage(number)}>{number + 1}</Button></span>)}
       <Button type="button" variant="ghost" size="icon" aria-label={labels.next} disabled={busy || !known || page + 1 >= pages} onClick={() => onPage(page + 1)}><ChevronRight aria-hidden="true" className="size-4" /></Button>
     </div>
   </footer>

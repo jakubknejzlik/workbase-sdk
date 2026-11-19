@@ -365,6 +365,89 @@ for (const width of [360, 390]) for (const language of ['en', 'cs'] as const) te
   await expect.poll(() => new URL(page.url()).searchParams.get('page')).toBe('4')
 })
 
+// The review's app-boundary probe uses synthetic rows/total to exercise the
+// supported offset bound without changing the backend pagination fixtures.
+for (const width of [1110, 1231, 1233]) for (const language of ['en', 'cs'] as const) for (const number of [900, 1000]) test(`paging: 200% text boundary ${width} ${language} page ${number}`, async ({ page, context }) => {
+  const copy = language === 'cs' ? cs : en
+  await page.setViewportSize({ width, height: 1000 })
+  await context.addInitScript(language => localStorage.setItem('console-language', language), language)
+  await page.route('**/query', async intercepted => {
+    const query = intercepted.request().postDataJSON()
+    if (query.entity !== 'worker' || !query.includeTotal) return intercepted.continue()
+    const response = await intercepted.fetch({ postData: JSON.stringify({ ...query, offset: 0 }) })
+    await intercepted.fulfill({ response, json: { ...await response.json(), total: 10010 } })
+  })
+  await page.goto(`${route}?page=${number}`)
+  await expect(list(page).locator('[data-list-range]')).toBeVisible()
+  await page.evaluate(async () => {
+    document.documentElement.style.fontSize = '32px'
+    await document.fonts.ready
+    await Promise.all(document.getAnimations().filter(animation => animation.effect?.getComputedTiming().iterations !== Infinity).map(animation => animation.finished.catch(() => {})))
+  })
+  const paging = list(page).locator('[data-list-paging]')
+  const previous = paging.getByRole('button', { name: copy.previousPage, exact: true })
+  const current = paging.getByRole('button', { name: String(number), exact: true })
+  const next = paging.getByRole('button', { name: copy.nextPage, exact: true })
+  await expect(current).toHaveAttribute('aria-current', 'page')
+  await expect(previous).toBeEnabled()
+  await expect(next).toBeEnabled()
+  await paging.scrollIntoViewIfNeeded()
+  // Check every clipping ancestor as well as the paging viewport; visible DOM
+  // alone missed the section's overflow:hidden in the review reproduction.
+  const checkPaging = async (phase: string, controls = [previous, current, next]) => {
+    for (const control of controls) {
+      const geometry = await control.evaluate(element => {
+        const box = element.getBoundingClientRect()
+        const clips = [{ left: 0, right: innerWidth }]
+        for (let parent = element.parentElement; parent; parent = parent.parentElement) {
+          if (/auto|scroll|hidden|clip/.test(getComputedStyle(parent).overflowX)) {
+            const rect = parent.getBoundingClientRect()
+            const style = getComputedStyle(parent)
+            clips.push({ left: rect.left + parseFloat(style.borderLeftWidth), right: rect.right - parseFloat(style.borderRightWidth) })
+          }
+        }
+        return { left: box.left, right: box.right, clipLeft: Math.max(...clips.map(clip => clip.left)), clipRight: Math.min(...clips.map(clip => clip.right)) }
+      })
+      observations.push({ kind: 'paging-boundary', phase, number, width, language, geometry })
+      await expect(control).toBeVisible()
+      expect.soft(geometry.left).toBeGreaterThanOrEqual(geometry.clipLeft)
+      expect.soft(geometry.right).toBeLessThanOrEqual(geometry.clipRight)
+    }
+  }
+  await checkPaging('before focus')
+  await next.focus()
+  await expect(next).toBeFocused()
+  await checkPaging('after focusing Next')
+  if (width === 1110 && number === 1000) {
+    // Below the supported layout widths, retain native focus/scroll recovery
+    // even when Previous/current/Next themselves cannot fit on one line.
+    await page.setViewportSize({ width: 320, height: 1000 })
+    await paging.scrollIntoViewIfNeeded()
+    await previous.focus()
+    const overflow = await paging.evaluate(element => ({ clientWidth: element.clientWidth, scrollWidth: element.scrollWidth }))
+    expect(overflow.scrollWidth).toBeGreaterThan(overflow.clientWidth)
+    await page.keyboard.press('Tab')
+    await expect(current).toBeFocused()
+    await page.keyboard.press('Tab')
+    await expect(next).toBeFocused()
+    expect.soft(await paging.evaluate(element => element.scrollLeft)).toBeGreaterThan(0)
+    await checkPaging('overflow fallback after focusing Next', [next])
+    await page.setViewportSize({ width, height: 1000 })
+  }
+  // Exercise the visible buttons in DOM order, excluding collapsed numbers.
+  const visible = paging.getByRole('button')
+  await expect(visible).toHaveCount(width < 1232 ? 3 : number === 900 ? 9 : 7)
+  await previous.focus()
+  for (let index = 1; index < await visible.count(); index++) {
+    await page.keyboard.press('Tab')
+    await expect(visible.nth(index)).toBeFocused()
+  }
+  await expect(next).toBeFocused()
+  await page.keyboard.press('Enter')
+  await expect.poll(() => new URL(page.url()).searchParams.get('page')).toBe(String(number + 1))
+  await page.unrouteAll({ behavior: 'wait' })
+})
+
 for (const width of [1440, 390, 360]) for (const actor of ['admin', 'staff'] as const) for (const language of ['en', 'cs'] as const) test(`G4–G6 polish ${width} ${actor} ${language}`, async ({ page, context }) => {
   const copy = language === 'cs' ? cs : en
   await page.setViewportSize({ width, height: 1000 })
