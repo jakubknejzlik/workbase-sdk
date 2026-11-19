@@ -13,11 +13,10 @@ export function stageConsoleAssets(root = resolve(import.meta.dirname, '..')) {
   try {
     mkdirSync(pending)
     cpSync(resolve(root, 'packages/frontend-console/dist'), pending, { recursive: true })
-    cpSync(resolve(root, 'LICENSE'), resolve(pending, 'LICENSE'))
-    cpSync(resolve(consoleDirectory, 'NOTICE'), resolve(pending, 'NOTICE'))
     const metadata = JSON.parse(readFileSync(resolve(pending, 'build-meta.json'), 'utf8'))
     const manifest = JSON.parse(readFileSync(resolve(root, 'packages/plugins/package.json'), 'utf8'))
-    if (metadata.version !== manifest.version || metadata.primitivesProof) throw new Error('Console build metadata does not match the plugins release')
+    if (metadata.version !== manifest.version || metadata.primitivesProof || !/^[a-f0-9]{40}$/.test(metadata.sha)
+      || !/^[a-f0-9]{40}$/.test(metadata.sourceCommit)) throw new Error('Console build metadata does not match the plugins release')
     console.log(checkConsolePublic(pending))
     rmSync(target, { recursive: true, force: true })
     renameSync(pending, target)

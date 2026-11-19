@@ -7,6 +7,12 @@
   response shape and signed cursors; offset and cursor cannot be combined.
   List rows and totals share policy, search, label and user filtering. (#230, slice 1)
 
+## 0.3.1 — 2026-11-18
+
+- Fix packaged console assets to pass provisioning: `build-meta.json` `sha` now
+  equals `consoleArtifactsSHA`, HTML carries the matching build stamp, and
+  `sourceCommit` records the source revision separately. (#216)
+
 ## 0.3.0 — 2026-11-17
 
 V3 integration release (PR #30): V3 manifest/layouts and

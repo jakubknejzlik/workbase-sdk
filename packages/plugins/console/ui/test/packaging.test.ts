@@ -14,7 +14,7 @@ test('producer staging and the resulting tarball retain React/Vite exports and a
     const manifest = JSON.parse(readFileSync(resolve('packages/plugins/package.json'), 'utf8'))
     put('packages/plugins/package.json', JSON.stringify(manifest)); put('packages/plugins/NOTICE', 'Synthetic notice'); put('LICENSE', 'Synthetic license')
     put('packages/plugins/console/src/index.ts', 'export {}')
-    put('packages/plugins/console/assets/build-meta.json', JSON.stringify({ version: manifest.version }))
+    put('packages/plugins/console/assets/build-meta.json', JSON.stringify({ version: manifest.version, sha: 'a'.repeat(40), sourceCommit: 'b'.repeat(40) }))
     cpSync(resolve('packages/plugins/console/ui/src'), join(root, 'packages/plugins/console/ui/src'), { recursive: true })
     cpSync(resolve('packages/plugins/console/ui/README.md'), join(root, 'packages/plugins/console/ui/README.md'))
     stageConsolePackage(root, 'plugins', stage); mkdirSync(archives)

@@ -4,6 +4,7 @@ import { dirname, normalize, resolve } from 'node:path'
 import ts from 'typescript'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
+import { CONSOLE_SHA_MARKER } from '@workbasehq/core/console-build'
 // Vite's new URL transform catches inline callback errors. Retain resolved paths
 // and reject them again before Rollup can write any output.
 const resolvedAssets = new Set<string>()
@@ -20,6 +21,9 @@ let publicDirectory: string
 export default defineConfig({ json: { namedExports: false, stringify: false }, base: '/', plugins: [react(), tailwindcss(), {
   name: 'public-console-boundary',
   enforce: 'pre',
+  transformIndexHtml() {
+    return [{ tag: 'meta', attrs: { name: 'workbase-build-sha', content: CONSOLE_SHA_MARKER }, injectTo: 'head-prepend' as const }]
+  },
   configResolved(config) {
     publicDirectory = config.publicDir
     resolveAsset = config.createResolver({ extensions: [], mainFields: [], tryIndex: false, preferRelative: true })

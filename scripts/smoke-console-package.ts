@@ -10,6 +10,7 @@ import { stageConsoleAssets } from './stage-console-assets'
 import { stageConsolePackage } from './lib/stage-console-package'
 
 const root = resolve(import.meta.dirname, '..')
+const sourceCommit = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim()
 const scratch = registerTempDir(mkdtempSync(join(tmpdir(), 'workbase-console-packed-')))
 const env = { ...process.env, NODE_PATH: '', NODE_OPTIONS: '', npm_config_cache: join(scratch, 'npm-cache'), npm_config_userconfig: join(scratch, 'npmrc') }
 const npm = (args: string[], cwd: string) => execFileSync('npm', args, { cwd, env, encoding: 'utf8', timeout: 180000, stdio: 'pipe' })
@@ -89,6 +90,8 @@ assert(realpathSync(assets).startsWith(realpathSync(process.cwd()) + '/node_modu
 const manifest = JSON.parse(readFileSync(fileURLToPath(new URL('../../package.json', import.meta.resolve('@workbasehq/plugins/console/assets'))), 'utf8'))
 const meta = JSON.parse(readFileSync(join(assets, 'build-meta.json'), 'utf8'))
 assert.equal(meta.version, manifest.version)
+assert.equal(meta.sourceCommit, ${JSON.stringify(sourceCommit)})
+assert(/^[a-f0-9]{40}$/.test(meta.sha))
 assert(!meta.primitivesProof)
 const html = readFileSync(join(assets, 'index.html'), 'utf8')
 const references = [...html.matchAll(/(?:src|href)=["']([^"']+\\.(?:js|css)(?:[?#][^"']*)?)["']/g)].map(match => match[1])
@@ -106,7 +109,38 @@ console.log('Node consumer: resolver, HTML, JS/CSS, version and legal notices pa
   mkdirSync(dirname(bundled), { recursive: true })
   execFileSync('bun', ['build', check, '--target=node', '--outfile', bundled], { cwd: consumer, env, stdio: 'pipe' })
   console.log('SST-style bundle:', execFileSync('node', [bundled], { cwd: consumer, env, encoding: 'utf8' }).trim())
-  console.log(`Packed consumer smoke passed; isolated npm cache; only core/plugins requested; lockfile sha256=${digest(join(consumer, 'package-lock.json'))}`)
+  // Provisioning declares tsx as an optional peer. Install it only after proving
+  // the static resolver works in plain Node with just the candidate packages.
+  const tsx = JSON.parse(readFileSync(join(root, 'packages/core/package.json'), 'utf8')).peerDependencies.tsx
+  npm(['install', '--no-save', '--ignore-scripts', '--include=optional', '--no-audit', '--no-fund', '--registry=https://registry.npmjs.org', `tsx@${tsx}`], consumer)
+  const project = join(consumer, 'plan-only')
+  mkdirSync(join(project, 'migrations'), { recursive: true })
+  writeFileSync(join(project, 'config.ts'), "export default { id: 'packaged', revision: 1, roles: ['owner'], entities: {}, plugins: [] }\n")
+  writeFileSync(join(project, 'worker.ts'), 'export default { fetch() { return new Response("ok") } }\n')
+  writeFileSync(join(project, 'migrations/0001_initial.sql'), 'CREATE TABLE records (id TEXT PRIMARY KEY);\n')
+  const provisionCheck = join(consumer, 'provision-check.mjs')
+  writeFileSync(provisionCheck, `import assert from 'node:assert/strict'
+import { cpSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
+import { join, resolve } from 'node:path'
+import { createProvisionPlan } from '@workbasehq/core/infra/provision'
+import { consoleAssetsDir } from '@workbasehq/plugins/console/assets'
+const assets = consoleAssetsDir()
+const options = { projectRoot: ${JSON.stringify(project)}, configPath: 'config.ts', handler: 'worker.ts', migrationsDir: 'migrations',
+  resourcePrefix: 'packaged-console', stage: 'test', authSecret: 'synthetic-plan-only-secret-00000000',
+  authBaseUrl: 'https://example.invalid', assetsDir: assets }
+assert.equal((await createProvisionPlan(options)).assetsDir, resolve(assets))
+const tampered = join(options.projectRoot, 'tampered-assets')
+cpSync(assets, tampered, { recursive: true })
+const file = readdirSync(join(tampered, 'assets')).find(name => name.endsWith('.js'))
+assert(file, 'Packaged console must include JS')
+const path = join(tampered, 'assets', file), bytes = readFileSync(path)
+bytes[0] ^= 1
+writeFileSync(path, bytes)
+await assert.rejects(createProvisionPlan({ ...options, assetsDir: tampered }), { code: 'provision_console_sha_mismatch' })
+console.log('Packed console plan-only provision passed; one-byte JS tamper rejected')
+`)
+  console.log(execFileSync('node', ['--import', 'tsx', provisionCheck], { cwd: consumer, env, encoding: 'utf8', timeout: 60000 }).trim())
+  console.log(`Packed consumer smoke passed; isolated npm cache; core/plugins candidates plus the provisioning tsx peer; lockfile sha256=${digest(join(consumer, 'package-lock.json'))}`)
 } finally {
   cleanupTempDir(scratch)
 }
