@@ -31,6 +31,7 @@ it('enforces inserts, every participating update, tenant isolation, FK and expli
     insert('booking', 'ok', { client: 'c1', location: 'l1' })
     expect(() => insert('booking', 'bad', { client: 'c2', location: 'l1' })).toThrow('workbase_ref_equality_')
     for (const set of ["client='c2'", "location='l2'", "client=NULL", "location=NULL"]) expect(() => db.exec(`UPDATE booking SET ${set} WHERE id='ok'`)).toThrow('workbase_ref_equality_')
+    expect(() => db.exec("UPDATE booking SET client='c2', location='l1' WHERE id='ok'")).toThrow('workbase_ref_equality_')
     db.exec("UPDATE booking SET client='c2', location='l2' WHERE id='ok'")
     expect(() => db.exec("UPDATE location SET client='c1' WHERE id='l2'")).toThrow('workbase_ref_equality_')
     db.exec("UPDATE location SET client='c2' WHERE id='l2'")
@@ -38,6 +39,7 @@ it('enforces inserts, every participating update, tenant isolation, FK and expli
     insert('booking', 'null-target', { client: null, location: 'ln' }); insert('booking', 'both-null', { client: null, location: null })
     expect(() => db.exec("UPDATE location SET client='c1' WHERE id='ln'")).toThrow('workbase_ref_equality_')
     expect(() => insert('booking', 'missing-null', { client: null, location: 'missing' })).toThrow()
+    db.exec("UPDATE location SET client='c2' WHERE id='l1'")
   } finally { db.close() }
 })
 it('adds only reviewable guards, rejects existing mismatches, and replay equals fresh including trigger bytes', () => {
@@ -95,4 +97,19 @@ it('supports self references using the final row for equality and reverse guards
     db.exec("UPDATE node SET client=NULL WHERE id='self'")
     db.exec("UPDATE node SET client='self' WHERE id='self'")
   } finally { db.close() }
+})
+it('keeps generated bundle/lock bytes deterministic across constraint order and verifies parent linkage', async () => {
+  const { plan, checkLinkage } = await import('../../src/migrations/schema-plan')
+  const { parseBundle } = await import('../../src/migrations/schema-bundle')
+  const base = await plan({ config: config([]), baseMigrations: {} })
+  const migrations = { [base.bundle!.filename]: base.bundle!.sql }
+  const other = { kind: 'unique', name: 'booking_identity', fields: ['client', 'location'] }
+  const a = await plan({ config: config([equality, other]), baseLock: base.lock, baseMigrations: migrations })
+  const b = await plan({ config: config([other, equality]), baseLock: base.lock, baseMigrations: migrations })
+  expect(a).toEqual(b)
+  expect(parseBundle(a.bundle!.filename, a.bundle!.sql).generated).toContain('CREATE TRIGGER')
+  await expect(checkLinkage(base.lock, migrations, a.lock, { ...migrations, [a.bundle!.filename]: a.bundle!.sql })).resolves.toBeUndefined()
+  await expect(checkLinkage(base.lock, migrations, a.lock, { ...migrations, [a.bundle!.filename]: a.bundle!.sql.replace('AFTER INSERT', 'BEFORE INSERT') })).rejects.toThrow('generated region')
+  const invalid = JSON.parse(a.lock); invalid.tables.find((t: any) => t.name === 'booking').constraints.find((c: any) => c.kind === 'ref_equality').targetField = 'missing'
+  expect(() => parseLock(JSON.stringify(invalid))).toThrow('Invalid schema.lock.json')
 })

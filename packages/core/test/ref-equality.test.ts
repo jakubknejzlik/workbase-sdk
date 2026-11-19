@@ -84,18 +84,18 @@ it('returns stable data MCP status/code for real D1 CRUD and atomic failures wit
   const app = createApp(config, runtime(), { commands: createCommandRegistry([operation]) })
   const mcp = await connectEqualityDataMcp(async (url, init) => app.request(String(url), { ...init, redirect: 'manual' }))
   try {
-  const { call } = mcp
-  const first = await call('create_record', { entity: 'reservation', data: { client: 'client-org-a', location: 'job-org-a' } })
-  const before = await snapshot()
-  for (const [name, args] of [
-    ['create_record', { entity: 'reservation', data: { client: 'other', location: 'job-org-a' }, idempotencyKey: 'mcp-create' }],
-    ['update_record', { entity: 'reservation', id: first.data.id, data: { client: 'other' }, version: 1 }],
-    ['update_record', { entity: 'jobs', id: 'job-org-a', data: { client_id: 'other' }, version: 1 }],
-    ['run_command', { name: 'reservation/pair', input: { client: 'other' }, idempotencyKey: 'mcp-atomic' }],
-  ] as const) {
-    expect(await call(name, args)).toEqual({ ok: false, code: 'ref_equality_mismatch', status: 422 })
-    expect(await snapshot()).toEqual(before)
-  }
-  await expect(call('run_command', { name: 'reservation/pair', input: { client: 'client-org-a' }, idempotencyKey: 'mcp-atomic' })).resolves.toEqual({ ok: true, data: {} })
+    const { call } = mcp
+    const first = await call('create_record', { entity: 'reservation', data: { client: 'client-org-a', location: 'job-org-a' } })
+    const before = await snapshot()
+    for (const [name, args] of [
+      ['create_record', { entity: 'reservation', data: { client: 'other', location: 'job-org-a' }, idempotencyKey: 'mcp-create' }],
+      ['update_record', { entity: 'reservation', id: first.data.id, data: { client: 'other' }, version: 1 }],
+      ['update_record', { entity: 'jobs', id: 'job-org-a', data: { client_id: 'other' }, version: 1 }],
+      ['run_command', { name: 'reservation/pair', input: { client: 'other' }, idempotencyKey: 'mcp-atomic' }],
+    ] as const) {
+      expect(await call(name, args)).toEqual({ ok: false, code: 'ref_equality_mismatch', status: 422 })
+      expect(await snapshot()).toEqual(before)
+    }
+    await expect(call('run_command', { name: 'reservation/pair', input: { client: 'client-org-a' }, idempotencyKey: 'mcp-atomic' })).resolves.toEqual({ ok: true, data: {} })
   } finally { await mcp.close() }
 })
