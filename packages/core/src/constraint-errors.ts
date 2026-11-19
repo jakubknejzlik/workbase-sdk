@@ -1,6 +1,6 @@
 import type { InstanceConfig } from './config'
 import { ApiError } from './errors'
-import { MAX_UNIQUE_CONSTRAINT_FIELDS, uniqueConstraintIdentity } from './entity-constraints'
+import { MAX_UNIQUE_CONSTRAINT_FIELDS, uniqueConstraintIdentity, refEqualityToken } from './entity-constraints'
 
 const d1Prefix = 'D1_ERROR: '
 const sqlitePrefix = 'UNIQUE constraint failed: '
@@ -13,7 +13,7 @@ const identityPattern = new RegExp(String.raw`^[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*(
  * Unknown database constraints retain the adapter's generic conflict fallback.
  */
 export function uniqueConflict(error: unknown, config: InstanceConfig): ApiError | undefined {
-  const declared = Object.entries(config.entities).flatMap(([entity, spec]) => (spec.constraints ?? []).map(constraint => ({
+  const declared = Object.entries(config.entities).flatMap(([entity, spec]) => (spec.constraints ?? []).filter(c => c.kind === 'unique').map(constraint => ({
     identity: uniqueConstraintIdentity(entity, constraint.fields), id: `${entity}.${constraint.name}`,
   })))
   if (!declared.length) return
@@ -44,4 +44,28 @@ export function uniqueConflict(error: unknown, config: InstanceConfig): ApiError
   const candidates = declared.filter(constraint => constraint.identity === identity).map(constraint => constraint.id)
   if (!candidates.length) return
   return new ApiError(409, 'unique_conflict', undefined, candidates.length === 1 ? { constraintId: candidates[0] } : undefined)
+}
+
+/** Exact SDK-generated tokens only; bounded cause traversal and declared identity
+ * bound message lengths. No substring matching or arbitrary database prose. */
+export function refEqualityMismatch(error: unknown, config: InstanceConfig): ApiError | undefined {
+  const declared = Object.entries(config.entities).flatMap(([entity, spec]) => (spec.constraints ?? []).filter(c => c.kind === 'ref_equality').map(c => ({ token: refEqualityToken(entity, c.name), id: `${entity}.${c.name}` })))
+  const matches = new Set<string>(), seen = new Set<unknown>()
+  const maxLength = declared.reduce((n, c) => Math.max(n, c.token.length), 0) + 100
+  let current = error
+  for (let i = 0; i < 4 && current instanceof Error && !seen.has(current); i++) {
+    seen.add(current)
+    if (current.message.length <= maxLength) {
+      let token = current.message.startsWith(d1Prefix) ? current.message.slice(d1Prefix.length) : current.message
+      const extended = ': SQLITE_CONSTRAINT (extended: SQLITE_CONSTRAINT_TRIGGER)'
+      if (token.endsWith(extended)) token = token.slice(0, -extended.length)
+      else if (token.endsWith(sqliteSuffix)) token = token.slice(0, -sqliteSuffix.length)
+      for (const constraint of declared) if (constraint.token === token) matches.add(constraint.id)
+    }
+    current = current.cause
+  }
+  if (matches.size === 1) return new ApiError(422, 'ref_equality_mismatch', undefined, { constraintId: [...matches][0] })
+}
+export function constraintError(error: unknown, config: InstanceConfig): ApiError | undefined {
+  return refEqualityMismatch(error, config) ?? uniqueConflict(error, config)
 }

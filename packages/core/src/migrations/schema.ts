@@ -1,4 +1,4 @@
-import { uniqueIndexName, type EntityConstraint } from '../entity-constraints'
+import { uniqueIndexName, refEqualityToken, type EntityConstraint, type UniqueConstraint, type RefEqualityConstraint } from '../entity-constraints'
 import { systemSchema } from './system-schema'
 export { systemSchema } from './system-schema'
 import { workflowSchema } from '../workflow-schema'
@@ -61,7 +61,7 @@ export function physicalTable(name: string, entity: InstanceConfig['entities'][s
     indexes: [{ name: `${name}_org_idx`, columns: ['organization_id', 'id'] }, ...refs.map(([key]) => ({ name: `${name}_${key}_idx`, columns: ['organization_id', key] }))],
   }
 }
-export function renderUniqueConstraint(table: string, constraint: EntityConstraint) {
+export function renderUniqueConstraint(table: string, constraint: UniqueConstraint) {
   return `CREATE UNIQUE INDEX ${quote(uniqueIndexName(table, constraint.name))} ON ${quote(table)}(${['organization_id', ...constraint.fields].map(quote).join(', ')})${constraint.where ? ` WHERE ${quote(constraint.where.field)} = ${literal(constraint.where.value)}` : ''};`
 }
 export function renderTable(table: TableSpec) {
@@ -72,7 +72,7 @@ export function renderTable(table: TableSpec) {
     ...table.checks.map(check => `CHECK (${check})`),
   ]
   const indexes = table.indexes.map(index => `CREATE INDEX ${quote(index.name)} ON ${quote(table.name)}(${index.columns.map(q).join(', ')});`)
-  return `CREATE TABLE ${quote(table.name)} (\n  ${columns.join(',\n  ')}\n);\n${indexes[0]}\n${indexes.slice(1).join('\n')}${table.constraints?.length ? '\n' + table.constraints.map(c => renderUniqueConstraint(table.name, c)).join('\n') : ''}`
+  return `CREATE TABLE ${quote(table.name)} (\n  ${columns.join(',\n  ')}\n);\n${indexes[0]}\n${indexes.slice(1).join('\n')}${table.constraints?.some(c => c.kind === 'unique') ? '\n' + table.constraints.filter(c => c.kind === 'unique').map(c => renderUniqueConstraint(table.name, c)).join('\n') : ''}`
 }
 export function createEntity(name: string, entity: InstanceConfig['entities'][string]) { return renderTable(physicalTable(name, entity)) }
 
@@ -99,8 +99,8 @@ export function initialSchema(config: InstanceConfig) {
   const legacy = !usesSdkBaseline(config)
     ? configuredSystemSchema(config) + opsSchema + (config.account?.entity === 'users' ? betterAuthSchema.replace('user_id TEXT NOT NULL REFERENCES users(id)', 'user_id TEXT NOT NULL REFERENCES "user"(id)') : betterAuthSchema) + emailDeliverySchema + workflowSchema
     : ''
-  if (usesSdkBaseline(config)) return physicalTables(config).map(renderTable).join('\n') + '\n'
-  return legacy + Object.entries(config.entities).filter(([n]) => !(n === 'users' && config.account?.entity === n)).map(([n, e]) => createEntity(n, e)).join('\n') + '\n' + revisionSQL(config.revision) + '\n'
+  if (usesSdkBaseline(config)) return physicalTables(config).map(renderTable).join('\n') + renderRefEqualities(physicalTables(config)) + '\n'
+  return legacy + Object.entries(config.entities).filter(([n]) => !(n === 'users' && config.account?.entity === n)).map(([n, e]) => createEntity(n, e)).join('\n') + renderRefEqualities(physicalTables(config)) + '\n' + revisionSQL(config.revision) + '\n'
 }
 
 /** Fresh schemas support configured application roles and the explicit users/account extension.
@@ -115,4 +115,35 @@ function configuredSystemSchema(config: InstanceConfig) {
       .replace('CREATE TABLE identities (\n  user_id TEXT NOT NULL REFERENCES users(id)', 'CREATE TABLE identities (\n  user_id TEXT NOT NULL REFERENCES "user"(id)')
   }
   return sql
+}
+
+/** Null equals null. A null hop projects null; a non-null hop must resolve in the
+ * same organization. Missing/foreign refs never pass, and composite FKs remain.
+ * The reverse guard preserves equality, not slice 4's stricter immutability. */
+export function refEqualityDefinition(table: TableSpec, constraint: RefEqualityConstraint) {
+  const target = table.foreignKeys.find(f => f.columns.length === 2 && f.columns[0] === 'organization_id' && f.columns[1] === constraint.through)!.table
+  const token = refEqualityToken(table.name, constraint.name)
+  const source = quote(table.name), parent = quote(target)
+  const field = quote(constraint.field), hop = quote(constraint.through), targetField = quote(constraint.targetField)
+  const mismatch = (row: string) => `(${row}.${hop} IS NULL AND ${row}.${field} IS NOT NULL) OR (${row}.${hop} IS NOT NULL AND NOT EXISTS (SELECT 1 FROM ${parent} AS target WHERE target."organization_id" = ${row}."organization_id" AND target."id" = ${row}.${hop} AND target.${targetField} IS ${row}.${field}))`
+  const abort = `SELECT RAISE(ABORT, ${literal(token)});`
+  const triggers = [
+    { name: `${token}_insert`, sql: `CREATE TRIGGER ${quote(`${token}_insert`)} AFTER INSERT ON ${source} WHEN ${mismatch('NEW')} BEGIN ${abort} END;` },
+    { name: `${token}_update`, sql: `CREATE TRIGGER ${quote(`${token}_update`)} AFTER UPDATE OF ${field}, ${hop}, "organization_id" ON ${source} WHEN ${mismatch('NEW')} BEGIN ${abort} END;` },
+    { name: `${token}_reverse`, sql: `CREATE TRIGGER ${quote(`${token}_reverse`)} AFTER UPDATE OF ${targetField} ON ${parent} WHEN NEW.${targetField} IS NOT OLD.${targetField} AND EXISTS (SELECT 1 FROM ${source} AS source WHERE source."organization_id" = OLD."organization_id" AND source.${hop} = OLD."id" AND source.${field} IS NOT NEW.${targetField}) BEGIN ${abort} END;` },
+  ]
+  // CHECK preflight reads existing data without touching domain or audit rows.
+  const guard = quote(`${token}_guard`)
+  const preflight = `CREATE TABLE ${guard} ("valid" INTEGER CONSTRAINT ${quote(token)} CHECK ("valid" = 1));
+INSERT INTO ${guard} SELECT 0 FROM ${source} AS source WHERE ${mismatch('source')} LIMIT 1;
+DROP TABLE ${guard};`
+  return { token, target, triggers, preflight }
+}
+export function renderRefEqualities(tables: readonly TableSpec[]) {
+  const sql = tables.flatMap(table => (table.constraints ?? []).flatMap(c => c.kind === 'ref_equality' ? refEqualityDefinition(table, c).triggers.map(t => t.sql) : []))
+  return sql.length ? '\n' + sql.join('\n') : ''
+}
+export function dropConstraint(table: TableSpec, constraint: EntityConstraint) {
+  return constraint.kind === 'unique' ? `DROP INDEX ${quote(uniqueIndexName(table.name, constraint.name))};`
+    : refEqualityDefinition(table, constraint).triggers.map(t => `DROP TRIGGER ${quote(t.name)};`).join('\n')
 }

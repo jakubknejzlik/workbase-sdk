@@ -68,8 +68,12 @@ export function validateLock(input: unknown): SchemaLock {
     ? { ...value, lockVersion: 2, entities: initialLineage(value.tables), transitions: [] }
     : value
   unique(lock.tables.map(t => t.name), 'physical table')
-  unique(lock.tables.flatMap(t => [...t.indexes.map(i => i.name), ...(t.constraints ?? []).map(c => uniqueIndexName(t.name, c.name))]), 'index name')
-  for (const table of lock.tables) validateEntityConstraints(table.constraints ?? [], Object.fromEntries(table.columns.map(c => [c.name, c])), (_path, message) => invalid(`${table.name}: ${message}`))
+  unique(lock.tables.flatMap(t => [...t.indexes.map(i => i.name), ...(t.constraints ?? []).filter(c => c.kind === 'unique').map(c => uniqueIndexName(t.name, c.name))]), 'index name')
+  const entities = Object.fromEntries(lock.tables.map(table => [table.name, { fields: Object.fromEntries(table.columns.map(c => {
+    const ref = table.foreignKeys.find(f => f.columns.length === 2 && f.columns[0] === 'organization_id' && f.columns[1] === c.name && f.targetColumns.join(',') === 'organization_id,id')
+    return [c.name, { ...c, ...(ref ? { type: 'ref', entity: ref.table } : {}) }]
+  })) }]))
+  for (const table of lock.tables) validateEntityConstraints(table.constraints ?? [], entities[table.name].fields, (_path, message) => invalid(`${table.name}: ${message}`), entities)
   unique(lock.entities.map(e => e.id), 'entity ID')
   unique(lock.entities.flatMap(e => e.fields.map(f => f.id)), 'field ID')
   unique(lock.entities.map(e => e.logicalName), 'logical entity')

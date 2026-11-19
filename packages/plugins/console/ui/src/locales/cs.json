@@ -3,6 +3,7 @@
   "empty": "Žádné záznamy",
   "notFound": "Nenalezeno",
   "forbidden": "Přístup odepřen",
+  "refEqualityMismatch": "Vybrané odkazy si neodpovídají. Změňte hodnoty a zkuste to znovu.",
   "uniqueConflict": "Záznam se stejnou kombinací hodnot již existuje. Změňte hodnoty a zkuste to znovu.",
   "network": "Chyba sítě",
   "validation": "Zkontrolujte formulář",

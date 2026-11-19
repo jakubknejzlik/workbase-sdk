@@ -1,6 +1,6 @@
 import { uniqueIndexName } from '../entity-constraints'
 import { baseFields, type InstanceConfig } from '../config'
-import { quote, renderUniqueConstraint } from '../migrations/schema'
+import { quote, physicalTable, refEqualityDefinition, renderUniqueConstraint } from '../migrations/schema'
 
 /** Check the effective model plus columns referenced by fixed plugin SQL/routes. */
 export async function checkInstanceSchema(db: D1Database, config: Pick<InstanceConfig, 'entities'>, dependencies: Record<string, readonly string[]>) {
@@ -18,6 +18,13 @@ export async function checkInstanceSchema(db: D1Database, config: Pick<InstanceC
 export async function checkEntityConstraints(db: D1Database, config: Pick<InstanceConfig, 'entities'>) {
   for (const [table, entity] of Object.entries(config.entities)) {
     for (const constraint of entity.constraints ?? []) {
+      if (constraint.kind === 'ref_equality') {
+        for (const trigger of refEqualityDefinition(physicalTable(table, entity), constraint).triggers) {
+          const definition = await db.prepare('SELECT sql FROM sqlite_schema WHERE type=? AND name=?').bind('trigger', trigger.name).first<{ sql: string }>()
+          if (definition?.sql !== trigger.sql.replace(/;$/, '')) throw new Error(`Schema drift: missing or changed ref equality constraint ${table}.${constraint.name}`)
+        }
+        continue
+      }
       const index = uniqueIndexName(table, constraint.name)
       const meta = await db.prepare('SELECT * FROM pragma_index_list(?) WHERE name=?').bind(table, index).first<{ unique: number; partial: number; origin: string }>()
       const columns = await db.prepare('SELECT * FROM pragma_index_xinfo(?) ORDER BY seqno').bind(index).all<{ name: string; coll: string; desc: number; key: number }>()
