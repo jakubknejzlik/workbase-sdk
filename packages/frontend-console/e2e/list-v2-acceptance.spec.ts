@@ -136,12 +136,20 @@ for (const state of ['empty', 'error'] as const) test(`G2: mobile ${state} messa
   if (state === 'empty') { await settled(page); await tab(page, 'empty'); await rows(page, { view: 'empty' }) }
   const message = list(page).getByText(state === 'empty' ? en.noResults : en.requestFailed, { exact: true }).first()
   await expect(message).toBeVisible(); await atScrollStart(page); await insideViewport(message); await atScrollStart(page)
+  if (state === 'error') {
+    await insideViewport(list(page).getByRole('alert'))
+    await insideViewport(list(page).getByText(en.listRequestFailedDescription, { exact: true }))
+    await insideViewport(list(page).getByRole('button', { name: en.listRetry, exact: true }))
+    await atScrollStart(page)
+  }
 })
 
 test('G3: in-panel retry repeats the failed query and preserves committed settings and page', async ({ page }) => {
   await page.goto(route); await settled(page)
   await page.getByRole('searchbox', { name: en.search, exact: true }).fill('Worker')
+  await expect.poll(() => new URL(page.url()).searchParams.get('search')).toBe('Worker')
   await rows(page, { search: 'Worker' }); await tab(page, 'inactive'); await rows(page, { view: 'inactive', search: 'Worker' })
+  await expect(footer(page).getByRole('button', { name: '2', exact: true })).toBeEnabled()
   let failing = true
   const queries: unknown[] = []
   await page.route('**/query', intercepted => {
@@ -152,8 +160,8 @@ test('G3: in-panel retry repeats the failed query and preserves committed settin
   })
   await footer(page).getByRole('button', { name: '2', exact: true }).click()
   const alert = list(page).getByRole('alert')
-  await expect(alert.getByText(en.requestFailed, { exact: true })).toHaveCount(1)
-  await expect(alert).toContainText('Your list settings are preserved.')
+  await expect.soft(alert.getByText(en.requestFailed, { exact: true })).toHaveCount(1)
+  await expect.soft(alert).toContainText('Your list settings are preserved.')
   const retry = alert.getByRole('button', { name: 'Try again', exact: true })
   await expect(retry).toBeVisible(); await insideViewport(retry)
   const failedUrl = page.url(); expect(new URL(failedUrl).searchParams.get('page')).toBe('2')

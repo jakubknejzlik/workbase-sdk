@@ -10,7 +10,7 @@ import { CursorPagination, type PaginationLabels } from './cursor-pagination'
 import { Button } from '../components/ui/button'
 export interface DataTableState { search: string; sort: { key: string; direction: 'asc' | 'desc' } | null; limit: number }
 export interface ServerColumn<T> { id: string; label: string; keepOnNarrow?: boolean; wrap?: boolean; sortable?: boolean; filter?: ReactNode; cell: (row: T) => ReactNode }
-interface ServerMeta<T> { compact?: boolean; serverColumn: ServerColumn<T>; labelId: string; sortLabel: string }
+interface ServerMeta<T> { compact?: boolean; widthClass?: string; serverColumn: ServerColumn<T>; labelId: string; sortLabel: string }
 /** Stable React render types retain focused headers and open mutation sessions across query updates. */
 function ServerFilter({ column }: { column: { filterOptions?: { renderFilter?: () => ReactNode } } }) { return column.filterOptions?.renderFilter?.() }
 function ServerHeader<T>(context: HeaderContext<T, unknown>) {
@@ -26,12 +26,12 @@ function ServerCell<T>({ column, row }: CellContext<T, unknown>) {
   return column.id === '_actions' ? config.cell(row.original) : <div className={((column.columnDef.meta as ServerMeta<T>).compact || config.wrap) ? "whitespace-normal break-words" : "truncate"} ref={node => { if (node) node.title = node.textContent ?? '' }}>{config.cell(row.original)}</div>
 }
 /** Workbase owns server state; the source provider renders it without local filtering/paging. */
-export function DataTable<T extends { id?: unknown }>({ rows, columns, state, onStateChange, page, range, onPage, nextCursor, isFetching, label, labels, onRowClick, searchDescription, searchAvailable = true, pendingSearch = false, staleLabel, clearFilters, onClearFilters, error, compact = false, mobileCards = false, hideFooter = false, scrollOnNarrow = false }: {
+export function DataTable<T extends { id?: unknown }>({ rows, columns, state, onStateChange, page, range, onPage, nextCursor, isFetching, label, labels, onRowClick, searchDescription, searchAvailable = true, pendingSearch = false, staleLabel, clearFilters, onClearFilters, error, onRetry, compact = false, mobileCards = false, hideFooter = false, scrollOnNarrow = false }: {
   hideFooter?: boolean; scrollOnNarrow?: boolean; compact?: boolean; mobileCards?: boolean
   rows: T[]; columns: ServerColumn<T>[]; state: DataTableState; onStateChange: (state: DataTableState, change: 'search' | 'sort' | 'limit') => void
   page: number; range?: { page: number; limit: number }; onPage: (direction: 'previous' | 'next') => void; nextCursor?: string | null; isFetching: boolean; label: string
-  labels: PaginationLabels & { search: string; clearSearch: string; noResults: string; sort: (column: string) => string; sortAndFilter?: string; sortStates?: { asc: string; desc: string; none: string }; error?: string }
-  onRowClick: (row: T) => void; searchDescription?: string; searchAvailable?: boolean; pendingSearch?: boolean; staleLabel?: string; clearFilters?: string; onClearFilters?: () => void; error?: Error | null
+  labels: PaginationLabels & { search: string; clearSearch: string; noResults: string; sort: (column: string) => string; sortAndFilter?: string; sortStates?: { asc: string; desc: string; none: string }; error?: string; errorDescription?: string; retry?: string }
+  onRowClick: (row: T) => void; searchDescription?: string; searchAvailable?: boolean; pendingSearch?: boolean; staleLabel?: string; clearFilters?: string; onClearFilters?: () => void; error?: Error | null; onRetry?: () => void
 }) {
   const narrow = useSyncExternalStore(callback => {
     const media = window.matchMedia('(max-width: 480px)'); media.addEventListener('change', callback)
@@ -41,12 +41,14 @@ export function DataTable<T extends { id?: unknown }>({ rows, columns, state, on
   const [controlsOpen, setControlsOpen] = useState(false)
   const [searchPending, setSearchPending] = useState(false)
   const stale = isFetching || searchPending || pendingSearch || !!staleLabel
-  const definitions: ColumnDef<T, unknown>[] = columns.map(column => {
+  const definitions: ColumnDef<T, unknown>[] = columns.map((column, index) => {
     const actions = column.id === '_actions'
     return { id: column.id, accessorFn: () => undefined,
       enableSorting: !!column.sortable, enableHiding: false,
       ...(actions ? { size: 72 } : {}),
-      meta: { compact, fixedWidth: actions, serverColumn: column, labelId: `${labelPrefix}-${column.id}`, sortLabel: labels.sort(column.label) },
+      // Explicit col widths let the browser derive the scrolling minimum from
+      // the configured, visible columns instead of a column-count breakpoint.
+      meta: { compact, fixedWidth: actions, widthClass: scrollOnNarrow && !compact ? actions ? 'w-18' : column.id === '_access' ? 'w-48' : index === 0 ? 'w-56' : 'w-40' : undefined, serverColumn: column, labelId: `${labelPrefix}-${column.id}`, sortLabel: labels.sort(column.label) },
       header: ServerHeader, cell: ServerCell,
     }
   })
@@ -60,7 +62,8 @@ export function DataTable<T extends { id?: unknown }>({ rows, columns, state, on
   // Keep the W44 primary + Actions layout without removing the other columns'
   // server sort/filter operations. Only authorized, configured columns reach here.
   const hiddenControls = narrow ? table.getAllLeafColumns().filter(column => !column.getIsVisible() && (column.getCanSort() || (column.columnDef.meta as ServerMeta<T>).serverColumn.filter)) : []
-  return <TablePresentationContext.Provider value={{ tableClass: narrow ? 'w-full' : compact ? 'w-full min-w-[900px] md:min-w-0' : visibleCount <= 2 ? 'min-w-[320px]' : visibleCount <= 3 ? 'min-w-[600px]' : visibleCount <= 5 ? 'min-w-[900px]' : visibleCount <= 8 ? 'min-w-[1400px]' : 'min-w-[2200px]', label, headerId: id => `${labelPrefix}-${id}`, stale, busy: stale,
+  return <TablePresentationContext.Provider value={{ tableClass: narrow || scrollOnNarrow && !compact ? 'w-full' : compact ? 'w-full min-w-[900px] md:min-w-0' : visibleCount <= 2 ? 'min-w-[320px]' : visibleCount <= 3 ? 'min-w-[600px]' : visibleCount <= 5 ? 'min-w-[900px]' : visibleCount <= 8 ? 'min-w-[1400px]' : 'min-w-[2200px]', label, headerId: id => `${labelPrefix}-${id}`, stale, busy: stale,
+    errorDescription: labels.errorDescription, retryLabel: labels.retry, onRetry,
     errorLabel: labels.error ?? 'Failed to load data', emptyContent: <div className="space-y-2 p-6 text-center text-muted-foreground"><p>{labels.noResults}</p>{onClearFilters && <Button type="button" variant="outline" onClick={onClearFilters}>{clearFilters}</Button>}</div>,
     pageSizeLabel: labels.pageSize, pageSizes: [10, 20, 30, 50, 100], pageSizeOption: size => labels.pageSizeOption?.(size) ?? String(size),
     pagination: <CursorPagination range={range} page={page} limit={state.limit} length={rows.length} hasNext={!!nextCursor} busy={stale} labels={labels} onPage={onPage} />,
