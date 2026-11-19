@@ -5,7 +5,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { createMemoryHistory, createRootRoute, createRoute, createRouter, RouterProvider } from '@tanstack/react-router'
 import { I18nextProvider, initReactI18next } from 'react-i18next'
 import i18next from 'i18next'
-import { GeneratedReadPage } from '../../console-generated/src/screens'
+import { ContextList, GeneratedReadPage } from '../../console-generated/src/screens'
 import { validateListSearch } from '../../console-generated/src/list-model'
 import type { Model, Capabilities, ReadQuery } from '../../console-generated/src/read'
 import type { ListColumn } from '../../core/src/list-contract'
@@ -14,17 +14,18 @@ import cs from '../src/locales/cs.json'
 let client: QueryClient
 beforeEach(() => { vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} }); vi.spyOn(window, 'scrollTo').mockImplementation(() => {}) })
 afterEach(() => { client?.clear(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
-async function mount(columns: ListColumn[], options: { language?: 'en' | 'cs'; denied?: string[]; embedded?: boolean; row?: Record<string, any> } = {}) {
+async function mount(columns: ListColumn[], options: { language?: 'en' | 'cs'; denied?: string[]; embedded?: boolean; contextSurface?: boolean; row?: Record<string, any> } = {}) {
   const fields = { id: { type: 'string' }, name: { type: 'string' }, status: { type: 'enum', values: ['active', 'unknown'] }, amount: { type: 'int' }, enabled: { type: 'bool' }, created: { type: 'datetime' }, owner: { type: 'ref', entity: 'people' } }
   const model: Model = { instance: 'cells', revision: 1, timeZone: 'Europe/Prague', limits: { root: 100, children: 20, relations: 4, exists: 4 }, entities: {
-    entries: { displayField: 'name', fields, columns: ['name'], relations: { owner: { entity: 'people', field: 'owner', cardinality: 'n:1' } }, routes: { list: '', detail: '' }, list: { mobileCards: true, columns, relatedColumns: { owner_name: { via: 'owner', field: 'name' } } } },
-    people: { displayField: 'name', fields: { id: { type: 'string' }, name: { type: 'string' } }, columns: ['name'], relations: {}, routes: { list: '', detail: '' } },
+    entries: { displayField: 'name', fields, columns: ['name'], relations: { owner: { entity: 'people', field: 'owner', cardinality: 'n:1' } }, routes: { list: '', detail: '' }, list: { mobileCards: true, columns, relatedColumns: { owner_name: { via: 'owner', field: 'place' } } } },
+    places: { displayField: 'name', fields: { id: { type: 'string' }, name: { type: 'string' } }, columns: ['name'], relations: {}, routes: { list: '', detail: '' } },
+    people: { detail: { lists: { entries: { entity: 'entries', label: 'Entries', bind: { field: 'owner', record: 'id' }, columns: ['name'] } } }, displayField: 'name', fields: { id: { type: 'string' }, name: { type: 'string' }, place: { type: 'ref', entity: 'places' } }, columns: ['name'], relations: {}, routes: { list: '', detail: '' } },
   } }
-  const caps: Capabilities = { revision: 1, entities: { entries: { readable: Object.keys(fields).filter(f => !options.denied?.includes(f)), writable: [], operations: ['read'] }, people: { readable: ['id', 'name'].filter(f => !options.denied?.includes(`people.${f}`)), writable: [], operations: ['read'] } } }
-  const row = { id: '0000123456789', name: 'Primary', status: 'active', amount: 0, enabled: false, created: '2026-10-24T22:30:00Z', owner: 'private-foreign-key', __labels: { owner: { status: 'ok', entity: 'people', row: { id: 'p', name: 'Readable person' } }, owner_name: { status: 'ok', entity: 'people', row: { id: 'p', name: 'Related person' } } }, ...options.row }
+  const caps: Capabilities = { revision: 1, entities: { entries: { readable: Object.keys(fields).filter(f => !options.denied?.includes(f)), writable: [], operations: ['read'] }, people: { readable: ['id', 'name', 'place'].filter(f => !options.denied?.includes(`people.${f}`)), writable: [], operations: ['read'] }, places: { readable: ['id', 'name'].filter(f => !options.denied?.includes(`places.${f}`)), writable: [], operations: ['read'] } } }
+  const row = { id: '0000123456789', name: 'Primary', status: 'active', amount: 0, enabled: false, created: '2026-10-24T22:30:00Z', owner: 'private-foreign-key', __labels: { owner: { status: 'ok', entity: 'people', row: { id: 'p', name: 'Readable person' } }, owner_name: { status: 'ok', entity: 'places', row: { id: 'p', name: 'Related person' } } }, ...options.row }
   const request = vi.fn(async (query: ReadQuery) => ({ data: [row], next_cursor: null }))
   client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } })
-  const root = createRootRoute(), route = createRoute({ getParentRoute: () => root, path: '/o/$orgId/e/$entity', validateSearch: validateListSearch, component: () => <GeneratedReadPage model={model} caps={caps} orgId="org" entity="entries" request={request} contextList={options.embedded ? { entity: 'people', id: 'p', list: 'entries' } : undefined} /> })
+  const root = createRootRoute(), route = createRoute({ getParentRoute: () => root, path: '/o/$orgId/e/$entity', validateSearch: validateListSearch, component: () => options.contextSurface ? <ContextList model={model} caps={caps} orgId="org" entity="people" id="p" name="entries" request={request} /> : <GeneratedReadPage model={model} caps={caps} orgId="org" entity="entries" request={request} contextList={options.embedded ? { entity: 'people', id: 'p', list: 'entries' } : undefined} /> })
   const router = createRouter({ routeTree: root.addChildren([route]), history: createMemoryHistory({ initialEntries: ['/o/org/e/entries'] }) }); await router.load()
   const i18n = i18next.createInstance(); await i18n.use(initReactI18next).init({ lng: options.language ?? 'en', resources: { en: { translation: { ...en, value_active: 'Active', value_unknown: 'Unknown' } }, cs: { translation: { ...cs, value_active: 'Aktivní', value_unknown: 'Neznámý' } } } })
   const rendered = render(<I18nextProvider i18n={i18n}><QueryClientProvider client={client}><RouterProvider router={router} /></QueryClientProvider></I18nextProvider>)
@@ -73,4 +74,29 @@ it.each(['amount', 'owner', 'people.name'])('omits denied secondary even from ca
 })
 it('uses unavailable text rather than foreign keys for missing secondary labels', async () => {
   const { container } = await mount([{ field: 'name', secondary: 'owner' }], { row: { __labels: {} } }); expect(container.textContent).not.toContain('private-foreign-key'); expect(screen.getAllByText(en.unavailableRecord).length).toBeGreaterThan(0)
+})
+
+it('retains configured descriptors when ContextList overrides its primary column selection', async () => {
+  const { container, request } = await mount([{ field: 'name', secondary: 'amount', cell: { kind: 'identifier', copy: true } }], { contextSurface: true })
+  expect(container.querySelectorAll('[data-list-secondary]').length).toBe(2)
+  expect(screen.getAllByRole('button', { name: en.listIdentifierCopy }).length).toBe(2)
+  expect(request).toHaveBeenCalledTimes(1); expect(request.mock.calls[0][0].select).toContain('amount')
+})
+it.each(['owner', 'people.place', 'places.name'])('omits denied cached related secondary along every hop: %s', async denied => {
+  const { container } = await mount([{ field: 'name', secondary: 'owner_name' }], { denied: [denied] })
+  expect(container.querySelector('[data-list-secondary]')).toBeNull()
+})
+it('renders a reference primary as a single row link without nesting target links', async () => {
+  const { container } = await mount([{ field: 'owner', secondary: 'status' }])
+  expect(screen.getAllByRole('link', { name: 'Readable person' }).every(link => link.getAttribute('href') === '/o/org/e/entries/0000123456789')).toBe(true)
+  expect(container.querySelector('a a')).toBeNull()
+})
+it.each([null, 'unknown'])('keeps badge null placeholders and neutral fallback for missing mappings: %s', async status => {
+  const { container } = await mount([{ field: 'status', cell: { kind: 'badge', tones: { active: 'positive' } } }], { row: { status } })
+  if (status == null) { expect(container.querySelector('[data-list-badge]')).toBeNull(); expect(screen.getAllByText('—').length).toBeGreaterThan(0) }
+  else expect(container.querySelector('[data-list-badge]')?.getAttribute('data-tone')).toBe('neutral')
+})
+it('omits identifier content and copy for denied cached primary values', async () => {
+  const { container } = await mount([{ field: 'name' }, { field: 'amount', cell: { kind: 'identifier', copy: true } }], { denied: ['amount'] })
+  expect(screen.queryByRole('button', { name: en.listIdentifierCopy })).toBeNull()
 })

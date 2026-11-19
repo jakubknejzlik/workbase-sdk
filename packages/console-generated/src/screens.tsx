@@ -1,3 +1,4 @@
+import { GeneratedListCell } from './list-cell'
 import { accountLinkField, accountLinkRelation } from './account-link'
 import { EntityCalendar } from './calendar'
 import { availableCalendar } from './calendar-model'
@@ -150,8 +151,6 @@ function ListPageBody({ discard, onDiscarded, savedViewsScope, model, caps, orgI
   // Explicit columns own the order; only automatically derived columns promote the display field.
   const listFields = [...new Set(configured ?? [defaultPrimary, ...definition.columns])].filter(field => readable.includes(field) || !!definition.list?.relatedColumns?.[field] && readable.includes(definition.list.relatedColumns[field].via))
   const primary = listFields[0]
-  // Only the date/number renderers of the cell whitelist are honored here; zone and locale come from the model and UI language.
-  const columnCell = Object.fromEntries((definition.list?.columns ?? []).flatMap(column => column.cell && ['date', 'datetime', 'number'].includes(column.cell.kind) ? [[column.field, column.cell.kind as 'date' | 'datetime' | 'number']] : []))
   const rows = list.data?.data ?? []
   const setFilter = (field: string, predicate?: Record<string, unknown>) => list.onStateChange({ ...list.state, userFilters: [...list.confirmedState.userFilters.filter(filter => filter.field !== field), ...(predicate ? [{ field, predicate }] : [])] }, 'filter')
   const relationFilters = list.filters.filter(filter => filter.kind === 'relation')
@@ -176,22 +175,6 @@ function ListPageBody({ discard, onDiscarded, savedViewsScope, model, caps, orgI
   const views = definition.list?.views?.filter(view => readableWhere(view.where, model, entity, caps) && (!view.rowAccess || definition.rowInvitations && caps.resources?.['invitations.read'] === true)) ?? []
 
   const sortable = sortableFields(model, entity, caps)
-  const fieldValue = (row: Record<string, any>, field: string): ReactNode => {
-    if (field === 'id') return <span title={String(row.id)}>{shortRecordId(row.id)}</span>
-    const spec = definition.fields[field]
-    if (definition.list?.relatedColumns?.[field] || spec?.type === 'ref') {
-      const target = row.__labels?.[field]
-      if (!target) return <span aria-label={t('loading')}>{t('loading')}</span>
-      if (target.status === 'empty') return '—'
-      if (target.status === 'unavailable') return t('unavailableRecord')
-      const label = recordLabel(model, target.entity, target.row, caps, i18n.language, t)
-      return <Link to="/o/$orgId/e/$entity/$id" params={{ orgId, entity: target.entity, id: String(target.row.id) }}>{label}</Link>
-    }
-    if (field === display) return recordLabel(model, entity, row, caps, i18n.language, t)
-    if (row[field] == null) return '—'
-    if (spec?.type === 'enum' && row[field] != null) return t(`value_${row[field]}`)
-    return spec.ui?.signedBy && row[field] != null ? signedValue(row, spec, row[field], i18n.language) : formatValue(row[field], spec, i18n.language, t('yes'), t('no'), t('nullValue'), model.timeZone, columnCell[field])
-  }
   const error = list.result.error as { status?: number; code?: string } | null
   const Page = contextList ? EmbeddedListCard : ResourcePage
   if (error?.status === 403) return <Page title={title ?? t('forbidden')}><p>{t('resourceForbidden', { resource: t(`entity_${entity}`).toLocaleLowerCase(i18n.language) })}</p></Page>
@@ -208,7 +191,7 @@ function ListPageBody({ discard, onDiscarded, savedViewsScope, model, caps, orgI
   const activeChips = <DataTableActiveFilters filters={chips} label={t('activeFilters')} clearLabel={t('clearAllFilters')} onClear={() => list.onStateChange({ ...list.state, userFilters: [], rowAccess: undefined }, 'filter')} />
   const presentation = availableCalendar(model, entity, caps) && <div role="group" aria-label={t('listPresentation')} className="flex flex-wrap gap-2 py-2">{(['table', 'calendar'] as const).map(presentation => <PrimitiveButton key={presentation} variant={list.state.presentation === presentation ? 'secondary' : 'ghost'} aria-pressed={list.state.presentation === presentation} onClick={() => list.onStateChange({ ...list.state, presentation }, 'view')}>{t(`${presentation}View`)}</PrimitiveButton>)}</div>
   const tableColumns = [
-      ...listFields.map((field, index) => ({ id: field, label: field === 'id' || field === primary ? t(`field_${field}`) : t(`listField_${field}`, { defaultValue: t(`field_${field}`) }), sortable: sortable.includes(field), filter: !list.offsetPaging && list.filters.some(filter => filter.field === field) ? <HeaderFilter model={model} caps={caps} orgId={orgId} entity={entity} descriptor={list.filters.find(filter => filter.field === field)!} request={request} predicate={list.state.userFilters.find(filter => filter.field === field)?.predicate} onChange={predicate => setFilter(field, predicate)} /> : undefined, cell: (row: Record<string, any>) => index === 0 ? <Link data-row-name="" title={String(row.id)} to="/o/$orgId/e/$entity/$id" params={{ orgId, entity, id: String(row.id) }}>{fieldValue(row, field)}</Link> : fieldValue(row, field) })),
+      ...listFields.map((field, index) => ({ id: field, label: field === 'id' || field === primary ? t(`field_${field}`) : t(`listField_${field}`, { defaultValue: t(`field_${field}`) }), sortable: sortable.includes(field), filter: !list.offsetPaging && list.filters.some(filter => filter.field === field) ? <HeaderFilter model={model} caps={caps} orgId={orgId} entity={entity} descriptor={list.filters.find(filter => filter.field === field)!} request={request} predicate={list.state.userFilters.find(filter => filter.field === field)?.predicate} onChange={predicate => setFilter(field, predicate)} /> : undefined, cell: (row: Record<string, any>) => <GeneratedListCell model={model} entity={entity} caps={caps} row={row} column={definition.list?.columns?.find(column => column.field === field) ?? { field }} orgId={orgId} primary={index === 0} signed={signedValue} /> })),
       ...((definition.accountLink || definition.rowInvitations) && (definition.list?.rowAccess === undefined || !!definition.list.rowAccess && definition.list.rowAccess.column) && write && canReadApplicationAccess(caps) ? [{ id: '_access', keepOnNarrow: true, wrap: true, label: t('rowAccess'), cell: (row: Record<string, any>) => <GeneratedRowInvitation model={model} caps={caps} orgId={orgId} entity={entity} request={request} write={write} onDenied={onDenied} row={row} disabled={list.stale || list.result.isFetching || searchPending} /> }] : []),
       ...(rowActions && hasRowActions(model, entity, caps) ? [{ id: '_actions', label: t('actions'), cell: (row: Record<string, any>) => <>{rowActions!(row, list.stale || list.result.isFetching || searchPending)}</> }] : []),
     ]
@@ -297,7 +280,7 @@ export function ContextList({ model, caps, orgId, entity, id, name, request, cre
   const { t } = useEntityTranslation(entity)
   if (!list || !caps.entities[entity]?.operations.includes('read') || !caps.entities[entity]?.readable.includes('id') || !caps.entities[list.entity]?.operations.includes('read') || !caps.entities[list.entity]?.readable.includes('id') || !caps.entities[list.entity]?.readable.includes(list.bind.field)) return null
   const target = model.entities[list.entity]
-  const configured = { ...model, entities: { ...model.entities, [list.entity]: { ...target, list: { ...target.list, ...(list.columns ? { columns: list.columns.map(field => ({ field })) } : {}), compact: true, mobileCards: target.list?.mobileCards ?? true } } } }
+  const configured = { ...model, entities: { ...model.entities, [list.entity]: { ...target, list: { ...target.list, ...(list.columns ? { columns: list.columns.map(field => target.list?.columns?.find(column => column.field === field) ?? { field }) } : {}), compact: true, mobileCards: target.list?.mobileCards ?? true } } } }
   return <GeneratedListPage key={`${model.instance}/${orgId}/${entity}/${id}/${name}/${caps.revision}`} model={configured} caps={caps} orgId={orgId} entity={list.entity} request={request} contextList={{ entity, id, list: name }} title={t(list.label, { defaultValue: list.label })} actions={() => list.create && create?.(list.entity, { [list.bind.field]: id })} />
 }
 function EmbeddedListCard({ title, actions, children, count }: { title: string; actions?: ReactNode; children?: ReactNode; count?: string; actionLabel?: string; onAction?: () => void }) {

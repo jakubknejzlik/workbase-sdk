@@ -73,7 +73,14 @@ for (const language of ['en', 'cs'] as const) for (const width of [390, 1440]) {
         measurements.push({ state, ...await geometry(page, section) })
         await page.screenshot({ path: testInfo.outputPath(`${language}-${width}-${state}.png`), animations: 'disabled', fullPage: true })
       }
-      const open = async () => { if (!await menu.isVisible()) await trigger.click(); await expect(menu).toBeVisible() }
+      const open = async () => {
+        if (!await menu.isVisible()) await trigger.click()
+        await expect(menu).toBeVisible()
+        const bounds = await box(menu)
+        expect(bounds.y, 'saved-view menu top stays in viewport').toBeGreaterThanOrEqual(0)
+        expect(bounds.y + bounds.height, 'saved-view menu bottom stays in viewport').toBeLessThanOrEqual(page.viewportSize()!.height + 1)
+        expect(await menu.evaluate(node => node.scrollWidth), 'saved-view menu has no horizontal overflow').toBeLessThanOrEqual(Math.ceil(bounds.width))
+      }
       const item = async (name: string) => { await open(); await menu.getByRole('button', { name, exact: true }).click() }
 
       // Create through the real menu and dialog, then keep a long view name present in every acceptance capture.
@@ -119,6 +126,14 @@ for (const language of ['en', 'cs'] as const) for (const width of [390, 1440]) {
       await expect(trigger).toHaveText(t.savedViewsMenu)
       await expect(trigger).toBeFocused()
     } finally {
+      if (testInfo.status !== testInfo.expectedStatus) {
+        await page.screenshot({ path: testInfo.outputPath('failure.png'), fullPage: true, timeout: 5000 }).catch(() => {})
+        const overlays = await page.locator('[role="dialog"]').evaluateAll(nodes => nodes.map(node => {
+          const { x, y, width, height } = node.getBoundingClientRect()
+          return { x, y, width, height, scrollWidth: node.scrollWidth, scrollHeight: node.scrollHeight }
+        })).catch(() => [])
+        await writeFile(testInfo.outputPath('failure-overlays.json'), JSON.stringify(overlays, null, 2))
+      }
       const path = testInfo.outputPath('geometry.json')
       await writeFile(path, JSON.stringify(measurements, null, 2))
       await testInfo.attach('geometry', { path, contentType: 'application/json' })

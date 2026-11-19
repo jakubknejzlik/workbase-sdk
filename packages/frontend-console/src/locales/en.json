@@ -1,4 +1,7 @@
 {
+  "listIdentifierCopy": "Copy identifier",
+  "listIdentifierCopied": "Identifier copied",
+  "listIdentifierCopyFailed": "Could not copy identifier",
   "inlineEditField": "Edit {{field}}",
   "inlineFreshValue": "Current value",
   "detailNotProvided": "Not provided",

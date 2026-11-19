@@ -4,11 +4,8 @@ export function shortRecordId(id: unknown) {
   const value = String(id ?? '')
   return value.length > 8 ? `${value.slice(0, 4)}…${value.slice(-3)}` : value
 }
-/** Instance zone for instants. Never the browser's: an absent zone is UTC, not the host. */
-export function instanceTimeZone(timeZone?: string) {
-  if (!timeZone) return 'UTC'
-  try { new Intl.DateTimeFormat('en', { timeZone }); return timeZone } catch { return 'UTC' }
-}
+import { instanceTimeZone } from './time-zone'
+export { instanceTimeZone } from './time-zone'
 export type CellKind = 'text' | 'identifier' | 'badge' | 'date' | 'datetime' | 'number'
 export function formatValue(value: unknown, field: Field, locale: string, yes: string, no: string, empty: string, timeZone?: string, cell?: CellKind) {
   if (value === null || value === undefined) return empty

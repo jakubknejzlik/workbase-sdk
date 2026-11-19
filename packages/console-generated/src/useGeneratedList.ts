@@ -1,3 +1,4 @@
+import { listColumnFields } from './list-presentation'
 import { filterDescriptors } from './filter-kinds'
 import { availableCalendar } from './calendar-model'
 import { useTranslation } from 'react-i18next'
@@ -67,7 +68,7 @@ export function useGeneratedList({ model, caps, orgId, entity, request, contextL
     document.contextList = contextList
     const definition = model.entities[entity]
     const calendar = state.presentation === 'calendar' ? availableCalendar(model, entity, caps) : undefined
-    const columns = [...(definition.displayField ? [definition.displayField] : []), ...(definition.list?.columns?.map(column => column.field) ?? definition.listColumns ?? definition.columns), ...(calendar ? [calendar.startField, calendar.endField, calendar.titleField ?? definition.displayField, ...(calendar.titleFields ?? []), calendar.secondaryField].filter((field): field is string => !!field) : [])]
+    const columns = [...(definition.displayField ? [definition.displayField] : []), ...listColumnFields(model, entity), ...(calendar ? [calendar.startField, calendar.endField, calendar.titleField ?? definition.displayField, ...(calendar.titleFields ?? []), calendar.secondaryField].filter((field): field is string => !!field) : [])]
     // Embedded cards fetch rendered values and identities; search/filter/sort stay server operands.
     document.select = [...new Set(['id', ...columns.flatMap(field => [definition.list?.relatedColumns?.[field]?.via ?? field, ...definition.fields[field]?.ui?.signedBy ? [definition.fields[field].ui!.signedBy!.field] : []])])].filter(field => caps.entities[entity]?.readable.includes(field))
   }

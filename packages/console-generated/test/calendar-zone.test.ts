@@ -26,3 +26,10 @@ it.each([undefined, 'Not/AZone'])('uses UTC fallback %s for month bounds and fil
   expect(calendarRange('2026-10-25', 'month', zone).start.toISOString()).toBe('2026-09-28T00:00:00.000Z')
   expect(filterMapping('date', { type: 'datetime' }, 'en', undefined, zone).toPredicate({ value: '2026-10-25' }, true)).toEqual({ gte: '2026-10-25T00:00:00.000Z', lt: '2026-10-26T00:00:00.000Z' })
 })
+it('shares compatible gap/fold disambiguation with date filters and preserves civil date-only filters', async () => {
+  const { civilInstant } = await import('../src/time-zone')
+  expect(civilInstant('2026-03-29', 'Europe/Prague', 2, 30).toISOString()).toBe('2026-03-29T01:30:00.000Z')
+  expect(civilInstant('2026-10-25', 'Europe/Prague', 2, 30).toISOString()).toBe('2026-10-25T00:30:00.000Z')
+  expect(civilInstant('2026-10-25', 'Europe/Prague', 9).toISOString()).toBe('2026-10-25T08:00:00.000Z')
+  expect(filterMapping('date', { type: 'date' }, 'cs', undefined, 'Europe/Prague').toPredicate({ value: '2026-10-25' }, true)).toEqual({ eq: '2026-10-25' })
+})

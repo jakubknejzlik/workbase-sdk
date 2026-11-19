@@ -1,3 +1,4 @@
+import { listColumnFields, readableListField } from './list-presentation'
 import { availableCalendar, calendarQuery, dayKey, validDay, type CalendarMode } from './calendar-model'
 import { filterDescriptors, filterMapping, selectionCap, type FilterDescriptor } from './filter-kinds'
 import { projection, listSearchableFields, type Model, type Capabilities, type ReadQuery, type RowAccessState } from './read'
@@ -77,7 +78,7 @@ export function stateFromSearch(search: ListSearch, model: Model, entity: string
   if (calendar) {
     state.presentation = search.presentation === 'calendar' ? 'calendar' : 'table'
     state.calendarMode = search.calendarMode ?? 'month'
-    state.calendarDate = search.calendarDate ?? dayKey(new Date())
+    state.calendarDate = search.calendarDate ?? dayKey(new Date(), model.timeZone)
   }
   const unavailableSearch = !!search.search && !listSearchableFields(model, entity, caps, embedded && state.presentation !== 'calendar' ? 'embedded' : state.presentation).length
   if (search.search && !unavailableSearch) state.search = search.search
@@ -135,7 +136,7 @@ export function toQueryDocument(state: ListState, model: Model, entity: string, 
   const rowAccess = state.offset === undefined ? allowedView?.rowAccess ?? state.rowAccess : state.rowAccess
   const strings = listSearchableFields(model, entity, caps, embedded && state.presentation !== 'calendar' ? 'embedded' : state.presentation)
   const fields = state.sort ? sortFields(model, entity, caps, state.sort.key) : []
-  const labels = labelColumns(model, entity, caps).filter(key => (model.entities[entity].list?.columns?.map(column => column.field) ?? model.entities[entity].listColumns ?? model.entities[entity].columns).includes(key))
+  const labels = labelColumns(model, entity, caps).filter(key => listColumnFields(model, entity).includes(key) && readableListField(model, entity, caps, key))
   const query: ReadQuery = { entity, ...(state.offset !== undefined ? { offset: state.offset, includeTotal: true, includeViewTotals: true, ...(allowedView ? { view: allowedView.id } : {}) } : {}), ...(rowAccess && model.entities[entity].rowInvitations && caps.resources?.['invitations.read'] === true ? { rowAccess } : {}), ...(state.search.trim() && strings.length ? { search: { text: state.search.trim(), fields: strings, locale } } : {}), select: select.length ? select : ['id'], ...(labels.length ? { labels } : {}), limit: Math.min(pageSizes.includes(state.limit as any) ? state.limit : 30, model.limits.root),
     ...(conditions.length ? { where: { and: conditions } } : {}),
     ...(Object.keys(labelWhere).length ? { labelWhere } : {}),
@@ -146,7 +147,7 @@ export function toQueryDocument(state: ListState, model: Model, entity: string, 
     const refs = calendar.titleFields.filter(field => select.includes(field) && model.entities[entity].fields[field]?.type === 'ref')
     if (refs.length) query.labels = [...new Set([...(query.labels ?? []), ...refs])]
   }
-  return calendar ? calendarQuery(query, calendar, state.calendarDate ?? dayKey(new Date()), state.calendarMode ?? 'month', model) : query
+  return calendar ? calendarQuery(query, calendar, state.calendarDate ?? dayKey(new Date(), model.timeZone), state.calendarMode ?? 'month', model) : query
 }
 /** Detail/picker hydration, chunked to the compiler's IN limit. Never used for list cells. */
 export function relationHydrationQueries(model: Model, entity: string, caps: Capabilities, columns: string[], rows: Record<string, any>[], extraFields: Record<string, string[]> = {}) {
