@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { defineInstance } from '@workbasehq/core/config'
+import { defineInstance, Fn, Q } from '@workbasehq/core/config'
 import type { ListInput } from '../../core/src/list-config'
 import { KernelRegistry } from '@workbasehq/core/kernel/registry'
 import type { WorkbasePlugin } from '@workbasehq/core/kernel/plugin'
 import { consoleUI } from '@workbasehq/plugins/console'
 import { prepare, prepareChanges } from '../src/planning'
-import { WorkflowError } from '../src/schemas'
+import { WorkflowError, type Change, type Index } from '../src/schemas'
 
 const cases: [string, ListInput, string, string][] = [
   ['shorthand column', { columns: ['name'] }, 'records', 'columns.0.field'],
@@ -54,6 +54,51 @@ const changeFor = (entity: string) => ({ kind: 'rename_field' as const,
   entity: entity === 'via' || entity === 'related' ? entity === 'via' ? 'records' : 'parents' : entity,
   from: entity === 'via' ? 'parent_id' : entity === 'related' ? 'ancestor_id' : 'name', to: 'title' })
 
+describe('intermediate rename models', () => {
+  const planners = [['prepareChanges', prepareChanges], ['prepare', prepare]] as const
+  const fixture = () => {
+    const config = freeze(defineInstance({ id: 'intermediate_model', revision: 1, roles: ['owner'], interactive: false,
+      entities: { records: { displayField: 'name', fields: {
+        name: { type: 'string' }, unused: { type: 'string' },
+        caption: { type: 'string', computed: Fn.concat('name', Q.value('!')).serialize() },
+      } } } }))
+    new KernelRegistry(config, { authorization: 'trust' })
+    const indexes = freeze<Index[]>([])
+    const changes = freeze<Change[]>([
+      { kind: 'rename_field', entity: 'records', from: 'name', to: 'title' },
+      { kind: 'rename_field', entity: 'records', from: 'unused', to: 'renamed' },
+      { kind: 'set_computed_field', entity: 'records', field: 'caption', computed: Fn.concat('title', Q.value('!')).serialize() },
+    ])
+    return { config, indexes, changes }
+  }
+
+  it.each(planners)('%s allows a later operation to repair a temporarily stale expression', (_name, planner) => {
+    const { config, indexes, changes } = fixture()
+    const before = JSON.stringify({ config, indexes, changes })
+    const result = planner(config, indexes, changes)
+    const target = 'target' in result ? result.target : defineInstance(result.next)
+    new KernelRegistry(target, { authorization: 'trust' })
+    expect(target.entities.records.fields.caption.computed).toBe(Fn.concat('title', Q.value('!')).serialize())
+    expect(target.entities.records.fields).toHaveProperty('title')
+    expect(target.entities.records.fields).toHaveProperty('renamed')
+    expect(target.entities.records.fields).not.toHaveProperty('name')
+    expect(target.entities.records.fields).not.toHaveProperty('unused')
+    expect(JSON.stringify({ config, indexes, changes })).toBe(before)
+  })
+
+  it.each(planners)('%s still rejects an invalid completed target at the validation boundary', (_name, planner) => {
+    const { config, indexes, changes } = fixture()
+    const invalidChanges = freeze(changes.slice(0, 2))
+    const before = JSON.stringify({ config, indexes, changes: invalidChanges })
+    expect(() => {
+      const result = planner(config, indexes, invalidChanges)
+      if ('next' in result) defineInstance(result.next)
+    }).toThrow(expect.objectContaining({ message: expect.stringContaining('Unknown schema field: records.name'),
+      code: planner === prepare ? 'invalid_input' : 'invalid_expression' }))
+    expect(JSON.stringify({ config, indexes, changes: invalidChanges })).toBe(before)
+  })
+})
+
 describe('list rename dependencies', () => {
   it.each(cases)('refuses plugin-owned %s before returning an invalid target', (_label, list, entity, path) => {
     const { config, plugin } = fixture(list, true)
@@ -91,9 +136,9 @@ describe('list rename dependencies', () => {
 })
 
 describe('lists on plugin-contributed entities', () => {
-  const fixture = (list: ListInput) => {
+  const fixture = (list: ListInput, displayField?: string) => {
     const plugin = freeze<WorkbasePlugin>({ name: 'inventory', version: '1', requires: { console: '^1' },
-      entities: { inventory: { fields: { name: { type: 'string' }, record_id: { type: 'ref', entity: 'records' } },
+      entities: { inventory: { displayField, fields: { name: { type: 'string' }, record_id: { type: 'ref', entity: 'records' } },
         relations: { record: { field: 'record_id', entity: 'records' } } } },
       contributes: { console: { entities: { inventory: { list } } } } })
     const config = defineInstance({ id: 'plugin_entity_rename', revision: 1, roles: ['owner'], interactive: false,
@@ -105,8 +150,9 @@ describe('lists on plugin-contributed entities', () => {
     return { config: freeze(config), plugin }
   }
 
-  it('allows unrelated chained renames and constructs the target kernel without mutating plugins', () => {
-    const { config, plugin } = fixture({ columns: ['name'] })
+  it.each([false, true])('allows unrelated chained renames without mutating plugins (generated display: %s)', generated => {
+    const { config, plugin } = fixture({ columns: [generated ? 'computed_display' : 'name'] },
+      generated ? Fn.concat('name', Q.value('!')).serialize() : undefined)
     const before = JSON.stringify(config)
     const result = prepare(config, [], [
       { kind: 'rename_field', entity: 'records', from: 'unused', to: 'renamed' },

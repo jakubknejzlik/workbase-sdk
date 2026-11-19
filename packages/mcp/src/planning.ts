@@ -1,7 +1,7 @@
 import { DISPLAY_VALUE, isExpression, ExpressionError } from '@workbasehq/core/query/expressions'
 import { devFixtures } from './dev-support.ts'
 import { createHash } from 'node:crypto'
-import { defineInstance, normalizeListConfig, baseFields, cloneInstanceConfig, displayFieldErrors, suggestedDisplayField, isDisplayFieldError, type InstanceConfig } from '@workbasehq/core/config'
+import { defineInstance, instanceConfigSchema, normalizeListConfig, baseFields, cloneInstanceConfig, displayFieldErrors, suggestedDisplayField, isDisplayFieldError, type InstanceConfig } from '@workbasehq/core/config'
 import { plan } from '@workbasehq/core/migrations/planner'
 import { quote } from '@workbasehq/core/migrations/schema'
 import { changeSchema, fail, WorkflowError, type Change, type Index } from './schemas.ts'
@@ -207,10 +207,16 @@ export function prepareChanges(config: InstanceConfig, existingIndexes: Index[],
          (entity.fields[f.backfillFrom.refField]?.entity === c.entity && f.backfillFrom.valueField === c.from))))) {
         fail('protected_field', 'A snapshot depends on this field; manual review required')
       }
-      // Recompose the evolving model for each rename, including plugin entities
-      // and their normalized defaults, exactly as the target kernel does.
+      // Compose in kernel order and parse only entity structure/defaults for list
+      // lookup, including generated display fields without evaluating expressions.
+      // Whole-model validation must wait until the batch is complete.
       // Trusted plugin objects stay untouched; only copied UI data is writable.
-      const listModel = defineInstance({ ...next, entities: composeEntities(next) })
+      const entities = instanceConfigSchema.shape.entities.parse(composeEntities(next))
+      for (const entity of Object.values(entities)) {
+        const expression = entity.displayExpression ?? (entity.displayField && isExpression(entity.displayField) ? entity.displayField : undefined)
+        if (expression) entity.fields[DISPLAY_VALUE] = { type: 'string', required: false, readOnly: true, computed: expression }
+      }
+      const listModel = { ...next, entities }
       const lists = Object.entries(next.ui?.entities ?? {}).flatMap(([entity, hints]) => hints.list
         ? [{ hints, ...collectListDependencies(listModel, entity, hints.list) }] : [])
       for (const plugin of next.plugins ?? []) for (const [entity, hints] of Object.entries(plugin.contributes?.console?.entities ?? {})) {
