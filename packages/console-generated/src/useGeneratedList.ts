@@ -41,7 +41,8 @@ export function useGeneratedList({ model, caps, orgId, entity, request, contextL
   const history = contextList ? local.history : (location.state as { generatedList?: PageHistory }).generatedList
   const cursors = !dropped && !canonicalFiltersChanged && history?.scope === scope && history.signature === signature && Array.isArray(history.cursors) && history.cursors.every(cursor => typeof cursor === 'string') ? history.cursors : []
   const offsetPaging = !contextList && state.presentation !== 'calendar'
-  const page = offsetPaging && !dropped && !canonicalFiltersChanged && history?.scope === scope && history.signature === signature && Number.isSafeInteger(history.page) && history.page! >= 0 ? history.page! : offsetPaging ? 0 : cursors.length
+  // Numbered pages are shareable; actor-bound cursors remain in history only.
+  const page = offsetPaging ? !dropped && !canonicalFiltersChanged ? (search.page ?? 1) - 1 : 0 : cursors.length
   state.cursor = offsetPaging ? undefined : cursors.at(-1)
   if (offsetPaging) state.offset = page * Math.min(state.limit, model.limits.root)
   const notice = dropped ? 'listStateDropped' : history?.scope === scope && history.signature === signature && ['listStateDropped', 'listCursorRestarted'].includes(history.notice ?? '') ? history.notice : null
@@ -50,7 +51,7 @@ export function useGeneratedList({ model, caps, orgId, entity, request, contextL
   const settledKey = useRef<string | undefined>(undefined)
   const observedKey = useRef<string | undefined>(undefined)
   const lastGood = useRef<{ scope: string; data: Result; page: number; limit: number } | undefined>(undefined)
-  const go = (next: ListSearch, nextCursors: string[], replace = false, notice?: ListNotice, nextPage = 0) => contextList ? Promise.resolve(setLocal({ search: next, history: { scope, signature: JSON.stringify(searchFromState(stateFromSearch(next, model, entity, caps, undefined, !!contextList).state)), cursors: nextCursors, page: nextPage, notice } })) : currentRoute ? navigate({ to: '.', search: next as any, replace, resetScroll: false,
+  const go = (next: ListSearch, nextCursors: string[], replace = false, notice?: ListNotice, nextPage = 0) => contextList ? Promise.resolve(setLocal({ search: next, history: { scope, signature: JSON.stringify(searchFromState(stateFromSearch(next, model, entity, caps, undefined, !!contextList).state)), cursors: nextCursors, page: nextPage, notice } })) : currentRoute ? navigate({ to: '.', search: { ...next, ...(offsetPaging && nextPage > 0 ? { page: nextPage + 1 } : {}) } as any, replace, resetScroll: false,
     state: old => ({ ...old, generatedList: { scope, signature: JSON.stringify(searchFromState(stateFromSearch(next, model, entity, caps, undefined, !!contextList).state)), cursors: nextCursors, page: nextPage, notice } }) }) : Promise.resolve()
   useEffect(() => {
     const legacyCursor = !contextList && Object.hasOwn(location.search, 'cursor')

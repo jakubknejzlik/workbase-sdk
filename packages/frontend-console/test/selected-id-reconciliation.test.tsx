@@ -41,6 +41,7 @@ async function mount(ids: string[] = [], saved = false, picker = false, panel = 
   let release: (() => void) | undefined, gate: Promise<void> | undefined
   const queries: ReadQuery[] = []
   const fetcher = vi.fn(async (path: string, options?: RequestInit) => {
+    if (path === '/me?scope=organization') return Response.json(client.getQueryData(['organization', 'org']))
     if (path.endsWith('/console-model')) return Response.json({ contractVersion: 2, model: { ...definition, commands: [], workflows: [] }, capabilities: permissions, console: { navigation: [], pages: [], entities: {} } })
     if (path === '/query') {
       const query = JSON.parse(options!.body as string) as ReadQuery; queries.push(query)
@@ -58,7 +59,7 @@ async function mount(ids: string[] = [], saved = false, picker = false, panel = 
   vi.stubGlobal('fetch', fetcher)
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } }); clients.push(client)
   client.setQueryData(['console-model', 'org'], { model: definition, capabilities: permissions, console: { navigation: [], pages: [], entities: {} } })
-  client.setQueryData(['me'], { user: { id: scope.userId }, memberships: [{ organization_id: 'org' }] })
+  client.setQueryData(['organization', 'org'], { user: { id: scope.userId }, memberships: [{ organization_id: 'org' }] })
   const entry = saved ? changeSavedViews(scope, 'entries', { kind: 'save', name: 'Restored', state: { search: '', sort: null, userFilters: selected(ids), presetFilters: [], limit: 30 } }).entries[0] : undefined
   const root = createRootRoute()
   const route = createRoute({ getParentRoute: () => root, path: '/o/$orgId/e/$entity', validateSearch: validateListSearch, component: () => <ReadPage orgId="org" entity="entries" /> })
@@ -97,7 +98,7 @@ it.each(['permission', 'actor', 'definition'] as const)('revalidates warm select
   test.hold()
   if (change === 'definition') test.redefine()
   else test.revoke()
-  if (change === 'actor') await act(async () => { test.client.setQueryData(['me'], { user: { id: 'other-actor' }, memberships: [{ organization_id: 'org' }] }) })
+  if (change === 'actor') await act(async () => { test.client.setQueryData(['organization', 'org'], { user: { id: 'other-actor' }, memberships: [{ organization_id: 'org' }] }) })
   else await test.refresh()
   await waitFor(() => expect(screen.queryAllByText(/REVOKED_LABEL_CANARY/)).toHaveLength(0))
   await act(async () => test.release())
@@ -196,7 +197,7 @@ it.each(['permission', 'actor'] as const)('revalidates a panel draft applied aft
   expect(test.router.state.location.search.filters).toBeUndefined()
 
   test.revoke()
-  if (change === 'actor') await act(async () => { test.client.setQueryData(['me'], { user: { id: 'other-actor' }, memberships: [{ organization_id: 'org' }] }) })
+  if (change === 'actor') await act(async () => { test.client.setQueryData(['organization', 'org'], { user: { id: 'other-actor' }, memberships: [{ organization_id: 'org' }] }) })
   else await test.refresh()
   await waitFor(() => expect(screen.queryAllByText(/REVOKED_LABEL_CANARY/)).toHaveLength(0))
   if (change === 'actor') {
@@ -223,7 +224,7 @@ it('purges the replaced actor\'s cached list rows, counts and totals when the co
   const test = await mount([])
   const owned = (actor: string) => test.client.getQueryCache().findAll({ queryKey: ['data-table'] }).filter(query => String(query.queryKey.at(-1)).includes(`"${actor}"`))
   await waitFor(() => expect(owned('actor').length).toBeGreaterThan(0))
-  await act(async () => { test.client.setQueryData(['me'], { user: { id: 'other-actor' }, memberships: [{ organization_id: 'org' }] }) })
+  await act(async () => { test.client.setQueryData(['organization', 'org'], { user: { id: 'other-actor' }, memberships: [{ organization_id: 'org' }] }) })
   await waitFor(() => expect(owned('other-actor').length).toBeGreaterThan(0))
   expect(owned('actor')).toEqual([])
 })

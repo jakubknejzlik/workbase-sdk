@@ -124,9 +124,7 @@ test('URL: reload restores committed settings and current page', async ({ page }
   await page.reload(); await settled(page); await rows(page, { view: 'inactive' }, 10)
 })
 
-test('URL: copied URL restores the current page as well as settings (#233 candidate)', async ({ page, context }) => {
-  // Keep the strict acceptance expectation visible. Page lives in history.state on
-  // this integration revision; independent s2 must decide the copied-page candidate.
+test('URL: copied URL restores the current page as well as settings', async ({ page, context }) => {
   await page.goto(route); await settled(page); await tab(page, 'inactive'); await rows(page, { view: 'inactive' })
   await footer(page).getByRole('button', { name: '2', exact: true }).click(); await rows(page, { view: 'inactive' }, 10)
   const other = await context.newPage()
@@ -176,7 +174,7 @@ test('personal views: update current view through the naming dialog and reload',
   await savedTrigger(page).click(); await savedMenu(page).getByRole('button', { name: 'Update me', exact: true }).click(); await savedMenu(page).getByRole('button', { name: en.savedViewsApplyView, exact: true }).click(); await rows(page, { view: 'active' })
 })
 
-test('personal views: rename then update in the same mounted session (#233 regression candidate)', async ({ page }) => {
+test('personal views: rename then update in the same mounted session', async ({ page }) => {
   await page.goto(route); await settled(page); await tab(page, 'inactive'); await rows(page, { view: 'inactive' }); await save(page, 'Compound inactive')
   await page.reload(); await settled(page); await tab(page, 'active'); await rows(page, { view: 'active' })
   await savedTrigger(page).click(); await savedMenu(page).getByRole('button', { name: 'Compound inactive', exact: true }).click(); await savedMenu(page).getByRole('button', { name: en.savedViewsApplyView, exact: true }).click(); await rows(page, { view: 'inactive' })

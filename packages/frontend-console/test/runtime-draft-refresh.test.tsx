@@ -44,8 +44,9 @@ async function setup(id?: string, beforeDraft?: () => void) {
   let queryGate: Promise<void> | undefined
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } })
   client.setQueryData(['console-model', 'org'], adaptConsoleModel(next)); client.setQueryData(['capabilities', 'org'], next.capabilities)
-  client.setQueryData(['me'], { user: { id: 'verified' }, memberships: [{ organization_id: 'org' }] })
+  client.setQueryData(['organization', 'org'], { user: { id: 'verified' }, memberships: [{ organization_id: 'org' }] })
   const fetcher = vi.fn(async (path: string) => {
+    if (path === '/me?scope=organization') return Response.json(client.getQueryData(['organization', 'org']))
     if (path.endsWith('/capabilities')) return Response.json(next.capabilities)
     if (path.endsWith('/console-model')) return Response.json(status === 200 ? next : { error: 'permission_denied' }, { status })
     if (path === '/query') { await queryGate; return Response.json({ data: [{ id: 'one', version: 1, name: 'Ada' }], next_cursor: null }) }

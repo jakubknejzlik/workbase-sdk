@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest'
 import { filterKind, filterableFields, filterMapping } from '../src/filter-kinds'
-import { stateFromSearch, toQueryDocument } from '../src/list-model'
+import { stateFromSearch, toQueryDocument, validateListSearch } from '../src/list-model'
 import { listSearchableFields, type Model, type Capabilities } from '../src/read'
 
 const model: Model = { instance: 'v2', revision: 1, limits: { root: 100, children: 100, relations: 4, exists: 4 }, entities: {
@@ -99,4 +99,15 @@ it('keeps embedded lists on all-columns search even when the entity configures e
   const embedded = toQueryDocument(stateFromSearch({ search: 'PR' }, configured, 'workers', caps, undefined, true).state, configured, 'workers', caps, 'en', undefined, true)
   expect(embedded.search?.fields).toEqual(expect.arrayContaining(['name', 'code']))
   expect(listSearchableFields(configured, 'workers', caps, 'table')).toEqual(['code'])
+})
+
+it('validates copied one-based page numbers and drops pages beyond the offset cap', () => {
+  expect(validateListSearch({ page: '3' })).toMatchObject({ page: 3 })
+  for (const page of [0, -1, 1.5, 'invalid', Number.MAX_SAFE_INTEGER + 1, true, [], null]) {
+    expect(validateListSearch({ page })).toMatchObject({ invalidSettings: true })
+    expect(validateListSearch({ page }).page).toBeUndefined()
+  }
+  const capped = { ...model, limits: { ...model.limits, maxOffset: 100 } }
+  expect(stateFromSearch(validateListSearch({ page: 5 }), capped, 'workers', caps).dropped).toBe(true)
+  expect(stateFromSearch(validateListSearch({ page: 4 }), capped, 'workers', caps).dropped).toBe(false)
 })

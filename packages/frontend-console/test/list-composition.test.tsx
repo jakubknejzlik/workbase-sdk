@@ -241,3 +241,17 @@ it.each(['toolbar', 'column'] as const)('honors row-access %s metadata without a
     expect(test.router.state.location.search.rowAccess).toBe('expired')
   }
 })
+
+it('copies the numbered page in the URL, restores it without history state, and resets it on settings changes', async () => {
+  const test = await mount()
+  await test.user.click(screen.getByRole('button', { name: '3' }))
+  await waitFor(() => expect(test.request.mock.calls.at(-1)?.[0].offset).toBe(20))
+  const copied = test.router.state.location.search
+  expect(copied.page).toBe(3)
+  await act(async () => { await test.router.navigate({ to: '.', search: copied as any, state: {} as any }) })
+  await waitFor(() => expect(screen.getByRole('button', { current: 'page' }).textContent).toBe('3'))
+  expect(test.request.mock.calls.at(-1)?.[0].offset).toBe(20)
+  await test.user.click(screen.getByRole('button', { name: /Active view/ }))
+  await waitFor(() => expect(test.request.mock.calls.at(-1)?.[0].offset).toBe(0))
+  expect(test.router.state.location.search.page).toBeUndefined()
+})

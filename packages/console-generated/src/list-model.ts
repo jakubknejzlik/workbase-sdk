@@ -18,7 +18,7 @@ export interface ListState {
   offset?: number
   limit: number
 }
-export interface ListSearch { rowAccess?: RowAccessState; presentation?: 'table' | 'calendar'; calendarMode?: CalendarMode; calendarDate?: string; invalidSettings?: boolean; filters?: ListFilter[]; view?: string; search?: string; sort?: string; direction?: 'asc' | 'desc'; pageSize?: number }
+export interface ListSearch { rowAccess?: RowAccessState; presentation?: 'table' | 'calendar'; calendarMode?: CalendarMode; calendarDate?: string; invalidSettings?: boolean; filters?: ListFilter[]; view?: string; search?: string; sort?: string; direction?: 'asc' | 'desc'; pageSize?: number; page?: number }
 export const pageSizes = [10, 20, 30, 50, 100] as const
 /** Router validator: excludes actor-bound cursors; field/kind validation follows against capabilities. */
 export function validateListSearch(input: Record<string, unknown>): ListSearch {
@@ -42,6 +42,11 @@ export function validateListSearch(input: Record<string, unknown>): ListSearch {
   if (typeof input.sort === 'string' && /^[a-z][a-z0-9_]*$/.test(input.sort)) {
     result.sort = input.sort
     result.direction = input.direction === 'desc' ? 'desc' : 'asc'
+  }
+  if (input.page !== undefined) {
+    const page = typeof input.page === 'number' || typeof input.page === 'string' && /^[1-9]\d*$/.test(input.page) ? Number(input.page) : NaN
+    if (Number.isSafeInteger(page) && page >= 1) result.page = page
+    else result.invalidSettings = true
   }
   const size = Number(input.pageSize)
   if (pageSizes.includes(size as any)) result.pageSize = size
@@ -83,10 +88,11 @@ export function stateFromSearch(search: ListSearch, model: Model, entity: string
   const unavailableSearch = !!search.search && !listSearchableFields(model, entity, caps, embedded && state.presentation !== 'calendar' ? 'embedded' : state.presentation).length
   if (search.search && !unavailableSearch) state.search = search.search
   if (search.pageSize) state.limit = search.pageSize
+  const unavailablePage = search.page !== undefined && (search.page - 1) * Math.min(state.limit, model.limits.root) > (model.limits.maxOffset ?? 10_000)
   const sort = search.sort === 'none' ? null : search.sort ? { key: search.sort, direction: search.direction ?? 'asc' as const } : state.sort
   const unavailableSort = !!sort && !sortFields(model, entity, caps, sort.key).length
   const allowedFilters = new Map(descriptors.map(filter => [filter.field, filter]))
-  let dropped = search.presentation === 'calendar' && !calendar || !!search.invalidSettings || (!!search.sort && unavailableSort) || unavailableSearch
+  let dropped = search.presentation === 'calendar' && !calendar || !!search.invalidSettings || (!!search.sort && unavailableSort) || unavailableSearch || unavailablePage
   const filters: ListFilter[] = []
   for (const filter of search.filters ?? []) {
     const descriptor = allowedFilters.get(filter.field)
