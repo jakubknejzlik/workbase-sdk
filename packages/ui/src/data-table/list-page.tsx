@@ -14,7 +14,7 @@ export function ListPageComposition({ tabs, toolbar, panel, chips, children, foo
   </section>
 }
 export function ListViewTabs({ label, views, value, onChange }: { label: string; views: { id: string; label: string; count?: number }[]; value: string; onChange: (id: string) => void }) {
-  return <div role="group" aria-label={label} className="flex flex-wrap gap-x-5 gap-y-1">{views.map(view => <button type="button" key={view.id} aria-pressed={value === view.id} onClick={() => onChange(view.id)} className="flex min-h-12 items-center gap-2 border-b-2 border-transparent text-sm text-muted-foreground aria-pressed:border-primary aria-pressed:font-semibold aria-pressed:text-foreground">
+  return <div role="group" aria-label={label} className="flex gap-5 overflow-x-auto whitespace-nowrap">{views.map(view => <button type="button" key={view.id} aria-pressed={value === view.id} onClick={() => onChange(view.id)} className="flex min-h-12 shrink-0 items-center gap-2 border-b-2 border-transparent text-sm text-muted-foreground aria-pressed:border-primary aria-pressed:font-semibold aria-pressed:text-foreground">
     {view.label}{Number.isSafeInteger(view.count) && view.count! >= 0 && <span className="rounded bg-muted px-1.5 py-0.5 text-xs tabular-nums">{view.count}</span>}
   </button>)}</div>
 }

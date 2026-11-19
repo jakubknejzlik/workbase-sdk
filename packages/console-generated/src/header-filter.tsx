@@ -19,7 +19,7 @@ export function ToolbarFilter(props: Props) {
   const { t } = useEntityTranslation(props.entity)
   const { descriptor } = props
   const mapping = filterMapping(descriptor.kind, props.model.entities[props.entity].fields[descriptor.field], undefined, descriptor.operators)
-  return <fieldset className="min-w-40 space-y-1 text-sm">
+  return <fieldset className="min-w-40 space-y-1 text-sm [&_.wb-picker>label]:sr-only">
     <legend className={descriptor.kind === 'relation' ? 'sr-only' : 'px-1'}>{descriptor.label ?? t(`field_${descriptor.field}`)}</legend>
     <FilterInput {...props} value={props.predicate ? mapping.fromPredicate(props.predicate) : undefined} onChange={value => props.onChange(mapping.toPredicate(value))} />
   </fieldset>
