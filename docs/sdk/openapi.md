@@ -70,7 +70,11 @@ and per-role documents are outside this contract.
 
 `POST /query` supports SDK-owned limit/offset paging. Send `offset: 0` for the
 first page and `(page - 1) * limit` for later pages. `limit` remains required
-(1–100); `offset` must be a nonnegative safe integer. Offset responses include
+(1–100); `offset` must be an integer from 0 through `QUERY_LIMITS.maxOffset`
+(default 10,000, inclusive). This SDK-wide cap bounds skipped root rows per
+request. Larger offsets return HTTP 400 `query_invalid` at path `["offset"]`
+before any rows or totals SQL. Use cursor paging for deeper traversal; cursor
+paging is unaffected by this cap. Offset responses include
 `data`, `offset`, `limit` and `next_cursor: null`. Add `includeTotal: true` to
 receive `total`, an exact `COUNT(id)` over the complete authorized, filtered
 list source before sorting or paging. It includes organization/actor policies,

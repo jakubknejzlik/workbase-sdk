@@ -5,15 +5,16 @@ import { KernelRegistry } from '../src/kernel/registry'
 import type { WorkbasePlugin } from '../src/kernel/plugin'
 import type { Scope } from '../src/types'
 import { executeQuery } from '../src/query/executor'
-import { validateQuery } from '../src/query/schema'
+import { validateQuery, querySchema } from '../src/query/schema'
+import { QUERY_LIMITS as L } from '../src/query/limits'
 import { compileListTotal, compileRoot } from '../src/query/compiler'
 import { resolveActor, requireScope } from '../src/authorization'
 import { setup, insertDomain, runtime } from '@workbasehq/test-support/helpers'
 
-const budget = vi.hoisted(() => ({ sqlLength: 64_000 }))
+const budget = vi.hoisted(() => ({ sqlLength: 64_000, maxOffset: undefined as number | undefined }))
 vi.mock('../src/query/limits', async importOriginal => {
   const actual = await importOriginal<typeof import('../src/query/limits')>()
-  return { ...actual, QUERY_LIMITS: { ...actual.QUERY_LIMITS, get sqlLength() { return budget.sqlLength } } }
+  return { ...actual, QUERY_LIMITS: { ...actual.QUERY_LIMITS, get sqlLength() { return budget.sqlLength }, get maxOffset() { return budget.maxOffset ?? actual.QUERY_LIMITS.maxOffset } } }
 })
 let scope: Scope
 const policy: WorkbasePlugin = { name: 'list_policy', version: '1', tableFilter(entity, current) {
@@ -28,7 +29,7 @@ const fixture = Array.from({ length: 16 }, (_, i) => ({
   client: i & 2 ? 'client-org-a' : 'client-other', priority: i & 4 ? 'high' : 'low', status: i & 8 ? 'done' : 'draft',
 }))
 beforeEach(async () => {
-  budget.sqlLength = 64_000
+  budget.sqlLength = 64_000; budget.maxOffset = undefined
   await setup(sample); await insertDomain(); await insertDomain('org-b')
   scope = await requireScope(await resolveActor(new Request('http://localhost', { headers: { Authorization: 'Bearer synthetic-owner-a' } }), runtime(), kernel.config), 'org-a', kernel.config)
   await env.DB.prepare('DELETE FROM slots').run(); await env.DB.prepare('DELETE FROM jobs WHERE organization_id=?').bind('org-a').run()
@@ -138,4 +139,42 @@ it('keeps total opt-in and returns offset metadata without a count', async () =>
   const result = await run({ ...base, offset: 2, includeTotal: false }, scope, kernel, db)
   expect(result).toEqual({ data: [{ id: 'page-02' }, { id: 'page-03' }], offset: 2, limit: 2, next_cursor: null })
   expect(prepare).toHaveBeenCalledTimes(1)
+})
+
+it('accepts the default maxOffset boundary', async () => {
+  expect(L.maxOffset).toBe(10_000)
+  expect(await run({ ...base, offset: L.maxOffset })).toMatchObject({ data: [], total: 16, offset: L.maxOffset })
+})
+it.each([false, true])('rejects maxOffset + 1 before rows or totals SQL (includeTotal=%s)', async includeTotal => {
+  const prepare = vi.fn(); const batch = vi.fn()
+  const db = { prepare, batch } as unknown as D1Database
+  const result = await run({ ...base, includeTotal, offset: 10_001 }, scope, kernel, db).catch(error => error)
+  expect(prepare).not.toHaveBeenCalled(); expect(batch).not.toHaveBeenCalled()
+  expect(result).toMatchObject({ status: 400, code: 'query_invalid', path: ['offset'] })
+})
+it.each([0, 4, 10_001])('respects maxOffset override %i at both boundaries', async maxOffset => {
+  budget.maxOffset = maxOffset
+  const page = await run({ ...base, offset: maxOffset })
+  expect(page).toMatchObject({ data: fixture.slice(maxOffset, maxOffset + base.limit).map(row => ({ id: row.id })), total: 16, offset: maxOffset })
+  const prepare = vi.fn(); const batch = vi.fn()
+  const db = { prepare, batch } as unknown as D1Database
+  const result = await run({ ...base, offset: maxOffset + 1 }, scope, kernel, db).catch(error => error)
+  expect(prepare).not.toHaveBeenCalled(); expect(batch).not.toHaveBeenCalled()
+  expect(result).toMatchObject({ status: 400, code: 'query_invalid', path: ['offset'] })
+})
+it.each([false, true])('shares maxOffset validation with list/query grammar (rest=%s)', rest => {
+  budget.maxOffset = 4
+  const schema = querySchema(kernel.config, 'jobs', rest)
+  expect(schema.safeParse({ ...base, offset: 4 }).success).toBe(true)
+  expect(schema.safeParse({ ...base, offset: 5 }).success).toBe(false)
+})
+it('keeps all cursor pages reachable with maxOffset zero', async () => {
+  budget.maxOffset = 0
+  const seen: string[] = []; let cursor: string | undefined
+  do {
+    const page = await run({ ...base, ...(cursor ? { cursor } : {}) })
+    expect(page.total).toBe(16); expect(page.offset).toBeUndefined()
+    seen.push(...page.data.map(row => row.id)); cursor = page.next_cursor ?? undefined
+  } while (cursor)
+  expect(seen).toEqual(fixture.map(row => row.id))
 })

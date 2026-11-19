@@ -82,7 +82,7 @@ export function querySchema(config: InstanceConfig, entity: string, rest = false
       shape.search = z.strictObject({ text: z.string().min(1).max(2000), fields: z.array(z.enum([...new Set([...names, ...labelNames])] as [string, ...string[]])).min(1).max(names.length + labelNames.length).refine(v => new Set(v).size === v.length), locale: z.enum(['en', 'cs']).optional() }).optional()
       shape.contextList = z.strictObject({ entity: z.string().regex(/^[a-z][a-z0-9_]*$/).max(100), list: z.string().regex(/^[a-z][a-z0-9_]*$/).max(100), id: z.string().min(1).max(2000) }).optional()
       shape.rowAccess = z.enum(['no_account', 'invited', 'expired', 'signed_in']).optional()
-      shape.offset = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional()
+      shape.offset = z.number().int().min(0).max(L.maxOffset).describe('Nonnegative offset bounded by QUERY_LIMITS.maxOffset (10,000 by default); larger offsets are rejected before rows or totals SQL.').optional()
       shape.includeTotal = z.boolean().optional()
       shape.view = z.string().min(1).max(100).optional()
       shape.includeViewTotals = z.boolean().optional()
