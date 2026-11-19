@@ -2,7 +2,7 @@ import { needsDisplayParts, parseDisplayParts, partsAlias } from './display-part
 import { ApiError } from '../errors'
 import type { KernelRegistry } from '../kernel/registry'
 import type { Scope } from '../types'
-import { compileRoot, compileInclude, queryOrder, orderField, selectedFields, type Statement } from './compiler'
+import { compileRoot, compileListTotal, compileInclude, queryOrder, orderField, selectedFields, type Statement } from './compiler'
 import { decodeCursor, encodeCursor, inputHash, queryHash } from './cursor'
 import { QUERY_LIMITS as L, type QueryCost } from './limits'
 import { labelAlias } from './labels'
@@ -31,7 +31,7 @@ function projectLabel(value: string | null) {
   }
   return label
 }
-export interface QueryResult { data: Row[]; next_cursor: string | null }
+export interface QueryResult { data: Row[]; next_cursor: string | null; total?: number; offset?: number; limit?: number }
 export type { QueryLog } from './observability'
 import { emptyQueryLog, recordQuery, type QueryLog } from './observability'
 /** Count configured shape only after validation; never inspect policy trees or values. */
@@ -78,7 +78,17 @@ export async function executeQuery(kernel: KernelRegistry, scope: Scope, db: D1D
     const [root] = await run([compileRoot(kernel, scope, query, keys, cost)])
     assertDenial(query.entity, root)
     const more = root.length > query.limit; const rows = root.slice(0, query.limit); totalRows += rows.length
-    const nextCursor = more ? await encodeCursor(secret, hash, kernel.config.revision, queryOrder(query).map(o => rows.at(-1)![orderField(o)] ?? null)) : null
+    const nextCursor = more && query.offset === undefined ? await encodeCursor(secret, hash, kernel.config.revision, queryOrder(query).map(o => rows.at(-1)![orderField(o)] ?? null)) : null
+    // Never count a scope whose policy denies all rows. Conditional denials have
+    // already been checked against the root result, before preparing any count.
+    let total: number | undefined
+    if (query.includeTotal) {
+      total = 0
+      if (kernel.tableFilter(query.entity, scope).kind !== 'none') {
+        const [count] = await run([compileListTotal(kernel, scope, query, cost)])
+        total = Number(count[0].total)
+      }
+    }
     const data = rows.map(row => projectRootRow(kernel, scope, query!, row))
     type Job = { entity: string; node: Selection; raw: Row[]; out: Row[]; path: QueryPath }
     let level: Job[] = [{ entity: query.entity, node: query, raw: rows, out: data, path: [] }]
@@ -114,7 +124,9 @@ export async function executeQuery(kernel: KernelRegistry, scope: Scope, db: D1D
       level = next
     }
     resultRows = data.length
-    outcome = 'ok'; return { data, next_cursor: nextCursor }
+    outcome = 'ok'; return { data, next_cursor: nextCursor,
+      ...(query.offset !== undefined ? { offset: query.offset, limit: query.limit } : {}),
+      ...(total !== undefined ? { total } : {}) }
   } catch (error) {
     if (error instanceof QueryError && error.cost) cost = error.cost
     outcome = error instanceof ApiError ? error.code : 'query_invalid'

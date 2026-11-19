@@ -1441,9 +1441,17 @@
             "properties": {},
             "type": "object"
           },
+          "includeTotal": {
+            "type": "boolean"
+          },
           "limit": {
             "maximum": 100,
             "minimum": 1,
+            "type": "integer"
+          },
+          "offset": {
+            "maximum": 9007199254740991,
+            "minimum": 0,
             "type": "integer"
           },
           "orderBy": {
@@ -2634,6 +2642,9 @@
             },
             "type": "object"
           },
+          "includeTotal": {
+            "type": "boolean"
+          },
           "labelWhere": {
             "additionalProperties": {
               "additionalProperties": false,
@@ -2677,6 +2688,11 @@
           "limit": {
             "maximum": 100,
             "minimum": 1,
+            "type": "integer"
+          },
+          "offset": {
+            "maximum": 9007199254740991,
+            "minimum": 0,
             "type": "integer"
           },
           "orderBy": {
@@ -2799,12 +2815,28 @@
             },
             "type": "array"
           },
+          "limit": {
+            "description": "Page size, present for offset paging.",
+            "maximum": 100,
+            "minimum": 1,
+            "type": "integer"
+          },
           "next_cursor": {
-            "description": "Opaque signed query cursor, or null. Pass unchanged to POST /query; it is not a row id.",
+            "description": "Opaque signed query cursor, or null. Pass unchanged to POST /query; it is not a row id. Offset paging returns null.",
             "type": [
               "string",
               "null"
             ]
+          },
+          "offset": {
+            "description": "Requested offset, present for offset paging.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "total": {
+            "description": "Exact authorized, filtered total when includeTotal is true; independent of paging.",
+            "minimum": 0,
+            "type": "integer"
           }
         },
         "required": [
@@ -2822,12 +2854,28 @@
             },
             "type": "array"
           },
+          "limit": {
+            "description": "Page size, present for offset paging.",
+            "maximum": 100,
+            "minimum": 1,
+            "type": "integer"
+          },
           "next_cursor": {
-            "description": "Opaque signed query cursor, or null. Pass unchanged to POST /query; it is not a row id.",
+            "description": "Opaque signed query cursor, or null. Pass unchanged to POST /query; it is not a row id. Offset paging returns null.",
             "type": [
               "string",
               "null"
             ]
+          },
+          "offset": {
+            "description": "Requested offset, present for offset paging.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "total": {
+            "description": "Exact authorized, filtered total when includeTotal is true; independent of paging.",
+            "minimum": 0,
+            "type": "integer"
           }
         },
         "required": [

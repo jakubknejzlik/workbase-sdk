@@ -402,7 +402,6 @@ it.each([
       { kind: 'set_locale', languages: ['en', 'cs'] },
       { kind: 'set_label', entity: 'worker', language: 'en', pluralForms: { one: '{{count}} worker', other: '{{count}} workers' }, singular: 'Worker', object: 'worker' },
       { kind: 'set_catalog_entries', language: 'en', namespace: 'domain', entries: { 'field.worker.name': 'Name' } },
-      { kind: 'set_instance_display_name', displayName: 'Cleaning' },
       { kind: 'set_instance_display_name', displayName: 'Field Ops' },
       { kind: 'set_roles', roles: ['owner', 'viewer'], organizationOwnerRole: 'owner' },
     ] : []),

@@ -102,7 +102,12 @@ export function generate(config: InstanceConfig, kernel: Pick<KernelRegistry, 'c
     queryRequests.push(ref(queryName))
     const page = (cursor: string) => object({ data: array(ref(`Row_${name}`)), next_cursor: { type: ['string', 'null'], description: cursor } })
     insert(`List_${name}`, page('REST cursor: last returned row id, or null. Pass as the cursor URL parameter; rows sort by id.'))
-    insert(`Result_${name}`, page('Opaque signed query cursor, or null. Pass unchanged to POST /query; it is not a row id.'))
+    insert(`Result_${name}`, object({
+      ...page('Opaque signed query cursor, or null. Pass unchanged to POST /query; it is not a row id. Offset paging returns null.').properties,
+      total: { type: 'integer', minimum: 0, description: 'Exact authorized, filtered total when includeTotal is true; independent of paging.' },
+      offset: { type: 'integer', minimum: 0, description: 'Requested offset, present for offset paging.' },
+      limit: { type: 'integer', minimum: 1, maximum: 100, description: 'Page size, present for offset paging.' },
+    }, ['data', 'next_cursor']))
     queryResponses.push(ref(`Result_${name}`))
     const base = `/api/${name}`
     const expand = parameter('expand', 'query', { type: 'string', description: 'Comma-separated relation names, at most five.' })

@@ -136,3 +136,13 @@ it.each(['preflight', 'relationDepth'])('includes numeric statements in early %s
     code: 'query_too_expensive', cost: expect.objectContaining({ statements: expect.any(Number) }),
   }))
 })
+it('charges an exact total statement and rejects it at cap+1 before SQL', async () => {
+  const input = { ...nested, includeTotal: true }
+  budget.statements = 5
+  await expect(run(input)).rejects.toMatchObject({ code: 'query_too_expensive', cost: { statements: 6 } })
+  expect(prepare).not.toHaveBeenCalled(); expect(batch).not.toHaveBeenCalled()
+  budget.statements = 6
+  await expect(run(input)).resolves.toMatchObject({ total: 1 })
+  expect(prepare).toHaveBeenCalledTimes(6)
+  expect(logs.at(-1)).toMatchObject({ estimatedCost: { statements: 6 }, statementCount: 6 })
+})

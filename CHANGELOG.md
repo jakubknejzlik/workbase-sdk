@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- `POST /query` supports central limit/offset paging and opt-in exact authorized
+  totals (`includeTotal: true`). Existing cursor-only requests retain their
+  response shape and signed cursors; offset and cursor cannot be combined.
+  List rows and totals share policy, search, label and user filtering. (#230, slice 1)
+
 ## 0.3.0 — 2026-11-17
 
 V3 integration release (PR #30): V3 manifest/layouts and

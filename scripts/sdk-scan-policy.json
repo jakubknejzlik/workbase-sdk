@@ -854,6 +854,20 @@
       "value": "0.0.0.0",
       "reason": "Negative test fixture: ops provisioning must reject private/unspecified network hosts; not a deployed host.",
       "lineNumber": 175
+    },
+    {
+      "path": "packages/core/test/infra/provision.test.ts",
+      "line": "  expect(plan.publicOrigin).toBe(inputs.publicHostname?.includes('xn--') ? 'https://app.xn--p1ai' : 'https://neutral.example.test')",
+      "value": "app.xn--p1ai",
+      "reason": "Synthetic punycode-TLD hostname validation assertion; this fixture is never deployed.",
+      "lineNumber": 107
+    },
+    {
+      "path": "packages/mcp/templates/standalone/deploy.env.example",
+      "line": "# Only this fallback expands {stage}, e.g. https://worker-{stage}.account.workers.dev.",
+      "value": "worker-{stage}.account.workers.dev.",
+      "reason": "SDK template comment illustrating a stage placeholder and Cloudflare provider URL; no actual account or deployment.",
+      "lineNumber": 15
     }
   ]
 }
