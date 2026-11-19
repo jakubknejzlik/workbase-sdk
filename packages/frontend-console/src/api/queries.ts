@@ -21,7 +21,9 @@ export const organizationOptions = (orgId: string) => ({
       const caps = client.getQueryData<ConsoleCapabilities>(['capabilities', orgId])
       // Existing screen polls and action preflights signal authority changes.
       // Refresh the sidebar's projection without adding probes to the shell.
-      const authorityChanged = previous && (previous.role !== next.role || JSON.stringify(previous.operations) !== JSON.stringify(next.operations))
+      const actorChanged = previous && previous.user?.id !== next.user?.id
+      const authorityChanged = previous && (actorChanged || previous.role !== next.role || JSON.stringify(previous.operations) !== JSON.stringify(next.operations))
+      if (actorChanged) await refreshRuntimeModel(client, orgId)
       if (authorityChanged || caps?.organization && caps.organization.role !== next.role) {
         await client.invalidateQueries({ queryKey: ['capabilities', orgId] })
       }

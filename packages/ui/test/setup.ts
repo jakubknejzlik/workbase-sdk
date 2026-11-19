@@ -4,6 +4,7 @@ afterEach(cleanup)
 
 // Browser APIs used by the restored source Select/calendar in jsdom.
 Object.defineProperty(window, 'matchMedia', { writable: true, value: (query: string) => ({ matches: false, media: query, addEventListener() {}, removeEventListener() {} }) })
+globalThis.ResizeObserver = class { observe() {} unobserve() {} disconnect() {} }
 HTMLElement.prototype.scrollIntoView = () => {}
 HTMLElement.prototype.hasPointerCapture = () => false
 HTMLElement.prototype.setPointerCapture = () => {}

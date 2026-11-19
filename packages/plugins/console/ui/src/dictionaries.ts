@@ -16,6 +16,7 @@ export function checkDictionaries(root: string, required: Map<string, KeySource[
   const accepted = new Map<string, Set<string>>()
   for (const [id, refs] of required) {
     const [ns, key] = id.split(':')
+    if (refs.every(ref => ref.optional) && refs.length && !Object.values(catalogs).some(resources => Object.hasOwn(resources[ns] ?? {}, key))) continue
     const plural = refs.some(ref => ref.plural) || Object.values(catalogs).some(c => Object.keys(c[ns] ?? {}).some(k => suffix.test(k) && k.replace(suffix, '') === key))
     let expectedVars: string | undefined
     for (const [lang, resources] of Object.entries(catalogs)) {

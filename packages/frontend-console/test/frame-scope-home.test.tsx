@@ -30,7 +30,7 @@ it.each([
   const me = { organizationsEnabled, role: 'admin', user: { id: 'admin', email: 'admin@example.test', name: 'Admin' }, memberships: scopes.map(organization_id => ({ organization_id, name: organization_id, role: 'admin' })) }
   const profile = { displayName: 'Admin', completeness: { complete: true } }
   const document: ConsoleModelContract = {
-    contractVersion: 1, console: null,
+    contractVersion: 2, console: null,
     model: { instance: 'test', revision: 1, locale: 'en', timeZone: 'UTC', entities: {}, commands: [], workflows: [], limits: {} },
     capabilities: { revision: 1, organization: { role: 'admin' }, entities: {}, commands: [], workflows: {}, resources: {} },
   }

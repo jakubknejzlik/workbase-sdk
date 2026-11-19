@@ -91,9 +91,10 @@ it.each([
   await writeFile(join(root, '.test-bin/bun'), '#!/bin/sh\nprintf "%s\\n" "$*" > build-command.txt\n')
   await chmod(join(root, '.test-bin/bun'), 0o755)
   const script = `import { mock } from 'bun:test'
+const { resolvePublicOrigin } = await import(${JSON.stringify(resolve('packages/core/src/infra/public-origin.ts'))})
 process.env.PATH = ${JSON.stringify(join(root, '.test-bin'))} + ':' + process.env.PATH
 let options
-mock.module('@workbasehq/core/infra/provision', () => ({ provision: async value => {
+mock.module('@workbasehq/core/infra/provision', () => ({ resolvePublicOrigin, provision: async value => {
   options = value
   return { url: 'https://example.test', databaseId: 'test-db', ...(value.devMailbox ? { devMailboxUrl: 'https://mailbox.example.test' } : {}) }
 } }))
@@ -104,8 +105,11 @@ try {
   const result = await config.run()
   console.log(JSON.stringify({ options, expected: './dist/console', result }))
 } catch (error) { console.log(JSON.stringify({ error: error.message, called: Boolean(options) })) }`
+  const inherited = { ...process.env }
+  delete inherited.WORKBASE_DOMAIN
+  delete inherited.WORKBASE_PUBLIC_HOSTNAME
   const result = spawnSync('bun', ['--no-install', '--eval', script], { cwd: root, encoding: 'utf8', env: {
-    ...process.env, WORKBASE_RESOURCE_PREFIX: 'test-instance', BETTER_AUTH_SECRET: 'test-secret',
+    ...inherited, WORKBASE_RESOURCE_PREFIX: 'test-instance', BETTER_AUTH_SECRET: 'test-secret',
     AUTH_BASE_URL: 'https://{stage}.example.test', EMAIL_FROM: email,
     WORKBASE_OPS_TOKEN: 'example-ops', WORKBASE_DEV_MAILBOX_TOKEN: mailbox,
   } })
@@ -396,13 +400,19 @@ it.each([
     { kind: 'set_account_link', entity: 'worker', invitationRole: 'staff' },
     ...(path === 'docs/sdk/mcp-composition.md' ? [
       { kind: 'set_locale', languages: ['en', 'cs'] },
+      { kind: 'set_label', entity: 'worker', language: 'en', pluralForms: { one: '{{count}} worker', other: '{{count}} workers' }, singular: 'Worker', object: 'worker' },
+      { kind: 'set_catalog_entries', language: 'en', namespace: 'domain', entries: { 'field.worker.name': 'Name' } },
       { kind: 'set_instance_display_name', displayName: 'Field Ops' },
       { kind: 'set_roles', roles: ['owner', 'viewer'], organizationOwnerRole: 'owner' },
+      { kind: 'set_constraints', entity: 'worker', constraints: [{ kind: 'unique', name: 'worker_name_unique', fields: ['name'] }] },
+      { kind: 'add_index', entity: 'worker', name: 'worker_name_idx', fields: ['name'] },
     ] : []),
   ]
-  const kinds = examples.map(change => compositionChangeSchema.parse(change).kind)
+  const kinds = examples.map(change => schemas.propose_change.parse({ instance: 'example', baseRevision: 1, changes: [change] }).changes[0].kind)
   for (const kind of kinds) expect(guide, kind).toContain('`' + kind + '`')
-  for (const [kind] of guide.matchAll(/\b(?:set|add|remove)_[a-z_]+\b/g)) expect(kinds).toContain(kind)
+  for (const [kind] of guide.matchAll(/\b(?:set|add|remove)_[a-z_]+\b/g)) {
+    expect(kinds).toContain(kind)
+  }
   const workflow = ['inspect_schema', 'propose_composition', 'validate', 'preview_migration', 'apply_to_disposable', 'promote']
   for (const tool of workflow) {
     expect(schemas).toHaveProperty(tool)

@@ -23,6 +23,7 @@ import { profileOptions } from './api/profile'
 import { applyInstanceLanguage } from './i18n'
 import { useRuntimeModel } from './api/runtime-model'
 import { RuntimeLocalization } from './runtime-localization'
+import { useScopeTeardown } from '../../console-generated/src/reference-authority'
 import { RecordBreadcrumbProvider } from '../../console-generated/src/breadcrumbs'
 import { Breadcrumbs } from './Breadcrumbs'
 import { instanceTitle, useConsoleTitle } from './console-title'
@@ -36,6 +37,8 @@ export function Frame() {
   useEffect(() => { if (schema.data) applyInstanceLanguage(schema.data.ui?.defaultLanguage ?? schema.data.locale) }, [schema.data])
   const orgId = /^\/o\/([^/]+)/.exec(location.pathname)?.[1]
   const me = useQuery({ ...meOptions, queryFn: () => api<Me>('/me', { redirect401: false }), enabled: !gated })
+  // This observer must survive RuntimeLocalization's org-keyed routed subtree.
+  useScopeTeardown(client, { orgId: orgId ? decodeURIComponent(orgId) : undefined, actor: me.data?.user?.id })
   const home = scopeHomeDestination(me.data, orgId ? decodeURIComponent(orgId) : undefined)
   useRuntimeModel(orgId ? decodeURIComponent(orgId) : undefined)
   useEffect(() => { client.removeQueries({ queryKey: ['resource-denied'], type: 'inactive' }) }, [client, location.pathname])

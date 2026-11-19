@@ -13,6 +13,22 @@ function request(path: string, role = 'staff', method = 'GET', body?: object) {
   return new Request(`http://localhost${path}`, { method, headers: { Authorization: `Bearer synthetic-${role}`, 'X-Organization-Id': 'org-a', 'Content-Type': 'application/json' }, ...(body ? { body: JSON.stringify(body) } : {}) })
 }
 beforeEach(async () => { await reset() })
+it.each(['/api/record/open', '/api/worker/worker'])('SDK detail GET %s keeps action metadata out of HTTP caches', async path => {
+  const app = await setup()
+  const response = await app.fetch(request(path))
+  expect(response.status).toBe(200)
+  expect(await response.json()).toHaveProperty('actions')
+  expect(response.headers.get('Cache-Control')).toBe('private, no-store')
+})
+it.each(['list', 'query'])('%s responses retain their existing cache headers and omit availability', async transport => {
+  const app = await setup()
+  const response = await app.fetch(transport === 'list' ? request('/api/record') : request('/query', 'staff', 'POST', { entity: 'record', select: ['id', 'state'], limit: 25 }))
+  expect(response.status).toBe(200)
+  expect(response.headers.get('Cache-Control')).toBeNull()
+  const body = await response.json() as { data: Record<string, unknown>[] }
+  expect(body.data.length).toBeGreaterThan(0)
+  expect(body.data.every(row => !Object.hasOwn(row, 'actions'))).toBe(true)
+})
 it('one detail GET includes SQL availability independent of projection and preserves version and masks', async () => {
   const app = await setup()
   const response = await app.fetch(request('/api/record/open?fields=id,version'))

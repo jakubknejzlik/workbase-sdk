@@ -1,5 +1,5 @@
 import type { InstanceConfig } from '../config'
-import { physicalTables, renderTable, renderColumn, quote, type TableSpec } from './schema'
+import { physicalTables, renderTable, renderColumn, renderUniqueConstraint, constraintTriggers, dropConstraint, quote, type TableSpec } from './schema'
 import type { SourceMap } from '../schema/source-location'
 import { initialEntityId, initialFieldId, transitionId, validateLock, type EntityLineage, type RenameTransition, type SchemaLock } from '../schema/lock-format'
 export type { SchemaLock, EntityLineage, FieldLineage, RenameTransition } from '../schema/lock-format'
@@ -28,6 +28,12 @@ export function diffSpecs(baseTables: readonly TableSpec[], tables: readonly Tab
       if (column.notNull && (column.defaultSql === null || column.defaultSql === 'NULL')) reject(base.name, column.name, 'NOT NULL additions require a non-null default')
       sql.push(`ALTER TABLE ${quote(base.name)} ADD COLUMN ${renderColumn(column)};`)
     }
+    for (const old of base.constraints ?? []) {
+      const current = table!.constraints?.find(c => c.name === old.name)
+      if (current && (old.kind !== current.kind || (old.kind === 'unique' && current.kind === 'unique' ? !equal(old.fields, current.fields) : !equal(old, current)))) reject(base.name, undefined, `changing constraint ${old.name} is unsupported; use a new name`)
+      if (!current || !equal(old, current)) sql.push(dropConstraint(base, old))
+    }
+    for (const constraint of table!.constraints ?? []) if (constraint.kind === 'unique' && !base.constraints?.some(c => equal(c, constraint))) sql.push(renderUniqueConstraint(table!.name, constraint))
     for (const key of ['unique', 'checks', 'foreignKeys', 'indexes'] as const) {
       if (!equal(base[key], table![key])) {
         const changed = [...base.foreignKeys, ...table!.foreignKeys].find(f => !base.foreignKeys.some(b => equal(b, f)) || !table!.foreignKeys.some(b => equal(b, f)))
@@ -36,6 +42,19 @@ export function diffSpecs(baseTables: readonly TableSpec[], tables: readonly Tab
     }
   }
   for (const table of tables) if (!baseTables.some(t => t.name === table.name)) sql.push(renderTable(table))
+  for (const table of tables) for (const constraint of table.constraints ?? []) {
+    const base = baseTables.find(t => t.name === table.name)
+    if (constraint.kind === 'unique' || !base?.constraints?.some(c => equal(c, constraint))) continue
+    const before = constraintTriggers(base, constraint, baseTables).triggers
+    for (const trigger of constraintTriggers(table, constraint, tables).triggers) {
+      if (before.find(t => t.name === trigger.name)?.sql !== trigger.sql) sql.push(`DROP TRIGGER ${quote(trigger.name)};`, trigger.sql)
+    }
+  }
+  for (const table of tables) for (const constraint of table.constraints ?? []) {
+    if (constraint.kind === 'unique' || baseTables.find(t => t.name === table.name)?.constraints?.some(c => equal(c, constraint))) continue
+    const definition = constraintTriggers(table, constraint, tables)
+    sql.push(...(definition.setup?.map(t => t.sql) ?? []), ...(definition.preflight ? [definition.preflight] : []), ...definition.triggers.map(t => t.sql))
+  }
   return sql.length ? sql.join('\n') + '\n' : ''
 }
 function located(error: unknown, sources: SourceMap): never {
@@ -47,6 +66,8 @@ function located(error: unknown, sources: SourceMap): never {
 export function schemaLock(config: InstanceConfig, base?: SchemaLock, sources: SourceMap = {}): SchemaLock {
   try {
     const previous = base && validateLock(base)
+    if (previous && (previous.tables.some(t => t.constraints?.some(c => c.kind !== 'unique')) || Object.values(config.entities).some(e => e.constraints?.some(c => c.kind !== 'unique')))
+      && Object.values(config.entities).some(e => e.renameFrom || Object.values(e.fields).some(f => f.renameFrom))) throw new SpecError('', undefined, 'Renaming a trigger-constrained graph (ref equality / ref immutability) requires a manually reviewed migration')
     const transitions = previous ? structuredClone(previous.transitions) : []
     const entities: EntityLineage[] = []
     const normalized = { account: config.account, entities: {} as InstanceConfig['entities'] }
@@ -106,6 +127,7 @@ export function schemaLock(config: InstanceConfig, base?: SchemaLock, sources: S
         fields[physical] = { ...field, renameFrom: undefined }
       }
       normalized.entities[entity.physicalName] = { ...input, renameFrom: undefined, fields,
+        ...(input.constraints?.length ? { constraints: input.constraints.map(c => c.kind !== 'unique' ? c : ({ ...c, fields: c.fields.map(key => fieldNames.get(key) ?? key), ...(c.where ? { where: { ...c.where, field: fieldNames.get(c.where.field) ?? c.where.field } } : {}) })) } : {}),
         checks: input.checks.map(c => ({ ...c, left: fieldNames.get(c.left) ?? c.left, right: fieldNames.get(c.right) ?? c.right })),
       }
       entities.push(entity)
@@ -124,7 +146,7 @@ export function schemaLock(config: InstanceConfig, base?: SchemaLock, sources: S
       entity.fields = table.columns.map(c => entity.fields.find(f => f.physicalName === c.name) ?? { id: initialFieldId(entity.id, c.name), logicalName: c.name, physicalName: c.name })
     }
     const changed = !!sql || !equal(transitions, previous?.transitions ?? [])
-    return validateLock({ lockVersion: 2, revision: previous ? previous.revision + Number(changed) : 1, parent: previous?.parent ?? null, tables, entities, transitions })
+    return validateLock({ lockVersion: previous?.lockVersion === 3 || tables.some(t => t.constraints?.length) ? 3 : 2, revision: previous ? previous.revision + Number(changed) : 1, parent: previous?.parent ?? null, tables, entities, transitions })
   } catch (error) { return located(error, sources) }
 }
 export function parseLock(bytes: string): SchemaLock {

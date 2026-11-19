@@ -1,17 +1,8 @@
+import { listColumnFields, readableListField } from './list-presentation'
 import { availableCalendar, calendarQuery, dayKey, validDay, type CalendarMode } from './calendar-model'
-import { filterableFields, filterKind, filterMapping, selectionCap, type FilterKind } from './filter-kinds'
+import { filterDescriptors, filterMapping, selectionCap, type FilterDescriptor } from './filter-kinds'
 import { projection, listSearchableFields, type Model, type Capabilities, type ReadQuery, type RowAccessState } from './read'
-export interface ListHints {
-  compact?: boolean; mobileCards?: boolean
-  filter?: Record<string, false | FilterKind>
-  views?: { id: string; label: string; where: Record<string, unknown>; default?: boolean }[]
-  columns?: string[]
-  relatedColumns?: Record<string, { via: string; field: string }>
-  defaultSort?: { key: string; direction: 'asc' | 'desc' }
-  pageSize?: number
-  search?: string[]
-  sort?: Record<string, false | { fields: string[] }>
-}
+export type ListHints = import('../../core/src/list-contract').ListConfig
 export interface ListFilter { field: string; predicate: Record<string, unknown> }
 export interface ListState {
   rowAccess?: RowAccessState
@@ -24,9 +15,10 @@ export interface ListState {
   userFilters: ListFilter[]
   presetFilters: ListFilter[]
   cursor?: string
+  offset?: number
   limit: number
 }
-export interface ListSearch { rowAccess?: RowAccessState; presentation?: 'table' | 'calendar'; calendarMode?: CalendarMode; calendarDate?: string; invalidSettings?: boolean; filters?: ListFilter[]; view?: string; search?: string; sort?: string; direction?: 'asc' | 'desc'; pageSize?: number }
+export interface ListSearch { rowAccess?: RowAccessState; presentation?: 'table' | 'calendar'; calendarMode?: CalendarMode; calendarDate?: string; invalidSettings?: boolean; filters?: ListFilter[]; view?: string; search?: string; sort?: string; direction?: 'asc' | 'desc'; pageSize?: number; page?: number }
 export const pageSizes = [10, 20, 30, 50, 100] as const
 /** Router validator: excludes actor-bound cursors; field/kind validation follows against capabilities. */
 export function validateListSearch(input: Record<string, unknown>): ListSearch {
@@ -50,6 +42,11 @@ export function validateListSearch(input: Record<string, unknown>): ListSearch {
   if (typeof input.sort === 'string' && /^[a-z][a-z0-9_]*$/.test(input.sort)) {
     result.sort = input.sort
     result.direction = input.direction === 'desc' ? 'desc' : 'asc'
+  }
+  if (input.page !== undefined) {
+    const page = typeof input.page === 'number' || typeof input.page === 'string' && /^[1-9]\d*$/.test(input.page) ? Number(input.page) : NaN
+    if (Number.isSafeInteger(page) && page >= 1) result.page = page
+    else result.invalidSettings = true
   }
   const size = Number(input.pageSize)
   if (pageSizes.includes(size as any)) result.pageSize = size
@@ -80,25 +77,26 @@ function sortFields(model: Model, entity: string, caps: Capabilities, key: strin
 export function sortableFields(model: Model, entity: string, caps: Capabilities) {
   return [...new Set([...projection(model, entity, caps), ...labelColumns(model, entity, caps)])].filter(field => sortFields(model, entity, caps, field).length > 0)
 }
-export function stateFromSearch(search: ListSearch, model: Model, entity: string, caps: Capabilities) {
+export function stateFromSearch(search: ListSearch, model: Model, entity: string, caps: Capabilities, descriptors = filterDescriptors(model, entity, caps), embedded = false) {
   const state = defaultListState(model, entity)
   const calendar = availableCalendar(model, entity, caps)
   if (calendar) {
     state.presentation = search.presentation === 'calendar' ? 'calendar' : 'table'
     state.calendarMode = search.calendarMode ?? 'month'
-    state.calendarDate = search.calendarDate ?? dayKey(new Date())
+    state.calendarDate = search.calendarDate ?? dayKey(new Date(), model.timeZone)
   }
-  const unavailableSearch = !!search.search && !listSearchableFields(model, entity, caps, state.presentation).length
+  const unavailableSearch = !!search.search && !listSearchableFields(model, entity, caps, embedded && state.presentation !== 'calendar' ? 'embedded' : state.presentation).length
   if (search.search && !unavailableSearch) state.search = search.search
   if (search.pageSize) state.limit = search.pageSize
+  const unavailablePage = search.page !== undefined && (search.page - 1) * Math.min(state.limit, model.limits.root) > (model.limits.maxOffset ?? 10_000)
   const sort = search.sort === 'none' ? null : search.sort ? { key: search.sort, direction: search.direction ?? 'asc' as const } : state.sort
   const unavailableSort = !!sort && !sortFields(model, entity, caps, sort.key).length
-  const allowedFilters = new Set(filterableFields(model, entity, caps))
-  let dropped = search.presentation === 'calendar' && !calendar || !!search.invalidSettings || (!!search.sort && unavailableSort) || unavailableSearch
+  const allowedFilters = new Map(descriptors.map(filter => [filter.field, filter]))
+  let dropped = search.presentation === 'calendar' && !calendar || !!search.invalidSettings || (!!search.sort && unavailableSort) || unavailableSearch || unavailablePage
   const filters: ListFilter[] = []
   for (const filter of search.filters ?? []) {
-    const kind = allowedFilters.has(filter.field) ? filterKind(model, entity, filter.field, caps) : undefined
-    const mapping = kind && filterMapping(kind, model.entities[entity].fields[filter.field])
+    const descriptor = allowedFilters.get(filter.field)
+    const mapping = descriptor && filterMapping(descriptor.kind, model.entities[entity].fields[filter.field], undefined, descriptor.operators, model.timeZone)
     const value = mapping && mapping.fromPredicate(filter.predicate)
     const predicate = value !== undefined && mapping ? mapping.toPredicate(value) : undefined
     if (!predicate || filters.some(item => item.field === filter.field)) { dropped = true; continue }
@@ -106,10 +104,11 @@ export function stateFromSearch(search: ListSearch, model: Model, entity: string
   }
   if (search.rowAccess && model.entities[entity].rowInvitations && caps.resources?.['invitations.read'] === true) state.rowAccess = search.rowAccess
   else if (search.rowAccess) dropped = true
+  // useGeneratedList follows this definition pruning with fresh selected-ID reconciliation.
   state.userFilters = filters
   const viewId = search.view ?? state.view
   const view = viewId === 'all' ? undefined : model.entities[entity].list?.views?.find(view => view.id === viewId)
-  if (viewId && viewId !== 'all' && (!view || !readableWhere(view.where, model, entity, caps))) { dropped ||= !!search.view; state.view = 'all' }
+  if (viewId && viewId !== 'all' && (!view || !readableWhere(view.where, model, entity, caps) || !!view.rowAccess && (!model.entities[entity].rowInvitations || caps.resources?.['invitations.read'] !== true))) { dropped ||= !!search.view; state.view = 'all' }
   else if (viewId) state.view = viewId
 
   state.sort = unavailableSort ? null : sort
@@ -119,25 +118,32 @@ export function searchFromState(state: ListState): ListSearch {
   return { ...(state.rowAccess ? { rowAccess: state.rowAccess } : {}), ...(state.presentation === 'calendar' ? { presentation: state.presentation } : {}), ...(state.calendarDate ? { calendarDate: state.calendarDate } : {}), ...(state.calendarMode ? { calendarMode: state.calendarMode } : {}), ...(state.view ? { view: state.view } : {}), ...(state.userFilters.length ? { filters: state.userFilters } : {}), ...(state.search ? { search: state.search } : {}), ...(state.sort ? { sort: state.sort.key, direction: state.sort.direction } : { sort: 'none' }), pageSize: state.limit }
 }
 /** The only list compiler adapter. All work is performed by POST /query, never by the table. */
-export function toQueryDocument(state: ListState, model: Model, entity: string, caps: Capabilities, locale: 'en' | 'cs' = 'en'): ReadQuery {
+export function toQueryDocument(state: ListState, model: Model, entity: string, caps: Capabilities, locale: 'en' | 'cs' = 'en', descriptors: FilterDescriptor[] = filterDescriptors(model, entity, caps), embedded = false): ReadQuery {
   const select = projection(model, entity, caps)
-  // UI and URL validation cap selections first. Reject bypassing callers rather than widening a filter.
-  for (const filter of state.userFilters) if (select.includes(filter.field) && Array.isArray(filter.predicate.in) && filter.predicate.in.length > selectionCap) throw new RangeError(`Select at most ${selectionCap} values per filter`)
+  const allowedFilters = new Map(descriptors.map(filter => [filter.field, filter]))
+  const userFilters = state.userFilters.filter(filter => {
+    const descriptor = allowedFilters.get(filter.field)
+    if (!descriptor) return false
+    if (Array.isArray(filter.predicate.in) && filter.predicate.in.length > selectionCap) throw new RangeError(`Select at most ${selectionCap} values per filter`)
+    return filterMapping(descriptor.kind, model.entities[entity].fields[filter.field], undefined, descriptor.operators, model.timeZone).fromPredicate(filter.predicate) !== undefined
+  })
   const labelWhere: Record<string, { contains: string; locale?: 'en' | 'cs' }> = {}
-  for (const filter of state.userFilters) if (labelColumns(model, entity, caps).includes(filter.field) && typeof filter.predicate.contains === 'string') labelWhere[filter.field] = { contains: filter.predicate.contains, ...(locale === 'cs' ? { locale } : {}) }
-  const conditions: Record<string, unknown>[] = [...state.presetFilters, ...state.userFilters].filter(filter => select.includes(filter.field) && !(filter.field in labelWhere && state.userFilters.includes(filter))).map(filter => {
+  for (const filter of userFilters) if (allowedFilters.get(filter.field)?.kind === 'text' && labelColumns(model, entity, caps).includes(filter.field) && typeof filter.predicate.contains === 'string') labelWhere[filter.field] = { contains: filter.predicate.contains, ...(locale === 'cs' ? { locale } : {}) }
+  const conditions: Record<string, unknown>[] = [...state.presetFilters, ...userFilters].filter(filter => select.includes(filter.field) && !(filter.field in labelWhere && userFilters.includes(filter))).map(filter => {
     const spec = model.entities[entity].fields[filter.field]
     if (spec?.type === 'bool' && JSON.stringify(filter.predicate) === '{"in":[false,null]}') return { or: [{ [filter.field]: { eq: false } }, { [filter.field]: { isNull: true } }] }
     // Shared state stores local calendar days; only the request carries instants.
-    const mapping = spec?.type === 'datetime' && Object.values(filter.predicate).some(value => typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)) ? filterMapping('date', spec) : undefined
+    const mapping = spec?.type === 'datetime' && Object.values(filter.predicate).some(value => typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)) ? filterMapping('date', spec, undefined, allowedFilters.get(filter.field)?.operators, model.timeZone) : undefined
     return { [filter.field]: mapping?.toPredicate(mapping.fromPredicate(filter.predicate), true) ?? filter.predicate }
   })
   const view = model.entities[entity].list?.views?.find(view => view.id === state.view)
-  if (view && readableWhere(view.where, model, entity, caps)) conditions.unshift(view.where)
-  const strings = listSearchableFields(model, entity, caps, state.presentation)
+  const allowedView = view && readableWhere(view.where, model, entity, caps) && (!view.rowAccess || model.entities[entity].rowInvitations && caps.resources?.['invitations.read'] === true) ? view : undefined
+  if (allowedView && state.offset === undefined) conditions.unshift(allowedView.where)
+  const rowAccess = state.offset === undefined ? allowedView?.rowAccess ?? state.rowAccess : state.rowAccess
+  const strings = listSearchableFields(model, entity, caps, embedded && state.presentation !== 'calendar' ? 'embedded' : state.presentation)
   const fields = state.sort ? sortFields(model, entity, caps, state.sort.key) : []
-  const labels = labelColumns(model, entity, caps).filter(key => (model.entities[entity].list?.columns ?? model.entities[entity].listColumns ?? model.entities[entity].columns).includes(key))
-  const query: ReadQuery = { entity, ...(state.rowAccess && model.entities[entity].rowInvitations && caps.resources?.['invitations.read'] === true ? { rowAccess: state.rowAccess } : {}), ...(state.search.trim() && strings.length ? { search: { text: state.search.trim(), fields: strings, locale } } : {}), select: select.length ? select : ['id'], ...(labels.length ? { labels } : {}), limit: Math.min(pageSizes.includes(state.limit as any) ? state.limit : 30, model.limits.root),
+  const labels = labelColumns(model, entity, caps).filter(key => listColumnFields(model, entity).includes(key) && readableListField(model, entity, caps, key))
+  const query: ReadQuery = { entity, ...(state.offset !== undefined ? { offset: state.offset, includeTotal: true, includeViewTotals: true, ...(allowedView ? { view: allowedView.id } : {}) } : {}), ...(rowAccess && model.entities[entity].rowInvitations && caps.resources?.['invitations.read'] === true ? { rowAccess } : {}), ...(state.search.trim() && strings.length ? { search: { text: state.search.trim(), fields: strings, locale } } : {}), select: select.length ? select : ['id'], ...(labels.length ? { labels } : {}), limit: Math.min(pageSizes.includes(state.limit as any) ? state.limit : 30, model.limits.root),
     ...(conditions.length ? { where: { and: conditions } } : {}),
     ...(Object.keys(labelWhere).length ? { labelWhere } : {}),
     orderBy: (fields.length ? fields : ['id']).map(field => ({ field, dir: fields.length ? state.sort!.direction : 'asc', ...(labelColumns(model, entity, caps).includes(field) ? { label: true } : {}) })),
@@ -147,7 +153,7 @@ export function toQueryDocument(state: ListState, model: Model, entity: string, 
     const refs = calendar.titleFields.filter(field => select.includes(field) && model.entities[entity].fields[field]?.type === 'ref')
     if (refs.length) query.labels = [...new Set([...(query.labels ?? []), ...refs])]
   }
-  return calendar ? calendarQuery(query, calendar, state.calendarDate ?? dayKey(new Date()), state.calendarMode ?? 'month', model) : query
+  return calendar ? calendarQuery(query, calendar, state.calendarDate ?? dayKey(new Date(), model.timeZone), state.calendarMode ?? 'month', model) : query
 }
 /** Detail/picker hydration, chunked to the compiler's IN limit. Never used for list cells. */
 export function relationHydrationQueries(model: Model, entity: string, caps: Capabilities, columns: string[], rows: Record<string, any>[], extraFields: Record<string, string[]> = {}) {

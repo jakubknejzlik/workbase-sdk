@@ -3,10 +3,11 @@ import { createElement as h } from 'react'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, expect, test, vi } from 'vitest'
 import { grants } from './grants'
-import { ConsoleProvider, PageView } from '../src/react'
+import { AccessCard, ConsoleProvider, PageView, failureState, useRuntime } from '../src/react'
 import { entityCreatePage, entityDetailPage, entityEditPage, entityListPage, type Node, page, list } from '../src/index'
 import type { Manifest } from '../src/check'
-import type { ClientRequestInit } from '../src/client'
+import { ApiFailure, type Client, type ClientRequestInit } from '../src/client'
+import { createI18n } from '../src/i18n'
 const fields = Object.fromEntries(['name', 'extra', 'user', 'locked'].map(name => [name, { type: name === 'user' ? 'ref' : 'string', required: name === 'name', readOnly: name === 'locked', userLink: name === 'user', computed: false }]))
 const meta = { displayField: 'name', fields }
 const links = { list: { to: '/items', bind: {} }, detail: { to: '/items/$itemId', bind: { itemId: 'record.id' } }, edit: { to: '/items/$itemId/edit', bind: { itemId: 'record.id' } } }
@@ -96,7 +97,7 @@ test('conflict retains draft; explicit reload and resave diffs against fresh ser
   render(view(fetch, 'edit'))
   fireEvent.change(await screen.findByLabelText('domain:field.probe.name'), { target: { value: 'Draft' } }); fireEvent.click(screen.getByText('sdk:save'))
   expect(await screen.findByText('sdk:conflict')).toBeTruthy(); expect((screen.getByLabelText('domain:field.probe.name') as unknown as { value: string }).value).toBe('Draft')
-  expect(fetch).toHaveBeenCalledTimes(2)
+  expect(fetch.mock.calls.filter(([, init]) => init.method === 'GET').length).toBeGreaterThanOrEqual(2)
   fireEvent.click(screen.getByText('sdk:reloadServerCopy'))
   await waitFor(() => expect((screen.getByLabelText('domain:field.probe.name') as unknown as { value: string }).value).toBe('Other session'))
   conflict = false
@@ -179,6 +180,34 @@ test('create entry and dirty edit back follow declared paths', async () => {
   expect(confirm).toHaveBeenCalledTimes(1); expect(navigate).toHaveBeenCalledWith('/items/x')
 })
 
+test.each(['en', 'cs'] as const)('named %s entity captions render object-form Create and singular form names while titles remain independent', async language => {
+  const singular = language === 'cs' ? 'Pracovník' : 'Worker', object = language === 'cs' ? 'pracovníka' : 'worker'
+  const i18n = createI18n({ languages: [language], catalogs: { [language]: {
+    domain: { 'entity.probe.singular': singular, 'entity.probe.object': object, 'entity.probe_one': '{{count}} item', 'entity.probe_other': '{{count}} items', 'field.probe.name': 'Name' },
+    ui: { 'probe.list': 'Independent list title', 'probe.create': 'Independent create title' },
+  } } })
+  const listPage = route('list', []), createPage = route('create', [])
+  render(h(ConsoleProvider, { caps: grants({ probe: meta }), identity: { actorId: 'a', orgId: 'one' }, t: i18n.t, i18n, fetch: async () => json({ data: [], next_cursor: null }) }, h(PageView, { definition: listPage, route: listPage, routes: [listPage, createPage], entities: { probe: meta }, params: {}, search: {}, navigate })))
+  fireEvent.click(screen.getByRole('button', { name: language === 'cs' ? 'Vytvořit pracovníka' : 'Create worker' }))
+  expect(navigate).toHaveBeenCalledWith('/items/new')
+  expect(screen.getByRole('heading', { name: 'Independent list title' })).toBeTruthy()
+  cleanup()
+  render(h(ConsoleProvider, { caps: grants({ probe: meta }), identity: { actorId: 'a', orgId: 'one' }, t: i18n.t, i18n }, h(PageView, { definition: createPage, route: createPage, entities: { probe: meta }, params: {}, search: {}, navigate })))
+  expect(screen.getByRole('form', { name: singular })).toBeTruthy()
+  expect(screen.getByRole('heading', { name: 'Independent create title' })).toBeTruthy()
+})
+
+test('real translator falls back to generic sdk:create when no object form exists in the active language', async () => {
+  const i18n = createI18n({ languages: ['cs', 'en'], catalogs: {
+    en: { domain: { 'entity.probe.object': 'worker' } },
+    cs: { domain: { 'entity.probe_other': '{{count}} pracovníků', 'field.probe.name': 'Jméno' }, ui: { 'probe.list': 'Seznam' } },
+  } })
+  const listPage = route('list', [])
+  render(h(ConsoleProvider, { caps: grants({ probe: meta }), identity: { actorId: 'a', orgId: 'one' }, t: i18n.t, i18n, fetch: async () => json({ data: [], next_cursor: null }) }, h(PageView, { definition: listPage, route: listPage, routes: [listPage, route('create')], entities: { probe: meta }, params: {}, search: {}, navigate })))
+  expect(screen.getByRole('button', { name: 'Vytvořit' })).toBeTruthy()
+  expect(screen.queryByRole('button', { name: 'Create worker' })).toBeNull()
+})
+
 test('page primitive infers list binding and renders static layout slots without fetching', async () => {
   const definition = page({ title: 'probe.list', data: { results: list('probe') } })
   const listed = { ...route('list', []), ...definition }
@@ -201,4 +230,128 @@ test('returning to an earlier search starts at page one, including after a host 
   expect(screen.queryByText('A second')).toBeNull()
   mounted.rerender(view(fetch, 'list', { layout: [], metadata: { ...meta, fields: { ...fields } } }))
   fireEvent.click(screen.getByText('sdk:loadMore')); expect(await screen.findByText('A second')).toBeTruthy()
+})
+
+const available = { ...row, access: { state: 'no_account', account: null, invitation: null }, actions: { close: { enabled: true }, invite: { enabled: true } } }
+function availabilityView(fetch: (url: string, init: ClientRequestInit) => Promise<Response>, mode: 'detail' | 'edit', capture: (client: Client) => void) {
+  function Inspector() { capture(useRuntime().client); return null }
+  const definition = route(mode, ['name', { kind: 'action', name: 'close' }, { kind: 'slot', id: 'access', props: {} }])
+  return h(ConsoleProvider, { caps: grants({ probe: meta }), identity: { actorId: 'a', orgId: 'one' }, t, fetch,
+    slots: { access: { contexts: ['record'], props: { access: { kind: 'access' } }, component: AccessCard } },
+  }, h(Inspector), h(PageView, { definition, route: definition, entities: { probe: meta }, params: { itemId: 'x' }, search: {}, navigate }))
+}
+function expectNoExecutableAvailability() {
+  for (const name of ['ui:actions.close', 'sdk:card.invite']) {
+    const button = screen.queryByRole('button', { name })
+    expect(button === null || button.hasAttribute('disabled')).toBe(true)
+  }
+}
+test.each([0, 403, 404, 503])('mounted invalidation hides generic/access actions during pending and failed refresh (%s)', async status => {
+  let finish: (value: Response) => void = () => {}, fail: (error: Error) => void = () => {}, client!: Client
+  const fetch = vi.fn().mockResolvedValueOnce(json(available)).mockImplementation(() => new Promise<Response>((resolve, reject) => { finish = resolve; fail = reject }))
+  render(availabilityView(fetch, 'detail', value => { client = value }))
+  await screen.findByRole('button', { name: 'ui:actions.close' }); await screen.findByRole('button', { name: 'sdk:card.invite' })
+  act(() => client.invalidate())
+  expectNoExecutableAvailability()
+  await waitFor(() => expect(fetch).toHaveBeenCalledTimes(2))
+  await act(async () => { if (status) finish(json({ error: 'failure' }, status)); else fail(new TypeError('offline')) })
+  expectNoExecutableAvailability()
+  expect(screen.getByText('Server')).toBeTruthy()
+  expect(fetch).toHaveBeenCalledTimes(2)
+})
+test.each([409, 403, 404, 0])('failed save (%s) and background owner refresh preserve drafts and use fresh availability', async status => {
+  let client!: Client, finishWrite: (value: Response) => void = () => {}, failWrite: (error: Error) => void = () => {}, finishRefresh: (value: Response) => void = () => {}
+  const fetch = vi.fn((_url: string, init: ClientRequestInit) => {
+    if (init.method === 'PATCH') return new Promise<Response>((resolve, reject) => { finishWrite = resolve; failWrite = reject })
+    if (fetch.mock.calls.length === 1) return Promise.resolve(json(available))
+    return new Promise<Response>(resolve => { finishRefresh = resolve })
+  })
+  render(availabilityView(fetch, 'edit', value => { client = value }))
+  const input = await screen.findByLabelText('domain:field.probe.name')
+  await screen.findByRole('button', { name: 'ui:actions.close' })
+  fireEvent.change(input, { target: { value: 'Unsaved' } }); fireEvent.click(screen.getByText('sdk:save'))
+  expectNoExecutableAvailability()
+  await act(async () => { if (status) finishWrite(json({ error: status === 409 ? 'version_conflict' : 'refused' }, status)); else failWrite(new TypeError('offline')) })
+  await waitFor(() => expect(fetch).toHaveBeenCalledTimes(3))
+  expectNoExecutableAvailability()
+  expect((input as unknown as { value: string }).value).toBe('Unsaved')
+  await act(async () => finishRefresh(json({ ...available, name: 'New server', version: 2, actions: { close: { enabled: false, reason: 'record.closed' } } })))
+  await screen.findByText('ui:record.closed')
+  expect((screen.getByLabelText('domain:field.probe.name') as unknown as { value: string }).value).toBe('Unsaved')
+  expect(screen.getByLabelText('domain:field.probe.name')).toBe(input)
+  expectNoExecutableAvailability()
+  expect(await client.one('probe', { id: 'x' }, new AbortController().signal, true)).toMatchObject({ name: 'New server' })
+  expect(fetch).toHaveBeenCalledTimes(3)
+})
+test.each([undefined, null, [], { close: { enabled: 'yes' } }])('invalid detail metadata %j cannot enable generic/access actions', async actions => {
+  render(availabilityView(async () => json({ ...available, actions }), 'detail', () => {}))
+  await screen.findByText('Server')
+  expectNoExecutableAvailability()
+})
+
+test.each(['en', 'cs'] as const)('unique conflict is localized, retains draft and permits corrected retry (%s)', async language => {
+  const i18n = createI18n({ languages: ['en', 'cs'], profile: { language }, catalogs: {} })
+  const fetch = vi.fn(async (_url: string, init: ClientRequestInit) => {
+    if (init.method !== 'PATCH') return json(row)
+    const data = JSON.parse(String(init.body))
+    return data.name === 'Duplicate' ? json({ error: 'unique_conflict', detail: { constraintId: 'probe.name_unique' } }, 409) : json({ ...row, ...data, version: 2 })
+  })
+  render(h(ConsoleProvider, { caps: grants({ probe: meta }), identity: { actorId: 'a', orgId: 'one' }, t: i18n.t, fetch }, h(PageView, { definition: route('edit'), route: route('edit'), entities: { probe: meta }, params: { itemId: 'x' }, search: {}, navigate })))
+  const name = await screen.findByLabelText(i18n.t('domain:field.probe.name'))
+  fireEvent.change(name, { target: { value: 'Duplicate' } }); fireEvent.click(screen.getByText(i18n.t('sdk:save')))
+  const message = language === 'cs' ? 'Záznam se stejnou kombinací hodnot již existuje. Změňte hodnoty a zkuste to znovu.' : 'A record with the same combination of values already exists. Change the values and try again.'
+  expect(await screen.findByText(message)).toBeTruthy()
+  expect(screen.queryByText(i18n.t('sdk:network'))).toBeNull()
+  expect((name as unknown as { value: string }).value).toBe('Duplicate'); expect(navigate).not.toHaveBeenCalled()
+  fireEvent.change(name, { target: { value: 'Corrected' } }); fireEvent.click(screen.getByText(i18n.t('sdk:save')))
+  await waitFor(() => expect(navigate).toHaveBeenCalledWith('/items/x'))
+  expect(JSON.parse(String(fetch.mock.calls.filter(([, init]) => init.method === 'PATCH').at(-1)![1].body))).toEqual({ name: 'Corrected' })
+})
+test.each(['en', 'cs'] as const)('ref equality mismatch is localized, retains draft and permits corrected retry (%s)', async language => {
+  const i18n = createI18n({ languages: ['en', 'cs'], profile: { language }, catalogs: {} })
+  const fetch = vi.fn(async (_url: string, init: ClientRequestInit) => {
+    if (init.method !== 'PATCH') return json(row)
+    const data = JSON.parse(String(init.body))
+    return data.name === 'Duplicate' ? json({ error: 'ref_equality_mismatch', detail: { constraintId: 'probe.name_unique' } }, 422) : json({ ...row, ...data, version: 2 })
+  })
+  render(h(ConsoleProvider, { caps: grants({ probe: meta }), identity: { actorId: 'a', orgId: 'one' }, t: i18n.t, fetch }, h(PageView, { definition: route('edit'), route: route('edit'), entities: { probe: meta }, params: { itemId: 'x' }, search: {}, navigate })))
+  const name = await screen.findByLabelText(i18n.t('domain:field.probe.name'))
+  fireEvent.change(name, { target: { value: 'Duplicate' } }); fireEvent.click(screen.getByText(i18n.t('sdk:save')))
+  const message = language === 'cs' ? 'Vybrané odkazy si neodpovídají. Změňte hodnoty a zkuste to znovu.' : 'The selected references do not agree. Change the values and try again.'
+  expect(await screen.findByText(message)).toBeTruthy()
+  expect(screen.queryByText(i18n.t('sdk:network'))).toBeNull()
+  expect((name as unknown as { value: string }).value).toBe('Duplicate'); expect(navigate).not.toHaveBeenCalled()
+  fireEvent.change(name, { target: { value: 'Corrected' } }); fireEvent.click(screen.getByText(i18n.t('sdk:save')))
+  await waitFor(() => expect(navigate).toHaveBeenCalledWith('/items/x'))
+  expect(JSON.parse(String(fetch.mock.calls.filter(([, init]) => init.method === 'PATCH').at(-1)![1].body))).toEqual({ name: 'Corrected' })
+})
+test.each(['en', 'cs'] as const)('ref immutable conflict is localized, retains draft and permits corrected retry (%s)', async language => {
+  const i18n = createI18n({ languages: ['en', 'cs'], profile: { language }, catalogs: {} })
+  const fetch = vi.fn(async (_url: string, init: ClientRequestInit) => {
+    if (init.method !== 'PATCH') return json(row)
+    const data = JSON.parse(String(init.body))
+    return data.name === 'Locked' ? json({ error: 'ref_immutable', detail: { constraintId: 'probe.name_locked' } }, 409) : json({ ...row, ...data, version: 2 })
+  })
+  render(h(ConsoleProvider, { caps: grants({ probe: meta }), identity: { actorId: 'a', orgId: 'one' }, t: i18n.t, fetch }, h(PageView, { definition: route('edit'), route: route('edit'), entities: { probe: meta }, params: { itemId: 'x' }, search: {}, navigate })))
+  const name = await screen.findByLabelText(i18n.t('domain:field.probe.name'))
+  fireEvent.change(name, { target: { value: 'Locked' } }); fireEvent.click(screen.getByText(i18n.t('sdk:save')))
+  const message = language === 'cs' ? 'Tento záznam používají jiné záznamy, proto už nelze tuto hodnotu změnit. Ponechte původní hodnotu a zkuste to znovu.' : 'This record is referenced by other records, so this value can no longer be changed. Keep the original value and try again.'
+  expect(await screen.findByText(message)).toBeTruthy()
+  expect(screen.queryByText(i18n.t('sdk:network'))).toBeNull()
+  expect((name as unknown as { value: string }).value).toBe('Locked'); expect(navigate).not.toHaveBeenCalled()
+  fireEvent.change(name, { target: { value: 'Corrected' } }); fireEvent.click(screen.getByText(i18n.t('sdk:save')))
+  await waitFor(() => expect(navigate).toHaveBeenCalledWith('/items/x'))
+  expect(JSON.parse(String(fetch.mock.calls.filter(([, init]) => init.method === 'PATCH').at(-1)![1].body))).toEqual({ name: 'Corrected' })
+})
+test('ref immutable code is bound to status 409 and does not widen other conflicts', () => {
+  expect(failureState(new ApiFailure(409, 'ref_immutable'))).toEqual({ kind: 'refImmutable' })
+  expect(failureState(new ApiFailure(422, 'ref_immutable'))).toEqual({ kind: 'network' })
+  expect(failureState(new ApiFailure(409, 'constraint_conflict'))).toEqual({ kind: 'network' })
+})
+test('generic constraint_conflict retains the current network fallback', async () => {
+  render(view(async (_url, init) => init.method === 'PATCH' ? json({ error: 'constraint_conflict' }, 409) : json(row), 'edit'))
+  fireEvent.change(await screen.findByLabelText('domain:field.probe.name'), { target: { value: 'Draft' } })
+  fireEvent.click(screen.getByText('sdk:save'))
+  expect(await screen.findByText('sdk:network')).toBeTruthy()
+  expect((screen.getByLabelText('domain:field.probe.name') as unknown as { value: string }).value).toBe('Draft')
 })

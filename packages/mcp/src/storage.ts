@@ -1,4 +1,4 @@
-import { isLiteralConfig, loadConfig } from '@workbasehq/core/schema/load'
+import { decodeSource, isLiteralConfig, loadConfig } from '@workbasehq/core/schema/load'
 import { assertInitialized } from './initialization.ts'
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { acquireInstanceLock } from './instance-lock.ts'
@@ -8,14 +8,15 @@ import { replaySources } from './replay-sources.ts'
 import { parseRuntimeSource } from './composition/runtime-source.ts'
 import { hydrateRuntimePlugins } from './composition/registry.ts'
 import { constants } from 'node:fs'
-import { open, lstat, mkdir, readFile, readdir, realpath, rename, rm, writeFile, link, unlink } from 'node:fs/promises'
-import { resolve, join, dirname } from 'node:path'
+import { open, lstat, mkdir, readFile, readdir, realpath, rename, rm, writeFile, link, unlink, rmdir } from 'node:fs/promises'
+import { resolve, join, dirname, relative, basename } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { createRequire } from 'node:module'
 import { inspectInstance, isDisplayFieldError, serializableInstanceConfig, type InstanceConfig } from '@workbasehq/core/config'
 import { isBuiltinPlugin } from '@workbasehq/core/plugins'
 import { z } from 'zod'
 import { hash } from './planning.ts'
+import { byteHash, byteManifest } from './byte-digest.ts'
 import { WorkflowError, fail, identifier, instanceSelector, type Index } from './schemas.ts'
 
 export type Migration = { name: string; sql: string }
@@ -124,7 +125,6 @@ async function fileSnapshot(path: string) {
     throw error
   } finally { await handle?.close() }
 }
-const byteHash = (bytes: Uint8Array) => hash(Buffer.from(bytes).toString('base64'))
 // Also fail closed for this process if the filesystem rejects both ways of
 // publishing a revocation marker. A successful retry must not reuse that proof.
 const unknownSdkEvidence = new Set<string>()
@@ -135,17 +135,20 @@ function revokedSdkRecord(record: any) {
   return { ...proposal, status: proposal.status === 'discarded' ? 'discarded' : 'proposed' }
 }
 async function dependencyHash(path: string) {
+  await noLink(path, true)
   const bytes = await fileBytes(path)
   return bytes === null ? null : byteHash(bytes)
 }
-const transactionPath = z.string().regex(/^(runtime\.ts|access\.ts|schema\.lock\.json|schema\/[a-z][a-z0-9_]{0,62}\.ts|openapi\.json|access\.lock\.(?:json|md)|package\.json|bun\.lock|config(?:\.v[1-9][0-9]*)?\.ts|config\.(?:indexes|versions)\.json|migrations\/\d{4}_[a-z0-9_]+\.sql|proposals\/[a-f0-9-]+\.json)$/)
+const transactionPath = z.string().regex(/^(runtime\.ts|access\.ts|schema\.lock\.json|schema\/[a-z][a-z0-9_]{0,62}\.ts|openapi\.json|access\.lock\.(?:json|md)|package\.json|bun\.lock|config(?:\.v[1-9][0-9]*)?\.ts|config\.(?:indexes|versions)\.json|migrations\/\d{4}_[a-z0-9_]+\.sql|locales\/(?:en|cs)\/(?:domain|ui)\.json|proposals\/[a-f0-9-]+\.json)$/)
 const digest = z.string().regex(/^[a-f0-9]{64}$/)
 const base64 = z.string().refine(value => Buffer.from(value, 'base64').toString('base64') === value)
 const identityPart = z.union([z.string().regex(/^(0|[1-9][0-9]*)$/), z.number().int().nonnegative().transform(String)])
 const identitySchema = z.strictObject({ dev: identityPart, ino: identityPart, hash: digest })
 type FileIdentity = z.infer<typeof identitySchema>
 const ownedJournalSchema = z.strictObject({
-  version: z.literal(3), transactionId: z.uuid(), files: z.array(z.strictObject({
+  version: z.literal(3), transactionId: z.uuid(),
+  directories: z.array(z.strictObject({ path: z.string().regex(/^locales(?:\/(?:en|cs))?$/), stage: z.uuid(), dev: identityPart, ino: identityPart })).optional(),
+  files: z.array(z.strictObject({
     path: transactionPath, before: base64.nullable(), stage: z.uuid(), after: identitySchema,
     capture: z.strictObject({ token: z.uuid(), identity: identitySchema }).optional(),
   }).refine(file => file.before === null ? file.capture === undefined
@@ -158,11 +161,11 @@ const journalSchema = z.union([
   z.strictObject({ files: z.array(z.strictObject({ path: transactionPath, before: z.string().nullable(), afterHash: digest.optional() })) }),
 ])
 // Validate all destinations before either publication or recovery can mutate anything.
-async function validatePaths(dir: string, paths: string[], inspectFiles = true) {
+async function validatePaths(dir: string, paths: string[], inspectFiles = true, missingLocales = false) {
   dir = resolve(dir)
   const seen = new Set<string>()
   await noLink(dir)
-  const directories = new Map<string, { dev: bigint; ino: bigint }>()
+  const directories = new Map<string, { dev: bigint; ino: bigint } | null>()
   for (const parent of [resolve(dir), join(dir, 'proposals')]) {
     const stat = await lstat(parent, { bigint: true })
     if (!stat.isDirectory() || stat.isSymbolicLink()) fail('unsafe_path', 'Transaction ancestors must be real directories', 403)
@@ -172,10 +175,14 @@ async function validatePaths(dir: string, paths: string[], inspectFiles = true) 
     if (!transactionPath.safeParse(path).success || seen.has(path)) fail('invalid_journal', 'Invalid promotion journal path', 500)
     seen.add(path)
     const destination = resolve(dir, path)
-    await noLink(dirname(destination))
+    await noLink(dirname(destination), missingLocales)
     if (inspectFiles) await noLink(destination, true)
     for (let parent = dirname(destination); ; parent = dirname(parent)) {
-      const stat = await lstat(parent, { bigint: true })
+      const stat = await lstat(parent, { bigint: true }).catch(error => {
+        if (error.code === 'ENOENT' && missingLocales && /^locales(?:\/(?:en|cs))?$/.test(relative(dir, parent))) return null
+        throw error
+      })
+      if (!stat) { directories.set(parent, null); continue }
       if (!stat.isDirectory() || stat.isSymbolicLink()) fail('unsafe_path', 'Transaction ancestors must be real directories', 403)
       const previous = directories.get(parent)
       if (previous && (previous.dev !== stat.dev || previous.ino !== stat.ino)) conflict(path)
@@ -185,7 +192,7 @@ async function validatePaths(dir: string, paths: string[], inspectFiles = true) 
     // Reject directories and other special files as well as symlinks.
     if (inspectFiles) await fileBytes(destination)
   }
-  return async (path: string) => {
+  const fence = async (path: string) => {
     path = resolve(path)
     const chain: string[] = []
     for (let parent = dirname(path); ; parent = dirname(parent)) {
@@ -197,13 +204,18 @@ async function validatePaths(dir: string, paths: string[], inspectFiles = true) 
     // and each syscall is accepted, as in #208; this is not a directory-handle lock.
     for (const parent of chain) {
       const stat = await lstat(parent, { bigint: true }).catch(error => {
+        if (error.code === 'ENOENT' && directories.get(parent) === null) return null
         if (error.code === 'ENOENT') conflict(path)
         throw error
       })
       const expected = directories.get(parent)
-      if (!expected || !stat.isDirectory() || stat.isSymbolicLink() || stat.dev !== expected.dev || stat.ino !== expected.ino) conflict(path)
+      if (stat === null && expected === null) continue
+      if (!stat || !expected || !stat.isDirectory() || stat.isSymbolicLink() || stat.dev !== expected.dev || stat.ino !== expected.ino) conflict(path)
     }
   }
+  return Object.assign(fence, { directory: (path: string, identity: { dev: string; ino: string } | null) => {
+    directories.set(resolve(dir, path), identity ? { dev: BigInt(identity.dev), ino: BigInt(identity.ino) } : null)
+  } })
 }
 class TransactionConflict extends WorkflowError {
   constructor(readonly path: string) { super('concurrent_modification', `Instance files changed during transaction: ${path}`, 409) }
@@ -344,7 +356,7 @@ export class Store {
       return await this.lockContext.run(held, fn)
     } finally { held.active = false; await release() }
   }
-  private configCache = new Map<string, { sourceHash: string; config: InstanceConfig; runtimeHash?: string; runtime?: InstanceConfig; paths?: Record<string, Buffer> }>()
+  private configCache = new Map<string, { config: InstanceConfig; runtimeHash?: string; runtime?: InstanceConfig; paths?: Record<string, Buffer> }>()
   private instanceDirectories = new Map<string, string>()
   private standalone = false
   public allowed: Set<string>
@@ -381,7 +393,7 @@ export class Store {
         if (literal) await replaySources(this.root, { accessLock: true })
         const config = literal
           ? (await loadConfig(configPath, { bindExistingLock: false })).config
-          : await importConfig(configPath, hash(await readFile(configPath, 'utf8')))
+          : await importConfig(configPath, byteHash((await fileBytes(configPath))!))
         // Core IDs use SQL identifiers (underscores); MCP instance selectors use hyphens.
         const instance = instanceSelector(config.id)
         if (this.requestedAllowed && (this.requestedAllowed.size !== 1 || !this.requestedAllowed.has(instance))) fail('invalid_allowlist', 'Standalone allowlist must contain only the config id')
@@ -464,25 +476,25 @@ export class Store {
     await assertInitialized(dir, instance)
     const dependencies = this.standalone ? await dependencySnapshot(dir) : undefined
     const names = (await readdir(dir)).filter(n => /^config(?:\.[a-z0-9_-]+)?\.(ts|json)$/.test(n)).sort()
-    const sources: Record<string, string> = {}
-    for (const name of names) { await noLink(join(dir, name)); sources[name] = await readFile(join(dir, name), 'utf8') }
+    const sources: Record<string, Buffer> = {}
+    for (const name of names) { await noLink(join(dir, name)); sources[name] = (await fileBytes(join(dir, name)))! }
     // Hash the complete tracked graph before evaluating either entrypoint.
-    const inputs = await replaySources(dir, { accessLock: true })
-    const runtimeSource = inputs['runtime.ts']?.toString('utf8')
+    const inputs = await replaySources(dir, { accessLock: true, presentation: options.canonicalRuntime === true })
+    const graph = { ...sources, ...inputs }
+    // Reject malformed authored TypeScript before parsing, importing or editing it.
+    for (const [path, bytes] of Object.entries(graph)) if (path.endsWith('.ts')) decodeSource(bytes, join(dir, path))
+    const runtimeSource = inputs['runtime.ts'] === undefined ? undefined : decodeSource(inputs['runtime.ts'], join(dir, 'runtime.ts'))
     if (options.canonicalRuntime && runtimeSource === undefined) fail('runtime_not_canonical', 'runtime.ts is required for composition changes')
     // Interpret before any runtime import; custom expressions must never execute
     // merely because a caller tried to compose built-ins.
     const model = options.canonicalRuntime ? parseRuntimeSource(runtimeSource!) : undefined
-    const sourceHash = hash(sources)
     const cached = this.configCache.get(instance)
-    const graph = { ...sources, ...Object.fromEntries(Object.entries(inputs).map(([path, bytes]) => [path, bytes.toString('utf8')])) }
-    const runtimeHash = hash(graph)
+    const runtimeHash = hash(byteManifest(graph))
     const fresh = cached?.runtimeHash !== runtimeHash
     const paths = [...new Set([...Object.keys(inputs), ...Object.keys(cached?.paths ?? {})])]
     const config = fresh ? await importConfig(join(dir, 'config.ts'), runtimeHash, paths) : cached.config
     let runtime: InstanceConfig | undefined
     if (config.baseline === 'workbase-sdk') {
-      Object.assign(sources, graph)
       if (inputs['runtime.ts']) {
         // The config import already invalidated the graph. Preserve that same
         // graph when loading runtime, including its import of config.ts.
@@ -491,21 +503,30 @@ export class Store {
         if (runtime?.id !== config.id || runtime.revision !== config.revision) fail('revision_mismatch', 'runtime.ts and config.ts disagree', 409)
       }
     }
-    if (!options.canonicalRuntime) this.configCache.set(instance, { sourceHash, config, runtimeHash, runtime, paths: inputs })
+    if (!options.canonicalRuntime) this.configCache.set(instance, { config, runtimeHash, runtime, paths: inputs })
     const migrationNames = (await readdir(join(dir, 'migrations'))).filter(name => name !== '.gitkeep').sort()
     if (migrationNames.some(n => !/^\d{4}_[a-z0-9_]+\.sql$/.test(n))) fail('invalid_migrations', 'Unexpected migration filename')
     const migrations: Migration[] = []
-    for (const name of migrationNames) { await noLink(join(dir, 'migrations', name)); migrations.push({ name, sql: await readFile(join(dir, 'migrations', name), 'utf8') }) }
-    const indexes = sources['config.indexes.json'] ? z.array(z.strictObject({ entity: identifier, name: identifier, fields: z.array(identifier).min(1) })).parse(JSON.parse(sources['config.indexes.json'])) : []
+    for (const name of migrationNames) {
+      const path = `migrations/${name}`
+      await noLink(join(dir, path))
+      const bytes = (await fileBytes(join(dir, path)))!
+      graph[path] = bytes
+      migrations.push({ name, sql: bytes.toString('utf8') })
+    }
+    const indexes = sources['config.indexes.json'] ? z.array(z.strictObject({ entity: identifier, name: identifier, fields: z.array(identifier).min(1) })).parse(JSON.parse(sources['config.indexes.json'].toString('utf8'))) : []
     const guards = Object.fromEntries([
       ...Object.entries(dependencies?.guards ?? {}),
-      ...Object.entries(sources).map(([name, source]) => [name, hash(source)]),
-      ...migrations.map(m => [`migrations/${m.name}`, hash(m.sql)]),
+      ...(config.baseline === 'workbase-sdk' && options.canonicalRuntime ? [
+        ...['runtime.ts', 'access.ts', 'schema.lock.json', 'access.lock.json', 'access.lock.md', 'openapi.json'].map(path => [path, null]),
+        ...['en', 'cs'].flatMap(lang => ['domain', 'ui', 'sdk'].map(ns => [`locales/${lang}/${ns}.json`, null])),
+      ] : []),
+      ...Object.entries(byteManifest(graph)),
     ])
     const sdkVersion = dependencies?.guards['package.json'] && config.baseline === 'workbase-sdk'
       ? JSON.parse(await readFile(join(dir, 'package.json'), 'utf8')).dependencies?.['@workbasehq/core'] : undefined
     return { config, ...(runtime ? { runtime } : {}), ...(options.canonicalRuntime ? { runtimeSource } : {}), indexes, migrations, ...(typeof sdkVersion === 'string' ? { sdkVersion } : {}), ...(dependencies ? { dependencyDigest: dependencies.digest } : {}),
-      fingerprint: hash({ sources, config, migrations, indexes, ...(dependencies ? { dependencyDigest: dependencies.digest } : {}) }), guards }
+      fingerprint: hash({ version: 2, sources: byteManifest(graph), config, indexes, ...(dependencies ? { dependencyDigest: dependencies.digest } : {}) }), guards }
   }
   async find(id: string) {
     for (const instance of this.allowed) {
@@ -650,8 +671,17 @@ export class Store {
   async recover(dir: string) { await this.withLock(dir, async () => {}) }
   private async rollbackOwned(dir: string, journal: OwnedJournal, source: string, publicationFence?: Fence, expectedJournal?: FileIdentity) {
     const journalPath = join(dir, 'proposals/.promotion.json')
-    const validated = await validatePaths(dir, journal.files.map(file => file.path), false)
+    const validated = await validatePaths(dir, journal.files.map(file => file.path), false, true)
     const fence = publicationFence ?? validated
+    for (const directory of journal.directories ?? []) {
+      const path = join(dir, directory.path)
+      const stat = await lstat(path, { bigint: true }).catch(error => { if (error.code === 'ENOENT') return null; throw error })
+      if (stat && (!stat.isDirectory() || stat.isSymbolicLink() || stat.dev.toString() !== directory.dev || stat.ino.toString() !== directory.ino)) conflict(path)
+      // A syscall may have installed the directory before its caller observed an
+      // error. Reattach only the journal-owned identity before undoing files.
+      validated.directory(directory.path, stat ? directory : null)
+      if (publicationFence && 'directory' in publicationFence) (publicationFence as typeof validated).directory(directory.path, stat ? directory : null)
+    }
     const marker = `${journalPath}.conflict-${hash(source).slice(0, 16)}`
     let journalFile: Awaited<ReturnType<typeof fileSnapshot>> = null
     let conflicted = false
@@ -746,14 +776,42 @@ export class Store {
       await syncDirectory(dirname(marker))
       conflict(journalPath)
     }
+    // Interrupted removeOwned can leave a retained hardlink after its canonical
+    // unlink failed. Dispose only names with the exact journal-owned new inode;
+    // matching bytes alone never establish ownership. Otherwise a new locale
+    // directory would stay nonempty across recovery retries.
+    for (const file of journal.files) if (file.path.startsWith('locales/')) {
+      const directory = dirname(join(dir, file.path)), prefix = basename(file.path) + '.'
+      const names = await readdir(directory).catch(error => { if (error.code === 'ENOENT') return []; throw error })
+      for (const name of names) {
+        if (!name.startsWith(prefix) || !/^[a-f0-9-]{36}\.tmp$/.test(name.slice(prefix.length))) continue
+        const path = join(directory, name)
+        if (sameFile((await fileSnapshot(path))?.identity, file.after)) {
+          await assertOwned(path, file.after, fence); await unlink(path)
+        }
+      }
+    }
     // Cleanup begins only after every canonical original has been verified.
-    for (const directory of new Set(journal.files.map(file => dirname(resolve(dir, file.path))))) await syncDirectory(directory)
+    for (const directory of new Set(journal.files.map(file => dirname(resolve(dir, file.path))))) {
+      if (await lstat(directory).catch(() => null)) await syncDirectory(directory)
+    }
     for (const file of journal.files) if (file.capture) {
       const temporary = `${resolve(dir, file.path)}.${file.capture.token}.tmp`
       if (await fileSnapshot(temporary)) {
         await assertOwned(temporary, file.capture.identity, fence)
         await unlink(temporary)
       }
+    }
+    for (const directory of [...journal.directories ?? []].reverse()) {
+      for (const path of [join(dir, directory.path), join(dir, 'proposals', `.promotion-dir-${directory.stage}`)]) {
+        const stat = await lstat(path, { bigint: true }).catch(error => { if (error.code === 'ENOENT') return null; throw error })
+        if (!stat) continue
+        if (!stat.isDirectory() || stat.isSymbolicLink() || stat.dev.toString() !== directory.dev || stat.ino.toString() !== directory.ino) conflict(path)
+        await rmdir(path)
+        await syncDirectory(dirname(path))
+      }
+      validated.directory(directory.path, null)
+      if (publicationFence && 'directory' in publicationFence) (publicationFence as typeof validated).directory(directory.path, null)
     }
     await removeOwned(journalPath, journalFile!.identity, fence)
     await syncDirectory(dirname(journalPath))
@@ -812,14 +870,6 @@ export class Store {
     await capture(journalPath, byteHash(Buffer.from(source)), byteHash, fence, txid)
   }
 
-  private async contentHash(path: string) {
-    await noLink(path, true)
-    try { return hash(await readFile(path, 'utf8')) }
-    catch (e) { if ((e as NodeJS.ErrnoException).code === 'ENOENT') return null; throw e }
-  }
-  private publicationHash(path: string, bytes: Buffer) {
-    return ['package.json', 'bun.lock'].includes(path) ? byteHash(bytes) : hash(bytes.toString('utf8'))
-  }
   // Caller holds the instance lock across loading guards, staging, publication and rollback.
   async commit(instance: string, files: { path: string; data: string | Uint8Array; create?: boolean }[], guards: Bundle['guards'], verify?: () => Promise<void>): Promise<void> {
     const dir = await this.directory(instance)
@@ -829,7 +879,7 @@ export class Store {
     const journal: OwnedJournal = { version: 3, transactionId: crypto.randomUUID(), files: [] }
     let source: string
     const staged = new Map<string, { path: string; identity: FileIdentity }>()
-    const fence = await validatePaths(dir, files.map(file => file.path))
+    const fence = await validatePaths(dir, files.map(file => file.path), true, true)
     const cleanupStaged = async () => {
       for (const file of staged.values()) {
         if (sameFile((await fileSnapshot(file.path))?.identity, file.identity)) {
@@ -838,11 +888,22 @@ export class Store {
       }
     }
     try {
+      const parents = new Set(files.filter(file => file.path.startsWith('locales/')).flatMap(file => ['locales', dirname(file.path)]))
+      for (const path of [...parents].sort()) {
+        if (await lstat(join(dir, path)).catch(error => { if (error.code === 'ENOENT') return null; throw error })) continue
+        const stage = crypto.randomUUID(), temporary = join(dir, 'proposals', `.promotion-dir-${stage}`)
+        await fence(temporary)
+        await mkdir(temporary, { mode: 0o700 })
+        const stat = await lstat(temporary, { bigint: true })
+        ;(journal.directories ??= []).push({ path, stage, dev: stat.dev.toString(), ino: stat.ino.toString() })
+        await syncDirectory(temporary)
+      }
+      await syncDirectory(join(dir, 'proposals'))
       for (const f of files) {
         const path = join(dir, f.path)
         const before = await fileSnapshot(path)
         if (f.create && before !== null) fail('migration_exists', 'Migration file already exists', 409)
-        if (!Object.hasOwn(expected, f.path)) expected[f.path] = before === null ? null : this.publicationHash(f.path, before.bytes)
+        if (!Object.hasOwn(expected, f.path)) expected[f.path] = before === null ? null : byteHash(before.bytes)
         expectedBytes.set(f.path, before?.identity.hash ?? null)
         const stage = crypto.randomUUID(), temporary = join(dir, 'proposals', `.promotion-${stage}.tmp`)
         await fence(temporary)
@@ -860,7 +921,11 @@ export class Store {
       }
       source = json(journal)
       if (!journalSchema.safeParse(JSON.parse(source)).success) fail('invalid_journal', 'Invalid promotion journal', 500)
-    } catch (error) { await cleanupStaged(); throw error }
+    } catch (error) {
+      await cleanupStaged()
+      for (const directory of journal.directories ?? []) await rmdir(join(dir, 'proposals', `.promotion-dir-${directory.stage}`))
+      throw error
+    }
     const internalPaths = new Set([
       ...[...staged.values()].map(file => file.path),
       ...journal.files.flatMap(file => file.capture ? [`${join(dir, file.path)}.${file.capture.token}.tmp`] : []),
@@ -868,9 +933,8 @@ export class Store {
     const check = async (temporary?: string, publishing?: string) => {
       const paths = new Set([
         ...Object.keys(expected),
-        // Composition publication must also reject newly added authored graph
-        // inputs, as well as edits/deletions of the originally guarded paths.
-        ...(Object.hasOwn(guards, 'runtime.ts') ? Object.keys(await replaySources(dir, { accessLock: true })) : []),
+        // Reject additions as well as edits/deletions of tracked graph inputs.
+        ...Object.keys(await replaySources(dir, { accessLock: true, presentation: Object.hasOwn(guards, 'locales/en/domain.json') })),
         ...(await readdir(dir)).filter(n => /^config(?:\.[a-z0-9_-]+)?\.(ts|json)$/.test(n)),
         ...(await readdir(join(dir, 'migrations'))).filter(n => n !== '.gitkeep').map(n => `migrations/${n}`),
       ])
@@ -878,8 +942,7 @@ export class Store {
       if (publishing) { paths.delete(publishing); paths.add(publishing) }
       for (const path of paths) {
         if (join(dir, path) === temporary || internalPaths.has(join(dir, path))) continue
-        if ((['package.json', 'bun.lock'].includes(path)
-          ? await dependencyHash(join(dir, path)) : await this.contentHash(join(dir, path))) !== (expected[path] ?? null)
+        if ((await dependencyHash(join(dir, path))) !== (expected[path] ?? null)
           || (expectedBytes.has(path) && await dependencyHash(join(dir, path)) !== expectedBytes.get(path))) {
           fail('concurrent_modification', `Instance files changed during promotion: ${path}`, 409)
         }
@@ -895,6 +958,17 @@ export class Store {
       // The immutable durable journal records original and staged inode identities
       // before capture or publication. Restart never infers ownership from bytes.
       await syncDirectory(dirname(journalPath))
+      for (const directory of journal.directories ?? []) {
+        const path = join(dir, directory.path), temporary = join(dir, 'proposals', `.promotion-dir-${directory.stage}`)
+        await fence(join(path, '.directory-fence'))
+        if (await lstat(path).catch(error => { if (error.code === 'ENOENT') return null; throw error })) conflict(path)
+        const stat = await lstat(temporary, { bigint: true })
+        if (!stat.isDirectory() || stat.isSymbolicLink() || stat.dev.toString() !== directory.dev || stat.ino.toString() !== directory.ino) conflict(temporary)
+        await rename(temporary, path)
+        fence.directory(directory.path, directory)
+        await syncDirectory(dirname(path))
+        await syncDirectory(join(dir, 'proposals'))
+      }
       for (const f of files) {
         const path = join(dir, f.path), stage = staged.get(f.path)!
         await check(stage.path, f.path)
@@ -904,7 +978,7 @@ export class Store {
         try { await install(stage.path, path, fence, undefined, stage.identity) }
         catch (error) { if ((error as NodeJS.ErrnoException).code === 'EEXIST') conflict(path); throw error }
         await assertOwned(path, stage.identity, fence)
-        expected[f.path] = this.publicationHash(f.path, Buffer.from(f.data))
+        expected[f.path] = byteHash(Buffer.from(f.data))
         expectedBytes.set(f.path, byteHash(Buffer.from(f.data)))
       }
       await check()
@@ -921,7 +995,16 @@ export class Store {
       // journal destination belongs to somebody else even if its bytes match.
       if (journalIdentity) await this.rollbackOwned(dir, journal, source, fence, journalIdentity)
       throw error
-    } finally { await cleanupStaged() }
+    } finally {
+      await cleanupStaged()
+      if (!journalIdentity) for (const directory of journal.directories ?? []) {
+        const path = join(dir, 'proposals', `.promotion-dir-${directory.stage}`)
+        const stat = await lstat(path, { bigint: true }).catch(error => { if (error.code === 'ENOENT') return null; throw error })
+        if (stat?.isDirectory() && stat.dev.toString() === directory.dev && stat.ino.toString() === directory.ino) {
+          await fence(path); await rmdir(path)
+        }
+      }
+    }
     // Journal retirement is the durable commit point. Failed disposal can leave
     // harmless retained originals, but cannot revoke a completed publication.
     for (const file of journal.files) if (file.capture) {

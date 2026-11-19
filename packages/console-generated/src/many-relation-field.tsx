@@ -11,7 +11,7 @@ export function ManyRelationField({ model, caps, orgId, entity, name, target, va
   const ids: string[] = value ? JSON.parse(value) : []
   const choices = usePickerSearch(model, caps, orgId, target, request)
   const { allowed, result, rows } = choices
-  const selected = useSelectedReferences(model, caps, orgId, target, ids, rows, request)
+  const selected = useSelectedReferences(model, caps, orgId, target, ids, request)
   const label = (row?: Record<string, any>) => !row ? t('unavailableRecord') : recordLabel(model, target, row, caps, i18n.language, t)
   return <div className="grid gap-2">
     <EntityPicker label={t(`relation_${name}`)} placeholder={t('search', { context: target })} remote value="" options={allowed ? rows.filter(row => !ids.includes(row.id)).map(row => ({ id: row.id, label: label(row) })) : []}

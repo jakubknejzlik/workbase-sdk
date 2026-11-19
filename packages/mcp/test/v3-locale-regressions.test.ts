@@ -1,3 +1,4 @@
+import { csCatalogChanges } from './presentation-fixture.ts'
 import { afterEach, expect, it } from 'vitest'
 import { mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -106,7 +107,7 @@ it.each(['', 'consumer/nested/app'])('promotes locale with SDK-relative imports 
   const before = await Promise.all(preserved.map(path => readFile(join(root, path), 'utf8')))
   const { call, close } = await connect(root)
   try {
-    await promote(call, [{ kind: 'set_locale', languages: ['en', 'cs'] }])
+    await promote(call, [{ kind: 'set_locale', languages: ['en', 'cs'] }, ...csCatalogChanges])
     const after = await readFile(join(root, 'config.ts'), 'utf8')
     expect(after.match(/^import .*$/gm)).toEqual(source.match(/^import .*$/gm))
     expect(await Promise.all(preserved.map(path => readFile(join(root, path), 'utf8')))).toEqual(before)

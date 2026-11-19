@@ -1,4 +1,4 @@
-import { createContext, createElement as h, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
+import { createContext, createElement as h, useContext, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { QueryClient, QueryClientProvider, useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useBlocker, useNavigate } from '@tanstack/react-router'
 import { ApiFailure, cacheKey, canonicalJSON, createClient, diff, type Client, type ClientRequestInit, type EntityMeta, type FieldMeta, type Issue, type RecordData } from '../client'
@@ -15,9 +15,12 @@ export { useAuthDirty } from './auth-dirty'
 export { Session } from './session'
 export { AuthShell, authReturnTo, createAuthI18n, type AuthShellProps } from './auth-shell'
 export { Shell } from './shell'
-export type State<T> = { kind: 'loading' | 'empty' | 'notFound' | 'forbidden' | 'network' } | { kind: 'ready'; data: T } | { kind: 'validation'; issues: Issue[] }
+export type State<T> = { kind: 'loading' | 'empty' | 'notFound' | 'forbidden' | 'network' | 'uniqueConflict' | 'refEqualityMismatch' | 'refImmutable' } | { kind: 'ready'; data: T } | { kind: 'validation'; issues: Issue[] }
 export function failureState(error: unknown): State<never> {
   return error instanceof ApiFailure && error.status === 404 ? { kind: 'notFound' } : error instanceof ApiFailure && error.status === 403 ? { kind: 'forbidden' }
+    : error instanceof ApiFailure && error.status === 422 && error.code === 'ref_equality_mismatch' ? { kind: 'refEqualityMismatch' }
+    : error instanceof ApiFailure && error.status === 409 && error.code === 'ref_immutable' ? { kind: 'refImmutable' }
+    : error instanceof ApiFailure && error.status === 409 && error.code === 'unique_conflict' ? { kind: 'uniqueConflict' }
     : error instanceof ApiFailure && error.issues ? { kind: 'validation', issues: error.issues } : { kind: 'network' }
 }
 type Runtime = { client: Client; identity: { actorId: string; orgId: string }; t: Translate; slots: Record<string, Slot>; caps?: Capabilities }
@@ -28,20 +31,33 @@ export type ProviderProps = { caps?: Capabilities; onAuthorizationFailure?: (sta
 export function ConsoleProvider({ identity, t, baseURL = '', fetch: transport = globalThis.fetch, slots = {}, i18n, caps, onAuthorizationFailure, children }: ProviderProps) {
   const language = useSyncExternalStore(i18n?.subscribe ?? (() => () => {}), i18n?.language ?? (() => ''), i18n?.language ?? (() => ''))
   // A fresh translator identity per language makes memoized authored consumers re-render on language change.
-  const translate = useMemo<Translate>(() => t.bind(null), [t, language])
+  const translate = useMemo<Translate>(() => Object.assign(t.bind(null), { exists: t.exists }), [t, language])
   const scopeKey = canonicalJSON([identity.actorId, identity.orgId, caps ?? null])
   const client = useMemo(() => createClient({ baseURL, ...identity, fetch: transport, onAuthorizationFailure }), [baseURL, scopeKey, transport, onAuthorizationFailure])
-  const queries = useMemo(() => new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity, refetchOnWindowFocus: false } } }), [client])
-  useEffect(() => client.subscribe(() => { void queries.invalidateQueries() }), [client, queries])
+  const queries = useMemo(() => new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity, refetchOnWindowFocus: false, structuralSharing: false } } }), [client])
+  useEffect(() => client.subscribe(event => {
+    if (event.kind === 'detail') queries.setQueryData([cacheKey('one', event.entity, { id: event.id })], event.record)
+    else if (event.kind === 'invalidate') {
+      void queries.cancelQueries()
+      void queries.invalidateQueries({ refetchType: event.refetch ? 'active' : 'none' })
+    } else {
+      const owner = cacheKey('one', event.entity, { id: event.id })
+      // The client already attempted this owner once, including on refusals.
+      void queries.invalidateQueries({ predicate: query => query.queryKey[0] !== owner })
+    }
+  }), [client, queries])
   useEffect(() => () => queries.clear(), [queries])
   return h(Context.Provider, { value: { client, identity, t: translate, slots, caps }, key: canonicalJSON([baseURL, scopeKey]) }, h(TranslationContext.Provider, { value: translate }, h(QueryClientProvider, { client: queries }, children)))
 }
 export function useRuntime() { const runtime = useContext(Context); if (!runtime) throw new Error('ConsoleProvider is required'); return runtime }
 export function useRecord(entity: string, id: string) {
   const { client } = useRuntime()
+  useSyncExternalStore(client.subscribe, client.snapshot, client.snapshot)
   const query = useQuery({ queryKey: [cacheKey('one', entity, { id })], queryFn: ({ signal }) => client.one(entity, { id }, signal, true) })
-  const state: State<RecordData> = query.data ? { kind: 'ready', data: query.data } : query.isPending ? { kind: 'loading' } : failureState(query.error)
-  return { state, reload: async () => { client.invalidate(); const result = await query.refetch(); if (result.error) throw result.error; return result.data! } }
+  const availabilityFresh = !!query.data && !query.isFetching && !query.isError && client.detailFresh(entity, id, query.data)
+  const data = query.data && (availabilityFresh ? query.data : { ...query.data, actions: undefined })
+  const state: State<RecordData> = data ? { kind: 'ready', data } : query.isPending ? { kind: 'loading' } : failureState(query.error)
+  return { state, availabilityFresh, reload: async () => { client.invalidate(); const result = await query.refetch(); if (result.error) throw result.error; return result.data! } }
 }
 export function useList(entity: string, metadata: EntityMeta, bind: Record<string, string>) {
   const { client, caps } = useRuntime(), queries = useQueryClient(), key = canonicalJSON(bind), metaKey = canonicalJSON(metadata)
@@ -105,14 +121,16 @@ function ResolvedSlot({ slot, props, ctx }: { slot: Slot; props: Record<string, 
   }
   return h(slot.component, { ...resolved, t: ctx.t })
 }
-export function reasonKey(reason: string) { return (reason.startsWith('access.') ? 'sdk:' : 'ui:') + reason }
+export function reasonKey(reason: string) { return reason === 'sdk.action_unavailable' ? 'sdk:action_unavailable' : (reason.startsWith('access.') ? 'sdk:' : 'ui:') + reason }
 function RecordAction({ ctx, name }: { ctx: RenderContext; name: string }) {
   const [pending, setPending] = useState(false), [failure, setFailure] = useState<unknown>()
+  const reasonId = useId()
   const controller = useRef<AbortController | null>(null)
   useEffect(() => () => controller.current?.abort(), [])
   const actions = ctx.record.actions as Record<string, { enabled: boolean; reason?: string }> | undefined
   if (!actions || !Object.hasOwn(actions, name)) return null
   const action = actions[name]
+  const reason = !action.enabled && action.reason
   async function run() {
     if (pending || !action.enabled) return
     controller.current = new AbortController(); setPending(true); setFailure(undefined)
@@ -120,8 +138,8 @@ function RecordAction({ ctx, name }: { ctx: RenderContext; name: string }) {
     catch (error) { if (!controller.current.signal.aborted) setFailure(error) }
     finally { if (!controller.current.signal.aborted) setPending(false) }
   }
-  return h('div', null, h('button', { type: 'button', disabled: pending || !action.enabled, onClick: () => { void run() } }, ctx.t('ui:actions.' + name)),
-    !action.enabled && action.reason && h('span', null, ctx.t(reasonKey(action.reason))), !!failure && message(failureState(failure), ctx.t))
+  return h('div', null, h('button', { type: 'button', disabled: pending || !action.enabled, 'aria-describedby': reason ? reasonId : undefined, onClick: () => { void run() } }, ctx.t('ui:actions.' + name)),
+    reason && h('span', { id: reasonId }, ctx.t(reasonKey(reason))), !!failure && message(failureState(failure), ctx.t))
 }
 function Tabs({ node, ctx }: { node: Exclude<Node, string | { kind: 'slot' } | { kind: 'action' }>; ctx: RenderContext }) {
   const [active, setActive] = useState(0)
@@ -171,8 +189,9 @@ function Form({ props, metadata, initial, reload }: { props: ViewProps; metadata
   }
   const conflict = hadConflict
   const state = failure ? failureState(failure) : undefined
-  const ctx: RenderContext = { ...runtime, slots: props.slots ?? runtime.slots, metadata, entity: definition.entity!, mode: definition.mode, record: base, draft, change: (name, value) => setDraft(current => ({ ...current, [name]: value })), issues: state?.kind === 'validation' ? state.issues : [] }
-  return h('form', { noValidate: true, onSubmit: (e: { preventDefault(): void }) => { e.preventDefault(); void save() } },
+  const ctx: RenderContext = { ...runtime, slots: props.slots ?? runtime.slots, metadata, entity: definition.entity!, mode: definition.mode, record: { ...base, actions: initial.actions, access: initial.access }, draft, change: (name, value) => setDraft(current => ({ ...current, [name]: value })), issues: state?.kind === 'validation' ? state.issues : [] }
+  const singularKey = 'domain:entity.' + definition.entity + '.singular'
+  return h('form', { 'aria-label': translate.exists?.(singularKey) ? translate(singularKey) : undefined, noValidate: true, onSubmit: (e: { preventDefault(): void }) => { e.preventDefault(); void save() } },
     conflict ? h('div', { role: 'alert' }, translate('sdk:conflict'), h('button', { type: 'button', disabled: saving, onClick: () => { void reloadCopy() } }, translate('sdk:reloadServerCopy'))) : state && message(state, translate),
     ...definition.layout.map((node, i) => h('div', { key: i }, renderNode(node, ctx))),
     h('button', { type: 'submit', disabled: saving }, translate('sdk:save')),
@@ -193,10 +212,11 @@ function ListView({ props, metadata }: { props: ViewProps; metadata: EntityMeta 
   const [bind, setBind] = useState(resolved), { state, more, hasMore, loadingMore } = useList(props.definition.entity!, metadata, bind)
   const create = props.routes?.filter(route => route.entity === props.definition.entity && route.mode === 'create' && gate(runtime.caps, { entities: props.entities }).allows(route))
   const createPath = create?.length === 1 && !Object.keys(create[0].params).length ? buildPath(create[0].path, {}) : undefined
+  const objectKey = 'domain:entity.' + props.definition.entity + '.object'
   useEffect(() => setBind(resolved), [canonicalJSON(resolved)])
   return h('div', null,
     h('p', null, translate('domain:entity.' + props.definition.entity, { count: state.kind === 'ready' ? state.data.length : 0 })),
-    createPath && h('button', { onClick: () => props.navigate(createPath) }, translate('sdk:create')),
+    createPath && h('button', { onClick: () => props.navigate(createPath) }, translate.exists?.(objectKey) ? translate('sdk:createEntity', { object: translate(objectKey) }) : translate('sdk:create')),
     metadata.displayField !== 'id' && h('input', { 'aria-label': translate('sdk:search'), value: bind.search ?? '', onChange: (e: { target: { value: string } }) => setBind(current => ({ ...current, search: e.target.value })) }),
     h('select', { 'aria-label': translate('sdk:sort'), value: bind.sort || metadata.displayField, onChange: (e: { target: { value: string } }) => setBind(current => ({ ...current, sort: e.target.value })) }, ...[...new Set(['id', ...Object.keys(metadata.fields)])].map(field => h('option', { key: field, value: field }, field === 'id' ? translate('sdk:identifier') : translate('domain:field.' + props.definition.entity + '.' + field)))),
     h('select', { 'aria-label': translate('sdk:direction'), value: bind.dir || 'asc', onChange: (e: { target: { value: string } }) => setBind(current => ({ ...current, dir: e.target.value })) }, ...['asc', 'desc'].map(dir => h('option', { key: dir, value: dir }, translate('sdk:' + dir)))),

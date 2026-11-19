@@ -1,3 +1,4 @@
+import { entityConstraintsSchema, validateEntityConstraints } from './entity-constraints'
 import { baseFields } from './model-inputs'
 export { baseFields, bodyValidator } from './model-inputs'
 import { recordActionsSchema } from './record-actions-data'
@@ -11,7 +12,9 @@ import type { WorkbasePlugin } from './kernel/plugin'
 import { resolvePlugins } from './kernel/composition'
 import { expand, type ShorthandInput } from './config-shorthand'
 import { validatePolicies } from './policies'
-import { filterSchema } from './query/schema'
+import { listInputSchema, normalizeListConfig, type ListConfig, type ListInput } from './list-config'
+export { normalizeListConfig } from './list-config'
+export type { ListInput, ListConfig } from './list-config'
 import { formDisplaySchema, formSectionsSchema, validateFormDisplay } from './form-display'
 import { detailDisplaySchema, validateDetailDisplay } from './detail-display'
 import { validateDisplayFields, isDisplayFieldError } from './display-field'
@@ -21,7 +24,7 @@ export { Q, Cond }
 /** SQLite date formatting with column operands; values use the library wire encoding. */
 export const Fn = { ...LibraryFn, strftime: (format: string, date: string) => Q.expr(`FN(${JSON.stringify(['STRFTIME', Q.value(format).serialize(), Q.expr(date).serialize()])})`) }
 
-export const CORE_VERSION = '0.3.1'
+export const CORE_VERSION = '0.4.0'
 const navigationIconSchema = z.enum(['LayoutDashboard', 'Users', 'MapPin', 'Coins', 'Wallet', 'ArrowLeftRight', 'Settings', 'Building2', 'Activity', 'Workflow', 'Database', 'Folder'])
 const identifier = z.string().regex(/^[a-z][a-z0-9_]*$/)
 export const serializedExpressionSchema = z.union([z.string().min(1).max(32000), z.record(z.string(), z.unknown()).transform(value => JSON.stringify(value))])
@@ -63,24 +66,12 @@ export const defaultOrganizationPermissions: Record<string, OrganizationAction[]
     return grants === undefined ? [] : [[role, grants]]
   }),
 )
-const filterKind = z.enum(['text', 'enum', 'relation', 'number', 'date', 'boolean'])
-const listHints = z.strictObject({
-  columns: z.array(identifier).optional(),
-  relatedColumns: z.record(identifier, z.strictObject({ via: identifier, field: identifier })).optional(),
-  compact: z.boolean().optional(), mobileCards: z.boolean().optional(),
-  defaultSort: z.strictObject({ key: identifier, direction: z.enum(['asc', 'desc']) }).optional(),
-  pageSize: z.union([z.literal(10), z.literal(20), z.literal(30), z.literal(50), z.literal(100)]).optional(),
-  search: z.array(identifier).optional(),
-  filter: z.record(identifier, z.union([z.literal(false), filterKind])).optional(),
-  views: z.array(z.strictObject({ id: identifier, label: z.string().min(1), where: z.record(z.string(), z.unknown()), default: z.boolean().optional() })).optional(),
-  sort: z.record(identifier, z.union([z.literal(false), z.strictObject({ fields: z.array(identifier).min(1).max(4) })])).optional(),
-})
 const schema = z.object({
   plugins: z.array(z.custom<WorkbasePlugin>()).readonly().optional(),
   interactive: z.boolean().optional(),
   ui: z.strictObject({
     defaultLanguage: z.enum(['en', 'cs']).optional(),
-    entities: z.record(identifier, z.strictObject({ views: calendarViewsSchema.optional(), form: formDisplaySchema.optional(), sections: formSectionsSchema.optional(), list: listHints.optional(), lookup: z.boolean().optional(),
+    entities: z.record(identifier, z.strictObject({ views: calendarViewsSchema.optional(), form: formDisplaySchema.optional(), sections: formSectionsSchema.optional(), list: listInputSchema.optional(), lookup: z.boolean().optional(),
       detail: detailDisplaySchema.optional(),
     })),
     navigation: z.strictObject({
@@ -113,6 +104,7 @@ const schema = z.object({
       z.custom<ISequelizable & ISerializable>(value => !!value && typeof (value as ISequelizable).toSQL === 'function' && typeof (value as ISerializable).serialize === 'function'),
       z.string().transform(value => Q.expr(value)),
     ]).optional(),
+    constraints: entityConstraintsSchema.optional(),
     checks: z.array(z.object({ left: identifier, op: z.enum(['<=', '>=']), right: identifier })).default([]),
   })),
   roles: z.array(identifier).min(1),
@@ -127,8 +119,13 @@ const schema = z.object({
 /** Shared schema for source-derived audits and property checks. */
 export const instanceConfigSchema = schema
 export type Field = z.infer<typeof fieldSchema>
-export type InstanceConfig = z.infer<typeof schema> & { effectiveAccess?: import('./access').EffectiveAccessPolicy; openapi?: Record<string, unknown> }
-export type InstanceInput = z.input<typeof schema>
+type ParsedInstance = z.infer<typeof schema>
+type ParsedUI = NonNullable<ParsedInstance['ui']>
+type CanonicalUI = Omit<ParsedUI, 'entities'> & { entities: Record<string, Omit<ParsedUI['entities'][string], 'list'> & { list?: ListConfig }> }
+export type InstanceConfig = Omit<ParsedInstance, 'ui'> & { ui?: CanonicalUI; effectiveAccess?: import('./access').EffectiveAccessPolicy; openapi?: Record<string, unknown> }
+type ParsedInput = z.input<typeof schema>
+type InputUI = NonNullable<ParsedInput['ui']>
+export type InstanceInput = Omit<ParsedInput, 'ui'> & { ui?: Omit<InputUI, 'entities'> & { entities: Record<string, Omit<InputUI['entities'][string], 'list'> & { list?: ListInput }> } }
 export type Operation = 'read' | 'create' | 'update' | 'delete'
 export const reservedEntities = new Set(['users', 'organizations', 'memberships', 'sessions', 'invitations', 'email_outbox', 'audit_outbox', 'security_log', 'idempotency_keys', 'instance_meta', 'webhook_deliveries', 'audit_events', 'd1_migrations', 'identities', 'access_tokens', 'user', 'session', 'account', 'verification', 'rateLimit', 'identity_link_grants', '_plugin_migrations'])
 type InstanceDefinitionInput = Omit<ShorthandInput, 'roles' | 'entities' | 'permissions' | 'baseline'> & { roles?: string[]; entities?: ShorthandInput['entities']; permissions?: ShorthandInput['permissions'] }
@@ -249,6 +246,14 @@ export function normalizeInstance(input: InstanceDefinitionInput, exactRoles = f
           if (!inverse) throw new Error(`Missing inverse pure join relation on ${name}`)
         }
       }
+      if (entity.constraints?.length && name === config.account?.entity) throw new Error('Constraints on the SDK account entity are unsupported')
+      validateEntityConstraints(entity.constraints ?? [], entity.fields, (relative, message) => {
+        path = ['entities', name, 'constraints', ...relative]
+        throw new Error(message)
+      }, config.entities, name)
+      for (const [i, c] of (entity.constraints ?? []).entries()) {
+        if (c.kind === 'ref_immutable' && c.referencedBy.entity === config.account?.entity) { path = ['entities', name, 'constraints', i, 'referencedBy', 'entity']; throw new Error('Immutability cannot be referenced by the SDK account entity') }
+      }
       for (const [i, c] of entity.checks.entries()) {
         path = ['entities', name, 'checks', i, !entity.fields[c.left] || entity.fields[c.left].computed ? 'left' : 'right']
         if (!entity.fields[c.left] || !entity.fields[c.right] || entity.fields[c.left].computed || entity.fields[c.right].computed) throw new Error('Unknown check field')
@@ -310,29 +315,7 @@ export function normalizeInstance(input: InstanceDefinitionInput, exactRoles = f
       throw error
     }
     validateCalendarViews(config, name, hints.views)
-    const list = hints.list
-    if (!list) continue
-    const scalar = (field: string) => known(field) && entity.fields[field]?.type !== 'ref'
-    for (const [key, column] of Object.entries(list.relatedColumns ?? {})) {
-      const via = entity.fields[column.via]
-      const target = via?.type === 'ref' && via.entity ? config.entities[via.entity] : undefined
-      const field = target?.fields[column.field]
-      if (known(key) || !field || field.type !== 'ref' || !field.entity) throw new Error(`Invalid UI related column: ${name}.${key}`)
-    }
-    for (const field of [...(list.columns ?? []).filter(field => !list.relatedColumns?.[field]), ...(list.search ?? []), ...Object.keys(list.sort ?? {}), ...Object.keys(list.filter ?? {})]) if (!known(field)) throw new Error(`Unknown UI field: ${name}.${field}`)
-    for (const field of list.search ?? []) if (!['string', 'text'].includes(entity.fields[field]?.type ?? (field === 'id' ? 'string' : ''))) throw new Error(`Invalid UI search field: ${name}.${field}`)
-    for (const [key, hint] of Object.entries(list.sort ?? {})) if (hint) {
-      if (new Set(hint.fields).size !== hint.fields.length) throw new Error(`Duplicate UI sort field: ${name}.${key}`)
-      if (!scalar(key) || !hint.fields.every(scalar)) throw new Error(`Invalid UI sort fields: ${name}`)
-    }
-    const kindFor = (field: string) => ({ string: 'text', text: 'text', ref: 'relation', enum: 'enum', bool: 'boolean', int: 'number', float: 'number', datetime: 'date' } as Record<string, string>)[entity.fields[field]?.type ?? (field === 'version' ? 'int' : ['created_at', 'updated_at'].includes(field) ? 'datetime' : 'string')]
-    for (const [field, kind] of Object.entries(list.filter ?? {})) if (kind && kind !== kindFor(field)) throw new Error(`Invalid UI filter kind: ${name}.${field}`)
-    const ids = (list.views ?? []).map(view => view.id)
-    if (ids.includes('all')) throw new Error(`Reserved UI view id: ${name}.all`)
-    if (new Set(ids).size !== ids.length) throw new Error(`Duplicate UI view id: ${name}`)
-    if ((list.views ?? []).filter(view => view.default).length > 1) throw new Error(`Multiple default UI views: ${name}`)
-    for (const view of list.views ?? []) if (!filterSchema(config)(name, 0).safeParse(view.where).success) throw new Error(`Invalid UI view where: ${name}.${view.id}`)
-    if (list.defaultSort && (!scalar(list.defaultSort.key) || list.sort?.[list.defaultSort.key] === false || (['enum', 'text'].includes(entity.fields[list.defaultSort.key]?.type) && !list.sort?.[list.defaultSort.key]))) throw new Error(`Invalid UI default sort: ${name}`)
+    if (hints.list) hints.list = normalizeListConfig(config, name, hints.list)
   }
   validateLabelExpressions(config)
   validatePolicies(config)

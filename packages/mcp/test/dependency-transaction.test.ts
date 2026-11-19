@@ -47,7 +47,7 @@ it('publishes manifest + lock + migration + history + proposal as one guarded sn
   expect(await snapshot()).toEqual(files.map(f => Buffer.from(f.data)))
   expect(await bytes('proposals/.promotion.json')).toBeNull()
   await expect(commit()).rejects.toMatchObject({ code: 'migration_exists' })
-  await expect(store.commit('sample', files.filter(f => !f.create), { ...guards, ...Object.fromEntries(files.map(f => [f.path, ['package.json', 'bun.lock'].includes(f.path) ? rawHash(f.data) : hash(f.data)])) })).resolves.toBeUndefined()
+  await expect(store.commit('sample', files.filter(f => !f.create), { ...guards, ...Object.fromEntries(files.map(f => [f.path, rawHash(f.data)])) })).resolves.toBeUndefined()
 })
 for (const absent of [false, true]) {
   it.each(['proposals/.promotion.json', ...files.map(f => f.path)])(`restores exact bytes after %s publication (dependencies absent=${absent})`, async boundary => {

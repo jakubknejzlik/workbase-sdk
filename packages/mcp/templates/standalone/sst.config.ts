@@ -12,8 +12,10 @@ export default $config({
     }
   },
   async run() {
-    const { provision } = await import('@workbasehq/core/infra/provision')
+    const { provision, ProvisionDiagnostic, resolvePublicOrigin } = await import('@workbasehq/core/infra/provision')
     const { execFileSync } = await import('node:child_process')
+    if (process.env.WORKBASE_DOMAIN !== undefined) throw new ProvisionDiagnostic('provision_legacy_domain_env')
+    const optional = (key: string) => process.env[key]?.trim() || undefined
     const required = (key: string) => {
       const value = process.env[key]
       if (!value) throw new Error(`Set ${key} before running SST`)
@@ -23,15 +25,17 @@ export default $config({
     const mailboxToken = process.env.WORKBASE_DEV_MAILBOX_TOKEN
     if (emailFrom && mailboxToken) throw new Error('EMAIL_FROM cannot be combined with WORKBASE_DEV_MAILBOX_TOKEN')
     if (mailboxToken && !['dev', 'test'].includes($app.stage)) throw new Error('WORKBASE_DEV_MAILBOX_TOKEN requires dev or test stage')
-    const domain = process.env.WORKBASE_DOMAIN?.replaceAll('{stage}', $app.stage)
+    // Only an unset hostname is optional; validate the raw value without normalization.
+    const publicHostname = process.env.WORKBASE_PUBLIC_HOSTNAME
+    const authBaseUrl = optional('AUTH_BASE_URL')?.replaceAll('{stage}', $app.stage)
+    resolvePublicOrigin({ publicHostname, authBaseUrl })
     // Also build for direct `sst deploy`, so stale assets cannot be uploaded.
     execFileSync('bun', ['run', 'build:console'], { stdio: 'inherit' })
     const deployed = await provision({
       configPath: './runtime.ts', handler: './src/index.ts', migrationsDir: './migrations',
       resourcePrefix: required('WORKBASE_RESOURCE_PREFIX'), stage: $app.stage,
-      authSecret: required('BETTER_AUTH_SECRET'), authBaseUrl: required('AUTH_BASE_URL').replaceAll('{stage}', $app.stage),
+      authSecret: required('BETTER_AUTH_SECRET'), publicHostname, authBaseUrl,
       assetsDir: './dist/console',
-      ...(domain ? { domain } : {}),
       opsToken: required('WORKBASE_OPS_TOKEN'),
       ...(mailboxToken ? { devMailbox: { token: mailboxToken } } : { email: { from: required('EMAIL_FROM') } }),
     })

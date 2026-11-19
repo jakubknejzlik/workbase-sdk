@@ -1,3 +1,4 @@
+import { canGrantRole, organizationPermission } from './organization-permissions'
 import { readableComputed } from './query/expressions'
 import type { KernelRegistry } from './kernel/registry'
 import type { Scope } from './types'
@@ -79,8 +80,18 @@ export function consoleAuthorization(kernel: KernelRegistry, scope: Scope, caps:
     } catch (error) { if (error instanceof QueryError) return undefined; throw error }
   }
   const predicate = (entity: string, where: Record<string, unknown>) => !!query({ entity, select: ['id'], limit: 1, where })
+  function rowInvitations(entity: string): boolean {
+    if (!kernel.providers.has('members') || !read(entity, 'id') || !Object.values(config.entities[entity].fields).some(field => field.userLink)) return false
+    try {
+      kernel.permission(scope, entity, 'create')
+      kernel.resourcePermission(scope, 'invitations.create')
+      organizationPermission(config, scope, 'invitations.create')
+      return canGrantRole(config, scope.role, 'member')
+    } catch { return false }
+  }
+  const listRowAccess = (entity: string) => rowInvitations(entity) && grant('invitations.read')
   const schema = (node: Record<string, unknown>) => node.sensitive !== true
     && (node.referenceEntity === undefined || typeof node.referenceEntity === 'string' && canRead(node.referenceEntity))
-  return { operation, command, grant, canRead, read, write, literals, defaults, relation, label, query, predicate, schema }
+  return { operation, command, grant, canRead, read, write, literals, defaults, relation, label, query, predicate, schema, rowInvitations, listRowAccess }
 }
 export type ConsoleAuthorization = ReturnType<typeof consoleAuthorization>

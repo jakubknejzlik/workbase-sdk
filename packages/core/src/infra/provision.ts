@@ -7,6 +7,7 @@ import type { CloudflareRuntime, DatabaseResource, KvResource, NativeBinding, Qu
 
 export { createProvisionPlan, validateProvisionOptions, type ProvisionOptions, type ProvisionPlan } from './provision-plan'
 export { ProvisionDiagnostic, provisionErrorMessage, type ProvisionDiagnosticCode } from './provision-diagnostics'
+export { resolvePublicOrigin, type ResolvedPublicOrigin, type ProvisionWarning } from './public-origin'
 
 // These names are supplied by SST's run-time config bundler, including in npm
 // dependencies. Type-only declarations disappear before SST injects its imports.
@@ -38,6 +39,7 @@ export async function provision(options: ProvisionOptions): Promise<ProvisionRes
   const accountId = options.accountId ?? process.env.CLOUDFLARE_DEFAULT_ACCOUNT_ID
   if (!accountId || !/^[a-f0-9]{32}$/.test(accountId)) throw new ProvisionDiagnostic('provision_invalid_account_id')
   const command = sstCommand($cli.paths.platform)
+  for (const warning of plan.warnings) console.warn(`${warning.code}: ${warning.message}`)
   try {
     const protect = options.protect ?? options.stage === 'production'
     const protection = { protect, retainOnDelete: protect }
@@ -85,7 +87,7 @@ export async function provision(options: ProvisionOptions): Promise<ProvisionRes
       ...(options.email ? [{ name: 'EMAIL', type: 'send_email', allowedSenderAddresses: [options.email.from] }] : []),
     ]
     const worker = new sst.cloudflare.Worker(`${plan.id}Worker`, {
-      accountId, handler: plan.handler, domain: options.domain, url: true, dev: false,
+      accountId, handler: plan.handler, domain: plan.publicHostname, url: true, dev: false,
       ...(plan.assetsDir ? { assets: { directory: plan.assetsDir, htmlHandling: 'none' as const, notFoundHandling: 'none' as const, runWorkerFirst: true as const } } : {}),
       compatibility: { date: '2026-08-01', flags: ['nodejs_compat'] },
       environment: plan.environment,

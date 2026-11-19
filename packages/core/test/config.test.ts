@@ -94,9 +94,9 @@ it('O owner-only configs retain implicit owner grants and reject explicit undecl
 
 it('C7b validates additive filter kinds and named-view grammar at config load', () => {
   const input = { ...sample, ui: { entities: { jobs: { list: { filter: { title: 'text' as const, client_id: false as const }, views: [{ id: 'open', label: 'viewOpen', where: { title: { contains: 'Case' } } }] } } } } }
-  expect(defineInstance(input).ui).toEqual(input.ui)
+  expect(defineInstance(input).ui?.entities.jobs.list?.filter).toEqual({ title: { kind: 'text', placement: 'panel', operators: ['contains'] }, client_id: false })
   for (const list of [
-    { filter: { missing: false } }, { filter: { title: 'number' } }, { views: [{ id: 'all', label: 'viewAll', where: {} }] },
+    { filter: { missing: false } }, { filter: { title: 'number' } }, { views: [{ id: 'all', label: 'viewAll', where: { title: { contains: 'restricted' } } }] },
     { views: [{ id: 'open', label: 'Open', where: { unknown: { eq: 'x' } } }] },
     { views: [{ id: 'open', label: 'Open', where: { title: { sql: 'x' } } }] },
     { views: [{ id: 'open', label: 'Open', where: {} }, { id: 'open', label: 'Again', where: {} }] },

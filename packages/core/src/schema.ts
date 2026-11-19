@@ -1,3 +1,5 @@
+import { entityConstraintsSchema, validateEntityConstraints, type UniqueConstraint, type RefEqualityConstraint, type RefImmutableConstraint } from './entity-constraints'
+export type { EntityConstraint } from './entity-constraints'
 import { assertSchemaLockBound } from './schema/revision'
 export { bindSchemaLock } from './schema/revision'
 export { createPhysicalNameResolver } from './schema/physical-names'
@@ -26,6 +28,7 @@ export const declarationSchema = z.strictObject({
   fields: z.record(identifier, fieldSchema.strict()),
   relations: z.record(identifier, relationSchema).optional(),
   displayField: z.union([serializedExpressionSchema, z.literal(false)]).optional(),
+  constraints: entityConstraintsSchema.optional(),
   checks: z.array(z.strictObject({ left: identifier, op: z.enum(['<=', '>=']), right: identifier })).optional(),
   commandsOnly: z.boolean().optional(),
   access: entityAccessSchema.optional(),
@@ -47,8 +50,9 @@ type LiteralFields<T extends EntityInput> = {
   [K in keyof T['fields']]: T['fields'][K] & Record<Exclude<keyof T['fields'][K], keyof EntityInput['fields'][string]>, never>
 }
 /** Data declaration only. loadConfig additionally enforces the literal source boundary. */
-export function defineEntity<const T extends EntityInput>(input: T & Record<Exclude<keyof T, keyof EntityInput>, never> & { fields: LiteralFields<T>; actions?: { [K in keyof T['actions']]: T['actions'][K] & { available?: { when: ActionWhen<T>; reason: string }[] } } }): EntityDeclaration<T> {
+export function defineEntity<const T extends EntityInput>(input: T & Record<Exclude<keyof T, keyof EntityInput>, never> & { fields: LiteralFields<T>; constraints?: ((UniqueConstraint & { fields: (keyof T['fields'] & string)[]; where?: NonNullable<UniqueConstraint['where']> & { field: keyof T['fields'] & string } }) | (RefEqualityConstraint & { field: keyof T['fields'] & string; through: keyof T['fields'] & string }) | (RefImmutableConstraint & { field: keyof T['fields'] & string }))[]; actions?: { [K in keyof T['actions']]: T['actions'][K] & { available?: { when: ActionWhen<T>; reason: string }[] } } }): EntityDeclaration<T> {
   const entity = parse(declarationSchema, input)
+  validateEntityConstraints(entity.constraints ?? [], entity.fields, (path, message) => { throw new DeclarationError(['constraints', ...path], message) })
   const relations = { ...entity.relations }
   for (const [name, field] of Object.entries(entity.fields)) {
     if (!field.userLink) continue

@@ -461,7 +461,7 @@
     {
       "pathDigest": "b8ad98987e3367e40cc04c1987ee05c6f8d26445ee6744cb83808e9fa3be7a52",
       "lineDigest": "f485347a1a84ae844df684ff12bb8bd2f0d7427dddf6617991a8b0749a243fc6",
-      "lineNumber": 5,
+      "lineNumber": 6,
       "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test."
     },
     {
@@ -653,7 +653,7 @@
     {
       "pathDigest": "f06b688867f786d268328fc2c79b0eb405fff41bacdee92c32ddbed5fd24a37c",
       "lineDigest": "04ea09f3521d4207e11f9fca7440fde19fa5f997df7020ec330e927f311a14d6",
-      "lineNumber": 7,
+      "lineNumber": 8,
       "reason": "Required public npm dependency/import; exact package identity, not an owner deployment."
     },
     {
@@ -721,6 +721,12 @@
       "lineDigest": "f5b88636a5e5a9b7d63a335662b5f5f4ad9cc2e939bfb1b0189ddb76fa4072a2",
       "lineNumber": 98,
       "reason": "Public npm dependency used to copy the existing SDK runtime into offline bridge fixtures; dependency attribution, not private owner content."
+    },
+    {
+      "pathDigest": "b8ad98987e3367e40cc04c1987ee05c6f8d26445ee6744cb83808e9fa3be7a52",
+      "lineDigest": "b7bdee93305257e9353c35389a866d12b63472d58fdcab948e6534143aec77d4",
+      "lineNumber": 3,
+      "reason": "Generic shared single-date picker import from the existing restored UI vendor source; no customer data."
     }
   ],
   "ids": [
@@ -854,6 +860,20 @@
       "value": "0.0.0.0",
       "reason": "Negative test fixture: ops provisioning must reject private/unspecified network hosts; not a deployed host.",
       "lineNumber": 175
+    },
+    {
+      "path": "packages/core/test/infra/provision.test.ts",
+      "line": "  expect(plan.publicOrigin).toBe(inputs.publicHostname?.includes('xn--') ? 'https://app.xn--p1ai' : 'https://neutral.example.test')",
+      "value": "app.xn--p1ai",
+      "reason": "Synthetic punycode-TLD hostname validation assertion; this fixture is never deployed.",
+      "lineNumber": 107
+    },
+    {
+      "path": "packages/mcp/templates/standalone/deploy.env.example",
+      "line": "# Only this fallback expands {stage}, e.g. https://worker-{stage}.account.workers.dev.",
+      "value": "worker-{stage}.account.workers.dev.",
+      "reason": "SDK template comment illustrating a stage placeholder and Cloudflare provider URL; no actual account or deployment.",
+      "lineNumber": 15
     }
   ]
 }

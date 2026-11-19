@@ -54,7 +54,7 @@ describe('safe planning', () => {
       const before = cloneInstanceConfig(config)
       const hinted = cloneInstanceConfig(config)
       hinted.ui = { entities: { [entity]: { list: {
-        columns: ['title', 'id'], search: ['title'],
+        columns: [{ field: 'title' }, { field: 'id' }], search: ['title'],
         sort: { title: { fields: ['title', 'created_at'] }, id: { fields: ['title', 'id'] } },
         defaultSort: { key: 'title', direction: 'desc' },
       } } } }
@@ -67,7 +67,7 @@ describe('safe planning', () => {
       expect(p.target.entities[entity].fields.title).toBeUndefined()
       expect(p.patch).toContainEqual({ op: 'replace', path: `/config/entities/${entity}/displayField`, value: 'summary' })
       expect(p.target.ui?.entities[entity].list).toEqual({
-        columns: ['summary', 'id'], search: ['summary'],
+        columns: [{ field: 'summary' }, { field: 'id' }], search: ['summary'],
         sort: { summary: { fields: ['summary', 'created_at'] }, id: { fields: ['summary', 'id'] } },
         defaultSort: { key: 'summary', direction: 'desc' },
       })
@@ -188,4 +188,35 @@ it('SR-83 field renames preserve composite calendar title operands and secondary
     ui: { entities: { events: { views: [{ kind: 'calendar', startField: 'start', titleFields: ['name'], secondaryField: 'name' }] } } },
   })
   expect(prepare(config, [], [{ kind: 'rename_field', entity: 'events', from: 'name', to: 'title' }]).target.ui?.entities.events.views).toEqual([{ kind: 'calendar', startField: 'start', titleFields: ['title'], secondaryField: 'title' }])
+})
+
+it('renames canonical list field operands through chains while preserving all literal metadata', async () => {
+  const { workerList, workerEntities } = await import('../../core/test/fixtures/list-v2/workers')
+  const config = defineInstance({ id: 'canonical_rename', revision: 1, roles: ['owner'], account: { entity: 'users' }, entities: workerEntities,
+    permissions: { owner: { '*': 'read' } }, ui: { entities: { workers: { list: {
+      ...workerList, columns: [{ field: 'name', label: 'code', secondary: 'code', cell: { kind: 'text' }, defaultVisible: false }, ...workerList.columns!.slice(1)],
+      views: [...workerList.views!, { id: 'by_team', label: 'code', where: { and: [{ team: { name: { eq: 'code' } } }, { name: { contains: 'code' } }] } }, { id: 'access_only', label: 'name', rowAccess: 'expired' }],
+      relatedColumns: { team_location: { via: 'team_id', field: 'location_id' } },
+    } } } } })
+  const before = JSON.stringify(config.ui)
+  const target = prepare(config, [], [
+    { kind: 'rename_field', entity: 'workers', from: 'code', to: 'worker_code' },
+    { kind: 'rename_field', entity: 'workers', from: 'worker_code', to: 'reference' },
+    { kind: 'rename_field', entity: 'workers', from: 'name', to: 'title' },
+    { kind: 'rename_field', entity: 'teams', from: 'name', to: 'title' },
+    { kind: 'rename_field', entity: 'workers', from: 'team_id', to: 'group_id' },
+    { kind: 'rename_field', entity: 'teams', from: 'location_id', to: 'place_id' },
+  ]).target
+  const list = target.ui!.entities.workers.list!
+  expect(list.columns![0]).toEqual({ field: 'title', label: 'code', secondary: 'reference', cell: { kind: 'text' }, defaultVisible: false })
+  expect(list.columns![1]).toEqual({ field: 'group_id' })
+  expect(list.filter!.group_id).toEqual({ kind: 'relation', placement: 'toolbar', operators: ['in'] })
+  expect(list.filter!.created_at).toEqual({ kind: 'date', placement: 'panel', operators: ['gte'], label: 'Vytvořeno od' })
+  expect(list.columns!.find(column => column.field === 'status')!.cell).toEqual({ kind: 'badge', tones: { active: 'positive', inactive: 'neutral' } })
+  expect(list.relatedColumns).toEqual({ team_location: { via: 'group_id', field: 'place_id' } })
+  expect(list.views!.find(view => view.id === 'by_team')).toEqual({ id: 'by_team', label: 'code', where: { and: [{ team: { title: { eq: 'code' } } }, { title: { contains: 'code' } }] } })
+  expect(list.views!.find(view => view.id === 'access_only')).toEqual({ id: 'access_only', label: 'name', rowAccess: 'expired', where: {} })
+  expect(list.rowAccess).toEqual(workerList.rowAccess)
+  expect(list.search).toEqual(['title', 'reference'])
+  expect(JSON.stringify(config.ui)).toBe(before)
 })

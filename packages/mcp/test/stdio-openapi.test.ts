@@ -9,6 +9,7 @@ import { JSONRPCMessageSchema } from '@modelcontextprotocol/sdk/types.js'
 import { loadConfig } from '@workbasehq/core/schema/load'
 import { KernelRegistry } from '@workbasehq/core/kernel/registry'
 import { generate } from '@workbasehq/core/openapi/generate'
+import { csCatalogChanges } from './presentation-fixture.ts'
 
 const hash = (data: string) => createHash('sha256').update(data).digest('hex')
 
@@ -66,7 +67,7 @@ it.each([true, false])('keeps access and locale lifecycles strictly JSON-RPC ove
     expect(invalid.error.code).toBe('invalid_access')
     for (const [tool, changes] of [
       ['propose_composition', [{ kind: 'set_entity_access', entity: 'worker', role: 'staff', access: { read: 'allow', create: 'deny', update: 'deny', delete: 'deny' } }]],
-      ['propose_change', [{ kind: 'set_locale', languages: ['en', 'cs'], locale: 'cs' }]],
+      ['propose_change', [{ kind: 'set_locale', languages: ['en', 'cs'], locale: 'cs' }, ...csCatalogChanges]],
     ] as const) {
       const oldSpec = await readFile(join(root, 'openapi.json'), 'utf8').catch(() => undefined)
       const proposal = await call(tool, { instance: 'stdio-fixture', baseRevision: 1, changes })

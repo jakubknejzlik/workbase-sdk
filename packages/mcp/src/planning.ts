@@ -1,12 +1,14 @@
 import { DISPLAY_VALUE, isExpression, ExpressionError } from '@workbasehq/core/query/expressions'
 import { devFixtures } from './dev-support.ts'
 import { createHash } from 'node:crypto'
-import { defineInstance, baseFields, cloneInstanceConfig, displayFieldErrors, suggestedDisplayField, isDisplayFieldError, type InstanceConfig } from '@workbasehq/core/config'
+import { defineInstance, instanceConfigSchema, normalizeListConfig, baseFields, cloneInstanceConfig, displayFieldErrors, suggestedDisplayField, isDisplayFieldError, type InstanceConfig } from '@workbasehq/core/config'
 import { plan } from '@workbasehq/core/migrations/planner'
 import { quote } from '@workbasehq/core/migrations/schema'
 import { changeSchema, fail, WorkflowError, type Change, type Index } from './schemas.ts'
 import { effectivePolicies } from './policies.ts'
+import { collectListDependencies } from './list-dependencies'
 import { roleNamePrivileges } from '@workbasehq/core/organization-permissions'
+import { composeEntities } from '@workbasehq/core/kernel/registry'
 
 export const hash = (value: unknown) => createHash('sha256').update(typeof value === 'string' ? value : JSON.stringify(value)).digest('hex')
 // Only complete engine constraint names may supply detail. Everything else in
@@ -71,6 +73,7 @@ export function guard(changes: Change[], config: InstanceConfig) {
     }
     if (c.kind === 'set_locale') continue
     if (c.kind === 'set_label') {
+      if (c.pluralForms !== undefined) fail('invalid_input', 'pluralForms requires a V3 presentation proposal; use plural for legacy entity captions')
       if (!entities.has(c.entity)) fail('unknown_entity', `Unknown entity: ${c.entity}`)
       continue
     }
@@ -102,6 +105,7 @@ export function indexSQL(index: Index) {
 export function prepareChanges(config: InstanceConfig, existingIndexes: Index[], changes: Change[]) {
   guard(changes, config)
   const next = cloneInstanceConfig(config)
+  for (const [entity, hints] of Object.entries(next.ui?.entities ?? {})) if (hints.list) hints.list = normalizeListConfig(next, entity, hints.list)
   const indexes = structuredClone(existingIndexes)
   // Rename hints describe a single transition, never carry them into the next one.
   for (const entity of Object.values(next.entities)) for (const f of Object.values(entity.fields)) delete f.renameFrom
@@ -203,7 +207,32 @@ export function prepareChanges(config: InstanceConfig, existingIndexes: Index[],
          (entity.fields[f.backfillFrom.refField]?.entity === c.entity && f.backfillFrom.valueField === c.from))))) {
         fail('protected_field', 'A snapshot depends on this field; manual review required')
       }
-      e.fields[c.to] = { ...e.fields[c.from], renameFrom: c.from }
+      // Compose in kernel order and parse only entity structure/defaults for list
+      // lookup, including generated display fields without evaluating expressions.
+      // Whole-model validation must wait until the batch is complete.
+      // Trusted plugin objects stay untouched; only copied UI data is writable.
+      const entities = instanceConfigSchema.shape.entities.parse(composeEntities(next))
+      for (const entity of Object.values(entities)) {
+        const expression = entity.displayExpression ?? (entity.displayField && isExpression(entity.displayField) ? entity.displayField : undefined)
+        if (expression) entity.fields[DISPLAY_VALUE] = { type: 'string', required: false, readOnly: true, computed: expression }
+      }
+      const listModel = { ...next, entities }
+      const lists = Object.entries(next.ui?.entities ?? {}).flatMap(([entity, hints]) => hints.list
+        ? [{ hints, ...collectListDependencies(listModel, entity, hints.list) }] : [])
+      for (const plugin of next.plugins ?? []) for (const [entity, hints] of Object.entries(plugin.contributes?.console?.entities ?? {})) {
+        if (!hints.list) continue
+        const { dependencies } = collectListDependencies(listModel, entity, hints.list)
+        const dependency = dependencies.find(ref => ref.entity === c.entity && ref.field === c.from)
+        if (dependency) fail('field_in_use', `Cannot rename ${c.entity}.${c.from}: referenced by plugin ${plugin.name} at contributes.console.entities.${entity}.list.${dependency.path}; update the plugin presentation before renaming this field.`)
+      }
+      for (const { hints, list, dependencies } of lists) {
+        for (const dependency of dependencies) if (dependency.entity === c.entity && dependency.field === c.from) {
+          try { dependency.rename(c.to) }
+          catch (error) { fail('invalid_input', (error as Error).message) }
+        }
+        hints.list = list
+      }
+      e.fields[c.to] = { ...e.fields[c.from], renameFrom: e.fields[c.from].renameFrom ?? c.from }
       delete e.fields[c.from]
       if (e.displayField === c.from) e.displayField = c.to
       const display = next.ui?.entities[c.entity]
@@ -224,27 +253,7 @@ export function prepareChanges(config: InstanceConfig, existingIndexes: Index[],
         related.columns = related.columns.map(renamed)
         if (related.defaultSort) related.defaultSort.key = renamed(related.defaultSort.key)
       }
-      const list = display?.list
-      if (list) {
-        if (list.columns) list.columns = list.columns.map(renamed)
-        if (list.search) list.search = list.search.map(renamed)
-        if (list.defaultSort) list.defaultSort.key = renamed(list.defaultSort.key)
-        if (list.filter) list.filter = Object.fromEntries(Object.entries(list.filter).map(([key, hint]) => [renamed(key), hint]))
-        if (list.sort) {
-          // Preserve configured key order, including disabled sort keys.
-          if (own(list.sort, c.from) && own(list.sort, c.to)) fail('invalid_input', 'Rename target already has a UI sort hint')
-          list.sort = Object.fromEntries(Object.entries(list.sort).map(([key, hint]) => [renamed(key), hint && { fields: hint.fields.map(renamed) }]))
-        }
-      }
-      const renameWhere = (where: Record<string, unknown>, entity: string): Record<string, unknown> => Object.fromEntries(Object.entries(where).map(([key, value]) => {
-        if (key === 'and' || key === 'or') return [key, (value as Record<string, unknown>[]).map(child => renameWhere(child, entity))]
-        if (key === 'not') return [key, renameWhere(value as Record<string, unknown>, entity)]
-        const relation = next.entities[entity].relations[key]
-        if (relation) return [key, relation.many ? Object.fromEntries(Object.entries(value as Record<string, Record<string, unknown>>).map(([quantifier, child]) => [quantifier, renameWhere(child, relation.entity)])) : renameWhere(value as Record<string, unknown>, relation.entity)]
-        return [entity === c.entity && key === c.from ? c.to : key, value]
-      }))
-      for (const [entity, hints] of Object.entries(next.ui?.entities ?? {})) if (hints.list?.views) hints.list.views = hints.list.views.map(view => ({ ...view, where: renameWhere(view.where, entity) }))
-      for (const r of Object.values(e.relations)) if (r.field === c.from) r.field = c.to
+      for (const [source, spec] of Object.entries(next.entities)) for (const r of Object.values(spec.relations)) if ((r.many ? r.entity : source) === c.entity && r.field === c.from) r.field = c.to
       for (const i of indexes) if (i.entity === c.entity) i.fields = i.fields.map(f => f === c.from ? c.to : f)
     } else if (c.kind === 'add_user_link') {
       if (next.account?.entity !== 'users' || c.entity === 'users') fail('invalid_user_link', 'User links require account.entity: users and a domain entity')

@@ -9,6 +9,7 @@ import { ProvisionDiagnostic, provisionFailure } from './provision-diagnostics'
 import { installedInfraDirectory } from './package-tools'
 import { provisionConfigSchema } from './provision-config'
 import { consoleArtifactsSHA, consoleHTMLStamps, readConsoleArtifacts } from '../console-build'
+import { resolvePublicOrigin, type ResolvedPublicOrigin } from './public-origin'
 
 export interface ProvisionOptions {
   /** Trusted application module, default-exporting an InstanceConfig. Paths resolve from projectRoot. */
@@ -21,9 +22,10 @@ export interface ProvisionOptions {
   assetsDir?: string
   /** Stable, operator-supplied secret, e.g. new sst.Secret('AuthSecret').value. Never generated per deploy. */
   authSecret: Input<string>
-  /** Exact public HTTPS origin; passed as AUTH_BASE_URL. */
-  authBaseUrl: string
-  domain?: string
+  /** Literal bare hostname; derives the HTTPS auth origin and attaches a Cloudflare Custom Domain. */
+  publicHostname?: string
+  /** Public HTTPS origin fallback, required when publicHostname is absent. */
+  authBaseUrl?: string
   email?: { from: string }
   webhook?: { url: Input<string>; allowedHosts: Input<string>; service?: Input<string>; events?: string }
   internalToken?: Input<string>
@@ -41,7 +43,7 @@ export interface ProvisionOptions {
   migrationTriggers?: Input<unknown>[]
 }
 
-export interface ProvisionPlan {
+export interface ProvisionPlan extends ResolvedPublicOrigin {
   stage: string
   root: string
   configPath: string
@@ -64,7 +66,7 @@ function label(value: unknown, limit: number): value is string {
 }
 
 /** No values supplied by callers are included in validation messages. */
-export function validateProvisionOptions(options: ProvisionOptions): void {
+export function validateProvisionOptions(options: ProvisionOptions): ResolvedPublicOrigin {
   if (!options || !label(options.stage, 32)) throw new ProvisionDiagnostic('provision_invalid_stage')
   if (options.devMailbox !== undefined) {
     if (options.stage !== 'dev' && options.stage !== 'test') throw new ProvisionDiagnostic('provision_invalid_dev_mailbox_stage')
@@ -76,17 +78,11 @@ export function validateProvisionOptions(options: ProvisionOptions): void {
   if (!nonempty(options.migrationsDir)) throw new ProvisionDiagnostic('provision_invalid_migrations_dir')
   if (options.assetsDir !== undefined && !nonempty(options.assetsDir)) throw new ProvisionDiagnostic('provision_invalid_assets_dir')
   if (!options.authSecret || (typeof options.authSecret === 'string' && options.authSecret.length < 32)) throw new ProvisionDiagnostic('provision_invalid_auth_secret')
-  try {
-    const url = new URL(options.authBaseUrl)
-    if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash || url.pathname !== '/') throw 0
-    if (options.domain !== undefined && (url.hostname !== options.domain || !options.domain.includes('.') || url.port)) throw new ProvisionDiagnostic('provision_invalid_domain')
-  } catch (error) {
-    if (error instanceof ProvisionDiagnostic) throw error
-    throw new ProvisionDiagnostic('provision_invalid_auth_base_url')
-  }
+  const origin = resolvePublicOrigin(options)
   if (options.email && !/^[^\s<>@]+@[^\s<>@]+\.[^\s<>@]+$/.test(options.email.from)) throw new ProvisionDiagnostic('provision_invalid_email')
   if (options.webhook && (!options.webhook.url || !options.webhook.allowedHosts)) throw new ProvisionDiagnostic('provision_invalid_webhook')
   if (options.accountId !== undefined && !/^[a-f0-9]{32}$/.test(options.accountId)) throw new ProvisionDiagnostic('provision_invalid_account_id')
+  return origin
 }
 
 /** Deterministic names fit SST's 54-character Worker limit and Cloudflare's 63-character queue limit.
@@ -116,7 +112,7 @@ async function packageTools() {
 /** Build a secret-free resource specification, without SST, Pulumi execution, preview or network access.
  * Config modules are trusted code, evaluated in an isolated Node process with tsx. */
 export async function createProvisionPlan(options: ProvisionOptions): Promise<ProvisionPlan> {
-  validateProvisionOptions(options)
+  const origin = validateProvisionOptions(options)
   const root = resolve(options.projectRoot ?? process.cwd())
   const configPath = resolve(root, options.configPath), handler = resolve(root, options.handler)
   const migrationsDir = resolve(root, options.migrationsDir)
@@ -150,12 +146,13 @@ export async function createProvisionPlan(options: ProvisionOptions): Promise<Pr
     const tools = await packageTools()
     const name = (suffix: string) => resourceName(options.resourcePrefix, options.stage, suffix)
     return {
+      ...origin,
       stage: options.stage, root, configPath, handler, migrationsDir, ...(assetsDir ? { assetsDir } : {}),
       names: { database: name('db'), audit: name('audit'), events: name('events'), deadLetter: name('events-dlq'), worker: name('worker') },
       id: `Workbase${sha256(JSON.stringify([options.resourcePrefix, options.stage])).slice(0, 20)}`,
       ...(options.devMailbox ? { devMailbox: { name: name('dev-mailbox'), handler: fileURLToPath(import.meta.resolve('@workbasehq/core/dev-mailbox')), bindingNames: ['DB', 'STAGE', 'DEV_MAILBOX_TOKEN'] } } : {}),
       schema,
-      environment: { STAGE: options.stage, SCHEMA_EXPECTED: JSON.stringify(schema), OPENAPI_SHA256: openapi, AUTH_BASE_URL: options.authBaseUrl,
+      environment: { STAGE: options.stage, SCHEMA_EXPECTED: JSON.stringify(schema), OPENAPI_SHA256: openapi, AUTH_BASE_URL: origin.publicOrigin,
         ...(options.email ? { EMAIL_FROM: options.email.from } : {}),
         ...(options.webhook?.events ? { WEBHOOK_EVENTS: options.webhook.events } : {}),
       },

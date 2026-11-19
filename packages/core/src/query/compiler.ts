@@ -14,6 +14,7 @@ import { fieldType } from './schema'
 import { labelPath, readableLabel, labelAlias, sortAlias, expressionColumns, expressionPath, readableDisplay } from './labels'
 import { QUERY_LIMITS as L, type QueryCost } from './limits'
 import type { Filter, Order, QueryInput, Scalar, Selection } from './schema'
+import { configuredViews, listPredicate } from './list-views'
 
 export interface Statement { sql: string; bindings: unknown[] }
 const col = (alias: string, field: string) => `${alias}.${field}`
@@ -456,9 +457,13 @@ class NullableLabel extends Condition {
   }
 }
 export const orderField = (order: Order) => order.label ? sortAlias(order.field) : order.field
-export function compileRoot(kernel: KernelRegistry, scope: Scope, query: QueryInput, keys?: Scalar[], cost?: QueryCost) {
-  let source = buildSelect(kernel, scope, query.entity, query)
-  const { required, add } = requiredDisplayEntities(kernel, scope, query.entity, query)
+/** Shared authorized, filtered list source, before sorting, seeking or paging.
+ * Configured views and manual access filters are ANDed here for rows and every count.
+ */
+function buildListSource(kernel: KernelRegistry, scope: Scope, query: QueryInput) {
+  const filtered = listPredicate(kernel, query)
+  let source = buildSelect(kernel, scope, query.entity, filtered)
+  const { required, add } = requiredDisplayEntities(kernel, scope, query.entity, filtered)
   add(query.entity, query.search?.fields ?? [])
   const labelKeys = [...new Set([...(query.labels ?? []), ...Object.keys(query.labelWhere ?? {}), ...(query.search?.fields ?? []).filter(key => labelPath(kernel.config, query.entity, key)), ...(query.orderBy ?? []).filter(o => o.label).map(o => o.field)])]
   const joins = new Map<string, string>()
@@ -496,7 +501,8 @@ export function compileRoot(kernel: KernelRegistry, scope: Scope, query: QueryIn
   }
   let ast = labelKeys.length ? Q.select().from(labeled, 'row').field('row.*') : source
   if (query.rowAccess) ast = ast.where(new RowAccessCondition(kernel, scope, query))
-  const order = queryOrder(query).map(o => ({ ...o, field: orderField(o) }))
+  const view = query.view && configuredViews(kernel, query.entity).find(view => view.id === query.view)
+  if (view && view.rowAccess) ast = ast.where(new RowAccessCondition(kernel, scope, { ...query, rowAccess: view.rowAccess }))
   function searchCondition(key: string, text: string, locale: 'en' | 'cs' = 'en'): Condition {
     const path = labelPath(kernel.config, query.entity, key)
     const plan = path ? readableLabel(kernel, scope, query.entity, key) : undefined
@@ -520,6 +526,19 @@ export function compileRoot(kernel: KernelRegistry, scope: Scope, query: QueryIn
   }
   for (const [key, predicate] of Object.entries(query.labelWhere ?? {})) ast = ast.where(searchCondition(key, predicate.contains, predicate.locale))
   if (query.search) ast = ast.where(Cond.or(query.search.fields.map(key => searchCondition(key, query.search!.text, query.search!.locale))))
+  return { ast, required }
+}
+/** COUNT is outside the complete list source, preserving its row semantics. */
+export function compileListTotal(kernel: KernelRegistry, scope: Scope, query: QueryInput, cost?: QueryCost) {
+  const { ast: source, required } = buildListSource(kernel, scope, query)
+  const ast = Q.select().from(source, 'list_total').field(Fn.count('list_total.id'), 'total')
+  return renderStatement(kernel, scope, ast, cost, required)
+}
+export function compileRoot(kernel: KernelRegistry, scope: Scope, query: QueryInput, keys?: Scalar[], cost?: QueryCost) {
+  const source = buildListSource(kernel, scope, query)
+  let ast = source.ast
+  const { required } = source
+  const order = queryOrder(query).map(o => ({ ...o, field: orderField(o) }))
   // With ID-only ordering and LIMIT, SQLite otherwise prefers scanning the tenant's
   // (org,id) index even over a selective raw FK predicate. Unary + preserves the
   // value/order but leaves index selection to the FK filter; sort its candidates.
@@ -529,6 +548,7 @@ export function compileRoot(kernel: KernelRegistry, scope: Scope, query: QueryIn
   if (keys) ast = ast.where(seek('row', order, keys, preferForeignKeySeek))
   for (const o of order) ast = ast.orderBy(preferForeignKeySeek ? Q.raw(`+${quote('row')}.${quote(o.field)}`) : col('row', o.field), o.dir.toUpperCase() as 'ASC' | 'DESC')
   ast = ast.limit(query.limit + 1)
+  if (query.offset !== undefined) ast = ast.offset(query.offset)
   return { ast, ...renderStatement(kernel, scope, ast, cost, required) }
 }
 /** One statement per relation per level; all parent identities share one JSON binding. */

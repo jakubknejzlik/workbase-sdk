@@ -277,12 +277,26 @@ field dependencies and declaration sources live in `effectiveAccess.actions` and
 both access locks; command bodies remain opaque guards. `actionReasonKeys(config)`
 from `@workbasehq/core/schema` exposes the finite authored reason keys.
 
-SDK-era detail GETs include an `actions` map, independent of projection. Forbidden
-or masked-dependency actions are omitted. SQL evaluates availability and selects
-the first failing reason. List, query and generic mutation responses omit the map.
+Under the D3 A contract, SDK-era detail GETs include a top-level `actions` map,
+independent of projection, with `Cache-Control: private, no-store`. The map key is
+the exact entity-scoped action name (`close` above), not a globally prefixed ID.
+Its identity is `(entity, action name)`: the entity and action path parameters
+select the declaration, whose `command` must be the full registered command
+identity (`record/close` above). Names may be reused by other entities; clients
+must retain the owning entity and record ID when dispatching or refreshing.
+No command-name shortening or action-ID re-encoding is performed.
+
+Forbidden or masked-dependency actions are omitted. SQL evaluates availability
+and selects the first failing reason, an i18n key. A command write-filter denial
+without an authored failing reason uses `sdk.action_unavailable`, translated by
+the console's bundled SDK catalog. List, query and generic mutation responses
+omit availability metadata; their cache-header behavior is unchanged.
 The SDK era marker is `baseline: 'workbase-sdk'`; domain fields and relations named
-`actions` and `access` are reserved in that era, including declarations without compiled access.
-Legacy configurations retain their existing response and naming contracts.
+`actions` and `access` are reserved in that era, including declarations without
+compiled access. In particular, an `actions` field or relation is rejected to
+prevent collision with the detail metadata. Legacy configurations intentionally
+retain their existing response and naming contracts: they may declare an
+`actions` field or relation, and detail GET does not inject the SDK availability map.
 
 `POST /api/:entity/:id/actions/:name` accepts `{}` for input-less commands.
 Object-shaped command schemas declare other accepted body keys; body `id`,
@@ -321,3 +335,178 @@ Unlink clears links and pending account invitations, retaining membership and
 independently granted access. `client.actWith(entity, id, name, body, signal)`
 returns `{record, result}` after the same cache refresh as `act()`; credentials
 stay in the result and are never cached as record data.
+
+### Named entity constraints
+
+Author stored-field uniqueness next to an entity's fields:
+
+```ts
+export default defineEntity({
+  fields: {
+    slot: { type: 'ref', entity: 'slot', required: true },
+    worker: { type: 'ref', entity: 'worker' },
+  },
+  constraints: [
+    { kind: 'unique', name: 'assignment_slot_worker_unique', fields: ['slot', 'worker'] },
+  ],
+})
+```
+
+The SDK prepends `organization_id`. Do not include organization or other implicit
+fields. Each name is a stable lower-case SQL identifier (at most 63 characters),
+unique within its entity. Each constraint contains 1–16 distinct stored field
+keys; an entity may declare at most 32 constraints. All supported scalar types,
+including references, can occupy a tuple position. Fields in different positions
+need not have matching types. Computed fields, relation paths, predicates and raw
+SQL are rejected. Names are sorted for deterministic SQL and lock output; field
+order is retained. Changing the fields of an existing name requires a new name.
+
+**Null policy:** SQLite's NULL-distinct semantics apply. If any tuple field is
+`NULL`, multiple such rows are allowed. Empty strings are ordinary values. Text
+comparison uses SQLite's default BINARY collation; reference foreign keys and
+organization boundaries continue to apply independently.
+
+The bundle/lock planner generates a named `CREATE UNIQUE INDEX` for new or existing
+tables. Adding a constraint does not rebuild the table. Existing duplicates cause
+migration application to fail; no rows are cleaned up. Review and resolve duplicate
+data before retrying. Removing a declaration generates `DROP INDEX`. Index names
+encode the physical entity name and the authored constraint name injectively in
+SQLite's global index namespace.
+
+Constrained schemas use **lockVersion 3**, carrying normalized typed constraints on
+physical table specs. Readers still accept v1 (with the existing v2 lineage
+bootstrap) and v2. Unconstrained v2 locks retain their bytes and SQL; once upgraded,
+a lock remains v3 even if its last constraint is removed. Further constraint kinds
+can extend the discriminated contract without replacing this lock envelope.
+
+Current rename publication remains explicitly blocked by the rename-intent gate;
+constraint fields are projected to their original physical names in the intent
+lock. The legacy nullable-reference planner explicitly blocks rebuilding or
+renaming fields of a constrained table, including removing a constraint in the
+same operation. A manually reviewed migration is required; constraints cannot be
+silently dropped during a rebuild. Runtime schema checks verify generated unique
+indexes, their column order, collation, uniqueness and absence of a predicate.
+
+CRUD and atomic writes map exact declared column identities from bounded SQLite/D1
+uniqueness diagnostics to `409 unique_conflict`. HTTP includes
+`detail.constraintId: '<entity>.<constraint-name>'` only when exactly one declared
+constraint matches. Equivalent declarations with different names return the code
+without an ID. Unknown constraints keep `409 constraint_conflict`; arbitrary trigger
+text never becomes a public domain code. Authorization/version errors retain their
+existing precedence. The data MCP adapter retains the HTTP status/code contract.
+
+This core slice does not add a V3 MCP constraint editor or localized console conflict
+UX. Those remain explicit follow-ups: authoring must use schema files plus the
+bundle/lock planner until the supported V3 editing flow is delivered. Existing
+non-unique MCP `add_index` keeps its semantics. Partial uniqueness, cross-relation
+equality and referenced-field immutability are delivered by slices 2-4 of #198 (below).
+
+### One-hop reference equality
+
+```ts
+constraints: [{
+  kind: 'ref_equality', name: 'booking_location_client',
+  field: 'client', through: 'location', targetField: 'client',
+}]
+```
+
+This expresses `booking.client == booking.location.client`. `field` and `through`
+are stored authored refs on booking; `targetField` is a stored authored ref on the
+entity referenced by `through`. Both endpoint refs must target the same entity.
+The three field names are identifiers, never paths or SQL. Unknown fields,
+computed fields, incompatible targets, expressions and multiple hops are rejected
+with declaration diagnostics. V3 MCP authors this same object using
+`propose_change` → `set_constraints`, then validate → preview_migration →
+apply_to_disposable → promote.
+
+Null equals null (`IS` semantics). A null hop projects null, so both `client` and
+`location` null pass; a non-null client with null location fails. A resolved
+location with null client requires the booking client to be null. A non-null hop
+must exist in the same organization even when the booking client is null. The
+existing organization-scoped composite FKs remain enforced, including the direct
+client FK. Missing and foreign-organization references never gain a null escape.
+
+SDK-generated AFTER triggers check inserts and updates of either participating
+field (also organization_id), using the final row so self references work. Reverse
+triggers reject target-field changes (including INSERT OR REPLACE) that would
+invalidate any incoming row in the same organization. Same-value updates and unreferenced target changes
+are allowed. Referenced-field immutability (`ref_immutable`, below) is a separate,
+stricter rule and composes with this one. Multi-row writes must preserve the rule
+at each row; the SDK does not defer equality checks to transaction commit.
+
+Lock v3 records the typed declaration and physical FK dependency, from which the
+four named trigger definitions are deterministically derived. Generated bundles
+and live schema verification include their exact definitions. Old v1/v2 and
+unique-only v3 locks retain their byte contract. Adding equality emits a read-only
+data preflight using an SDK-owned CHECK guard before installing triggers. Bad
+existing data fails migration validation without changing records; preview shows
+the exact failing guard and constraint identity. Removing equality drops all four
+triggers, including both reverse guards. Renames in a constrained graph and schema
+changes requiring rebuilds are explicitly rejected for manual review.
+
+HTTP CRUD and atomic writes return `422 ref_equality_mismatch` with
+`detail.constraintId` (for example `booking.booking_location_client`). The generic
+code works for every entity pair. Only exact tokens generated for configured
+constraints, with bounded D1 wrappers/causes, are mapped; arbitrary database text
+keeps the generic fallback. Failed writes roll back domain, audit and idempotency
+changes. Data MCP forwards the same status/code; the console displays an English
+or Czech message, retains the draft, and permits a corrected retry.
+
+### Referenced-field immutability
+
+```ts
+// declared on location
+constraints: [{
+  kind: 'ref_immutable', name: 'location_client_locked', field: 'client',
+  referencedBy: { entity: 'booking', field: 'location' },
+}]
+```
+
+`location.client` cannot change while any same-organization `booking.location`
+points at the row. `field` is a stored authored ref on the constrained entity;
+`referencedBy.field` is a stored authored ref on `referencedBy.entity` whose target
+is the constrained entity (self references are allowed). Identifiers only: unknown
+entities/fields, computed fields, wrong targets, paths (`a.b`), multi-hop shapes,
+extra properties and SQL are rejected with declaration diagnostics in the DSL and
+the V3 MCP `set_constraints` contract. The SDK account entity cannot be the
+referencing entity.
+
+Semantics are `NEW.field IS NOT OLD.field` and explicit: NULL to value and value to
+NULL are changes (rejected while referenced); NULL to NULL, same-value updates,
+unrelated field edits and updates of unreferenced rows are allowed. There is no
+status filter: cancelled references count. References from another organization
+never block (the lookup is scoped by `organization_id`), and deleting or reparenting
+the last reference releases the field. Referencing rows need no trigger: adding a
+reference after a change is always valid.
+
+SDK-generated triggers guard actual stored changes. A BEFORE UPDATE guard checks
+changes to the original row. BEFORE INSERT/UPDATE captures referenced identities
+that could conflict through the primary key or a declared unique key in an internal
+snapshot table; AFTER INSERT/UPDATE checks that those identities still hold the same
+ref. This catches implicit REPLACE deletions even with `recursive_triggers=OFF`.
+UPSERTs that update unrelated fields or do nothing are allowed even if the proposed
+ref is omitted or different. Names/tokens derive from
+`workbase_ref_immutable_<table hex>_<name>`.
+
+Composition with `ref_equality`: both may exist. Ordinary changes fail in the BEFORE
+UPDATE guard. Equality's replacement guard checks pending immutability snapshots
+before raising its own error, preserving the stricter immutability token regardless
+of trigger installation order. Equality still guards the referencing side independently.
+
+Lock v3 records the typed declaration; old v1/v2 and unique/equality-only locks keep
+their bytes. No data preflight or domain-table rebuild is needed. Adding the constraint
+creates its internal snapshot table and triggers; removal drops them. Existing equality
+replacement triggers are refreshed when their immutability prechecks change. Changing
+a definition requires a new name. Renames and rebuilds in a trigger-constrained graph
+are rejected for a manually reviewed migration. `checkEntityConstraints` verifies the
+exact trigger and internal-table definitions at runtime.
+
+HTTP CRUD and atomic writes return `409 ref_immutable` with `detail.constraintId`
+(for example `location.location_client_locked`). 409 is used (not 422) because the
+request is well-formed and conflicts with current state - whether the row is
+referenced - and it keeps the triage contract; the distinct code separates it from
+generic `constraint_conflict` and `unique_conflict`. Only exact tokens generated for
+configured constraints are mapped (bounded causes and lengths); unknown trigger text
+keeps the generic fallback. Failed writes roll back domain, audit and idempotency
+changes. Data MCP forwards status/code; the console shows a localized EN/CS message,
+keeps the draft and permits retry.

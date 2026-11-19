@@ -87,7 +87,7 @@ async function contract(role = 'owner') {
 it('empty config returns a usable versioned console model without a console plugin', async () => {
   await start(empty())
   const body = await contract()
-  expect(body.contractVersion).toBe(1)
+  expect(body.contractVersion).toBe(2)
   expect(body.model).toMatchObject({ instance: 'previously_unknown_482', revision: 7, entities: {}, commands: [], workflows: [], locale: 'en', timeZone: 'UTC' })
   expect(body.capabilities.entities).toEqual({})
   expect(body.console).toBeNull()
@@ -190,7 +190,7 @@ it('an unauthorized user gets no mutation or command grants and live membership 
 it('contract version field and private cache headers are present; anonymous and wrong-organization access fail', async () => {
   await start()
   const response = await request()
-  expect((await response.json() as ConsoleModelContract).contractVersion).toBe(1)
+  expect((await response.json() as ConsoleModelContract).contractVersion).toBe(2)
   expect(response.headers.get('Cache-Control')).toBe('private, no-store')
   expect(response.headers.get('Vary')).toBe('Cookie, Authorization, X-Organization-Id')
   const anonymous = await app.request('http://localhost/o/org-a/console-model')
@@ -458,7 +458,7 @@ it('live provider field masks prune label dependencies and references throughout
   expect(entity).not.toHaveProperty('displayField')
   expect(entity).not.toHaveProperty('labelDependencies')
   expect(entity.listColumns).toEqual(['name'])
-  expect(entity.list).toEqual({ columns: ['name'], relatedColumns: {}, search: ['name'], sort: {}, filter: { name: 'text' }, views: [] })
+  expect(entity.list).toEqual({ columns: [{ field: 'name' }], relatedColumns: {}, search: ['name'], sort: {}, filter: { name: { kind: 'text', placement: 'panel', operators: ['contains'] } }, views: [] })
   expect(entity.views).toEqual([])
   expect(entity.detail).toEqual({ fields: ['name'], metrics: [], lists: {}, relations: {}, sections: [] })
   expect(entity.relations).toEqual({})
@@ -577,7 +577,7 @@ it.each([false, true])('readable sensitive presentation literals fail closed for
     { children: { none: { state: { eq: canary } } } },
   ]
   const display: ConsoleEntityDisplay = {
-    list: { search: ['name', 'secret'], filter: { state: 'enum', name: 'text' },
+    list: { search: ['name', 'secret'], filter: { state: { kind: 'enum', placement: 'panel', operators: ['in'] }, name: { kind: 'text', placement: 'panel', operators: ['contains'] } },
       sort: { state: { fields: ['state'] }, name: { fields: ['name', 'state'] }, count: { fields: ['count'] } },
       defaultSort: { key: 'state', direction: 'asc' }, views: [
       ...unsafeWhere.map((where, index) => ({ id: `private_${index}`, label: 'Private view', where })),
@@ -635,7 +635,7 @@ it.each([false, true])('readable sensitive presentation literals fail closed for
     for (const hints of displays) {
       expect(hints?.list?.views?.map(view => view.id)).toEqual(['public'])
       expect(hints?.list?.search).toEqual(['name'])
-      expect(hints?.list?.filter).toEqual({ name: 'text' })
+      expect(hints?.list?.filter).toEqual({ name: { kind: 'text', placement: 'panel', operators: ['contains'] } })
       expect(hints?.list?.sort).toEqual({ count: { fields: ['count'] } })
       expect(hints?.list).not.toHaveProperty('defaultSort')
       expect(hints?.detail?.summary).toEqual([])
