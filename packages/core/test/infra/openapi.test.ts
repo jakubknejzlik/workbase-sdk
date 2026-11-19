@@ -154,6 +154,8 @@ it('describes request grammar, disjoint entities, both cursor contracts and muta
   expect(doc.components.schemas.List_worker.properties.next_cursor.description).toContain('last returned row id')
   expect(check({ entity: 'worker', limit: 2, offset: 0, includeTotal: true })).toBe(true)
   expect(check({ entity: 'worker', limit: 2, offset: -1 })).toBe(false)
+  expect(check({ entity: 'worker', limit: 2, offset: 10_000 })).toBe(true)
+  expect(check({ entity: 'worker', limit: 2, offset: 10_001 })).toBe(false)
   expect(doc.components.schemas.Result_worker.properties.total).toMatchObject({ type: 'integer', minimum: 0 })
   expect(doc.components.schemas.Result_worker.required).toEqual(['data', 'next_cursor'])
   expect(doc.components.schemas.Result_worker.properties.next_cursor.description).toContain('Opaque signed')

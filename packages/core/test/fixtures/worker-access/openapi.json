@@ -1453,7 +1453,8 @@
             "type": "integer"
           },
           "offset": {
-            "maximum": 9007199254740991,
+            "description": "Nonnegative offset bounded by QUERY_LIMITS.maxOffset (10,000 by default); larger offsets are rejected before rows or totals SQL.",
+            "maximum": 10000,
             "minimum": 0,
             "type": "integer"
           },
@@ -2702,7 +2703,8 @@
             "type": "integer"
           },
           "offset": {
-            "maximum": 9007199254740991,
+            "description": "Nonnegative offset bounded by QUERY_LIMITS.maxOffset (10,000 by default); larger offsets are rejected before rows or totals SQL.",
+            "maximum": 10000,
             "minimum": 0,
             "type": "integer"
           },
@@ -7898,6 +7900,7 @@
       "filterDepth": 8,
       "inputBytes": 64000,
       "levelRows": 2000,
+      "maxOffset": 10000,
       "nodes": 400,
       "parents": 100,
       "relationDepth": 2,
