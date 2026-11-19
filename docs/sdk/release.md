@@ -7,7 +7,7 @@ separate published packages. See the [0.4.0 changelog](../../CHANGELOG.md),
 [migration notes](migration-0.4.0.md) and
 [runnable Workers configuration](../../packages/core/examples/README.md).
 
-The candidate starts at integration/cleaning `a51c635eb84cf4e4bd128f28f4704e226fdf6e55`
+The candidate starts at the accepted integration revision `a51c635eb84cf4e4bd128f28f4704e226fdf6e55`
 and merges main `cfef8a865331bb65f3a8f41adb2a1ecd7be9a03a`, following the
 `release/sdk-v0.3.1` → main pattern. Review
 [release PR #256](https://github.com/jakubknejzlik/workbase-sdk/pull/256) and
