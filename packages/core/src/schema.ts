@@ -1,4 +1,4 @@
-import { entityConstraintsSchema, validateEntityConstraints, type EntityConstraint } from './entity-constraints'
+import { entityConstraintsSchema, validateEntityConstraints, type UniqueConstraint, type RefEqualityConstraint } from './entity-constraints'
 export type { EntityConstraint } from './entity-constraints'
 import { assertSchemaLockBound } from './schema/revision'
 export { bindSchemaLock } from './schema/revision'
@@ -50,7 +50,7 @@ type LiteralFields<T extends EntityInput> = {
   [K in keyof T['fields']]: T['fields'][K] & Record<Exclude<keyof T['fields'][K], keyof EntityInput['fields'][string]>, never>
 }
 /** Data declaration only. loadConfig additionally enforces the literal source boundary. */
-export function defineEntity<const T extends EntityInput>(input: T & Record<Exclude<keyof T, keyof EntityInput>, never> & { fields: LiteralFields<T>; constraints?: (EntityConstraint & { fields: (keyof T['fields'] & string)[]; where?: NonNullable<EntityConstraint['where']> & { field: keyof T['fields'] & string } })[]; actions?: { [K in keyof T['actions']]: T['actions'][K] & { available?: { when: ActionWhen<T>; reason: string }[] } } }): EntityDeclaration<T> {
+export function defineEntity<const T extends EntityInput>(input: T & Record<Exclude<keyof T, keyof EntityInput>, never> & { fields: LiteralFields<T>; constraints?: ((UniqueConstraint & { fields: (keyof T['fields'] & string)[]; where?: NonNullable<UniqueConstraint['where']> & { field: keyof T['fields'] & string } }) | (RefEqualityConstraint & { field: keyof T['fields'] & string; through: keyof T['fields'] & string }))[]; actions?: { [K in keyof T['actions']]: T['actions'][K] & { available?: { when: ActionWhen<T>; reason: string }[] } } }): EntityDeclaration<T> {
   const entity = parse(declarationSchema, input)
   validateEntityConstraints(entity.constraints ?? [], entity.fields, (path, message) => { throw new DeclarationError(['constraints', ...path], message) })
   const relations = { ...entity.relations }

@@ -11,13 +11,13 @@ import { replayBundle } from '../src/offline'
 const roots: string[] = []
 afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))) })
 const constraint = { kind: 'unique', name: 'worker_name_unique', fields: ['name', 'code'] }
-async function fixture(duplicates = false) {
+async function fixture(duplicates = false, refEquality = false) {
   const root = await mkdtemp(join(tmpdir(), 'mcp-constraints-')); roots.push(root)
   const { server, workflow, store } = await createServer({ root })
   expect(await workflow.call('bootstrap_instance', { id: 'constraint_fixture', target: 'cloudflare-github' })).toMatchObject({ ok: true })
   await symlink(resolve('node_modules'), join(root, 'node_modules'))
   const entityPath = join(root, 'schema/worker.ts')
-  await writeFile(entityPath, (await readFile(entityPath, 'utf8')).replace('fields: {', "fields: { code: { type: 'text' },"))
+  await writeFile(entityPath, (await readFile(entityPath, 'utf8')).replace('fields: {', "fields: { code: { type: 'text' }," + (refEquality ? " client: { type: 'ref', entity: 'worker' }, location: { type: 'ref', entity: 'worker' }," : '')))
   execFileSync('bun', [resolve('packages/core/src/migrations/schema-cli.ts'), 'plan', '--root', root, '--init'], { encoding: 'utf8' })
   await writeFile(join(root, 'runtime.ts'), `import { identity } from '@workbasehq/plugins/identity'
 import { permissions } from '@workbasehq/plugins/permissions'
@@ -32,6 +32,9 @@ export default { ...config, plugins: [identity, permissions({ roles: ['admin', '
     const bundle = parseBundle('0001_r1.sql', await readFile(path, 'utf8'))
     bundle.post = `INSERT INTO organizations VALUES ('org','Org');
 INSERT INTO worker (id,organization_id,name,code,created_at,updated_at) VALUES ('one','org','Duplicate','same','now','now'),('two','org','Duplicate','same','now','now');\n`
+    if (refEquality) bundle.post = `INSERT INTO organizations VALUES ('org','Org');
+INSERT INTO worker (id,organization_id,name,created_at,updated_at) VALUES ('target','org','Target','now','now');
+INSERT INTO worker (id,organization_id,name,client,location,created_at,updated_at) VALUES ('bad','org','Bad','target','target','now','now');\n`
     bundle.manual = await manualEvidence(bundle)
     await writeFile(path, renderBundle(bundle))
   }
@@ -174,7 +177,7 @@ it('keeps the MCP wire shape compatible with the shared constraint contract', as
   const { schemaChangeSchema } = await import('../src/schemas')
   const { declarationSchema } = await import('@workbasehq/core/schema')
   const shared = declarationSchema.shape.constraints.unwrap()
-  for (const constraints of [[constraint], [partial], [], Array.from({ length: 33 }, () => constraint), [{ ...constraint, fields: Array(17).fill('name') }], [{ ...constraint, where: '1=1' }], [{ ...constraint, kind: 'partial_unique' }]]) {
+  for (const constraints of [[constraint], [partial], [equality], [], Array.from({ length: 33 }, () => constraint), [{ ...constraint, fields: Array(17).fill('name') }], [{ ...constraint, where: '1=1' }], [{ ...constraint, kind: 'partial_unique' }]]) {
     expect(schemaChangeSchema.safeParse({ kind: 'set_constraints', entity: 'worker', constraints }).success).toBe(shared.safeParse(constraints).success)
   }
 })
@@ -224,6 +227,55 @@ it('rejects adding partial uniqueness over matching duplicates with sources and 
     const source = await readFile(join(root, 'schema/worker.ts'), 'utf8')
     const result = await propose([{ ...partial, where: { ...partial.where, value: 'same' } }]); expect(result, JSON.stringify(result)).toMatchObject({ ok: true })
     expect(await call('validate', { proposalId: result.proposalId })).toMatchObject({ ok: false, error: { status: 422, message: expect.stringContaining('UNIQUE constraint failed') } })
+    expect(await call('promote', { proposalId: result.proposalId, expectedRevision: 1 })).toMatchObject({ ok: false })
+    expect(await readFile(join(root, 'schema/worker.ts'), 'utf8')).toBe(source)
+  } finally { await server.close() }
+})
+
+const equality = { kind: 'ref_equality', name: 'worker_location_client', field: 'client', through: 'location', targetField: 'client' }
+it('authors ref equality through V3 validation, preview, disposable D1, promote and removal', async () => {
+  const { root, server, call, propose } = await fixture(false, true)
+  try {
+    const result = await propose([equality]); expect(result, JSON.stringify(result)).toMatchObject({ ok: true })
+    const validation = await call('validate', { proposalId: result.proposalId }); expect(validation, JSON.stringify(validation)).toMatchObject({ ok: true })
+    const preview = await call('preview_migration', { proposalId: result.proposalId })
+    expect(preview.sql).toContain('CREATE TRIGGER'); expect(preview.sql).toContain('_reverse')
+    expect(preview.sql).not.toContain('ALTER TABLE')
+    expect(await call('apply_to_disposable', { proposalId: result.proposalId })).toMatchObject({ ok: true, verified: true, diffs: [] })
+    expect(await call('promote', { proposalId: result.proposalId, expectedRevision: 1 })).toMatchObject({ ok: true, revision: 2 })
+    expect((await loadConfig(join(root, 'config.ts'))).config.entities.worker.constraints).toEqual([equality])
+    const removal = await call('propose_change', { instance: 'constraint-fixture', baseRevision: 2, changes: [{ kind: 'set_constraints', entity: 'worker', constraints: [] }] })
+    expect(removal).toMatchObject({ ok: true })
+    expect(await call('validate', { proposalId: removal.proposalId })).toMatchObject({ ok: true })
+    expect(await call('preview_migration', { proposalId: removal.proposalId })).toMatchObject({ sql: expect.stringContaining('DROP TRIGGER') })
+    expect(await call('apply_to_disposable', { proposalId: removal.proposalId })).toMatchObject({ ok: true, verified: true })
+    expect(await call('promote', { proposalId: removal.proposalId, expectedRevision: 2 })).toMatchObject({ ok: true, revision: 3 })
+  } finally { await server.close() }
+})
+it.each([
+  [{ ...equality, field: 'missing' }, 'stored authored ref'],
+  [{ ...equality, field: 'name' }, 'stored authored ref'],
+  [{ ...equality, targetField: 'name' }, 'target-compatible'],
+  [{ ...equality, targetField: 'missing' }, 'target-compatible'],
+  [{ ...equality, through: 'location.client' }, 'Input does not match'],
+  [{ ...equality, targetField: 'client.name' }, 'Input does not match'],
+  [{ ...equality, sql: 'client = location.client' }, 'Input does not match'],
+  [{ ...equality, field: 'client = location.client' }, 'Input does not match'],
+])('rejects invalid/raw/multi-hop MCP equality with diagnostics: %j', async (constraint, message) => {
+  const { root, server, propose } = await fixture(false, true)
+  try {
+    const source = await readFile(join(root, 'schema/worker.ts'), 'utf8')
+    expect(await propose([constraint])).toMatchObject({ ok: false, error: { message: expect.stringContaining(message) } })
+    expect(await readFile(join(root, 'schema/worker.ts'), 'utf8')).toBe(source)
+  } finally { await server.close() }
+})
+it('rejects pre-existing equality mismatches without altering data or authorizing promotion', async () => {
+  const { root, server, call, propose } = await fixture(true, true)
+  try {
+    const source = await readFile(join(root, 'schema/worker.ts'), 'utf8')
+    const result = await propose([equality]); expect(result).toMatchObject({ ok: true })
+    const validation = await call('validate', { proposalId: result.proposalId })
+    expect(validation).toMatchObject({ ok: false, error: { status: 422, message: expect.stringContaining('Migration 0002_r2.sql failed') } })
     expect(await call('promote', { proposalId: result.proposalId, expectedRevision: 1 })).toMatchObject({ ok: false })
     expect(await readFile(join(root, 'schema/worker.ts'), 'utf8')).toBe(source)
   } finally { await server.close() }

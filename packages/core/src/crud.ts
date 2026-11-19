@@ -1,4 +1,4 @@
-import { uniqueConflict } from './constraint-errors'
+import { constraintError } from './constraint-errors'
 import { readRecord } from './record-read'
 import { accountAccessState, canReadAccountAccess } from './worker-access'
 import { recordActionRoutes } from './record-action-routes'
@@ -59,7 +59,7 @@ export function crudRoutes(app: App, config: InstanceConfig, env: RuntimeEnv) {
       if (/CHECK constraint failed: policy_ok\s*=\s*1/i.test(String(error))) throw new ApiError(403, 'policy_violation')
       if (/CHECK constraint failed: actor_ok\s*=\s*1/i.test(String(error))) throw new ApiError(403, 'field_forbidden')
       if (/CHECK constraint failed: (?:atomic_assert|ok\s*=\s*1)/i.test(String(error))) throw new ApiError(409, 'version_conflict')
-      throw error instanceof ApiError ? error : uniqueConflict(error, config) ?? error
+      throw error instanceof ApiError ? error : constraintError(error, config) ?? error
     }
     await publishCommittedEvents(env, config, [event])
   }

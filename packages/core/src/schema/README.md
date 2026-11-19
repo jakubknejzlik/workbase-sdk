@@ -400,3 +400,54 @@ UX. Those remain explicit follow-ups: authoring must use schema files plus the
 bundle/lock planner until the supported V3 editing flow is delivered. Existing
 non-unique MCP `add_index` keeps its semantics. Partial uniqueness, cross-relation
 equality and referenced-field immutability belong to later slices of #198.
+
+### One-hop reference equality
+
+```ts
+constraints: [{
+  kind: 'ref_equality', name: 'booking_location_client',
+  field: 'client', through: 'location', targetField: 'client',
+}]
+```
+
+This expresses `booking.client == booking.location.client`. `field` and `through`
+are stored authored refs on booking; `targetField` is a stored authored ref on the
+entity referenced by `through`. Both endpoint refs must target the same entity.
+The three field names are identifiers, never paths or SQL. Unknown fields,
+computed fields, incompatible targets, expressions and multiple hops are rejected
+with declaration diagnostics. V3 MCP authors this same object using
+`propose_change` → `set_constraints`, then validate → preview_migration →
+apply_to_disposable → promote.
+
+Null equals null (`IS` semantics). A null hop projects null, so both `client` and
+`location` null pass; a non-null client with null location fails. A resolved
+location with null client requires the booking client to be null. A non-null hop
+must exist in the same organization even when the booking client is null. The
+existing organization-scoped composite FKs remain enforced, including the direct
+client FK. Missing and foreign-organization references never gain a null escape.
+
+SDK-generated AFTER triggers check inserts and updates of either participating
+field (also organization_id), using the final row so self references work. Reverse
+triggers reject target-field changes (including INSERT OR REPLACE) that would
+invalidate any incoming row in the same organization. Same-value updates and unreferenced target changes
+are allowed. Slice 4 referenced-field immutability is a separate, stricter rule;
+this declaration does not implement it. Multi-row writes must preserve the rule
+at each row; the SDK does not defer equality checks to transaction commit.
+
+Lock v3 records the typed declaration and physical FK dependency, from which the
+four named trigger definitions are deterministically derived. Generated bundles
+and live schema verification include their exact definitions. Old v1/v2 and
+unique-only v3 locks retain their byte contract. Adding equality emits a read-only
+data preflight using an SDK-owned CHECK guard before installing triggers. Bad
+existing data fails migration validation without changing records; preview shows
+the exact failing guard and constraint identity. Removing equality drops all four
+triggers, including both reverse guards. Renames in a constrained graph and schema
+changes requiring rebuilds are explicitly rejected for manual review.
+
+HTTP CRUD and atomic writes return `422 ref_equality_mismatch` with
+`detail.constraintId` (for example `booking.booking_location_client`). The generic
+code works for every entity pair. Only exact tokens generated for configured
+constraints, with bounded D1 wrappers/causes, are mapped; arbitrary database text
+keeps the generic fallback. Failed writes roll back domain, audit and idempotency
+changes. Data MCP forwards the same status/code; the console displays an English
+or Czech message, retains the draft, and permits a corrected retry.
