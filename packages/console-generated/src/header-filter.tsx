@@ -54,7 +54,7 @@ function RelationFilterInput(props: FilterContext & { descriptor: FilterDescript
   const { model, caps, orgId, target, request, descriptor } = props
   const choices = usePickerSearch(model, caps, orgId, target, request)
   const values = Array.isArray(props.value) ? props.value : []
-  const selected = useSelectedReferences(model, caps, orgId, target, values, choices.rows, request)
+  const selected = useSelectedReferences(model, caps, orgId, target, values, request)
   const [pickerValue, setPickerValue] = useState('')
   const name = (row: Record<string, any>) => recordLabel(model, target, row, caps, i18n.language, t)
   if (!choices.allowed || !caps.entities[props.entity]?.readable.includes(descriptor.field)) return null

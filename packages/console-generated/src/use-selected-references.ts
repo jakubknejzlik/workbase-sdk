@@ -1,18 +1,18 @@
 import { hashKey, useQueries, useQueryClient, type QueryClient } from '@tanstack/react-query'
-import { useEffect } from 'react'
 import { pickerQuery } from './write'
+import { referenceScope, useReferenceAuthority } from './reference-authority'
 import { visibleEntities, type Capabilities, type Model, type ReadQuery, type Result } from './read'
 
 type Row = Record<string, any>
 type Pending = { id: string; resolve: (row: Row | null) => void; reject: (error: unknown) => void }
 const batches = new WeakMap<QueryClient, Map<string, Pending[]>>()
-const key = (model: Model, caps: Capabilities, orgId: string, target: string) => ['picker', model.instance, model.revision, orgId, caps, target, 'selected']
+const key = (model: Model, caps: Capabilities, orgId: string, target: string, authority?: string) => ['picker', ...referenceScope(model, caps, orgId, target, authority), 'selected']
 
 /** Coalesce sibling controls in this render into bounded, capability-scoped target queries. */
-function enqueue(client: QueryClient, model: Model, caps: Capabilities, orgId: string, target: string, id: string, request: (query: ReadQuery) => Promise<Result>) {
+function enqueue(client: QueryClient, model: Model, caps: Capabilities, orgId: string, target: string, id: string, request: (query: ReadQuery) => Promise<Result>, authority?: string) {
   let scopes = batches.get(client)
   if (!scopes) { scopes = new Map(); batches.set(client, scopes) }
-  const scope = hashKey(key(model, caps, orgId, target))
+  const scope = hashKey(key(model, caps, orgId, target, authority))
   return new Promise<Row | null>((resolve, reject) => {
     const pending = scopes.get(scope)
     if (pending) { pending.push({ id, resolve, reject }); return }
@@ -30,29 +30,22 @@ function enqueue(client: QueryClient, model: Model, caps: Capabilities, orgId: s
   })
 }
 
-/** Seed from authorized options/includes and fetch only IDs not already known in this scope. */
-export function selectedReferenceOptions(client: QueryClient, model: Model, caps: Capabilities, orgId: string, target: string, id: string, known: Row[], request: (query: ReadQuery) => Promise<Result>) {
+/** A selected label must be fetched in its current authority/definition scope. */
+export function selectedReferenceOptions(client: QueryClient, model: Model, caps: Capabilities, orgId: string, target: string, id: string, request: (query: ReadQuery) => Promise<Result>, authority?: string) {
   return {
-    queryKey: [...key(model, caps, orgId, target), id],
-    queryFn: () => enqueue(client, model, caps, orgId, target, id, request),
-    initialData: known.find(row => row.id === id), enabled: visibleEntities(model, caps).includes(target), staleTime: Infinity, retry: false,
+    queryKey: [...key(model, caps, orgId, target, authority), id],
+    queryFn: () => enqueue(client, model, caps, orgId, target, id, request, authority),
+    enabled: visibleEntities(model, caps).includes(target), staleTime: Infinity, retry: false,
   }
 }
 
-export function useSelectedReferences(model: Model, caps: Capabilities, orgId: string, target: string, ids: string[], known: Row[], request: (query: ReadQuery) => Promise<Result>) {
+export function useSelectedReferences(model: Model, caps: Capabilities, orgId: string, target: string, ids: string[], request: (query: ReadQuery) => Promise<Result>) {
+  const authority = useReferenceAuthority()
   const client = useQueryClient(), allowed = visibleEntities(model, caps).includes(target)
   const unique = [...new Set(ids)].filter(Boolean)
-  const results = useQueries({ queries: unique.map(id => selectedReferenceOptions(client, model, caps, orgId, target, id, known, request)) })
-  const knownKey = hashKey([key(model, caps, orgId, target), known])
-  useEffect(() => {
-    if (!allowed) return
-    for (const row of known) {
-      const queryKey = [...key(model, caps, orgId, target), row.id]
-      if (client.getQueryState(queryKey)?.status !== 'error' && hashKey([client.getQueryData(queryKey)]) !== hashKey([row])) client.setQueryData(queryKey, row)
-    }
-  }, [client, knownKey, allowed])
-  return { rows: allowed ? results.flatMap((result, index) => { const row = !result.error && (known.find(row => row.id === unique[index]) ?? result.data); return row ? [row] : [] }) : [], error: results.find(result => result.error)?.error,
-    seed: (row?: Row) => { if (allowed && row) client.setQueryData([...key(model, caps, orgId, target), row.id], row) } }
+  const results = useQueries({ queries: unique.map(id => selectedReferenceOptions(client, model, caps, orgId, target, id, request, authority)) })
+  return { rows: allowed ? results.flatMap(result => { const row = !result.error && result.data; return row ? [row] : [] }) : [], error: results.find(result => result.error)?.error,
+    seed: (row?: Row) => { if (allowed && row) client.setQueryData([...key(model, caps, orgId, target, authority), row.id], row) } }
 }
 
 /** List label projections and n:1 detail includes already carry authorized target rows. */

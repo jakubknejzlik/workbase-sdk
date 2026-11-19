@@ -306,10 +306,9 @@ export function useCommandMutation(props: Pick<Context, 'write' | 'onDenied'>, n
 export function RelationPicker(props: Context & { allowCreate?: boolean; target: string; field: string; label?: string; value: string; selectedRow?: Record<string, any>; onChange: (value: string) => void; error?: string }) {
   const { t, i18n } = useEntityTranslation(props.entity); const { model, caps, orgId, target, field, value, onChange, request } = props
   const [wizard, setWizard] = useState(false)
-  const [created, setCreated] = useState<Record<string, any>>()
   const choices = usePickerSearch(model, caps, orgId, target, request)
   const { allowed, search, rows, result } = choices
-  const hydrated = useSelectedReferences(model, caps, orgId, target, [value], [...rows, ...(props.selectedRow ? [props.selectedRow] : []), ...(created ? [created] : [])], request)
+  const hydrated = useSelectedReferences(model, caps, orgId, target, [value], request)
   const hints = model.pickerHints?.[props.entity]?.[field]
   const name = (row: Record<string, any>) => {
     const display = caps.entities[target]?.displayField ?? model.entities[target].displayField
@@ -318,7 +317,7 @@ export function RelationPicker(props: Context & { allowCreate?: boolean; target:
     return recordLabel(model, target, row, caps, i18n.language, t)
   }
   const refresh = useRefresh()
-  const create = useMutation({ mutationFn: (data: Record<string, any>) => props.write(`/api/${target}`, 'POST', data, wizardKey), onSuccess: async row => { await refresh(); setCreated(row); onChange(row.id); setWizard(false); choices.close() } })
+  const create = useMutation({ mutationFn: (data: Record<string, any>) => props.write(`/api/${target}`, 'POST', data, wizardKey), onSuccess: async row => { await refresh(); onChange(row.id); setWizard(false); choices.close() } })
   const [wizardKey, setWizardKey] = useState('')
   const schema = writeSchema(model, target, caps)
   const wizardAllowed = props.allowCreate !== false && hints?.wizard && caps.entities[target]?.operations.includes('create')
