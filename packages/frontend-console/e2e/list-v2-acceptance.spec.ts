@@ -630,3 +630,72 @@ for (const width of [1440, 390]) for (const language of ['en', 'cs'] as const) {
     await expect.soft(page.getByRole('group', { name: copy.sortAndFilter, exact: true })).toHaveAccessibleName(expected.filters, { timeout: 500 })
   })
 }
+
+for (const width of [1440, 360]) for (const language of ['en', 'cs'] as const) {
+  test(`#259 Columns icon ${width} ${language}`, async ({ page, context }) => {
+    const copy = language === 'cs' ? cs : en
+    await page.setViewportSize({ width, height: 900 })
+    await context.addInitScript(language => localStorage.setItem('console-language', language), language)
+    await page.goto(route)
+    await settled(page)
+    const trigger = page.getByRole('button', { name: copy.listDisplay, exact: true })
+    await expect(trigger).toHaveAccessibleName(copy.listDisplay)
+    await expect(trigger).toHaveAttribute('title', copy.listDisplay)
+    await expect(trigger.locator('svg.lucide-columns-3')).toHaveCount(1)
+    await expect(trigger.locator('svg')).toHaveAttribute('aria-hidden', 'true')
+    expect(await trigger.evaluate(button => button.firstElementChild?.tagName.toLowerCase())).toBe('svg')
+  })
+}
+
+for (const width of [1440, 1024, 768, 390, 360]) for (const language of ['en', 'cs'] as const) {
+  test(`#259 long Columns containment ${width} ${language}`, async ({ page, context }) => {
+    const copy = language === 'cs' ? cs : en
+    await page.setViewportSize({ width, height: 900 })
+    await context.addInitScript(language => localStorage.setItem('console-language', language), language)
+    // Reuse review1's real console-model probe: 30 hidden fields; Worker/D1 still supplies all rows.
+    await page.route('**/console-model', async intercepted => {
+      const response = await intercepted.fetch(); const body = await response.json()
+      for (let index = 0; index < 30; index++) {
+        const field = `probe_${index}`
+        body.model.entities.worker.fields[field] = { ...body.model.entities.worker.fields.code }
+        body.console.entities.worker.list.filter[field] = false
+        body.model.entities.worker.listColumns.push(field)
+        body.capabilities.entities.worker.readable.push(field)
+        body.console.entities.worker.list.columns.push({ field, defaultVisible: false })
+      }
+      await intercepted.fulfill({ response, json: body })
+    })
+    await page.route('**/query', async intercepted => {
+      const strip = (value: any): any => Array.isArray(value) ? value.filter(item => typeof item !== 'string' || !item.startsWith('probe_')).map(strip) : value && typeof value === 'object' ? Object.fromEntries(Object.entries(value).map(([key, item]) => [key, strip(item)])) : value
+      const response = await intercepted.fetch({ postData: JSON.stringify(strip(intercepted.request().postDataJSON())) })
+      await intercepted.fulfill({ response })
+    })
+    await page.goto(route); await settled(page)
+    await expect.poll(() => ids(page)).toEqual(expectedRows({}).slice(0, 10).map(row => row.id))
+    const trigger = page.getByRole('button', { name: copy.listDisplay, exact: true })
+    await trigger.focus(); await page.keyboard.press('Enter')
+    const dialog = page.getByRole('dialog', { name: copy.listDisplayHeading, exact: true })
+    await expect(dialog.getByRole('checkbox')).toHaveCount(36)
+    await page.evaluate(async () => { await Promise.all(document.getAnimations().filter(animation => animation.effect?.getComputedTiming().iterations !== Infinity).map(animation => animation.finished.catch(() => {}))) })
+    const bounds = await dialog.boundingBox()
+    observations.push({ kind: 'long-columns-bounds', width, language, bounds })
+    expect(bounds!.height).toBeLessThanOrEqual(675)
+    await insideViewport(dialog)
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+    const columnList = dialog.locator('[data-list-display-columns]')
+    await expect(columnList).toHaveCount(1)
+    const scrolling = await columnList.evaluate(element => ({ client: element.clientHeight, scroll: element.scrollHeight, overflow: getComputedStyle(element).overflowY }))
+    expect(scrolling.scroll).toBeGreaterThan(scrolling.client)
+    expect(scrolling.overflow).toBe('auto')
+    const compact = dialog.getByRole('checkbox', { name: copy.listDisplayCompact, exact: true })
+    const reset = dialog.getByRole('button', { name: copy.listDisplayReset, exact: true })
+    await insideViewport(compact); await insideViewport(reset)
+    await columnList.getByRole('checkbox').last().focus()
+    expect(await columnList.evaluate(element => element.scrollTop)).toBeGreaterThan(0)
+    await insideViewport(columnList.getByRole('checkbox').last())
+    await insideViewport(compact); await insideViewport(reset)
+    await compact.click(); await expect(compact).toBeChecked()
+    await reset.click(); await expect(compact).not.toBeChecked()
+    await page.keyboard.press('Escape'); await expect(trigger).toBeFocused()
+  })
+}

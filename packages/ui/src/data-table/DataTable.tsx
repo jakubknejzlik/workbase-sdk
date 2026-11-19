@@ -72,8 +72,8 @@ export function DataTable<T extends { id?: unknown }>({ rows, columns, state, on
     <div className={`w-full min-w-0 max-w-full ${compact ? 'compact-data-table' : ''}`} data-slot="data-table" data-list-density={listV2 ? compact ? 'compact' : 'comfortable' : undefined} data-list-access={listV2 && fixedDensity ? 'true' : undefined}>
       {searchAvailable && <div className="flex flex-wrap items-center gap-3 py-4"><DataTableSearch value={state.search} onChange={search => onStateChange({ ...state, search }, 'search')} label={labels.search} clearLabel={labels.clearSearch} description={searchDescription} onPendingChange={setSearchPending} /></div>}
       {hiddenControls.length > 0 && <div className="my-2">
-        <Button type="button" variant="outline" aria-expanded={controlsOpen} aria-controls={`${labelPrefix}-controls`} onClick={() => setControlsOpen(open => !open)}>{labels.sortAndFilter ?? 'Sort and filter'}</Button>
-        {controlsOpen && <div id={`${labelPrefix}-controls`} role="group" aria-label={labels.sortAndFilter ?? 'Sort and filter'} className="mt-2 space-y-2 rounded-md border p-2">
+        <Button type="button" variant="outline" aria-expanded={controlsOpen} aria-controls={`${labelPrefix}-controls`} onClick={() => setControlsOpen(open => !open)}>{labels.sortAndFilter ?? 'Filters'}</Button>
+        {controlsOpen && <div id={`${labelPrefix}-controls`} role="group" aria-label={labels.sortAndFilter ?? 'Filters'} className="mt-2 space-y-2 rounded-md border p-2">
           {hiddenControls.map(column => {
             const config = (column.columnDef.meta as ServerMeta<T>).serverColumn
             const direction = column.getIsSorted()
