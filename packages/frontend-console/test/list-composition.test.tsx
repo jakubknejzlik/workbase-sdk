@@ -213,7 +213,7 @@ it.each(['number', 'date'] as const)('keeps the shared %s range shape for gte-on
   expect(test.request.mock.calls).toHaveLength(before)
   await test.user.click(within(panel).getByRole('button', { name: en.applyFilter }))
   await waitFor(() => expect(test.request.mock.calls).toHaveLength(before + 1))
-  expect(test.request.mock.calls.at(-1)?.[0].where).toEqual({ and: [{ amount: { gte: lowerBound === 'date' ? new Date(2026, 10, 19).toISOString() : 10.5 } }] })
+  expect(test.request.mock.calls.at(-1)?.[0].where).toEqual({ and: [{ amount: { gte: lowerBound === 'date' ? '2026-11-18T23:00:00.000Z' /* midnight 19 Nov in the model's Europe/Prague zone, whatever the host zone */ : 10.5 } }] })
 })
 it('keeps confirmed toolbar filters and search when applying an older panel draft', async () => {
   const test = await mount(), panel = await openPanel(test.user)

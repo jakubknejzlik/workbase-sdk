@@ -219,3 +219,11 @@ it.each(['permission', 'actor'] as const)('revalidates a panel draft applied aft
   expect(screen.queryAllByText(/REVOKED_LABEL_CANARY/)).toHaveLength(0)
   expect((test.router.state.location.state as any).generatedList).toMatchObject({ cursors: [], notice: 'listStateDropped' })
 })
+it('purges the replaced actor\'s cached list rows, counts and totals when the console observes a different actor', async () => {
+  const test = await mount([])
+  const owned = (actor: string) => test.client.getQueryCache().findAll({ queryKey: ['data-table'] }).filter(query => String(query.queryKey.at(-1)).includes(`"${actor}"`))
+  await waitFor(() => expect(owned('actor').length).toBeGreaterThan(0))
+  await act(async () => { test.client.setQueryData(['me'], { user: { id: 'other-actor' }, memberships: [{ organization_id: 'org' }] }) })
+  await waitFor(() => expect(owned('other-actor').length).toBeGreaterThan(0))
+  expect(owned('actor')).toEqual([])
+})
