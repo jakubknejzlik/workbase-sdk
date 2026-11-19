@@ -12,7 +12,7 @@ import { validateFormDisplay } from '../../../core/src/form-display'
 import { validateDetailDisplay } from '../../../core/src/detail-display'
 import { ApiError } from '../../../core/src/errors'
 import { executeWidgets, validateWidgets, visibleWidgets } from './widgets'
-import type { InstanceConfig } from '@workbasehq/core/config'
+import { normalizeListConfig, type InstanceConfig } from '@workbasehq/core/config'
 import type { Scope } from '../../../core/src/types'
 import type { ConsoleContribution, ConsoleRegistry, ConsoleNavigation, ConsoleGrant } from './contract'
 export type * from './contract'
@@ -51,6 +51,7 @@ export function validateConsole(config: InstanceConfig) {
     entities.add(entity)
     validateCalendarViews(config, entity, part.entities![entity].views)
     validateFormDisplay(entity, config.entities[entity], part.entities![entity])
+    if (part.entities![entity].list) normalizeListConfig(config, entity, part.entities![entity].list)
     const detail = part.entities![entity].detail
     if (detail !== undefined) validateDetailDisplay(config, entity, detail)
   }
@@ -87,7 +88,7 @@ export function consoleRegistry(config: InstanceConfig, scope: Scope): ConsoleRe
   const entities: ConsoleRegistry['entities'] = Object.fromEntries(Object.entries(config.entities).map(([name, entity]) => [name, {
     ...config.ui?.entities?.[name], fields: Object.fromEntries(Object.entries(entity.fields).flatMap(([field, definition]) => definition.ui ? [[field, definition.ui]] : [])),
   }]))
-  for (const part of parts) for (const [entity, display] of Object.entries(part.entities ?? {})) entities[entity] = { ...entities[entity], ...display }
+  for (const part of parts) for (const [entity, { list, ...display }] of Object.entries(part.entities ?? {})) entities[entity] = { ...entities[entity], ...display, ...(list ? { list: normalizeListConfig(config, entity, list) } : {}) }
   return { navigation: navigation.sort(ordered), pages, entities, modelUi: config.ui }
 }
 

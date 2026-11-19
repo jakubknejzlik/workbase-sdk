@@ -16,7 +16,8 @@ import type { KernelCommand, ResourceAction, PluginMigration, Predicate, TableFi
 import { renderPredicate } from './predicate'
 export { renderPredicate } from './predicate'
 import { DeclarationError } from '../schema/declaration'
-import { resolvePlugins } from './composition'
+import { composeEntities, resolvePlugins } from './composition'
+export { composeEntities } from './composition'
 import { applyPluginMigrations } from './migrations'
 import { timed } from '../request-timing'
 import { policyFilter, readableFields, validatePolicies } from '../policies'
@@ -51,17 +52,13 @@ export class KernelRegistry {
     this.providers = resolved.providers
     const names = new Set(this.plugins.map(plugin => plugin.name))
     // contribute: reject collisions rather than allowing load order to silently overwrite code.
-    const entities = { ...config.entities }
+    const entities = composeEntities({ ...config, plugins: this.plugins })
     const commands = [...(options.commands?.values() ?? [])]
     const workflows = [...(options.workflows?.values() ?? [])]
     const workflowRegistrations = new Map<string, WorkflowRegistration>(
       workflows.map(workflow => [workflow.name, { kind: 'runtime', source: 'workflows' }]))
     const commandNames = [...(config.commands ?? [])]
     for (const plugin of this.plugins) {
-      for (const [name, entity] of Object.entries(plugin.entities ?? {})) {
-        if (Object.hasOwn(entities, name)) throw new Error(`Duplicate entity: ${name}`)
-        entities[name] = entity
-      }
       for (const command of plugin.commands ?? []) {
         if (!isBuiltinPlugin(plugin) || !options.commands?.has(command.name)) commands.push(command)
         if (!commandNames.includes(command.name)) commandNames.push(command.name)

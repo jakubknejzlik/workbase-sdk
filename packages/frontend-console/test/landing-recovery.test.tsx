@@ -106,7 +106,7 @@ it('a cold scoped bootstrap failure retains successful identity for instance rec
 it('a cold Members-only admin opens Members from the instance Overview without a console provider', async () => {
   const me = { ...account, role: 'admin', memberships: [{ organization_id: 'instance', name: 'Instance', role: 'admin' }] }
   const document: ConsoleModelContract = {
-    contractVersion: 1, console: null,
+    contractVersion: 2, console: null,
     model: { instance: 'test', revision: 1, locale: 'en', timeZone: 'UTC', limits: {}, entities: {}, commands: [], workflows: [] },
     capabilities: { revision: 1, organization: { role: 'admin' }, entities: {}, commands: [], workflows: {}, resources: { 'members.read': true } },
   }

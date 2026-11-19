@@ -21,7 +21,7 @@ export function projection(model: Model, entity: string, caps: Capabilities) { r
 export function listSearchableFields(model: Model, entity: string, caps: Capabilities, presentation?: 'table' | 'calendar') {
   const definition = model.entities[entity]; const readable = projection(model, entity, caps)
   const display = caps.entities[entity]?.displayField ?? definition.displayField
-  const columns = definition.list?.columns ?? definition.listColumns ?? [...(display ? [display] : []), ...definition.columns]
+  const columns = definition.list?.columns?.map(column => column.field) ?? definition.listColumns ?? [...(display ? [display] : []), ...definition.columns]
   const calendar = presentation === 'calendar' ? availableCalendar(model, entity, caps) : undefined
   const calendarFields = calendar ? [calendar.startField, calendar.endField, calendar.titleField, ...(calendar.titleFields ?? []), calendar.secondaryField, caps.entities[entity]?.displayField ?? definition.displayField].filter((field): field is string => !!field) : []
   return [...new Set([...columns, ...(definition.list?.search ?? []), ...calendarFields])].filter(key => {

@@ -84,7 +84,7 @@ it.each([
     expect(await runSchemaCli('check', ['--root', root])).toBe(0)
     execFileSync('bun', ['run', 'check:access'], { cwd: root, encoding: 'utf8' })
     if (settings.defaultLanguage === 'en') {
-      expect((await loadConfig(join(root, 'config.ts'))).config.ui?.entities.worker.list?.columns).toEqual(['name'])
+      expect((await loadConfig(join(root, 'config.ts'))).config.ui?.entities.worker.list?.columns).toEqual([{ field: 'name' }])
       expect(await runOpenApiCli(['--root', root])).toBe(0)
     }
     expect(await call('submit_change', { instance: 'demo', proposalId: proposal.proposalId, expectedBaseSha: 'a'.repeat(40) })).toMatchObject({ ok: false, error: { code: 'github_not_configured' } })

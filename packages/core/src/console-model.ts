@@ -1,4 +1,3 @@
-import { canGrantRole, organizationPermission } from './organization-permissions'
 import { z } from 'zod'
 import { bodyValidator } from './config'
 import { capabilities } from './capabilities'
@@ -37,10 +36,7 @@ export function consoleModel(kernel: KernelRegistry, scope: Scope): ConsoleModel
       return consoleInputSchema(schema, node => authority.schema(node) && literalGrants.get(node) !== false)
     }
     const link = Object.entries(entity.fields).find(([, field]) => field.userLink)
-    let rowInvitations = false
-    if (kernel.providers.has('members') && authority.read(name, 'id') && Object.values(entity.fields).some(field => field.userLink)) {
-      try { kernel.permission(scope, name, 'create'); kernel.resourcePermission(scope, 'invitations.create'); organizationPermission(config, scope, 'invitations.create'); rowInvitations = canGrantRole(config, scope.role, 'member') } catch {}
-    }
+    const rowInvitations = authority.rowInvitations(name)
     const display = authority.canRead(name) && config.ui?.entities[name] ? presentation.display(name, config.ui.entities[name]) : undefined
     const displayField = entity.displayField && authority.read(name, entity.displayField) ? entity.displayField : undefined
     return [name, {
@@ -65,7 +61,7 @@ export function consoleModel(kernel: KernelRegistry, scope: Scope): ConsoleModel
         }]
       })),
       columns: Object.keys(entity.fields).filter(field => authority.read(name, field)),
-      ...(display?.list?.columns ? { listColumns: display.list.columns } : {}),
+      ...(display?.list?.columns ? { listColumns: display.list.columns.map(column => column.field) } : {}),
       listLimit: Math.min(30, QUERY_LIMITS.root),
       ...(displayField ? { displayField } : {}),
       ...(entity.label && displayField ? { labelDependencies: labelDependencies(config, name).filter(dependency => authority.read(dependency.entity, dependency.field)) } : {}),
@@ -88,7 +84,7 @@ export function consoleModel(kernel: KernelRegistry, scope: Scope): ConsoleModel
     }]
   }))
   return {
-    contractVersion: 1,
+    contractVersion: 2,
     model: {
       instance: config.id, revision: config.revision,
       ...(config.displayName ? { displayName: config.displayName } : {}),

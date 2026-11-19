@@ -40,15 +40,26 @@ export function consolePresentation(kernel: KernelRegistry, scope: Scope, author
         return readable(column.via) && target && read(target, column.field) && end && read(end, 'id')
       }).map(([key, column]) => [key, pick(column, ['via', 'field'])]))
       const column = (field: string) => readable(field) || Object.hasOwn(relatedColumns, field)
+      const literalColumn = (field: string) => {
+        const related = relatedColumns[field]
+        if (!related) return operand(field)
+        const target = config.entities[entity].fields[related.via].entity!
+        return operand(related.via) && authority.label(target, related.field)
+      }
       result.list = {
         ...pick(list, ['pageSize', 'compact', 'mobileCards']),
         ...(list.defaultSort && operand(list.defaultSort.key) ? { defaultSort: pick(list.defaultSort, ['key', 'direction']) } : {}),
         ...(list.relatedColumns ? { relatedColumns } : {}),
-        ...(list.columns ? { columns: list.columns.filter(column) } : {}),
+        ...(list.columns ? { columns: list.columns.filter(spec => column(spec.field)).map(spec => ({
+          ...pick(spec, ['field', 'label', 'defaultVisible']),
+          ...(spec.secondary && column(spec.secondary) ? { secondary: spec.secondary } : {}),
+          ...(spec.cell ? { cell: spec.cell.kind === 'badge' && !literalColumn(spec.field) ? { kind: 'badge' as const } : structuredClone(spec.cell) } : {}),
+        })) } : {}),
         ...(list.search ? { search: list.search.filter(operand) } : {}),
-        ...(list.filter ? { filter: Object.fromEntries(Object.entries(list.filter).filter(([field]) => operand(field))) } : {}),
+        ...(list.filter ? { filter: Object.fromEntries(Object.entries(list.filter).filter(([field]) => literalColumn(field)).map(([field, hint]) => [field, structuredClone(hint)])) } : {}),
         ...(list.sort ? { sort: Object.fromEntries(Object.entries(list.sort).filter(([field, hint]) => operand(field) && (!hint || hint.fields.every(operand))).map(([field, hint]) => [field, hint && { fields: [...hint.fields] }])) } : {}),
-        ...(list.views ? { views: list.views.filter(view => predicate(entity, view.where)).map(view => pick(view, ['id', 'label', 'where', 'default'])) } : {}),
+        ...(list.rowAccess !== undefined && authority.listRowAccess(entity) ? { rowAccess: structuredClone(list.rowAccess) } : {}),
+        ...(list.views ? { views: list.views.filter(view => predicate(entity, view.where) && (!view.rowAccess || authority.listRowAccess(entity))).map(view => structuredClone(pick(view, ['id', 'label', 'where', 'rowAccess', 'default']))) } : {}),
       }
       if (list.defaultSort && (!operand(list.defaultSort.key) || list.sort?.[list.defaultSort.key] && !result.list.sort?.[list.defaultSort.key])) delete result.list.defaultSort
     }

@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useEntityTranslation } from './entity-translation'
 import { DataTableFilterDropdown, TextFilter, MultiSelectFilter, RangeFilter, ToggleFilter } from '@workbasehq/ui'
 import { Button } from '@workbasehq/ui/components/ui/button'
-import { filterKind, filterMapping, selectionCap, type FilterValue } from './filter-kinds'
+import { filterKind, filterOperators, filterMapping, selectionCap, type FilterValue } from './filter-kinds'
 import { useRelationLabels } from './useGeneratedList'
 import { RelationPicker } from './write-screens'
 import { recordLabel, type Capabilities, type Model, type ReadQuery, type Result } from './read'
@@ -15,7 +15,7 @@ export function HeaderFilter(props: Props) {
 function FilterEditor(props: Props & { close: () => void }) {
   const { t, i18n } = useEntityTranslation(props.entity); const spec = props.model.entities[props.entity].fields[props.field]
   const kind = filterKind(props.model, props.entity, props.field, props.caps)!
-  const mapping = filterMapping(kind, spec)
+  const mapping = filterMapping(kind, spec, undefined, filterOperators(props.model, props.entity, props.field))
   const [value, setValue] = useState<FilterValue | undefined>(() => props.predicate ? mapping.fromPredicate(props.predicate) : undefined)
   const [pickerValue, setPickerValue] = useState('')
   const values = Array.isArray(value) ? value : []

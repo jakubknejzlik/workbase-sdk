@@ -9,7 +9,7 @@ import { PluginPage } from '../src/console-pages'
 // A Members-only composition has no console provider; /console-model returns
 // console:null, with the authenticated model and admin capability projection.
 const document: ConsoleModelContract = {
-  contractVersion: 1, console: null,
+  contractVersion: 2, console: null,
   model: { instance: 'test', revision: 1, locale: 'en', timeZone: 'UTC', limits: {}, entities: {}, commands: [], workflows: [] },
   capabilities: { revision: 1, organization: { role: 'admin' }, entities: {}, commands: [], workflows: {}, resources: {} },
 }
@@ -63,4 +63,9 @@ it.each([undefined, false])('the fallback omits Members without a read grant (%s
   const registry = adaptConsoleModel({ ...document, capabilities: { ...document.capabilities, resources } }).console
   expect(registry.pages.some(page => page.id === 'members.list')).toBe(false)
   expect(registry.navigation.some(item => item.page === 'members.list')).toBe(false)
+})
+
+it('requires the canonical v2 console wire contract', () => {
+  expect(() => adaptConsoleModel({ ...document, contractVersion: 1 } as unknown as ConsoleModelContract)).toThrow('Unsupported console contract')
+  expect(adaptConsoleModel(document).contractVersion).toBe(2)
 })
