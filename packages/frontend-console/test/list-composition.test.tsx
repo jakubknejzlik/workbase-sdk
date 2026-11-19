@@ -71,13 +71,16 @@ it('merges Apply into latest confirmed state once, resets paging, and restores i
   await waitFor(() => expect(test.router.state.location.search.filters).toEqual([{ field: 'status', predicate: { in: ['inactive'] } }]))
 })
 it('uses exact server counts and total, caps reachable pages, and orders the shared slots', async () => {
-  await mount()
+  const test = await mount()
   expect(screen.getByRole('button', { name: /Active view.*42/ })).toBeTruthy()
   expect(screen.getByText(/1.*10.*73/)).toBeTruthy()
   expect(screen.queryByRole('button', { name: '6' })).toBeNull()
   expect(screen.queryByRole('button', { name: /Filter column.*Status/ })).toBeNull()
   const slots = [...document.querySelectorAll('[data-list-slot]')].map(node => node.getAttribute('data-list-slot'))
   expect(slots).toEqual(['tabs', 'toolbar', 'chips', 'table', 'footer'])
+  await openPanel(test.user)
+  const open = [...document.querySelectorAll('[data-list-slot]')].map(node => node.getAttribute('data-list-slot'))
+  expect(open).toEqual(['tabs', 'toolbar', 'panel', 'chips', 'table', 'footer'])
 })
 it.each(['query_too_expensive', 'denied'])('hides old rows/counts during loading and after %s', async failure => {
   const test = await mount(); test.hold(); test.fail(failure)
@@ -92,6 +95,29 @@ it.each(['query_too_expensive', 'denied'])('hides old rows/counts during loading
   expect(screen.queryByText(/1.*10.*73/)).toBeNull()
 })
 
+it('keeps same-key rows and counts mounted during a held background refetch, but hides them when the key changes', async () => {
+  const test = await mount()
+  const row = screen.getByText('Current')
+  test.hold()
+  let invalidation: Promise<void> | undefined
+  await act(async () => { invalidation = client.invalidateQueries({ refetchType: 'active' }) })
+  await waitFor(() => expect(test.request.mock.calls).toHaveLength(2))
+  expect(test.request.mock.calls[1][0]).toEqual(test.request.mock.calls[0][0])
+  expect(screen.getByText('Current')).toBe(row)
+  expect(document.body.contains(row)).toBe(true)
+  expect(screen.getByRole('button', { name: /Active view.*42/ })).toBeTruthy()
+  expect(screen.getByText(/1.*10.*73/)).toBeTruthy()
+  await act(async () => test.release())
+  await invalidation
+  await waitFor(() => expect(screen.getByText('Current')).toBe(row))
+  test.hold()
+  await test.user.click(screen.getByRole('button', { name: /Active view/ }))
+  await waitFor(() => expect(test.request.mock.calls).toHaveLength(3))
+  expect(screen.queryByText('Current')).toBeNull()
+  expect(screen.queryByRole('button', { name: /Active view.*42/ })).toBeNull()
+  expect(screen.queryByText(/1.*10.*73/)).toBeNull()
+  await act(async () => test.release())
+})
 it('stages row access in the panel, keeps confirmed chips until Apply and clears it with its chip', async () => {
   const test = await mount({ access: true }), panel = await openPanel(test.user)
   const before = test.request.mock.calls.length, url = test.router.state.location.href
@@ -108,6 +134,7 @@ it('resets the numbered page after a page size change', async () => {
   const test = await mount()
   await test.user.click(screen.getByRole('button', { name: '3' }))
   await waitFor(() => expect(test.request.mock.calls.at(-1)?.[0].offset).toBe(20))
+  expect(screen.getByRole('option', { name: '20 / page' })).toBeTruthy()
   await test.user.selectOptions(screen.getByRole('combobox', { name: en.rowsPerPage }), '20')
   await waitFor(() => expect(test.request.mock.calls.at(-1)?.[0]).toMatchObject({ offset: 0, limit: 20 }))
   expect(test.router.state.location.search.pageSize).toBe(20)

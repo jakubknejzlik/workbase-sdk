@@ -25,7 +25,7 @@ export function useGeneratedList({ model, caps, orgId, entity, request, contextL
   // subscriptions can briefly combine old search with new history state during navigation.
   const search = contextList ? local.search : validateListSearch(location.search as Record<string, unknown>)
   const filters = filterDescriptors(model, entity, caps)
-  const restored = stateFromSearch(search, model, entity, caps, filters)
+  const restored = stateFromSearch(search, model, entity, caps, filters, !!contextList)
   const [restoreAttempt, setRestoreAttempt] = useState(0)
   const reconciled = useReconciledFilters(model, caps, orgId, entity, restored.state.userFilters, filters, request, currentRoute, restoreAttempt)
   const state = { ...restored.state, userFilters: reconciled.filters }
@@ -44,15 +44,17 @@ export function useGeneratedList({ model, caps, orgId, entity, request, contextL
   if (offsetPaging) state.offset = page * Math.min(state.limit, model.limits.root)
   const notice = dropped ? 'listStateDropped' : history?.scope === scope && history.signature === signature && ['listStateDropped', 'listCursorRestarted'].includes(history.notice ?? '') ? history.notice : null
   const previous = useRef<PreviousState | undefined>(undefined)
+  // Key whose response has settled; only a background refetch of that same key may keep its rows mounted.
+  const settledKey = useRef<string | undefined>(undefined)
   const lastGood = useRef<{ scope: string; data: Result; page: number; limit: number } | undefined>(undefined)
-  const go = (next: ListSearch, nextCursors: string[], replace = false, notice?: ListNotice, nextPage = 0) => contextList ? Promise.resolve(setLocal({ search: next, history: { scope, signature: JSON.stringify(searchFromState(stateFromSearch(next, model, entity, caps).state)), cursors: nextCursors, page: nextPage, notice } })) : currentRoute ? navigate({ to: '.', search: next as any, replace, resetScroll: false,
-    state: old => ({ ...old, generatedList: { scope, signature: JSON.stringify(searchFromState(stateFromSearch(next, model, entity, caps).state)), cursors: nextCursors, page: nextPage, notice } }) }) : Promise.resolve()
+  const go = (next: ListSearch, nextCursors: string[], replace = false, notice?: ListNotice, nextPage = 0) => contextList ? Promise.resolve(setLocal({ search: next, history: { scope, signature: JSON.stringify(searchFromState(stateFromSearch(next, model, entity, caps, undefined, !!contextList).state)), cursors: nextCursors, page: nextPage, notice } })) : currentRoute ? navigate({ to: '.', search: next as any, replace, resetScroll: false,
+    state: old => ({ ...old, generatedList: { scope, signature: JSON.stringify(searchFromState(stateFromSearch(next, model, entity, caps, undefined, !!contextList).state)), cursors: nextCursors, page: nextPage, notice } }) }) : Promise.resolve()
   useEffect(() => {
     const legacyCursor = !contextList && Object.hasOwn(location.search, 'cursor')
     if (reconciled.ready && (dropped || canonicalFiltersChanged || legacyCursor)) void go(searchFromState(state), [], true, dropped ? 'listStateDropped' : legacyCursor ? 'listCursorRestarted' : undefined)
   }, [currentRoute, reconciled.ready, dropped, canonicalFiltersChanged, signature, location.searchStr])
   const { i18n } = useTranslation()
-  const document = toQueryDocument(state, model, entity, caps, i18n.language?.startsWith('cs') ? 'cs' : 'en', filters)
+  const document = toQueryDocument(state, model, entity, caps, i18n.language?.startsWith('cs') ? 'cs' : 'en', filters, !!contextList)
   if (contextList) {
     document.contextList = contextList
     const definition = model.entities[entity]
@@ -74,7 +76,10 @@ export function useGeneratedList({ model, caps, orgId, entity, request, contextL
       void go(searchFromState(state), [], true, 'listCursorRestarted')
     }
   }, [failure, state.cursor])
-  const data = offsetPaging ? reconciled.ready && result.isSuccess && !result.isFetching && !result.isPlaceholderData ? result.data : undefined : reconciled.ready ? result.data ?? (state.presentation !== 'calendar' && failure?.code === 'query_too_expensive' && lastGood.current?.scope === queryScope ? lastGood.current.data : undefined) : undefined
+  const keyId = JSON.stringify(key)
+  if (offsetPaging && reconciled.ready && result.isSuccess && !result.isFetching && !result.isPlaceholderData) settledKey.current = keyId
+  // A cached response for a different key is stale until its own fetch settles; the same key stays mounted while refetching.
+  const data = offsetPaging ? reconciled.ready && result.isSuccess && !result.isPlaceholderData && (!result.isFetching || settledKey.current === keyId) ? result.data : undefined : reconciled.ready ? result.data ?? (state.presentation !== 'calendar' && failure?.code === 'query_too_expensive' && lastGood.current?.scope === queryScope ? lastGood.current.data : undefined) : undefined
   const onStateChange = (next: DataTableState & Partial<ListState>, change: 'search' | 'sort' | 'limit' | 'filter' | 'view') => {
     previous.current = { scope, search: searchFromState(state), cursors, page }
     // A panel draft can outlive its authority; every submission needs fresh ID proof.

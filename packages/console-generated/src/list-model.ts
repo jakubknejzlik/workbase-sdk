@@ -71,7 +71,7 @@ function sortFields(model: Model, entity: string, caps: Capabilities, key: strin
 export function sortableFields(model: Model, entity: string, caps: Capabilities) {
   return [...new Set([...projection(model, entity, caps), ...labelColumns(model, entity, caps)])].filter(field => sortFields(model, entity, caps, field).length > 0)
 }
-export function stateFromSearch(search: ListSearch, model: Model, entity: string, caps: Capabilities, descriptors = filterDescriptors(model, entity, caps)) {
+export function stateFromSearch(search: ListSearch, model: Model, entity: string, caps: Capabilities, descriptors = filterDescriptors(model, entity, caps), embedded = false) {
   const state = defaultListState(model, entity)
   const calendar = availableCalendar(model, entity, caps)
   if (calendar) {
@@ -79,7 +79,7 @@ export function stateFromSearch(search: ListSearch, model: Model, entity: string
     state.calendarMode = search.calendarMode ?? 'month'
     state.calendarDate = search.calendarDate ?? dayKey(new Date())
   }
-  const unavailableSearch = !!search.search && !listSearchableFields(model, entity, caps, state.presentation).length
+  const unavailableSearch = !!search.search && !listSearchableFields(model, entity, caps, embedded && state.presentation !== 'calendar' ? 'embedded' : state.presentation).length
   if (search.search && !unavailableSearch) state.search = search.search
   if (search.pageSize) state.limit = search.pageSize
   const sort = search.sort === 'none' ? null : search.sort ? { key: search.sort, direction: search.direction ?? 'asc' as const } : state.sort
@@ -111,7 +111,7 @@ export function searchFromState(state: ListState): ListSearch {
   return { ...(state.rowAccess ? { rowAccess: state.rowAccess } : {}), ...(state.presentation === 'calendar' ? { presentation: state.presentation } : {}), ...(state.calendarDate ? { calendarDate: state.calendarDate } : {}), ...(state.calendarMode ? { calendarMode: state.calendarMode } : {}), ...(state.view ? { view: state.view } : {}), ...(state.userFilters.length ? { filters: state.userFilters } : {}), ...(state.search ? { search: state.search } : {}), ...(state.sort ? { sort: state.sort.key, direction: state.sort.direction } : { sort: 'none' }), pageSize: state.limit }
 }
 /** The only list compiler adapter. All work is performed by POST /query, never by the table. */
-export function toQueryDocument(state: ListState, model: Model, entity: string, caps: Capabilities, locale: 'en' | 'cs' = 'en', descriptors: FilterDescriptor[] = filterDescriptors(model, entity, caps)): ReadQuery {
+export function toQueryDocument(state: ListState, model: Model, entity: string, caps: Capabilities, locale: 'en' | 'cs' = 'en', descriptors: FilterDescriptor[] = filterDescriptors(model, entity, caps), embedded = false): ReadQuery {
   const select = projection(model, entity, caps)
   const allowedFilters = new Map(descriptors.map(filter => [filter.field, filter]))
   const userFilters = state.userFilters.filter(filter => {
@@ -133,7 +133,7 @@ export function toQueryDocument(state: ListState, model: Model, entity: string, 
   const allowedView = view && readableWhere(view.where, model, entity, caps) && (!view.rowAccess || model.entities[entity].rowInvitations && caps.resources?.['invitations.read'] === true) ? view : undefined
   if (allowedView && state.offset === undefined) conditions.unshift(allowedView.where)
   const rowAccess = state.offset === undefined ? allowedView?.rowAccess ?? state.rowAccess : state.rowAccess
-  const strings = listSearchableFields(model, entity, caps, state.presentation)
+  const strings = listSearchableFields(model, entity, caps, embedded && state.presentation !== 'calendar' ? 'embedded' : state.presentation)
   const fields = state.sort ? sortFields(model, entity, caps, state.sort.key) : []
   const labels = labelColumns(model, entity, caps).filter(key => (model.entities[entity].list?.columns?.map(column => column.field) ?? model.entities[entity].listColumns ?? model.entities[entity].columns).includes(key))
   const query: ReadQuery = { entity, ...(state.offset !== undefined ? { offset: state.offset, includeTotal: true, includeViewTotals: true, ...(allowedView ? { view: allowedView.id } : {}) } : {}), ...(rowAccess && model.entities[entity].rowInvitations && caps.resources?.['invitations.read'] === true ? { rowAccess } : {}), ...(state.search.trim() && strings.length ? { search: { text: state.search.trim(), fields: strings, locale } } : {}), select: select.length ? select : ['id'], ...(labels.length ? { labels } : {}), limit: Math.min(pageSizes.includes(state.limit as any) ? state.limit : 30, model.limits.root),

@@ -93,3 +93,10 @@ it('uses explicit search sources independently of table columns without broadeni
   expect(listSearchableFields(configured, 'workers', caps)).toEqual(['code'])
   expect(toQueryDocument({ ...stateFromSearch({ search: 'PR' }, configured, 'workers', caps).state, offset: 0 }, configured, 'workers', caps).search?.fields).toEqual(['code'])
 })
+it('keeps embedded lists on all-columns search even when the entity configures explicit table search', () => {
+  const configured = structuredClone(model); configured.entities.workers.list!.search = ['code']
+  expect(listSearchableFields(configured, 'workers', caps, 'embedded')).toEqual(expect.arrayContaining(['name', 'code']))
+  const embedded = toQueryDocument(stateFromSearch({ search: 'PR' }, configured, 'workers', caps, undefined, true).state, configured, 'workers', caps, 'en', undefined, true)
+  expect(embedded.search?.fields).toEqual(expect.arrayContaining(['name', 'code']))
+  expect(listSearchableFields(configured, 'workers', caps, 'table')).toEqual(['code'])
+})
