@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useEntityTranslation } from './entity-translation'
 import { DataTableFilterDropdown, TextFilter, MultiSelectFilter, RangeFilter, ToggleFilter, EntityPicker } from '@workbasehq/ui'
+import { Input } from '@workbasehq/ui/components/ui/input'
 import { Button } from '@workbasehq/ui/components/ui/button'
 import { filterMapping, selectionCap, type FilterDescriptor, type FilterValue } from './filter-kinds'
 import { usePickerSearch } from './use-picker-search'
@@ -18,8 +19,8 @@ export function ToolbarFilter(props: Props) {
   const { t } = useEntityTranslation(props.entity)
   const { descriptor } = props
   const mapping = filterMapping(descriptor.kind, props.model.entities[props.entity].fields[descriptor.field], undefined, descriptor.operators)
-  return <fieldset className="min-w-48 space-y-2 rounded-md border p-2 text-sm">
-    <legend className="px-1">{descriptor.label ?? t(`field_${descriptor.field}`)}</legend>
+  return <fieldset className="min-w-40 space-y-1 text-sm">
+    <legend className={descriptor.kind === 'relation' ? 'sr-only' : 'px-1'}>{descriptor.label ?? t(`field_${descriptor.field}`)}</legend>
     <FilterInput {...props} value={props.predicate ? mapping.fromPredicate(props.predicate) : undefined} onChange={value => props.onChange(mapping.toPredicate(value))} />
   </fieldset>
 }
@@ -45,7 +46,12 @@ export function FilterInput(props: FilterContext & { descriptor: FilterDescripto
   if (kind === 'text') return <TextFilter description={t((!spec || spec.type === 'ref') ? 'filterCaseInsensitive' : 'filterCaseSensitive')} label={t('filterContains')} value={typeof value === 'string' ? value : ''} onChange={setValue} />
   if (kind === 'enum') return <MultiSelectFilter options={(spec.values ?? []).map(id => ({ id, label: t(`value_${id}`, { defaultValue: id }) }))} value={Array.isArray(value) ? value : []} onChange={setValue} capLabel={capLabel} />
   if (kind === 'relation') return <RelationFilterInput {...props} target={spec.entity!} />
-  if (kind === 'number' || kind === 'date') return <RangeFilter locale={i18n.language} calendarLabel={t('selectDateRange')} type={kind === 'date' ? 'date' : 'number'} value={value && typeof value === 'object' && !Array.isArray(value) ? value : {}} onChange={setValue} labels={{ single: t('filterSingle'), from: t('filterFrom'), to: t('filterTo') }} />
+  if (kind === 'number' || kind === 'date') {
+    const operators = props.descriptor.operators
+    const range = value && typeof value === 'object' && !Array.isArray(value) ? value : {}
+    if (operators?.length === 1 && operators[0] === 'gte') return <label className="grid gap-1 text-sm">{t('filterFrom')}<Input type={kind === 'date' ? 'date' : 'number'} value={range.from ?? ''} onChange={event => setValue({ from: event.target.value })} /></label>
+    return <RangeFilter locale={i18n.language} calendarLabel={t('selectDateRange')} type={kind === 'date' ? 'date' : 'number'} value={range} onChange={setValue} labels={{ single: t('filterSingle'), from: t('filterFrom'), to: t('filterTo') }} />
+  }
   return <ToggleFilter value={typeof value === 'boolean' ? value : undefined} onChange={setValue} labels={{ label: t('filterValue'), all: t('filterAll'), yes: t('yes'), no: t('no') }} />
 }
 /** Read-only adapter: reuse authorized search/pages/ID hydration, always use the model label. */

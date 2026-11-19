@@ -26,8 +26,8 @@ function ServerCell<T>({ column, row }: CellContext<T, unknown>) {
   return column.id === '_actions' ? config.cell(row.original) : <div className={((column.columnDef.meta as ServerMeta<T>).compact || config.wrap) ? "whitespace-normal break-words" : "truncate"} ref={node => { if (node) node.title = node.textContent ?? '' }}>{config.cell(row.original)}</div>
 }
 /** Workbase owns server state; the source provider renders it without local filtering/paging. */
-export function DataTable<T extends { id?: unknown }>({ rows, columns, state, onStateChange, page, range, onPage, nextCursor, isFetching, label, labels, onRowClick, searchDescription, searchAvailable = true, pendingSearch = false, staleLabel, clearFilters, onClearFilters, error, compact = false, mobileCards = false }: {
-  compact?: boolean; mobileCards?: boolean
+export function DataTable<T extends { id?: unknown }>({ rows, columns, state, onStateChange, page, range, onPage, nextCursor, isFetching, label, labels, onRowClick, searchDescription, searchAvailable = true, pendingSearch = false, staleLabel, clearFilters, onClearFilters, error, compact = false, mobileCards = false, hideFooter = false, scrollOnNarrow = false }: {
+  hideFooter?: boolean; scrollOnNarrow?: boolean; compact?: boolean; mobileCards?: boolean
   rows: T[]; columns: ServerColumn<T>[]; state: DataTableState; onStateChange: (state: DataTableState, change: 'search' | 'sort' | 'limit') => void
   page: number; range?: { page: number; limit: number }; onPage: (direction: 'previous' | 'next') => void; nextCursor?: string | null; isFetching: boolean; label: string
   labels: PaginationLabels & { search: string; clearSearch: string; noResults: string; sort: (column: string) => string; sortAndFilter?: string; sortStates?: { asc: string; desc: string; none: string }; error?: string }
@@ -36,7 +36,7 @@ export function DataTable<T extends { id?: unknown }>({ rows, columns, state, on
   const narrow = useSyncExternalStore(callback => {
     const media = window.matchMedia('(max-width: 480px)'); media.addEventListener('change', callback)
     return () => media.removeEventListener('change', callback)
-  }, () => window.matchMedia('(max-width: 480px)').matches, () => false) && !mobileCards && columns.some(column => column.id === '_actions')
+  }, () => window.matchMedia('(max-width: 480px)').matches, () => false) && !scrollOnNarrow && !mobileCards && columns.some(column => column.id === '_actions')
   const labelPrefix = useId()
   const [controlsOpen, setControlsOpen] = useState(false)
   const [searchPending, setSearchPending] = useState(false)
@@ -96,7 +96,7 @@ export function DataTable<T extends { id?: unknown }>({ rows, columns, state, on
           return <div key={column.id} className={`min-w-0 ${column.id === columns[0]?.id || column.id === columns.at(-1)?.id ? 'col-span-2' : ''}`}><dt className="text-xs text-muted-foreground">{column.getCanSort() ? <button type="button" className="inline-flex min-h-8 items-center gap-1" aria-label={labels.sort(config.label)} onClick={() => column.toggleSorting(column.getIsSorted() === 'asc')}>{config.label}{column.getIsSorted() === 'asc' ? ' ↑' : column.getIsSorted() === 'desc' ? ' ↓' : ' ↕'}</button> : config.label}</dt><dd className="whitespace-normal break-words">{config.cell(row)}</dd></div>
         })}</dl></li>)}</ul>
       </div>}
-      <DataTableFooter />
+      {!hideFooter && <DataTableFooter />}
     </div>
   </DataTableProvider></TablePresentationContext.Provider>
 }

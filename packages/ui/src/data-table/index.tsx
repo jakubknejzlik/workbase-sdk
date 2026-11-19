@@ -12,3 +12,4 @@ export function StaticDataTable<T>({ data, columns, label }: { data: T[]; column
 export const LegacyDataTable = StaticDataTable
 export * from './row-actions'
 export * from './complete-table'
+export * from './list-page'

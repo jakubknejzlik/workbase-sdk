@@ -23,7 +23,7 @@ afterEach(() => { for (const client of clients.splice(0)) client.clear(); vi.res
 async function mount(language: 'en' | 'cs' = 'en', initialScope: SavedViewsScope | null = scope, embedded = false) {
   const i18n = i18next.createInstance()
   await i18n.use(initReactI18next).init({ lng: language, resources: { [language]: { translation: language === 'cs' ? cs : en } } })
-  const request = vi.fn(async (query: ReadQuery) => ({ data: [{ id: query.cursor ? 'second' : 'first', name: 'Entry', created: '2026-11-17T00:00:00Z' }], next_cursor: query.cursor ? null : 'next-opaque' }))
+  const request = vi.fn(async (query: ReadQuery) => ({ data: [{ id: query.offset || query.cursor ? 'second' : 'first', name: 'Entry', created: '2026-11-17T00:00:00Z' }], next_cursor: query.cursor ? null : 'next-opaque', total: 100, offset: query.offset, limit: query.limit }))
   let update!: (value: { scope?: SavedViewsScope; caps: Capabilities }) => void
   function Fixture() {
     const [context, setContext] = useState<{ scope?: SavedViewsScope; caps: Capabilities }>({ scope: initialScope ?? undefined, caps }); update = setContext
@@ -61,7 +61,7 @@ it.each(['en', 'cs'] as const)('%s saves, applies at page one, renames, updates 
   await navigate(router, { sort: 'none' })
   await waitFor(() => expect(screen.getByRole('button', { name: copy.nextPage }).hasAttribute('disabled')).toBe(false))
   await user.click(screen.getByRole('button', { name: copy.nextPage }))
-  await waitFor(() => expect(request.mock.lastCall?.[0].cursor).toBe('next-opaque'))
+  await waitFor(() => expect(request.mock.lastCall?.[0].offset).toBe(30))
   await user.click(screen.getByRole('button', { name: copy.savedViewsApply }))
   await waitFor(() => expect(request.mock.lastCall?.[0]).toMatchObject({ limit: 30, orderBy: [{ field: 'created', dir: 'desc' }], where: { and: [{ name: { contains: 'Saved' } }] } }))
   expect(request.mock.lastCall?.[0].cursor).toBeUndefined()
@@ -163,5 +163,5 @@ it('over-limit and malformed storage report failure while the list stays usable'
   await act(async () => window.dispatchEvent(new StorageEvent('storage', { key: savedViewsKey(scope, 'entries') })))
   expect(screen.getByRole('alert').textContent).toBe(en.savedViewsError_invalid)
   await user.click(screen.getByRole('button', { name: en.nextPage }))
-  await waitFor(() => expect(request.mock.lastCall?.[0].cursor).toBe('next-opaque'))
+  await waitFor(() => expect(request.mock.lastCall?.[0].offset).toBe(30))
 })

@@ -80,3 +80,16 @@ it('never converts label text to IDs or emits a stale kind after configuration c
   const exact = stateFromSearch({ filters: [{ field: 'team_id', predicate: { in: ['target-a', 'target-b'] } }] }, model, 'workers', caps)
   expect(toQueryDocument(exact.state, model, 'workers', caps).where).toMatchObject({ and: [{}, { team_id: { in: ['target-a', 'target-b'] } }] })
 })
+
+it('uses the server view operand for offset rows/counts and retains manual access separately', () => {
+  const { state } = stateFromSearch({ view: 'invited', rowAccess: 'expired', search: 'Ada' }, model, 'workers', caps)
+  const query = toQueryDocument({ ...state, offset: 30 }, model, 'workers', caps)
+  expect(query).toMatchObject({ view: 'invited', rowAccess: 'expired', offset: 30, includeTotal: true, includeViewTotals: true })
+  expect(query.where).toBeUndefined()
+  expect(query.cursor).toBeUndefined()
+})
+it('uses explicit search sources independently of table columns without broadening calendar behavior', () => {
+  const configured = structuredClone(model); configured.entities.workers.list!.search = ['code']
+  expect(listSearchableFields(configured, 'workers', caps)).toEqual(['code'])
+  expect(toQueryDocument({ ...stateFromSearch({ search: 'PR' }, configured, 'workers', caps).state, offset: 0 }, configured, 'workers', caps).search?.fields).toEqual(['code'])
+})

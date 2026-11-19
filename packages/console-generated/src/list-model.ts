@@ -14,6 +14,7 @@ export interface ListState {
   userFilters: ListFilter[]
   presetFilters: ListFilter[]
   cursor?: string
+  offset?: number
   limit: number
 }
 export interface ListSearch { rowAccess?: RowAccessState; presentation?: 'table' | 'calendar'; calendarMode?: CalendarMode; calendarDate?: string; invalidSettings?: boolean; filters?: ListFilter[]; view?: string; search?: string; sort?: string; direction?: 'asc' | 'desc'; pageSize?: number }
@@ -130,12 +131,12 @@ export function toQueryDocument(state: ListState, model: Model, entity: string, 
   })
   const view = model.entities[entity].list?.views?.find(view => view.id === state.view)
   const allowedView = view && readableWhere(view.where, model, entity, caps) && (!view.rowAccess || model.entities[entity].rowInvitations && caps.resources?.['invitations.read'] === true) ? view : undefined
-  if (allowedView) conditions.unshift(allowedView.where)
-  const rowAccess = allowedView?.rowAccess ?? state.rowAccess
+  if (allowedView && state.offset === undefined) conditions.unshift(allowedView.where)
+  const rowAccess = state.offset === undefined ? allowedView?.rowAccess ?? state.rowAccess : state.rowAccess
   const strings = listSearchableFields(model, entity, caps, state.presentation)
   const fields = state.sort ? sortFields(model, entity, caps, state.sort.key) : []
   const labels = labelColumns(model, entity, caps).filter(key => (model.entities[entity].list?.columns?.map(column => column.field) ?? model.entities[entity].listColumns ?? model.entities[entity].columns).includes(key))
-  const query: ReadQuery = { entity, ...(rowAccess && model.entities[entity].rowInvitations && caps.resources?.['invitations.read'] === true ? { rowAccess } : {}), ...(state.search.trim() && strings.length ? { search: { text: state.search.trim(), fields: strings, locale } } : {}), select: select.length ? select : ['id'], ...(labels.length ? { labels } : {}), limit: Math.min(pageSizes.includes(state.limit as any) ? state.limit : 30, model.limits.root),
+  const query: ReadQuery = { entity, ...(state.offset !== undefined ? { offset: state.offset, includeTotal: true, includeViewTotals: true, ...(allowedView ? { view: allowedView.id } : {}) } : {}), ...(rowAccess && model.entities[entity].rowInvitations && caps.resources?.['invitations.read'] === true ? { rowAccess } : {}), ...(state.search.trim() && strings.length ? { search: { text: state.search.trim(), fields: strings, locale } } : {}), select: select.length ? select : ['id'], ...(labels.length ? { labels } : {}), limit: Math.min(pageSizes.includes(state.limit as any) ? state.limit : 30, model.limits.root),
     ...(conditions.length ? { where: { and: conditions } } : {}),
     ...(Object.keys(labelWhere).length ? { labelWhere } : {}),
     orderBy: (fields.length ? fields : ['id']).map(field => ({ field, dir: fields.length ? state.sort!.direction : 'asc', ...(labelColumns(model, entity, caps).includes(field) ? { label: true } : {}) })),

@@ -50,7 +50,7 @@ async function mount(ids: string[] = [], saved = false, picker = false, panel = 
         const data = ids.filter(id => readable.has(id)).map(id => ({ id, name: id === 'revoked' ? 'REVOKED_LABEL_CANARY' : 'Readable team', alternate: definition.entities.teams.displayField === 'alternate' ? 'New display' : 'OLD_DISPLAY_CANARY' }))
         return Response.json({ data: data.map(row => Object.fromEntries(query.select.map(field => [field, row[field as keyof typeof row]]))), next_cursor: null })
       }
-      return Response.json({ data: [{ id: 'entry', name: 'Entry' }], next_cursor: query.cursor ? null : 'next-page' })
+      return Response.json({ data: [{ id: 'entry', name: 'Entry' }], next_cursor: null, total: 6, offset: query.offset, limit: query.limit })
     }
     throw new Error(`Unexpected request ${path}`)
   })
@@ -92,7 +92,7 @@ it.each(['permission', 'actor', 'definition'] as const)('revalidates warm select
   const test = await mount(['revoked'])
   await waitFor(() => expect(screen.queryAllByText(/REVOKED_LABEL_CANARY/).length).toBeGreaterThan(0))
   await test.user.click(screen.getByRole('button', { name: en.nextPage }))
-  await waitFor(() => expect(test.source().at(-1)?.cursor).toBe('next-page'))
+  await waitFor(() => expect(test.source().at(-1)?.offset).toBe(2))
   test.hold()
   if (change === 'definition') test.redefine()
   else test.revoke()
@@ -168,15 +168,15 @@ it('revalidates a previously verified URL selection after leaving and returning 
   expect(screen.queryAllByText(/REVOKED_LABEL_CANARY/)).toHaveLength(0)
   expect(screen.getByText(en.listStateDropped)).toBeTruthy()
 })
-it('retains the cursor after an unchanged authority refresh while revalidating the selected IDs', async () => {
+it('retains the page after an unchanged authority refresh while revalidating the selected IDs', async () => {
   const test = await mount(['readable'])
   await waitFor(() => expect(test.source().length).toBeGreaterThan(0))
   await test.user.click(screen.getByRole('button', { name: en.nextPage }))
-  await waitFor(() => expect(test.source().at(-1)?.cursor).toBe('next-page'))
+  await waitFor(() => expect(test.source().at(-1)?.offset).toBe(2))
   const before = test.source().length
   await test.refresh()
   await waitFor(() => expect(test.source().length).toBeGreaterThan(before))
-  expect(test.source().at(-1)?.cursor).toBe('next-page')
+  expect(test.source().at(-1)?.offset).toBe(2)
   expect(test.router.state.location.search.filters).toEqual(selected(['readable']))
   expect(screen.queryByText(en.listStateDropped)).toBeNull()
 })
@@ -184,7 +184,7 @@ it('retains the cursor after an unchanged authority refresh while revalidating t
 
 it.each(['permission', 'actor'] as const)('revalidates a panel draft applied after %s authority changes', async change => {
   const test = await mount([], false, false, true)
-  await test.user.click(await screen.findByText(en.sortAndFilter, { selector: 'summary' }))
+  await test.user.click(await screen.findByText(en.sortAndFilter))
   const panel = screen.getByRole('group', { name: en.sortAndFilter })
   const picker = within(panel).getByRole('combobox', { name: 'Team' })
   await test.user.click(picker)
