@@ -130,10 +130,12 @@ export function refEqualityDefinition(table: TableSpec, constraint: RefEqualityC
   const abort = `SELECT RAISE(ABORT, ${literal(token)});`
   // A replacement has no OLD row in AFTER INSERT. Consult its captured state
   // here too, so equality cannot win merely because its AFTER trigger runs first.
-  const immutableChecks = tables.find(t => t.name === target)?.constraints?.filter((c): c is RefImmutableConstraint => c.kind === 'ref_immutable').map(c => refImmutableDefinition(tables.find(t => t.name === target)!, c).check).join(' ') ?? ''
+  const pendingImmutableChecks = (table: TableSpec | undefined) => table?.constraints?.filter((c): c is RefImmutableConstraint => c.kind === 'ref_immutable').map(c => refImmutableDefinition(table, c).check).join(' ') ?? ''
+  const sourceChecks = pendingImmutableChecks(table)
+  const immutableChecks = pendingImmutableChecks(tables.find(t => t.name === target))
   const triggers = [
-    { name: `${token}_insert`, sql: `CREATE TRIGGER ${quote(`${token}_insert`)} AFTER INSERT ON ${source} WHEN ${mismatch('NEW')} BEGIN ${abort} END;` },
-    { name: `${token}_update`, sql: `CREATE TRIGGER ${quote(`${token}_update`)} AFTER UPDATE OF ${field}, ${hop}, "organization_id" ON ${source} WHEN ${mismatch('NEW')} BEGIN ${abort} END;` },
+    { name: `${token}_insert`, sql: `CREATE TRIGGER ${quote(`${token}_insert`)} AFTER INSERT ON ${source} WHEN ${mismatch('NEW')} BEGIN ${sourceChecks}${sourceChecks ? ' ' : ''}${abort} END;` },
+    { name: `${token}_update`, sql: `CREATE TRIGGER ${quote(`${token}_update`)} AFTER UPDATE OF ${field}, ${hop}, "organization_id" ON ${source} WHEN ${mismatch('NEW')} BEGIN ${sourceChecks}${sourceChecks ? ' ' : ''}${abort} END;` },
     { name: `${token}_reverse`, sql: `CREATE TRIGGER ${quote(`${token}_reverse`)} AFTER UPDATE OF ${targetField} ON ${parent} WHEN NEW.${targetField} IS NOT OLD.${targetField} AND ${reverseMismatch('OLD')} BEGIN ${abort} END;` },
     // INSERT OR REPLACE can change a target field without firing UPDATE. The
     // distinct single-word role suffix keeps the global trigger names injective.
