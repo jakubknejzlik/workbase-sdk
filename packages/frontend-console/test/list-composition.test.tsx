@@ -16,9 +16,10 @@ const caps: Capabilities = { revision: 1, entities: { entries: { readable: Objec
 let client: QueryClient
 beforeEach(() => { vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} }); vi.spyOn(window, 'scrollTo').mockImplementation(() => {}) })
 afterEach(() => { client?.clear(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
-async function mount(options: { access?: boolean; accessPlacement?: 'toolbar' | 'column'; missingTotals?: boolean; empty?: boolean; range?: boolean } = {}) {
+async function mount(options: { access?: boolean; accessPlacement?: 'toolbar' | 'column'; missingTotals?: boolean; empty?: boolean; range?: boolean; lowerBound?: 'number' | 'date' } = {}) {
   const definition = structuredClone(model), permissions = structuredClone(caps)
   if (options.range) { definition.entities.entries.fields.amount = { type: 'number' }; definition.entities.entries.list!.filter!.amount = { kind: 'number', placement: 'panel', operators: ['eq', 'gte', 'lte'] }; permissions.entities.entries.readable.push('amount') }
+  if (options.lowerBound) { definition.entities.entries.fields.amount = { type: options.lowerBound === 'date' ? 'datetime' : 'number' }; definition.entities.entries.list!.filter!.amount = { kind: options.lowerBound, placement: 'panel', operators: ['gte'] }; permissions.entities.entries.readable.push('amount') }
   if (options.access) { definition.entities.entries.rowInvitations = true; definition.entities.entries.list!.rowAccess = options.accessPlacement === 'column' ? { column: true } : { placement: options.accessPlacement ?? 'panel' }; permissions.resources = { 'invitations.read': true } }
   let mode = 'success', release: (() => void) | undefined
   let gate: Promise<void> | undefined
@@ -118,6 +119,25 @@ it('keeps same-key rows and counts mounted during a held background refetch, but
   expect(screen.queryByText(/1.*10.*73/)).toBeNull()
   await act(async () => test.release())
 })
+it('hides invalidated cached rows and counts after A → pending B → A until A settles', async () => {
+  const test = await mount()
+  const originalQuery = test.request.mock.calls[0][0]
+  test.hold()
+  await test.user.click(screen.getByRole('button', { name: /Active view/ }))
+  await waitFor(() => expect(test.request.mock.calls).toHaveLength(2))
+  expect(screen.queryByText('Current')).toBeNull()
+  await act(async () => { await client.invalidateQueries({ type: 'inactive', refetchType: 'none' }) })
+  await act(async () => test.router.history.back())
+  await waitFor(() => expect(test.request.mock.calls).toHaveLength(3))
+  expect(test.request.mock.calls[2][0]).toEqual(originalQuery)
+  expect(screen.queryByText('Current')).toBeNull()
+  expect(screen.queryByRole('button', { name: /Active view.*42/ })).toBeNull()
+  expect(screen.queryByText('1–10 of 73')).toBeNull()
+  await act(async () => test.release())
+  expect(await screen.findByText('Current')).toBeTruthy()
+  expect(await screen.findByText('1–10 of 73')).toBeTruthy()
+  expect(screen.getByRole('button', { name: /Active view.*42/ })).toBeTruthy()
+})
 it('stages row access in the panel, keeps confirmed chips until Apply and clears it with its chip', async () => {
   const test = await mount({ access: true }), panel = await openPanel(test.user)
   const before = test.request.mock.calls.length, url = test.router.state.location.href
@@ -175,6 +195,25 @@ it('validates a draft range without requests and commits only after correction',
   await test.user.click(within(panel).getByRole('button', { name: en.applyFilter }))
   await waitFor(() => expect(test.request.mock.calls).toHaveLength(before + 1))
   expect(test.request.mock.calls.at(-1)?.[0].where).toEqual({ and: [{ amount: { gte: 10, lte: 15 } }] })
+})
+it.each(['number', 'date'] as const)('keeps the shared %s range shape for gte-only filters and sends only the lower bound', async lowerBound => {
+  const test = await mount({ lowerBound }), panel = await openPanel(test.user)
+  const before = test.request.mock.calls.length
+  const from = within(panel).getByLabelText(en.filterFrom) as HTMLInputElement
+  expect((within(panel).getByLabelText(en.filterSingle) as HTMLInputElement).disabled).toBe(true)
+  expect((within(panel).getByLabelText(en.filterTo) as HTMLInputElement).disabled).toBe(true)
+  expect(from.disabled).toBe(false)
+  expect(from.type).toBe(lowerBound === 'date' ? 'text' : 'number')
+  if (lowerBound === 'date') {
+    await test.user.click(within(panel).getByRole('button', { name: en.selectDateRange }))
+    expect(screen.getByRole('grid')).toBeTruthy()
+    await test.user.keyboard('{Escape}')
+  }
+  await test.user.type(from, lowerBound === 'date' ? '2026-11-19' : '10.5')
+  expect(test.request.mock.calls).toHaveLength(before)
+  await test.user.click(within(panel).getByRole('button', { name: en.applyFilter }))
+  await waitFor(() => expect(test.request.mock.calls).toHaveLength(before + 1))
+  expect(test.request.mock.calls.at(-1)?.[0].where).toEqual({ and: [{ amount: { gte: lowerBound === 'date' ? new Date(2026, 10, 19).toISOString() : 10.5 } }] })
 })
 it('keeps confirmed toolbar filters and search when applying an older panel draft', async () => {
   const test = await mount(), panel = await openPanel(test.user)

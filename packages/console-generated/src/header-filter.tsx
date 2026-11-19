@@ -1,7 +1,6 @@
 import { useState } from 'react'
 import { useEntityTranslation } from './entity-translation'
 import { DataTableFilterDropdown, TextFilter, MultiSelectFilter, RangeFilter, ToggleFilter, EntityPicker } from '@workbasehq/ui'
-import { Input } from '@workbasehq/ui/components/ui/input'
 import { Button } from '@workbasehq/ui/components/ui/button'
 import { filterMapping, selectionCap, type FilterDescriptor, type FilterValue } from './filter-kinds'
 import { usePickerSearch } from './use-picker-search'
@@ -49,8 +48,7 @@ export function FilterInput(props: FilterContext & { descriptor: FilterDescripto
   if (kind === 'number' || kind === 'date') {
     const operators = props.descriptor.operators
     const range = value && typeof value === 'object' && !Array.isArray(value) ? value : {}
-    if (operators?.length === 1 && operators[0] === 'gte') return <label className="grid gap-1 text-sm">{t('filterFrom')}<Input type={kind === 'date' ? 'date' : 'number'} value={range.from ?? ''} onChange={event => setValue({ from: event.target.value })} /></label>
-    return <RangeFilter locale={i18n.language} calendarLabel={t('selectDateRange')} type={kind === 'date' ? 'date' : 'number'} value={range} onChange={setValue} labels={{ single: t('filterSingle'), from: t('filterFrom'), to: t('filterTo') }} />
+    return <RangeFilter lowerBoundOnly={operators?.length === 1 && operators[0] === 'gte'} locale={i18n.language} calendarLabel={t('selectDateRange')} type={kind === 'date' ? 'date' : 'number'} value={range} onChange={setValue} labels={{ single: t('filterSingle'), from: t('filterFrom'), to: t('filterTo') }} />
   }
   return <ToggleFilter value={typeof value === 'boolean' ? value : undefined} onChange={setValue} labels={{ label: t('filterValue'), all: t('filterAll'), yes: t('yes'), no: t('no') }} />
 }

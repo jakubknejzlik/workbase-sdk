@@ -46,6 +46,7 @@ export function useGeneratedList({ model, caps, orgId, entity, request, contextL
   const previous = useRef<PreviousState | undefined>(undefined)
   // Key whose response has settled; only a background refetch of that same key may keep its rows mounted.
   const settledKey = useRef<string | undefined>(undefined)
+  const observedKey = useRef<string | undefined>(undefined)
   const lastGood = useRef<{ scope: string; data: Result; page: number; limit: number } | undefined>(undefined)
   const go = (next: ListSearch, nextCursors: string[], replace = false, notice?: ListNotice, nextPage = 0) => contextList ? Promise.resolve(setLocal({ search: next, history: { scope, signature: JSON.stringify(searchFromState(stateFromSearch(next, model, entity, caps, undefined, !!contextList).state)), cursors: nextCursors, page: nextPage, notice } })) : currentRoute ? navigate({ to: '.', search: next as any, replace, resetScroll: false,
     state: old => ({ ...old, generatedList: { scope, signature: JSON.stringify(searchFromState(stateFromSearch(next, model, entity, caps, undefined, !!contextList).state)), cursors: nextCursors, page: nextPage, notice } }) }) : Promise.resolve()
@@ -77,6 +78,8 @@ export function useGeneratedList({ model, caps, orgId, entity, request, contextL
     }
   }, [failure, state.cursor])
   const keyId = JSON.stringify(key)
+  // Leaving a settled key ends its mounted-row lifetime, even if we return before another key settles.
+  if (observedKey.current !== keyId) { observedKey.current = keyId; settledKey.current = undefined }
   if (offsetPaging && reconciled.ready && result.isSuccess && !result.isFetching && !result.isPlaceholderData) settledKey.current = keyId
   // A cached response for a different key is stale until its own fetch settles; the same key stays mounted while refetching.
   const data = offsetPaging ? reconciled.ready && result.isSuccess && !result.isPlaceholderData && (!result.isFetching || settledKey.current === keyId) ? result.data : undefined : reconciled.ready ? result.data ?? (state.presentation !== 'calendar' && failure?.code === 'query_too_expensive' && lastGood.current?.scope === queryScope ? lastGood.current.data : undefined) : undefined
