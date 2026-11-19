@@ -218,7 +218,7 @@ it.each([
     expect(await readFile(join(root, 'schema/worker.ts'), 'utf8')).toBe(source)
   } finally { await server.close() }
 })
-it('rejects adding partial uniqueness over matching duplicate data without promoting or cleaning it', async () => {
+it('rejects adding partial uniqueness over matching duplicates with sources and reviewed data intact', async () => {
   const { root, server, call, propose } = await fixture(true)
   try {
     const source = await readFile(join(root, 'schema/worker.ts'), 'utf8')
