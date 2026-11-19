@@ -6,6 +6,7 @@ import { plan } from '@workbasehq/core/migrations/planner'
 import { quote } from '@workbasehq/core/migrations/schema'
 import { changeSchema, fail, WorkflowError, type Change, type Index } from './schemas.ts'
 import { effectivePolicies } from './policies.ts'
+import { collectListDependencies } from './list-dependencies'
 import { roleNamePrivileges } from '@workbasehq/core/organization-permissions'
 
 export const hash = (value: unknown) => createHash('sha256').update(typeof value === 'string' ? value : JSON.stringify(value)).digest('hex')
@@ -205,6 +206,23 @@ export function prepareChanges(config: InstanceConfig, existingIndexes: Index[],
          (entity.fields[f.backfillFrom.refField]?.entity === c.entity && f.backfillFrom.valueField === c.from))))) {
         fail('protected_field', 'A snapshot depends on this field; manual review required')
       }
+      // Resolve every list against the pre-rename model. Plugin contributions are
+      // trusted code retained by cloneInstanceConfig; only copied UI data is writable.
+      const lists = Object.entries(next.ui?.entities ?? {}).flatMap(([entity, hints]) => hints.list
+        ? [{ hints, ...collectListDependencies(next, entity, hints.list) }] : [])
+      for (const plugin of next.plugins ?? []) for (const [entity, hints] of Object.entries(plugin.contributes?.console?.entities ?? {})) {
+        if (!hints.list) continue
+        const { dependencies } = collectListDependencies(next, entity, hints.list)
+        const dependency = dependencies.find(ref => ref.entity === c.entity && ref.field === c.from)
+        if (dependency) fail('field_in_use', `Cannot rename ${c.entity}.${c.from}: referenced by plugin ${plugin.name} at contributes.console.entities.${entity}.list.${dependency.path}; update the plugin presentation before renaming this field.`)
+      }
+      for (const { hints, list, dependencies } of lists) {
+        for (const dependency of dependencies) if (dependency.entity === c.entity && dependency.field === c.from) {
+          try { dependency.rename(c.to) }
+          catch (error) { fail('invalid_input', (error as Error).message) }
+        }
+        hints.list = list
+      }
       e.fields[c.to] = { ...e.fields[c.from], renameFrom: e.fields[c.from].renameFrom ?? c.from }
       delete e.fields[c.from]
       if (e.displayField === c.from) e.displayField = c.to
@@ -225,30 +243,6 @@ export function prepareChanges(config: InstanceConfig, existingIndexes: Index[],
         if (next.entities[source].relations[name]?.entity !== c.entity) continue
         related.columns = related.columns.map(renamed)
         if (related.defaultSort) related.defaultSort.key = renamed(related.defaultSort.key)
-      }
-      const list = display?.list
-      if (list) {
-        if (list.columns) list.columns = list.columns.map(column => ({ ...column, field: renamed(column.field), ...(column.secondary ? { secondary: renamed(column.secondary) } : {}) }))
-        if (list.search) list.search = list.search.map(renamed)
-        if (list.defaultSort) list.defaultSort.key = renamed(list.defaultSort.key)
-        if (list.filter) list.filter = Object.fromEntries(Object.entries(list.filter).map(([key, hint]) => [renamed(key), hint]))
-        if (list.sort) {
-          // Preserve configured key order, including disabled sort keys.
-          if (own(list.sort, c.from) && own(list.sort, c.to)) fail('invalid_input', 'Rename target already has a UI sort hint')
-          list.sort = Object.fromEntries(Object.entries(list.sort).map(([key, hint]) => [renamed(key), hint && { fields: hint.fields.map(renamed) }]))
-        }
-      }
-      const renameWhere = (where: Record<string, unknown>, entity: string): Record<string, unknown> => Object.fromEntries(Object.entries(where).map(([key, value]) => {
-        if (key === 'and' || key === 'or') return [key, (value as Record<string, unknown>[]).map(child => renameWhere(child, entity))]
-        if (key === 'not') return [key, renameWhere(value as Record<string, unknown>, entity)]
-        const relation = next.entities[entity].relations[key]
-        if (relation) return [key, relation.many ? Object.fromEntries(Object.entries(value as Record<string, Record<string, unknown>>).map(([quantifier, child]) => [quantifier, renameWhere(child, relation.entity)])) : renameWhere(value as Record<string, unknown>, relation.entity)]
-        return [entity === c.entity && key === c.from ? c.to : key, value]
-      }))
-      for (const [entity, hints] of Object.entries(next.ui?.entities ?? {})) if (hints.list?.views) hints.list.views = hints.list.views.map(view => ({ ...view, where: renameWhere(view.where ?? {}, entity) }))
-      for (const [source, hints] of Object.entries(next.ui?.entities ?? {})) for (const related of Object.values(hints.list?.relatedColumns ?? {})) {
-        if (source === c.entity) related.via = renamed(related.via)
-        if (next.entities[source].fields[related.via]?.entity === c.entity) related.field = renamed(related.field)
       }
       for (const [source, spec] of Object.entries(next.entities)) for (const r of Object.values(spec.relations)) if ((r.many ? r.entity : source) === c.entity && r.field === c.from) r.field = c.to
       for (const i of indexes) if (i.entity === c.entity) i.fields = i.fields.map(f => f === c.from ? c.to : f)
