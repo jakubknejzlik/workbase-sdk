@@ -16,10 +16,10 @@ const caps: Capabilities = { revision: 1, entities: { entries: { readable: Objec
 let client: QueryClient
 beforeEach(() => { vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} }); vi.spyOn(window, 'scrollTo').mockImplementation(() => {}) })
 afterEach(() => { client?.clear(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
-async function mount(options: { access?: boolean; missingTotals?: boolean; empty?: boolean; range?: boolean } = {}) {
+async function mount(options: { access?: boolean; accessPlacement?: 'toolbar' | 'column'; missingTotals?: boolean; empty?: boolean; range?: boolean } = {}) {
   const definition = structuredClone(model), permissions = structuredClone(caps)
   if (options.range) { definition.entities.entries.fields.amount = { type: 'number' }; definition.entities.entries.list!.filter!.amount = { kind: 'number', placement: 'panel', operators: ['eq', 'gte', 'lte'] }; permissions.entities.entries.readable.push('amount') }
-  if (options.access) { definition.entities.entries.rowInvitations = true; definition.entities.entries.list!.rowAccess = { placement: 'panel' }; permissions.resources = { 'invitations.read': true } }
+  if (options.access) { definition.entities.entries.rowInvitations = true; definition.entities.entries.list!.rowAccess = options.accessPlacement === 'column' ? { column: true } : { placement: options.accessPlacement ?? 'panel' }; permissions.resources = { 'invitations.read': true } }
   let mode = 'success', release: (() => void) | undefined
   let gate: Promise<void> | undefined
   const request = vi.fn(async (query: ReadQuery) => {
@@ -161,4 +161,17 @@ it('keeps confirmed toolbar filters and search when applying an older panel draf
   await test.user.click(within(panel).getByRole('button', { name: en.applyFilter }))
   await waitFor(() => expect(test.request.mock.calls).toHaveLength(before + 1))
   expect(test.request.mock.calls.at(-1)?.[0]).toMatchObject({ offset: 0, search: { text: 'New search' }, where: { and: [{ quick: { eq: true } }, { status: { in: ['inactive'] } }] } })
+})
+
+it.each(['toolbar', 'column'] as const)('honors row-access %s metadata without adding an Apply boundary', async accessPlacement => {
+  const test = await mount({ access: true, accessPlacement })
+  if (accessPlacement === 'column') {
+    expect(screen.queryByRole('combobox', { name: en.rowAccessFilter })).toBeNull()
+    const panel = await openPanel(test.user)
+    expect(within(panel).queryByRole('combobox', { name: en.rowAccessFilter })).toBeNull()
+  } else {
+    await test.user.selectOptions(screen.getByRole('combobox', { name: en.rowAccessFilter }), 'expired')
+    await waitFor(() => expect(test.request.mock.calls.at(-1)?.[0]).toMatchObject({ rowAccess: 'expired', offset: 0 }))
+    expect(test.router.state.location.search.rowAccess).toBe('expired')
+  }
 })
