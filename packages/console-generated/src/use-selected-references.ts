@@ -1,15 +1,15 @@
 import { hashKey, useQueries, useQueryClient, type QueryClient } from '@tanstack/react-query'
 import { pickerQuery } from './write'
-import { referenceScope, useReferenceAuthority } from './reference-authority'
+import { referenceScope, useReferenceAuthority, type ReferenceAuthorityState } from './reference-authority'
 import { visibleEntities, type Capabilities, type Model, type ReadQuery, type Result } from './read'
 
 type Row = Record<string, any>
 type Pending = { id: string; resolve: (row: Row | null) => void; reject: (error: unknown) => void }
 const batches = new WeakMap<QueryClient, Map<string, Pending[]>>()
-const key = (model: Model, caps: Capabilities, orgId: string, target: string, authority?: string) => ['picker', ...referenceScope(model, caps, orgId, target, authority), 'selected']
+const key = (model: Model, caps: Capabilities, orgId: string, target: string, authority?: ReferenceAuthorityState) => ['picker', ...referenceScope(model, caps, orgId, target, authority), 'selected']
 
 /** Coalesce sibling controls in this render into bounded, capability-scoped target queries. */
-function enqueue(client: QueryClient, model: Model, caps: Capabilities, orgId: string, target: string, id: string, request: (query: ReadQuery) => Promise<Result>, authority?: string) {
+function enqueue(client: QueryClient, model: Model, caps: Capabilities, orgId: string, target: string, id: string, request: (query: ReadQuery) => Promise<Result>, authority?: ReferenceAuthorityState) {
   let scopes = batches.get(client)
   if (!scopes) { scopes = new Map(); batches.set(client, scopes) }
   const scope = hashKey(key(model, caps, orgId, target, authority))
@@ -31,7 +31,7 @@ function enqueue(client: QueryClient, model: Model, caps: Capabilities, orgId: s
 }
 
 /** A selected label must be fetched in its current authority/definition scope. */
-export function selectedReferenceOptions(client: QueryClient, model: Model, caps: Capabilities, orgId: string, target: string, id: string, request: (query: ReadQuery) => Promise<Result>, authority?: string) {
+export function selectedReferenceOptions(client: QueryClient, model: Model, caps: Capabilities, orgId: string, target: string, id: string, request: (query: ReadQuery) => Promise<Result>, authority?: ReferenceAuthorityState) {
   return {
     queryKey: [...key(model, caps, orgId, target, authority), id],
     queryFn: () => enqueue(client, model, caps, orgId, target, id, request, authority),

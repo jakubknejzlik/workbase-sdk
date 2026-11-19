@@ -167,3 +167,15 @@ it('revalidates a previously verified URL selection after leaving and returning 
   expect(screen.queryAllByText(/REVOKED_LABEL_CANARY/)).toHaveLength(0)
   expect(screen.getByText(en.listStateDropped)).toBeTruthy()
 })
+it('retains the cursor after an unchanged authority refresh while revalidating the selected IDs', async () => {
+  const test = await mount(['readable'])
+  await waitFor(() => expect(test.source().length).toBeGreaterThan(0))
+  await test.user.click(screen.getByRole('button', { name: en.nextPage }))
+  await waitFor(() => expect(test.source().at(-1)?.cursor).toBe('next-page'))
+  const before = test.source().length
+  await test.refresh()
+  await waitFor(() => expect(test.source().length).toBeGreaterThan(before))
+  expect(test.source().at(-1)?.cursor).toBe('next-page')
+  expect(test.router.state.location.search.filters).toEqual(selected(['readable']))
+  expect(screen.queryByText(en.listStateDropped)).toBeNull()
+})
