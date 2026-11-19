@@ -12,14 +12,16 @@ import { parseRuntimeSource } from './composition/runtime-source'
 import { hydrateRuntimePlugins } from './composition/registry'
 import { stateRoot, applyDisposable } from './disposable'
 import { expectedSnapshot, instanceMeta } from './offline'
-import { Store, atomic, json, noLink, type Bundle } from './storage'
+import { Store, durableAtomic, json, noLink, type Bundle } from './storage'
 import { fail, WorkflowError, type SchemaChange } from './schemas'
 import { hash } from './planning'
 import type { SchemaProposal } from './proposals'
 import { promotionHash, submitChange } from './submit-change'
 import type { GitHubConfiguration } from './github'
 
-const save = async (store: Store, proposal: SchemaProposal) => atomic(join(await store.directory(proposal.instance), 'proposals', `${proposal.proposalId}.json`), json(proposal))
+// Persist through the canonical proposal directory so revocation is durable
+// before checking mutable application paths, even when config.ts is missing or unsafe.
+const save = async (store: Store, proposal: SchemaProposal) => durableAtomic(join(await store.proposalDirectory(proposal.instance), 'proposals', `${proposal.proposalId}.json`), json(proposal))
 function revision(bundle: Bundle, expected: number) {
   if (bundle.config.revision !== expected) fail('stale_revision', 'Instance revision changed; propose again', 409)
 }

@@ -121,6 +121,31 @@ it.each(['schema/worker.ts', 'schema.lock.json'])('rejects stale proposal eviden
     expect(await call('promote', { proposalId, expectedRevision: 1 })).toMatchObject({ ok: false, error: { code: 'validation_required' } })
   } finally { await server.close() }
 })
+it.each(['validate', 'apply_to_disposable'])('revokes saved authorization when config disappears before %s', async action => {
+  const { root, server, call, propose } = await fixture()
+  try {
+    const result = await propose(); expect(result).toMatchObject({ ok: true })
+    const { proposalId } = result
+    expect(await call('validate', { proposalId })).toMatchObject({ ok: true })
+    expect(await call('apply_to_disposable', { proposalId })).toMatchObject({ ok: true, verified: true })
+    const path = join(root, 'config.ts')
+    const config = await readFile(path)
+    await rm(path)
+    expect(await call(action, { proposalId })).toMatchObject({ ok: false, error: { code: 'invalid_instance_directory' } })
+    await writeFile(path, config)
+    expect(await call('promote', { proposalId, expectedRevision: 1 })).toMatchObject({
+      ok: false, error: { code: action === 'validate' ? 'validation_required' : 'verification_required' },
+    })
+    const saved = JSON.parse(await readFile(join(root, 'proposals', `${proposalId}.json`), 'utf8'))
+    expect(saved.verification).toBeUndefined()
+    expect(saved.status).toBe(action === 'validate' ? 'proposed' : 'validated')
+    if (action === 'validate') expect(saved.validation).toBeUndefined()
+    expect(await call('validate', { proposalId })).toMatchObject({ ok: true })
+    expect(await call('promote', { proposalId, expectedRevision: 1 })).toMatchObject({ ok: false, error: { code: 'verification_required' } })
+    expect(await call('apply_to_disposable', { proposalId })).toMatchObject({ ok: true, verified: true })
+    expect(await call('promote', { proposalId, expectedRevision: 1 })).toMatchObject({ ok: true, status: 'promoted' })
+  } finally { await server.close() }
+})
 it('rejects existing duplicate data reviewably and cannot promote failed validation', async () => {
   const { root, server, call, propose } = await fixture(true)
   try {
