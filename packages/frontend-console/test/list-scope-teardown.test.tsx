@@ -122,3 +122,18 @@ it('keeps a deep-linked state while the actor is only being established (unknown
   expect(test.router.state.location.search).toMatchObject({ view: 'active', filters: [{ field: 'status', predicate: { in: ['active'] } }] })
   expect(screen.getByRole('button', { name: /Remove.*Active/ })).toBeTruthy()
 })
+it('treats a transient unknown actor as no change, but unknown -> a different actor as a replacement', async () => {
+  const test = await mount({ actor: 'A', search: { view: 'active' } })
+  await test.switchTo({ actor: undefined })
+  expect(await screen.findByText('Row of anon@org')).toBeTruthy()
+  expect(test.router.state.location.search.view).toBe('active')
+  await test.switchTo({ actor: 'A' })
+  expect(await screen.findByText('Row of A@org')).toBeTruthy()
+  expect(test.router.state.location.search.view).toBe('active')
+  await test.switchTo({ actor: undefined })
+  test.hold(); test.snapshots.length = 0
+  await test.switchTo({ actor: 'B' })
+  await waitFor(() => expect(test.router.state.location.search.view).toBeUndefined())
+  expect(stale(test.snapshots, 'Row of A@org', 'B@org')).toEqual([])
+  await test.release(); expect(await screen.findByText('Row of B@org')).toBeTruthy()
+})

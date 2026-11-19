@@ -314,7 +314,7 @@ export function RelationPicker(props: Context & { allowCreate?: boolean; target:
   const name = (row: Record<string, any>) => {
     const display = caps.entities[target]?.displayField ?? model.entities[target].displayField
     if (display && !caps.entities[target]?.readable.includes(display)) return recordLabel(model, target, { id: row.id }, caps, i18n.language, t)
-    if (hints?.labelTemplate) return hints.labelTemplate.replace(/\{(\w+)\}/g, (_, key) => caps.entities[target]?.readable.includes(key) ? row[key] == null ? '' : formatFieldValue(row[key], model.entities[target].fields[key], i18n.language, t) : '').trim() || recordLabel(model, target, row, caps, i18n.language, t)
+    if (hints?.labelTemplate) return hints.labelTemplate.replace(/\{(\w+)\}/g, (_, key) => caps.entities[target]?.readable.includes(key) ? row[key] == null ? '' : formatFieldValue(row[key], model.entities[target].fields[key], i18n.language, t, model.timeZone) : '').trim() || recordLabel(model, target, row, caps, i18n.language, t)
     return recordLabel(model, target, row, caps, i18n.language, t)
   }
   const refresh = useRefresh()

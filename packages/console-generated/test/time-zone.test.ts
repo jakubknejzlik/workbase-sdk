@@ -44,3 +44,7 @@ it('compiles date filters to the instance zone day boundaries (DST-aware) and sh
   expect(mapping.label({ from: '2026-11-17' }, key => key)).toBe('Nov 17, 2026 – filterMaximum')
   expect(filterMapping('date', field, 'cs', undefined, 'Asia/Tokyo').label({ value: '2026-11-17' }, key => key)).toBe('17. 11. 2026')
 })
+it('formats only genuine numbers under the number cell and leaves identifiers and blanks alone', () => {
+  for (const value of ['', ' ', '00123', 'abc', false]) expect(formatValue(value, { type: 'string' }, 'en', 'y', 'n', '-', 'UTC', 'number')).toBe(String(value))
+  expect(formatValue('1234.5', { type: 'string' }, 'en', 'y', 'n', '-', 'UTC', 'number')).toBe('1,234.5')
+})

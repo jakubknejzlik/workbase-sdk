@@ -50,14 +50,14 @@ function Catalogue({ scope, entity, state, current, initial, fingerprint, onAppl
   // Search text, paging and the draft panel are outside the saved settings; only confirmed state is compared.
   const dirty = current !== baseline && !settling
   useEffect(() => { if (settling && current === baseline) setSettling(false) }, [settling, current, baseline])
-  const mutate = (change: SavedViewsChange) => {
+  const mutate = (change: SavedViewsChange, close = true) => {
     if (!active.current) return false
     const result = changeSavedViews(scope, entity, change)
     setCatalogue(result); setMessage(result.error ? `savedViewsError_${result.error}` : 'savedViewsChanged')
     if (result.error) return false
     if (change.kind === 'save') { const saved = result.entries.at(-1)!.id; setActiveId(saved); setCandidate(saved) }
     if (change.kind === 'delete') { setActiveId(''); setCandidate('') }
-    setDialogue(undefined)
+    if (close) setDialogue(undefined)
     return true
   }
   const openDialogue = (next: Dialogue, value = '') => { if (!active.current) return; setOpen(false); setName(value); setUpdate(next.kind === 'save' && !next.asNew && !!entry); setMessage(''); setDialogue(next) }
@@ -72,7 +72,8 @@ function Catalogue({ scope, entity, state, current, initial, fingerprint, onAppl
   const submit = () => {
     if (dialogue?.kind === 'rename' && entry) mutate({ kind: 'rename', id: entry.id, name })
     else if (dialogue?.kind === 'save' && !dialogue.asNew && update && entry) {
-      if (mutate({ kind: 'update', id: entry.id, state }) && name.trim() !== entry.name) mutate({ kind: 'rename', id: entry.id, name })
+      // Name first: a refused name leaves both the stored view and the open dialog untouched.
+      if (name.trim() === entry.name || mutate({ kind: 'rename', id: entry.id, name }, false)) mutate({ kind: 'update', id: entry.id, state })
     } else if (dialogue?.kind === 'save') mutate({ kind: 'save', name, state })
   }
   const selected = candidate && catalogue.entries.some(item => item.id === candidate) ? candidate : activeId && entry ? activeId : catalogue.entries[0]?.id ?? ''

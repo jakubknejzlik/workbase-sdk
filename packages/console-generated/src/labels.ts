@@ -12,7 +12,7 @@ export function instanceTimeZone(timeZone?: string) {
 export type CellKind = 'text' | 'identifier' | 'badge' | 'date' | 'datetime' | 'number'
 export function formatValue(value: unknown, field: Field, locale: string, yes: string, no: string, empty: string, timeZone?: string, cell?: CellKind) {
   if (value === null || value === undefined) return empty
-  if (['int', 'float', 'number'].includes(field.type) || cell === 'number' && Number.isFinite(Number(value)) && !['date', 'datetime'].includes(field.type)) return new Intl.NumberFormat(locale, { useGrouping: field.ui?.format === 'identifier' ? false : undefined }).format(Number(value))
+  if (['int', 'float', 'number'].includes(field.type) || cell === 'number' && (typeof value === 'number' && Number.isFinite(value) || typeof value === 'string' && /^-?(0|[1-9]\d*)(\.\d+)?$/.test(value))) return new Intl.NumberFormat(locale, { useGrouping: field.ui?.format === 'identifier' ? false : undefined }).format(Number(value))
   if (['date', 'datetime'].includes(field.type)) {
     const date = new Date(String(value))
     if (!Number.isNaN(date.getTime())) {

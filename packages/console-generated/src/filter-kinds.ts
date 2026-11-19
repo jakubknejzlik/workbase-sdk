@@ -13,7 +13,7 @@ const day = (value: unknown): value is string => typeof value === 'string' && /^
 /** Offset (ms) of an IANA zone at an instant, from the formatter rather than the host's own zone. */
 function zoneOffset(instant: number, timeZone: string) {
   const parts = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone, hourCycle: 'h23', year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric', second: 'numeric' }).formatToParts(new Date(instant)).map(part => [part.type, Number(part.value)]))
-  return Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second) - Math.floor(instant / 1000) * 1000
+  return Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour % 24, parts.minute, parts.second) - Math.floor(instant / 1000) * 1000
 }
 /** First instant of a calendar day in the instance zone; `next` yields the following day's start. */
 const localDay = (value: string, next = false, zone?: string) => {
