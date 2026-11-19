@@ -175,6 +175,21 @@ visibility, and replaces the client, query cache and drafts whenever canonical
 Slots receive only declared authorized props and `t`. Action nodes consume only
 the owning detail's `actions` entries, and use `ui:actions.<name>` labels.
 
+The D3 A detail contract uses exact entity-scoped action names: `(entity, name)`
+selects the declaration's full registered `command` identity (for example,
+`record` / `close` maps to `record/close`). The wire key is `close`; names can
+repeat on other entities. Keep the owning entity and record ID for dispatch and
+refresh. SDK detail GET includes this top-level map with
+`Cache-Control: private, no-store`; list/query responses omit availability.
+`baseline: 'workbase-sdk'` reserves `actions` as both a field and relation name
+to prevent metadata collisions. Legacy configurations intentionally allow those
+names and retain their existing detail payloads without injected availability.
+See the [SDK record-action contract](../../../core/src/schema/README.md).
+Disabled generic actions retain native disabled-button semantics and describe
+their translated reason through `aria-describedby`, as the access card does.
+Authored reasons use `ui:`; core's `sdk.action_unavailable` fallback and `access.*`
+reasons use the bundled `sdk:` catalog, including English and Czech fallbacks.
+
 Register the SDK access card in `ui/-slots.ts` with an explicit dependency on the
 account-link field. The extractor stubs this exact SDK component import; it does
 not admit other React exports into data modules.

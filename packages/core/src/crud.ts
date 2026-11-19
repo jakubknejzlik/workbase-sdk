@@ -87,7 +87,10 @@ export function crudRoutes(app: App, config: InstanceConfig, env: RuntimeEnv) {
     await rejectedInput({ entity: c.req.param('entity'), id: c.req.param('id'), params: c.req.query() })
     const name = c.req.param('entity')!, scope = c.get('scope')
     const row = await readRecord(config, scope, env, name, c.req.param('id')!, c.req.query(), writeLog)
-    if (config.baseline === 'workbase-sdk') row.actions = await recordActions(config, scope, env.DB, name, c.req.param('id')!)
+    if (config.baseline === 'workbase-sdk') {
+      row.actions = await recordActions(config, scope, env.DB, name, c.req.param('id')!)
+      c.header('Cache-Control', 'private, no-store')
+    }
     if (config.baseline === 'workbase-sdk' && canReadAccountAccess(config, scope, name)) row.access = await accountAccessState(config, scope, env.DB, name, c.req.param('id')!)
     return c.json(row)
   }))

@@ -31,6 +31,7 @@
   "removed": "Přístup již není dostupný",
   "navigation": "Navigace",
   "identifier": "Identifikátor",
+  "action_unavailable": "Tato akce není dostupná",
   "access.invitation_pending": "Pozvánka čeká na přijetí",
   "access.already_linked": "Účet je již propojen",
   "access.no_invitation": "Žádná čekající pozvánka",
