@@ -105,3 +105,36 @@ it('returns stable data MCP status/code for real D1 CRUD and atomic failures wit
     expect(await call('update_record', { entity: 'jobs', id: 'job-org-a', data: { title: 'Renamed' }, version: 1 })).toMatchObject({ ok: true })
   } finally { await mcp.close() }
 })
+
+// Regressions derived from the reviewer's local D1/Miniflare probes.
+it('rejects UPDATE OR REPLACE of an occupied referenced identity on D1', async () => {
+  await setup(config); await insertDomain()
+  await env.DB.prepare("PRAGMA recursive_triggers=OFF").run()
+  await env.DB.prepare("INSERT INTO clients(id,organization_id,name,created_at,updated_at) VALUES('other','org-a','Other','now','now')").run()
+  await env.DB.prepare("INSERT INTO jobs(id,organization_id,title,client_id,created_at,updated_at) VALUES('free','org-a','Free','other','now','now')").run()
+  await env.DB.prepare("INSERT INTO reservation(id,organization_id,client,location,created_at,updated_at) VALUES('held','org-a','client-org-a','job-org-a','now','now')").run()
+  const before = await snapshot()
+  await expect(env.DB.prepare("UPDATE OR REPLACE jobs SET id='job-org-a' WHERE id='free'").run()).rejects.toThrow(refImmutableToken('jobs', constraint.name))
+  expect(await snapshot()).toEqual(before)
+  expect((await env.DB.prepare('PRAGMA foreign_key_check').all()).results).toEqual([])
+})
+it('rejects multi-row REPLACE through a declared unique key and reused referenced id on D1', async () => {
+  const uniqueConfig = defineInstance({ ...config, entities: { ...config.entities, jobs: { ...config.entities.jobs, constraints: [constraint, { kind: 'unique', name: 'title_unique', fields: ['title'] }] } } })
+  await setup(uniqueConfig); await insertDomain()
+  await env.DB.prepare("PRAGMA recursive_triggers=OFF").run()
+  await env.DB.prepare("INSERT INTO clients(id,organization_id,name,created_at,updated_at) VALUES('other','org-a','Other','now','now')").run()
+  await env.DB.prepare("INSERT INTO reservation(id,organization_id,client,location,created_at,updated_at) VALUES('held','org-a','client-org-a','job-org-a','now','now')").run()
+  const row = await env.DB.prepare("SELECT title FROM jobs WHERE id='job-org-a'").first<{ title: string }>()
+  const before = await snapshot()
+  await expect(env.DB.prepare("INSERT OR REPLACE INTO jobs(id,organization_id,title,client_id,created_at,updated_at) VALUES('replacement','org-a',?,'other','now','now'),('job-org-a','org-a','New title','other','now','now')").bind(row!.title).run()).rejects.toThrow(refImmutableToken('jobs', constraint.name))
+  expect(await snapshot()).toEqual(before)
+  expect((await env.DB.prepare('PRAGMA foreign_key_check').all()).results).toEqual([])
+})
+it('allows UPSERTs with omitted or differing proposals when the stored ref does not change on D1', async () => {
+  const nullableConfig = defineInstance({ ...config, entities: { ...config.entities, jobs: { ...config.entities.jobs, fields: { ...config.entities.jobs.fields, client_id: { ...config.entities.jobs.fields.client_id, required: false } } } } })
+  await setup(nullableConfig); await insertDomain()
+  await env.DB.prepare("INSERT INTO reservation(id,organization_id,client,location,created_at,updated_at) VALUES('held','org-a','client-org-a','job-org-a','now','now')").run()
+  await expect(env.DB.prepare("INSERT INTO jobs(id,organization_id,title,created_at,updated_at) VALUES('job-org-a','org-a','Renamed','now','now') ON CONFLICT(id) DO UPDATE SET title=excluded.title").run()).resolves.toMatchObject({ success: true })
+  await expect(env.DB.prepare("INSERT INTO jobs(id,organization_id,title,client_id,created_at,updated_at) VALUES('job-org-a','org-a','Ignored','different','now','now') ON CONFLICT(id) DO NOTHING").run()).resolves.toMatchObject({ success: true })
+  expect(await env.DB.prepare("SELECT title,client_id FROM jobs WHERE id='job-org-a'").first()).toEqual({ title: 'Renamed', client_id: 'client-org-a' })
+})

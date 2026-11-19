@@ -86,6 +86,37 @@ it('covers id-change, INSERT OR REPLACE and upsert paths', () => {
     db.exec("INSERT INTO location (id,organization_id,created_at,updated_at,client) VALUES ('solo','a','now','now','c1') ON CONFLICT(id) DO UPDATE SET label='same-client'")
   } finally { db.close() }
 })
+// Regressions derived from s4-review1 probe-expanded.ts and multi-replace.log.
+it('rejects UPDATE OR REPLACE of an occupied referenced identity', () => {
+  const { db } = fixture([[immutable], [equality]])
+  try {
+    db.exec("PRAGMA recursive_triggers=OFF; UPDATE location SET client='c2' WHERE id='free'")
+    rejected(db, "UPDATE OR REPLACE location SET id='used' WHERE id='free'")
+    expect(db.prepare("SELECT id,client FROM location WHERE id IN ('free','used') ORDER BY id").all()).toEqual([{ id: 'free', client: 'c2' }, { id: 'used', client: 'c1' }])
+    expect(db.prepare('PRAGMA foreign_key_check').all()).toEqual([])
+  } finally { db.close() }
+})
+it('rejects multi-row REPLACE through a declared unique key before a referenced identity is reused', () => {
+  const { db } = fixture([[immutable, { kind: 'unique', name: 'label_unique', fields: ['label'] }], []])
+  try {
+    db.exec('PRAGMA recursive_triggers=OFF')
+    rejected(db, "INSERT OR REPLACE INTO location(id,organization_id,created_at,updated_at,client,label) VALUES('replacement','a','now','now','c2','used'),('used','a','now','now','c2','new label')")
+    expect(db.prepare("SELECT client,label FROM location WHERE id='used'").get()).toEqual({ client: 'c1', label: 'used' })
+    expect(db.prepare("SELECT id FROM location WHERE id='replacement'").get()).toBeUndefined()
+    expect(db.prepare('PRAGMA foreign_key_check').all()).toEqual([])
+  } finally { db.close() }
+})
+it('allows UPSERTs with omitted or differing proposals when the stored ref does not change', () => {
+  const { db } = fixture([[immutable], [equality]])
+  try {
+    db.exec("INSERT INTO location(id,organization_id,created_at,updated_at,label) VALUES('used','a','now','now','renamed') ON CONFLICT(id) DO UPDATE SET label=excluded.label")
+    db.exec("INSERT INTO location(id,organization_id,created_at,updated_at,client) VALUES('used','a','now','now','c2') ON CONFLICT(id) DO NOTHING")
+    db.exec("INSERT INTO location(id,organization_id,created_at,updated_at,client) VALUES('used','a','now','now',NULL) ON CONFLICT DO NOTHING")
+    db.exec("INSERT INTO location(id,organization_id,created_at,updated_at,client) VALUES('used','a','now','now','c2') ON CONFLICT(id) DO UPDATE SET client=client")
+    expect(db.prepare("SELECT client,label FROM location WHERE id='used'").get()).toEqual({ client: 'c1', label: 'renamed' })
+    rejected(db, "INSERT INTO location(id,organization_id,created_at,updated_at,client) VALUES('used','a','now','now','c2') ON CONFLICT(id) DO UPDATE SET client=excluded.client")
+  } finally { db.close() }
+})
 it('is organization scoped: references from a foreign organization never block', () => {
   const { db, insert } = fixture(undefined, false)
   try {
@@ -123,10 +154,10 @@ it('composes with ref_equality: the stricter immutability error wins, unreferenc
     db.exec("DELETE FROM booking WHERE id='eq-booking'"); db.exec("UPDATE location SET client='c2' WHERE id='eq'")
   } finally { db.close() }
 })
-it('adds reviewable trigger-only SQL, replay equals fresh, removal drops both triggers and bytes are deterministic', () => {
+it('adds reviewable guard SQL, replay equals fresh, removal drops its table and triggers and bytes are deterministic', () => {
   const from = schemaLock(config([])), to = schemaLock(config(), from)
   const sql = diffSpecs(from.tables, to.tables)
-  expect(sql.match(/CREATE TRIGGER/g)).toHaveLength(2); expect(sql).not.toMatch(/ALTER TABLE|UPDATE "|DELETE FROM|CHECK \("valid"/)
+  expect(sql.match(/CREATE TRIGGER/g)).toHaveLength(4); expect(sql).not.toMatch(/ALTER TABLE|UPDATE "location"|DELETE FROM "location"|CHECK \("valid"/)
   const { db } = fixture([[], []])
   try {
     db.exec(sql)
@@ -134,7 +165,7 @@ it('adds reviewable trigger-only SQL, replay equals fresh, removal drops both tr
     const fresh = fixture()
     try { expect(shape(db)).toEqual(shape(fresh.db)) } finally { fresh.db.close() }
     const removed = diffSpecs(to.tables, schemaLock(config([]), to).tables)
-    expect(removed.match(/DROP TRIGGER/g)).toHaveLength(2)
+    expect(removed.match(/DROP TRIGGER/g)).toHaveLength(4)
     db.exec(removed); expect(db.prepare("SELECT * FROM sqlite_schema WHERE type='trigger'").all()).toEqual([])
   } finally { db.close() }
   expect(lockBytes(parseLock(lockBytes(to)))).toBe(lockBytes(to))
@@ -170,12 +201,12 @@ it('rejects constrained rebuilds, renames and in-place constraint changes explic
   const changed = config([{ ...immutable, referencedBy: { entity: 'booking', field: 'alt' } }])
   expect(() => schemaLock(changed, lock)).toThrow('changing constraint')
 })
-it('keeps the legacy planner domain-only and trigger-only for SDK-baseline constraint migrations', async () => {
+it('keeps the legacy planner domain-only without rebuilding tables for SDK-baseline constraint migrations', async () => {
   const { plan } = await import('../../src/migrations/planner')
   const from = config([]), base = schemaLock(from); bindSchemaLock(from, base)
   const to = config(), next = schemaLock(to, base); bindSchemaLock(to, next)
   const migration = plan(from, to)
-  expect(migration.blocked).toEqual([]); expect(migration.sql.match(/CREATE TRIGGER/g)).toHaveLength(2)
+  expect(migration.blocked).toEqual([]); expect(migration.sql.match(/CREATE TRIGGER/g)).toHaveLength(4)
   expect(migration.sql).not.toContain('instance_meta')
 })
 it('keeps generated bundle/lock bytes deterministic across constraint order and verifies parent linkage', async () => {
@@ -194,4 +225,43 @@ it('keeps generated bundle/lock bytes deterministic across constraint order and 
   expect(() => parseLock(JSON.stringify(invalid))).toThrow('Invalid schema.lock.json')
   invalid.tables.find((t: any) => t.name === 'location').constraints.find((c: any) => c.kind === 'ref_immutable').referencedBy = { entity: 'booking', field: 'client' }
   expect(() => parseLock(JSON.stringify(invalid))).toThrow('Invalid schema.lock.json')
+})
+
+it.each([false, true])('guards replacement writes independently of recursive_triggers=%s and trigger installation order', recursive => {
+  const { db } = fixture([[immutable], [equality]])
+  try {
+    db.exec(`PRAGMA recursive_triggers=${recursive ? 'ON' : 'OFF'}`)
+    const triggers = db.prepare("SELECT name,sql FROM sqlite_schema WHERE type='trigger' ORDER BY name").all() as { name: string; sql: string }[]
+    for (const trigger of triggers) db.exec(`DROP TRIGGER "${trigger.name}"`)
+    for (const trigger of triggers.reverse()) db.exec(trigger.sql)
+    rejected(db, "INSERT OR REPLACE INTO location(id,organization_id,created_at,updated_at,client) VALUES('used','a','now','now','c2')")
+    db.exec("UPDATE location SET client='c2' WHERE id='free'")
+    rejected(db, "UPDATE OR REPLACE location SET id='used' WHERE id='free'")
+    db.exec("INSERT OR REPLACE INTO location(id,organization_id,created_at,updated_at,client) VALUES('used','a','now','now','c1')")
+  } finally { db.close() }
+})
+it('allows ignored identity/unique conflicts and OR REPLACE plus DO NOTHING without changing the stored ref', () => {
+  const { db } = fixture([[immutable, { kind: 'unique', name: 'label_unique', fields: ['label'] }], []])
+  try {
+    db.exec("INSERT OR REPLACE INTO location(id,organization_id,created_at,updated_at,client) VALUES('used','a','now','now','c2') ON CONFLICT(id) DO NOTHING")
+    db.exec("INSERT INTO location(id,organization_id,created_at,updated_at,client,label) VALUES('ignored','a','now','now','c2','used') ON CONFLICT(organization_id,label) DO NOTHING")
+    db.exec("UPDATE location SET client='c2' WHERE id='free'")
+    db.exec("UPDATE OR IGNORE location SET id='used' WHERE id='free'")
+    expect(db.prepare("SELECT client,label FROM location WHERE id='used'").get()).toEqual({ client: 'c1', label: 'used' })
+    expect(db.prepare("SELECT client FROM location WHERE id='free'").get()).toEqual({ client: 'c2' })
+  } finally { db.close() }
+})
+it('regenerates equality precedence checks when immutability is added and removed', () => {
+  const base = schemaLock(config([], [equality])), next = schemaLock(config([immutable], [equality]), base)
+  const { db } = fixture([[], [equality]])
+  const shape = (db: DatabaseSync) => db.prepare("SELECT type,name,sql FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%' ORDER BY type,name").all()
+  try {
+    db.exec(diffSpecs(base.tables, next.tables))
+    const fresh = fixture([[immutable], [equality]])
+    try { expect(shape(db)).toEqual(shape(fresh.db)) } finally { fresh.db.close() }
+    rejected(db, "INSERT OR REPLACE INTO location(id,organization_id,created_at,updated_at,client) VALUES('used','a','now','now','c2')")
+    db.exec(diffSpecs(next.tables, base.tables))
+    const original = fixture([[], [equality]])
+    try { expect(shape(db)).toEqual(shape(original.db)) } finally { original.db.close() }
+  } finally { db.close() }
 })

@@ -1,6 +1,6 @@
 import { uniqueIndexName } from '../entity-constraints'
 import { baseFields, type InstanceConfig } from '../config'
-import { quote, physicalTable, constraintTriggers, renderUniqueConstraint } from '../migrations/schema'
+import { quote, physicalTable, physicalTables, constraintTriggers, renderUniqueConstraint } from '../migrations/schema'
 
 /** Check the effective model plus columns referenced by fixed plugin SQL/routes. */
 export async function checkInstanceSchema(db: D1Database, config: Pick<InstanceConfig, 'entities'>, dependencies: Record<string, readonly string[]>) {
@@ -19,7 +19,12 @@ export async function checkEntityConstraints(db: D1Database, config: Pick<Instan
   for (const [table, entity] of Object.entries(config.entities)) {
     for (const constraint of entity.constraints ?? []) {
       if (constraint.kind !== 'unique') {
-        for (const trigger of constraintTriggers(physicalTable(table, entity), constraint).triggers) {
+        const definition = constraintTriggers(physicalTable(table, entity), constraint, physicalTables(config))
+        for (const object of definition.setup ?? []) {
+          const stored = await db.prepare('SELECT sql FROM sqlite_schema WHERE type=? AND name=?').bind('table', object.name).first<{ sql: string }>()
+          if (stored?.sql !== object.sql.replace(/;$/, '')) throw new Error(`Schema drift: missing or changed ref immutable constraint ${table}.${constraint.name}`)
+        }
+        for (const trigger of definition.triggers) {
           const definition = await db.prepare('SELECT sql FROM sqlite_schema WHERE type=? AND name=?').bind('trigger', trigger.name).first<{ sql: string }>()
           if (definition?.sql !== trigger.sql.replace(/;$/, '')) throw new Error(`Schema drift: missing or changed ${constraint.kind.replace('_', ' ')} constraint ${table}.${constraint.name}`)
         }

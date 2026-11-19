@@ -43,9 +43,16 @@ export function diffSpecs(baseTables: readonly TableSpec[], tables: readonly Tab
   }
   for (const table of tables) if (!baseTables.some(t => t.name === table.name)) sql.push(renderTable(table))
   for (const table of tables) for (const constraint of table.constraints ?? []) {
+    if (constraint.kind !== 'ref_equality' || !baseTables.find(t => t.name === table.name)?.constraints?.some(c => equal(c, constraint))) continue
+    const before = constraintTriggers(table, constraint, baseTables).triggers
+    for (const trigger of constraintTriggers(table, constraint, tables).triggers) {
+      if (before.find(t => t.name === trigger.name)?.sql !== trigger.sql) sql.push(`DROP TRIGGER ${quote(trigger.name)};`, trigger.sql)
+    }
+  }
+  for (const table of tables) for (const constraint of table.constraints ?? []) {
     if (constraint.kind === 'unique' || baseTables.find(t => t.name === table.name)?.constraints?.some(c => equal(c, constraint))) continue
-    const definition = constraintTriggers(table, constraint)
-    sql.push(...(definition.preflight ? [definition.preflight] : []), ...definition.triggers.map(t => t.sql))
+    const definition = constraintTriggers(table, constraint, tables)
+    sql.push(...(definition.setup?.map(t => t.sql) ?? []), ...(definition.preflight ? [definition.preflight] : []), ...definition.triggers.map(t => t.sql))
   }
   return sql.length ? sql.join('\n') + '\n' : ''
 }
