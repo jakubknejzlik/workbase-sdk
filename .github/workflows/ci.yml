@@ -42,6 +42,10 @@ jobs:
       - run: bun run test
         env:
           WORKBASE_PRIVATE_TERMS: ${{ secrets.WORKBASE_PRIVATE_TERMS }}
+      - name: List v2 acceptance (including #233 regressions)
+        run: bun run console:build && bun run test:list-v2-acceptance
+        env:
+          WORKBASE_PRIVATE_TERMS: ${{ secrets.WORKBASE_PRIVATE_TERMS }}
       - run: bun run test:mcp
       - run: bash scripts/sdk-pack.sh
         env:

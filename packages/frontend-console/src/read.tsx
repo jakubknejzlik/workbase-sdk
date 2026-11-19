@@ -9,7 +9,7 @@ import { GeneratedReadPage } from '@workbasehq/console-generated/screens'
 import { GeneratedActions, GeneratedRowActions, GeneratedCreateDialog, HeaderCommands, resourceCreateLabel } from '@workbasehq/console-generated/writes'
 import { ContextCreateAction } from '../../console-generated/src/write-screens'
 import { listCommandActions } from '../../console-generated/src/write'
-import { useMe } from './api/queries'
+import { useOrganization } from './api/queries'
 import { api } from './api/client'
 import { ReferenceAuthority } from '../../console-generated/src/reference-authority'
 import { useRuntimeModel, refreshRuntimeModel } from './api/runtime-model'
@@ -26,8 +26,9 @@ export function ReadPage({ orgId, entity, id }: { orgId: string; entity: string;
   const deniedKey = ['resource-denied', orgId, entity, id ?? '']
   const denied = useQuery({ queryKey: deniedKey, queryFn: () => false, initialData: false, enabled: false, gcTime: Infinity }).data
   const runtime = useRuntimeModel(orgId)
-  const me = useMe()
+  const me = useOrganization(orgId)
   if (denied) return <ResourcePage title={t('forbidden')}><p>{t('resourceForbidden', { resource: t(`entity_${entity}`).toLocaleLowerCase(i18n.language) })}</p></ResourcePage>
+  if (me.error) return <QueryError error={me.error} />
   if (runtime.error) return <QueryError error={runtime.error} />
   if (!runtime.data) return <Loading />
   const { model, capabilities: caps, console: registry } = runtime.data
