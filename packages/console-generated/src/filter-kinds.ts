@@ -90,9 +90,26 @@ export function filterKind(model: Model, entity: string, field: string, caps?: C
   return hint?.kind ?? ({ string: 'text', text: 'text', enum: 'enum', ref: 'relation', int: 'number', float: 'number', number: 'number', datetime: 'date', date: 'date', bool: 'boolean' } as Record<string, FilterKind>)[spec.type]
 }
 
-/** Explicit readable filters remain eligible independently of rendered columns. */
-export function filterableFields(model: Model, entity: string, caps: Capabilities): string[] {
+/** Runtime descriptors consume the canonical contract; they never carry option rows or target labels. */
+export interface FilterDescriptor {
+  field: string
+  kind: FilterKind
+  placement: 'toolbar' | 'panel'
+  label?: string
+  operators?: readonly string[]
+}
+export function filterDescriptors(model: Model, entity: string, caps: Capabilities): FilterDescriptor[] {
   const definition = model.entities[entity]
   const display = caps.entities[entity]?.displayField ?? definition.displayField
-  return [...new Set([display && caps.entities[entity]?.readable.includes(display) ? display : 'id', ...(definition.list?.columns?.map(column => column.field) ?? definition.listColumns ?? definition.columns), ...Object.keys(definition.list?.filter ?? {})])].filter(field => !!filterKind(model, entity, field, caps))
+  // Declaration order owns explicit controls; preserve implicit header filters for compatibility.
+  const fields = [...new Set([...Object.keys(definition.list?.filter ?? {}), display && caps.entities[entity]?.readable.includes(display) ? display : 'id', ...(definition.list?.columns?.map(column => column.field) ?? definition.listColumns ?? definition.columns)])]
+  return fields.flatMap(field => {
+    const kind = filterKind(model, entity, field, caps)
+    const hint = definition.list?.filter?.[field]
+    return kind ? [{ field, kind, placement: hint && hint.placement || 'panel', ...(hint && hint.label ? { label: hint.label } : {}), ...(hint && hint.operators ? { operators: hint.operators } : {}) }] : []
+  })
+}
+/** Compatibility field list; every consumer derives from the same descriptors. */
+export function filterableFields(model: Model, entity: string, caps: Capabilities): string[] {
+  return filterDescriptors(model, entity, caps).map(filter => filter.field)
 }
