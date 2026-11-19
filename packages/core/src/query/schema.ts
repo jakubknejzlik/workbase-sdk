@@ -52,12 +52,13 @@ export function validateQuery(kernel: KernelRegistry, scope: Scope, input: unkno
   if (!parsed.success) {
     const issue = parsed.error.issues[0]
     // Unknown client keys/values never become error text or paths.
-    const known = new Set(['entity', 'rowAccess', 'select', 'where', 'search', 'text', 'fields', 'locale', 'labelWhere', 'labels', 'label', 'orderBy', 'field', 'dir', 'limit', 'cursor', 'include', 'and', 'or', 'not', 'some', 'none',
+    const known = new Set(['entity', 'rowAccess', 'select', 'where', 'search', 'text', 'fields', 'locale', 'labelWhere', 'labels', 'label', 'orderBy', 'field', 'dir', 'limit', 'cursor', 'offset', 'includeTotal', 'include', 'and', 'or', 'not', 'some', 'none',
       ...Object.values(kernel.config.entities).flatMap(e => [...Object.keys(e.fields), ...Object.keys(e.relations)]), ...baseFields,
       ...operatorsFor('string')])
     invalid(issue.path.map(p => typeof p === 'number' ? p : known.has(String(p)) ? String(p) : '?'))
   }
   const query = parsed.data as QueryInput
+  if (query.offset !== undefined && query.cursor !== undefined) invalid(['offset'])
   if (query.rowAccess) {
     if (!kernel.providers.has('members') || !userLinks(kernel.config).some(link => link.entity === entity)) invalid(['rowAccess'])
     kernel.resourcePermission(scope, 'invitations.read')
@@ -178,6 +179,7 @@ export function validateQuery(kernel: KernelRegistry, scope: Scope, input: unkno
     }
   }
   selection(entity, query, 0, 1, [])
+  if (query.includeTotal) cost.statements++
   if (cost.statements > L.statements || cost.depth > L.relationDepth || cost.relations > L.relations || cost.exists > L.exists || cost.fieldRows > L.fieldRows || cost.nodes > L.nodes)
     throw new QueryError('query_too_expensive', [], cost)
   return { query, cost }

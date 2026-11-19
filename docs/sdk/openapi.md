@@ -67,3 +67,25 @@ semantic check (authorization, cursor verification, query cost and uniqueness).
 
 The document reserves its own public path. Swagger UI, YAML, client generation
 and per-role documents are outside this contract.
+
+`POST /query` supports SDK-owned limit/offset paging. Send `offset: 0` for the
+first page and `(page - 1) * limit` for later pages. `limit` remains required
+(1–100); `offset` must be a nonnegative safe integer. Offset responses include
+`data`, `offset`, `limit` and `next_cursor: null`. Add `includeTotal: true` to
+receive `total`, an exact `COUNT(id)` over the complete authorized, filtered
+list source before sorting or paging. It includes organization/actor policies,
+search, `labelWhere`, and confirmed user `where` filters. Empty and out-of-range
+pages still report the complete matching total. No instance-authored count
+query or configuration is needed. Count statements use the normal query budgets
+and are not executed for unreadable scopes.
+
+Cursor migration: existing callers may continue to omit `offset` and follow
+`next_cursor` unchanged. They may also request `includeTotal`; the total covers
+all matching rows, independent of cursor position. Do not combine `cursor` and
+`offset`. New numbered-page callers use offset paging. Ordering includes an ID
+tiebreaker; concurrent writes can still move offset page boundaries. Rows and
+total use the same source but separate statements, so concurrent writes between
+those statements can also change the total.
+
+Configured view predicates, list row-access configuration and per-view counts
+are handled in a later slice of #230; this API does not add those contracts.
