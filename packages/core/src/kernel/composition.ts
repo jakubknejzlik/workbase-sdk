@@ -1,4 +1,17 @@
 import type { WorkbasePlugin } from './plugin'
+import type { InstanceInput } from '../config'
+
+/** Compose authored and plugin entities in kernel dependency order without mutating either source. */
+export function composeEntities(config: Pick<InstanceInput, 'entities' | 'plugins' | 'interactive'>) {
+  const entities = { ...config.entities }
+  for (const plugin of resolvePlugins(config.plugins ?? [], config.interactive).plugins) {
+    for (const [name, entity] of Object.entries(plugin.entities ?? {})) {
+      if (Object.hasOwn(entities, name)) throw new Error(`Duplicate entity: ${name}`)
+      entities[name] = entity
+    }
+  }
+  return entities
+}
 
 /** Contract majors are deliberately narrower than package semver. Only login is multi-provider. */
 export function resolvePlugins(input: readonly WorkbasePlugin[], interactive = false) {

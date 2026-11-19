@@ -4,7 +4,8 @@ import type { ListInput } from '../../core/src/list-config'
 import { KernelRegistry } from '@workbasehq/core/kernel/registry'
 import type { WorkbasePlugin } from '@workbasehq/core/kernel/plugin'
 import { consoleUI } from '@workbasehq/plugins/console'
-import { prepare } from '../src/planning'
+import { prepare, prepareChanges } from '../src/planning'
+import { WorkflowError } from '../src/schemas'
 
 const cases: [string, ListInput, string, string][] = [
   ['shorthand column', { columns: ['name'] }, 'records', 'columns.0.field'],
@@ -86,5 +87,55 @@ describe('list rename dependencies', () => {
     expect(result.target.plugins).toContain(plugin)
     new KernelRegistry(result.target, { authorization: 'trust' })
     expect(JSON.stringify(plugin.contributes)).toBe(before)
+  })
+})
+
+describe('lists on plugin-contributed entities', () => {
+  const fixture = (list: ListInput) => {
+    const plugin = freeze<WorkbasePlugin>({ name: 'inventory', version: '1', requires: { console: '^1' },
+      entities: { inventory: { fields: { name: { type: 'string' }, record_id: { type: 'ref', entity: 'records' } },
+        relations: { record: { field: 'record_id', entity: 'records' } } } },
+      contributes: { console: { entities: { inventory: { list } } } } })
+    const config = defineInstance({ id: 'plugin_entity_rename', revision: 1, roles: ['owner'], interactive: false,
+      // Deliberately install the consumer before its provider.
+      plugins: [plugin, consoleUI()],
+      entities: { records: { fields: { name: { type: 'string' }, unused: { type: 'string' }, another: { type: 'string' },
+        parent_id: { type: 'ref', entity: 'records' } } } } })
+    new KernelRegistry(config, { authorization: 'trust' })
+    return { config: freeze(config), plugin }
+  }
+
+  it('allows unrelated chained renames and constructs the target kernel without mutating plugins', () => {
+    const { config, plugin } = fixture({ columns: ['name'] })
+    const before = JSON.stringify(config)
+    const result = prepare(config, [], [
+      { kind: 'rename_field', entity: 'records', from: 'unused', to: 'renamed' },
+      { kind: 'rename_field', entity: 'records', from: 'another', to: 'second' },
+    ])
+    const kernel = new KernelRegistry(result.target, { authorization: 'trust' })
+    expect(kernel.config.entities.records.fields).toHaveProperty('renamed')
+    expect(kernel.config.entities.records.fields).toHaveProperty('second')
+    expect(kernel.config.entities.inventory.fields).toHaveProperty('name')
+    expect(result.target.plugins).toContain(plugin)
+    expect(result.target.entities).not.toHaveProperty('inventory')
+    expect(JSON.stringify(config)).toBe(before)
+  })
+
+  it.each([
+    ['related column', { relatedColumns: { ancestor: { via: 'record_id', field: 'parent_id' } } }, 'parent_id', 'relatedColumns.ancestor.field'],
+    ['relation predicate', { views: [{ id: 'named', label: 'Named', where: { record: { not: { name: { eq: 'literal' } } } } }] }, 'name', 'views.0.where.record.not.name'],
+  ] satisfies [string, ListInput, string, string][])('refuses cross-entity %s dependencies with field_in_use', (_label, list, from, path) => {
+    const { config, plugin } = fixture(list)
+    const before = JSON.stringify(config)
+    for (const planner of [prepare, prepareChanges]) {
+      expect(() => planner(config, [], [
+        { kind: 'rename_field', entity: 'records', from: 'unused', to: 'renamed' },
+        { kind: 'rename_field', entity: 'records', from, to: 'title' },
+      ])).toThrow(expect.objectContaining({ constructor: WorkflowError, code: 'field_in_use', status: 400,
+        message: expect.stringContaining(`plugin inventory at contributes.console.entities.inventory.list.${path}`) }))
+    }
+    expect(config.plugins).toContain(plugin)
+    expect(JSON.stringify(config)).toBe(before)
+    new KernelRegistry(config, { authorization: 'trust' })
   })
 })

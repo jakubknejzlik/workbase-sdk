@@ -8,6 +8,7 @@ import { changeSchema, fail, WorkflowError, type Change, type Index } from './sc
 import { effectivePolicies } from './policies.ts'
 import { collectListDependencies } from './list-dependencies'
 import { roleNamePrivileges } from '@workbasehq/core/organization-permissions'
+import { composeEntities } from '@workbasehq/core/kernel/registry'
 
 export const hash = (value: unknown) => createHash('sha256').update(typeof value === 'string' ? value : JSON.stringify(value)).digest('hex')
 // Only complete engine constraint names may supply detail. Everything else in
@@ -206,13 +207,15 @@ export function prepareChanges(config: InstanceConfig, existingIndexes: Index[],
          (entity.fields[f.backfillFrom.refField]?.entity === c.entity && f.backfillFrom.valueField === c.from))))) {
         fail('protected_field', 'A snapshot depends on this field; manual review required')
       }
-      // Resolve every list against the pre-rename model. Plugin contributions are
-      // trusted code retained by cloneInstanceConfig; only copied UI data is writable.
+      // Recompose the evolving model for each rename, including plugin entities
+      // and their normalized defaults, exactly as the target kernel does.
+      // Trusted plugin objects stay untouched; only copied UI data is writable.
+      const listModel = defineInstance({ ...next, entities: composeEntities(next) })
       const lists = Object.entries(next.ui?.entities ?? {}).flatMap(([entity, hints]) => hints.list
-        ? [{ hints, ...collectListDependencies(next, entity, hints.list) }] : [])
+        ? [{ hints, ...collectListDependencies(listModel, entity, hints.list) }] : [])
       for (const plugin of next.plugins ?? []) for (const [entity, hints] of Object.entries(plugin.contributes?.console?.entities ?? {})) {
         if (!hints.list) continue
-        const { dependencies } = collectListDependencies(next, entity, hints.list)
+        const { dependencies } = collectListDependencies(listModel, entity, hints.list)
         const dependency = dependencies.find(ref => ref.entity === c.entity && ref.field === c.from)
         if (dependency) fail('field_in_use', `Cannot rename ${c.entity}.${c.from}: referenced by plugin ${plugin.name} at contributes.console.entities.${entity}.list.${dependency.path}; update the plugin presentation before renaming this field.`)
       }
