@@ -50,12 +50,6 @@ export function useReconciledFilters(model: Model, caps: Capabilities, orgId: st
   }, [key, version, enabled])
   // Never expose restored relation IDs to chip hydration while their authority is unverified.
   const reconciled = ready ? plans.length ? resolved!.filters : filters : filters.filter(filter => !plans.some(plan => plan.filter.field === filter.field))
-  // Immediate picker selections already came from authorized options. Saved/URL restores
-  // never call this path, and an authority change changes every proof key.
-  const accept = (next: ListFilter[]) => {
-    const nextKey = keyFor(next)
-    if (ready) setResolved({ key: nextKey, version: version + (nextKey === key ? 0 : 1), filters: next })
-  }
-  return { accept, filters: reconciled, ready, error: matches ? resolved?.error : undefined,
+  return { filters: reconciled, ready, error: matches ? resolved?.error : undefined,
     dropped: ready && JSON.stringify(filters) !== JSON.stringify(reconciled) }
 }

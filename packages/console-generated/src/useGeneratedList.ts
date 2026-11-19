@@ -74,7 +74,8 @@ export function useGeneratedList({ model, caps, orgId, entity, request, contextL
   const data = reconciled.ready ? result.data ?? (state.presentation !== 'calendar' && failure?.code === 'query_too_expensive' && lastGood.current?.scope === queryScope ? lastGood.current.data : undefined) : undefined
   const onStateChange = (next: DataTableState & Partial<ListState>, change: 'search' | 'sort' | 'limit' | 'filter' | 'view') => {
     previous.current = { scope, search: searchFromState(state), cursors }
-    if (change === 'filter') reconciled.accept(next.userFilters ?? state.userFilters)
+    // A panel draft can outlive its authority; every submission needs fresh ID proof.
+    if (change === 'filter') setRestoreAttempt(value => value + 1)
     void go(searchFromState({ ...state, ...next, ...(change !== 'filter' ? { userFilters: restored.state.userFilters } : {}), cursor: undefined }), [], change === 'search')
   }
   const onPage = (direction: 'previous' | 'next') => {

@@ -27,9 +27,10 @@ beforeEach(() => {
   vi.spyOn(window, 'scrollTo').mockImplementation(() => {})
 })
 afterEach(() => { clients.splice(0).forEach(client => client.clear()); vi.restoreAllMocks(); vi.unstubAllGlobals() })
-async function mount(ids: string[] = [], saved = false, picker = false) {
+async function mount(ids: string[] = [], saved = false, picker = false, panel = false) {
   let readable = new Set(['readable', 'revoked']), denied = false
   let definition = structuredClone(model)
+  if (panel) definition.entities.entries.list!.filter!.team_id = { kind: 'relation', placement: 'panel', operators: ['in'], label: 'Team' }
   const permissions = structuredClone(caps)
   if (picker) {
     permissions.entities.entries.operations.push('create')
@@ -178,4 +179,31 @@ it('retains the cursor after an unchanged authority refresh while revalidating t
   expect(test.source().at(-1)?.cursor).toBe('next-page')
   expect(test.router.state.location.search.filters).toEqual(selected(['readable']))
   expect(screen.queryByText(en.listStateDropped)).toBeNull()
+})
+
+
+it.each(['permission', 'actor'] as const)('revalidates a panel draft applied after %s authority changes', async change => {
+  const test = await mount([], false, false, true)
+  await test.user.click(await screen.findByText(en.sortAndFilter, { selector: 'summary' }))
+  const panel = screen.getByRole('group', { name: en.sortAndFilter })
+  const picker = within(panel).getByRole('combobox', { name: 'Team' })
+  await test.user.click(picker)
+  await test.user.click(await screen.findByRole('option', { name: 'REVOKED_LABEL_CANARY' }))
+  await waitFor(() => expect(within(panel).queryAllByText(/REVOKED_LABEL_CANARY/).length).toBeGreaterThan(0))
+  expect(test.router.state.location.search.filters).toBeUndefined()
+
+  test.revoke()
+  if (change === 'actor') await act(async () => { test.client.setQueryData(['me'], { user: { id: 'other-actor' }, memberships: [{ organization_id: 'org' }] }) })
+  else await test.refresh()
+  await waitFor(() => expect(screen.queryAllByText(/REVOKED_LABEL_CANARY/)).toHaveLength(0))
+  const beforeApply = test.queries.length
+  await test.user.click(within(panel).getByRole('button', { name: en.applyFilter }))
+
+  await waitFor(() => expect(test.router.state.location.search.filters).toBeUndefined())
+  expect(screen.getByText(en.listStateDropped)).toBeTruthy()
+  expect(test.queries.slice(beforeApply).some(query => query.entity === 'teams' && JSON.stringify(query.select) === '["id"]' && JSON.stringify(query.where) === '{"id":{"in":["revoked"]}}')).toBe(true)
+  for (const query of test.source()) expect(JSON.stringify(query.where ?? {})).not.toContain('revoked')
+  expect(test.source().at(-1)?.where).toBeUndefined()
+  expect(screen.queryAllByText(/REVOKED_LABEL_CANARY/)).toHaveLength(0)
+  expect((test.router.state.location.state as any).generatedList).toMatchObject({ cursors: [], notice: 'listStateDropped' })
 })
