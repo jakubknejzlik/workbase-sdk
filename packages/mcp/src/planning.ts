@@ -1,7 +1,7 @@
 import { DISPLAY_VALUE, isExpression, ExpressionError } from '@workbasehq/core/query/expressions'
 import { devFixtures } from './dev-support.ts'
 import { createHash } from 'node:crypto'
-import { defineInstance, baseFields, cloneInstanceConfig, displayFieldErrors, suggestedDisplayField, isDisplayFieldError, type InstanceConfig } from '@workbasehq/core/config'
+import { defineInstance, normalizeListConfig, baseFields, cloneInstanceConfig, displayFieldErrors, suggestedDisplayField, isDisplayFieldError, type InstanceConfig } from '@workbasehq/core/config'
 import { plan } from '@workbasehq/core/migrations/planner'
 import { quote } from '@workbasehq/core/migrations/schema'
 import { changeSchema, fail, WorkflowError, type Change, type Index } from './schemas.ts'
@@ -103,6 +103,7 @@ export function indexSQL(index: Index) {
 export function prepareChanges(config: InstanceConfig, existingIndexes: Index[], changes: Change[]) {
   guard(changes, config)
   const next = cloneInstanceConfig(config)
+  for (const [entity, hints] of Object.entries(next.ui?.entities ?? {})) if (hints.list) hints.list = normalizeListConfig(next, entity, hints.list)
   const indexes = structuredClone(existingIndexes)
   // Rename hints describe a single transition, never carry them into the next one.
   for (const entity of Object.values(next.entities)) for (const f of Object.values(entity.fields)) delete f.renameFrom
@@ -204,7 +205,7 @@ export function prepareChanges(config: InstanceConfig, existingIndexes: Index[],
          (entity.fields[f.backfillFrom.refField]?.entity === c.entity && f.backfillFrom.valueField === c.from))))) {
         fail('protected_field', 'A snapshot depends on this field; manual review required')
       }
-      e.fields[c.to] = { ...e.fields[c.from], renameFrom: c.from }
+      e.fields[c.to] = { ...e.fields[c.from], renameFrom: e.fields[c.from].renameFrom ?? c.from }
       delete e.fields[c.from]
       if (e.displayField === c.from) e.displayField = c.to
       const display = next.ui?.entities[c.entity]
@@ -227,7 +228,7 @@ export function prepareChanges(config: InstanceConfig, existingIndexes: Index[],
       }
       const list = display?.list
       if (list) {
-        if (list.columns) list.columns = list.columns.map(renamed)
+        if (list.columns) list.columns = list.columns.map(column => ({ ...column, field: renamed(column.field), ...(column.secondary ? { secondary: renamed(column.secondary) } : {}) }))
         if (list.search) list.search = list.search.map(renamed)
         if (list.defaultSort) list.defaultSort.key = renamed(list.defaultSort.key)
         if (list.filter) list.filter = Object.fromEntries(Object.entries(list.filter).map(([key, hint]) => [renamed(key), hint]))
@@ -244,8 +245,12 @@ export function prepareChanges(config: InstanceConfig, existingIndexes: Index[],
         if (relation) return [key, relation.many ? Object.fromEntries(Object.entries(value as Record<string, Record<string, unknown>>).map(([quantifier, child]) => [quantifier, renameWhere(child, relation.entity)])) : renameWhere(value as Record<string, unknown>, relation.entity)]
         return [entity === c.entity && key === c.from ? c.to : key, value]
       }))
-      for (const [entity, hints] of Object.entries(next.ui?.entities ?? {})) if (hints.list?.views) hints.list.views = hints.list.views.map(view => ({ ...view, where: renameWhere(view.where, entity) }))
-      for (const r of Object.values(e.relations)) if (r.field === c.from) r.field = c.to
+      for (const [entity, hints] of Object.entries(next.ui?.entities ?? {})) if (hints.list?.views) hints.list.views = hints.list.views.map(view => ({ ...view, where: renameWhere(view.where ?? {}, entity) }))
+      for (const [source, hints] of Object.entries(next.ui?.entities ?? {})) for (const related of Object.values(hints.list?.relatedColumns ?? {})) {
+        if (source === c.entity) related.via = renamed(related.via)
+        if (next.entities[source].fields[related.via]?.entity === c.entity) related.field = renamed(related.field)
+      }
+      for (const [source, spec] of Object.entries(next.entities)) for (const r of Object.values(spec.relations)) if ((r.many ? r.entity : source) === c.entity && r.field === c.from) r.field = c.to
       for (const i of indexes) if (i.entity === c.entity) i.fields = i.fields.map(f => f === c.from ? c.to : f)
     } else if (c.kind === 'add_user_link') {
       if (next.account?.entity !== 'users' || c.entity === 'users') fail('invalid_user_link', 'User links require account.entity: users and a domain entity')

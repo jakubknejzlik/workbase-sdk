@@ -8,7 +8,8 @@ export type Scalar = string | number | boolean | null
 export interface Filter { [key: string]: unknown }
 export interface Order { field: string; dir: 'asc' | 'desc'; label?: boolean }
 export interface Selection { labels?: string[]; select?: string[]; where?: Filter; orderBy?: Order[]; limit?: number; include?: Record<string, Selection> }
-export type RowAccessState = 'no_account' | 'invited' | 'expired' | 'signed_in'
+import type { RowAccessState } from './row-access-state'
+export type { RowAccessState } from './row-access-state'
 export interface QueryInput extends Selection { rowAccess?: RowAccessState; contextList?: { entity: string; list: string; id: string }; search?: { text: string; fields: string[]; locale?: 'en' | 'cs' }; labelWhere?: Record<string, { contains: string; locale?: 'en' | 'cs' }>; entity: string; limit: number; cursor?: string }
 export const fieldsFor = (config: InstanceConfig, entity: string) => [...baseFields, ...Object.keys(config.entities[entity].fields)]
 export function fieldType(config: InstanceConfig, entity: string, field: string): Field['type'] {

@@ -76,7 +76,7 @@ it.each([
 })
 it('set_locale changes locale and default language independently and preserves UI hints', () => {
   let config = fixture()
-  config.ui = { entities: { rezervace: { list: { columns: ['title'] } } } }
+  config.ui = { entities: { rezervace: { list: { columns: [{ field: 'title' }] } } } }
   const next = (value: unknown) => {
     const result = prepare(config, [], [changeSchema.parse(value)])
     expect(result.sql.replace(/^--[^\n]*\n/gm, '').trim()).toBe(revisionSQL(config.revision + 1))
@@ -88,7 +88,7 @@ it('set_locale changes locale and default language independently and preserves U
   config = next({ kind: 'set_locale', locale: 'cs' })
   expect(config.locale).toBe('cs'); expect(config.ui?.defaultLanguage).toBeUndefined()
   config = next({ kind: 'set_locale', defaultLanguage: 'en' })
-  expect(config.locale).toBe('cs'); expect(config.ui).toEqual({ defaultLanguage: 'en', entities: { rezervace: { list: { columns: ['title'] } } } })
+  expect(config.locale).toBe('cs'); expect(config.ui).toEqual({ defaultLanguage: 'en', entities: { rezervace: { list: { columns: [{ field: 'title' }] } } } })
   delete config.ui
   expect(next({ kind: 'set_locale', defaultLanguage: 'cs' }).ui).toEqual({ defaultLanguage: 'cs', entities: {} })
 })

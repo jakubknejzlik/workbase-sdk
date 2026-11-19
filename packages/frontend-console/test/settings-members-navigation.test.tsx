@@ -20,7 +20,7 @@ it.each([
   // Exercise the actual HTTP boundary, including values outside the static contract.
   const organization = (role === undefined ? {} : { role }) as ConsoleModelContract['capabilities']['organization']
   const document: ConsoleModelContract = {
-    contractVersion: 1, console: null,
+    contractVersion: 2, console: null,
     model: { instance: 'test', revision: 1, locale: 'en', timeZone: 'UTC', limits: {}, entities: {}, commands: [], workflows: [] },
     capabilities: { revision: 1, organization, entities: {}, commands: [], workflows: {}, resources: grant === undefined ? {} : { 'members.read': grant as boolean } },
   }

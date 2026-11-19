@@ -12,7 +12,7 @@ const day = (value: unknown): value is string => typeof value === 'string' && /^
 const localDay = (value: string, next = false) => { const [y, m, d] = value.split('-').map(Number); return new Date(y, m - 1, d + Number(next)).toISOString() }
 const localDate = (instant: string, previous = false) => { const d = new Date(instant); if (previous) d.setDate(d.getDate() - 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` }
 /** One reversible mapping per kind. Predicates stay root scalar predicates, including refs. */
-export function filterMapping(kind: FilterKind, field?: Pick<Field, 'type' | 'required' | 'values'>, locale?: string): FilterMapping {
+function rawFilterMapping(kind: FilterKind, field?: Pick<Field, 'type' | 'required' | 'values'>, locale?: string): FilterMapping {
   if (kind === 'text') return {
     toPredicate: value => typeof value === 'string' && value.length > 0 && value.length <= 2000 ? { contains: value } : undefined,
     fromPredicate: p => Object.keys(p).join() === 'contains' && typeof p.contains === 'string' ? p.contains : undefined,
@@ -54,20 +54,45 @@ export function filterMapping(kind: FilterKind, field?: Pick<Field, 'type' | 're
     },
   }
 }
+/** Validate the backend operators too: local day/nullable-bool state has compound emissions. */
+export function filterMapping(kind: FilterKind, field?: Pick<Field, 'type' | 'required' | 'values'>, locale?: string, operators?: readonly string[]): FilterMapping {
+  const mapping = rawFilterMapping(kind, field, locale)
+  if (!operators) return mapping
+  const permitted = (value: unknown) => {
+    const predicate = mapping.toPredicate(value, true)
+    if (!predicate) return false
+    const keys = kind === 'boolean' && JSON.stringify(predicate) === '{"in":[false,null]}' ? ['eq', 'isNull'] : Object.keys(predicate)
+    return keys.every(key => operators.includes(key))
+  }
+  return {
+    ...mapping,
+    toPredicate: (value, instants) => permitted(value) ? mapping.toPredicate(value, instants) : undefined,
+    fromPredicate: predicate => {
+      const value = mapping.fromPredicate(predicate)
+      return value !== undefined && permitted(value) ? value : undefined
+    },
+  }
+}
+export function filterOperators(model: Model, entity: string, field: string): readonly string[] | undefined {
+  const hint = model.entities[entity].list?.filter?.[field]
+  return hint ? hint.operators : undefined
+}
 export function filterKind(model: Model, entity: string, field: string, caps?: Capabilities): FilterKind | undefined {
-  const spec = model.entities[entity]?.fields[field]
-  const related = model.entities[entity]?.list?.relatedColumns?.[field]
+  const definition = model.entities[entity]
+  const hint = definition?.list?.filter?.[field]
+  if (hint === false) return undefined
+  const spec = definition?.fields[field]
+  const related = definition?.list?.relatedColumns?.[field]
   if (related) return !caps || caps.entities[entity]?.readable.includes(related.via) ? 'text' : undefined
   if (!spec || caps && !caps.entities[entity]?.readable.includes(field)) return undefined
-  const hint = model.entities[entity].list?.filter?.[field]
-  if (hint === false) return undefined
+  if (hint?.kind === 'relation' && spec.type === 'ref') return !caps || !!spec.entity && caps.entities[spec.entity]?.operations.includes('read') && caps.entities[spec.entity]?.readable.includes('id') ? 'relation' : undefined
   if (spec.type === 'ref') return 'text'
-  return hint ?? ({ string: 'text', text: 'text', enum: 'enum', ref: 'relation', int: 'number', float: 'number', number: 'number', datetime: 'date', date: 'date', bool: 'boolean' } as Record<string, FilterKind>)[spec.type]
+  return hint?.kind ?? ({ string: 'text', text: 'text', enum: 'enum', ref: 'relation', int: 'number', float: 'number', number: 'number', datetime: 'date', date: 'date', bool: 'boolean' } as Record<string, FilterKind>)[spec.type]
 }
 
-/** Filterable means a header rendered by this list; hidden schema fields are not extra filters. */
+/** Explicit readable filters remain eligible independently of rendered columns. */
 export function filterableFields(model: Model, entity: string, caps: Capabilities): string[] {
   const definition = model.entities[entity]
   const display = caps.entities[entity]?.displayField ?? definition.displayField
-  return [...new Set([display && caps.entities[entity]?.readable.includes(display) ? display : 'id', ...(definition.list?.columns ?? definition.listColumns ?? definition.columns)])].filter(field => !!filterKind(model, entity, field, caps))
+  return [...new Set([display && caps.entities[entity]?.readable.includes(display) ? display : 'id', ...(definition.list?.columns?.map(column => column.field) ?? definition.listColumns ?? definition.columns), ...Object.keys(definition.list?.filter ?? {})])].filter(field => !!filterKind(model, entity, field, caps))
 }

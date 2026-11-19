@@ -30,7 +30,7 @@ beforeEach(() => {
 afterEach(() => { navigate.mockReset(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 function document(revision = 1): ConsoleModelContract {
   return {
-    contractVersion: 1, console: { entities: {}, navigation: [], pages: [] },
+    contractVersion: 2, console: { entities: {}, navigation: [], pages: [] },
     model: { instance: 'drafts', revision, locale: 'en', timeZone: 'UTC', limits: { root: 100, children: 10, relations: 10, exists: 100 }, entities: {
       entries: { displayField: 'name', fields: { id: { type: 'string' }, version: { type: 'integer' }, name: { type: 'string' } }, writeSchema: { type: 'object', properties: { name: { type: 'string' } }, required: ['name'] }, columns: ['name'], relations: {}, routes: {} },
     }, commands: [], workflows: [] },

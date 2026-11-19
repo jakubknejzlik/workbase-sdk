@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { baseFields, cloneInstanceConfig, defineInstance, type InstanceConfig } from './config'
+import { baseFields, cloneInstanceConfig, defineInstance, normalizeListConfig, type InstanceConfig } from './config'
 import { plan } from './migrations/planner'
 import { diffVersions, versionData } from './migrations/versions'
 import type { ConfigPatch } from './config-proposal-contract'
@@ -71,9 +71,8 @@ export function prepareConfigProposal(config: InstanceConfig, rawPatch: unknown)
     if (operation.kind === 'add_enum_filter') {
       if (Object.hasOwn(entity.fields, operation.field) || baseFields.includes(operation.field)) refuse(`Field already exists or is reserved: ${operation.field}`)
       entity.fields[operation.field] = { type: 'enum', required: false, values: operation.values }
-      list.filter = { ...list.filter, [operation.field]: 'enum' }
-      // Header filters are available only for visible list columns.
-      if (list.columns) list.columns = [...list.columns, operation.field]
+      list.filter = normalizeListConfig(next, operation.entity, { ...list, filter: { ...list.filter, [operation.field]: 'enum' } }).filter
+      if (list.columns) list.columns = [...list.columns, { field: operation.field }]
       for (const form of Object.values(display.form ?? {})) form.fields = [...form.fields, operation.field]
     } else if (operation.kind === 'enable_calendar') {
       if (entity.fields[operation.startField]?.type !== 'datetime') refuse('Calendar requires an existing datetime field.')
@@ -82,9 +81,9 @@ export function prepareConfigProposal(config: InstanceConfig, rawPatch: unknown)
     } else {
       if (!Object.hasOwn(entity.fields, operation.field)) refuse(`Unknown field: ${operation.field}`)
       // Without configured columns the list already includes visible schema fields.
-      const columns = list.columns ?? Object.keys(entity.fields).filter(field => !entity.fields[field].ui?.hidden)
-      if (columns.includes(operation.field)) refuse('The list already includes this column.')
-      list.columns = [...columns, operation.field]
+      const columns = list.columns ?? Object.keys(entity.fields).filter(field => !entity.fields[field].ui?.hidden).map(field => ({ field }))
+      if (columns.some(column => column.field === operation.field)) refuse('The list already includes this column.')
+      list.columns = [...columns, { field: operation.field }]
     }
   }
   next.revision++

@@ -31,7 +31,7 @@ it('SR-85 previews without publication; Apply creates immutable history and loca
   expect(applied).toMatchObject({ revision: 2, appliesToDatabase: false })
   expect(await drafts.apply('demo', preview.proposalId)).toEqual(applied)
   expect((await drafts.history('demo')).versions.map(version => version.revision)).toEqual([1, 2])
-  expect((await store.load('demo')).config.ui!.entities.interviews.list!.columns).toEqual(['title', 'notes'])
+  expect((await store.load('demo')).config.ui!.entities.interviews.list!.columns).toEqual([{ field: 'title' }, { field: 'notes' }])
   const rolledBack = await rollback(store, 'demo', 1, { expectedRevision: 2 })
   expect(rolledBack).toMatchObject({ ok: true, newRevision: 3, written: true, destructive: [], appliesToDatabase: false })
   expect(versionData((await store.load('demo')).config)).toEqual(versionData(config))

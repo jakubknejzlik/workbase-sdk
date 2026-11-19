@@ -12,7 +12,7 @@ import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@work
 import { Badge } from '@workbasehq/ui/components/ui/badge'
 import { Button as PrimitiveButton } from '@workbasehq/ui/components/ui/button'
 import { useGeneratedList, useRelationLabels } from './useGeneratedList'
-import { filterKind, filterMapping } from './filter-kinds'
+import { filterKind, filterOperators, filterMapping } from './filter-kinds'
 import { HeaderFilter } from './header-filter'
 import { readableWhere, sortableFields } from './list-model'
 import { SavedViewsControls } from './saved-views-controls'
@@ -112,7 +112,7 @@ function GeneratedListPage({ savedViewsScope, model, caps, orgId, entity, reques
   const list = useGeneratedList({ model, caps, orgId, entity, request, contextList })
   const readable = projection(model, entity, caps)
   const display = caps.entities[entity]?.displayField ?? definition.displayField
-  const configured = definition.list?.columns ?? definition.listColumns
+  const configured = definition.list?.columns?.map(column => column.field) ?? definition.listColumns
   const defaultPrimary = display && readable.includes(display) && definition.fields[display] ? display : 'id'
   // Explicit columns own the order; only automatically derived columns promote the display field.
   const listFields = [...new Set(configured ?? [defaultPrimary, ...definition.columns])].filter(field => readable.includes(field) || !!definition.list?.relatedColumns?.[field] && readable.includes(definition.list.relatedColumns[field].via))
@@ -120,16 +120,16 @@ function GeneratedListPage({ savedViewsScope, model, caps, orgId, entity, reques
   const rows = list.data?.data ?? []
   const setFilter = (field: string, predicate?: Record<string, unknown>) => list.onStateChange({ ...list.state, userFilters: [...list.state.userFilters.filter(filter => filter.field !== field), ...(predicate ? [{ field, predicate }] : [])] }, 'filter')
   const chips = list.state.userFilters.map(filter => {
-    const spec = definition.fields[filter.field]; const mapping = filterMapping(filterKind(model, entity, filter.field, caps)!, spec, i18n.language)
+    const spec = definition.fields[filter.field]; const mapping = filterMapping(filterKind(model, entity, filter.field, caps)!, spec, i18n.language, filterOperators(model, entity, filter.field))
     const value = mapping.fromPredicate(filter.predicate)
     const label = mapping.label(value, key => {
-      if (spec.type === 'ref') return key
-      return t(spec.type === 'enum' ? `value_${key}` : key, { defaultValue: key })
+      if (spec?.type === 'ref') return key
+      return t(spec?.type === 'enum' ? `value_${key}` : key, { defaultValue: key })
     })
     const column = t(`field_${filter.field}`)
     return { id: filter.field, column, value: label, removeLabel: t('removeFilter', { column, value: label }), onRemove: () => setFilter(filter.field) }
   })
-  const views = definition.list?.views?.filter(view => readableWhere(view.where, model, entity, caps)) ?? []
+  const views = definition.list?.views?.filter(view => readableWhere(view.where, model, entity, caps) && (!view.rowAccess || definition.rowInvitations && caps.resources?.['invitations.read'] === true)) ?? []
 
   const sortable = sortableFields(model, entity, caps)
   const fieldValue = (row: Record<string, any>, field: string): ReactNode => {
@@ -145,7 +145,7 @@ function GeneratedListPage({ savedViewsScope, model, caps, orgId, entity, reques
     }
     if (field === display) return recordLabel(model, entity, row, caps, i18n.language, t)
     if (row[field] == null) return '—'
-    if (spec.type === 'enum' && row[field] != null) return t(`value_${row[field]}`)
+    if (spec?.type === 'enum' && row[field] != null) return t(`value_${row[field]}`)
     return spec.ui?.signedBy && row[field] != null ? signedValue(row, spec, row[field], i18n.language) : formatValue(row[field], spec, i18n.language, t('yes'), t('no'), t('nullValue'))
   }
   const error = list.result.error as { status?: number; code?: string } | null
@@ -156,7 +156,7 @@ function GeneratedListPage({ savedViewsScope, model, caps, orgId, entity, reques
     {list.notice && <p role="status" className="my-2 text-sm">{t(list.notice)}</p>}
     {error?.code === 'query_too_expensive' && list.undo && <PrimitiveButton variant="outline" onClick={list.undo}>{t('undoLastChange')}</PrimitiveButton>}
     {!contextList && savedViewsScope && savedViewsScope.instance === model.instance && savedViewsScope.orgId === orgId && <SavedViewsControls scope={savedViewsScope} entity={entity} state={list.state} onApply={list.applySavedView} />}
-    {views.length > 0 && <div role="group" aria-label={t('listViews')} className="flex flex-wrap gap-2 py-2">{[{ id: 'all', label: 'viewAll' }, ...views].map(view => <PrimitiveButton key={view.id} className="border border-transparent aria-pressed:border-foreground aria-pressed:font-semibold" variant={(list.state.view ?? 'all') === view.id ? 'secondary' : 'ghost'} aria-pressed={(list.state.view ?? 'all') === view.id} onClick={() => list.onStateChange({ ...list.state, view: view.id }, 'view')}>{t(view.label)}</PrimitiveButton>)}</div>}
+    {views.length > 0 && <div role="group" aria-label={t('listViews')} className="flex flex-wrap gap-2 py-2">{[...(!views.some(view => view.id === 'all') ? [{ id: 'all', label: 'viewAll' }] : []), ...views].map(view => <PrimitiveButton key={view.id} className="border border-transparent aria-pressed:border-foreground aria-pressed:font-semibold" variant={(list.state.view ?? 'all') === view.id ? 'secondary' : 'ghost'} aria-pressed={(list.state.view ?? 'all') === view.id} onClick={() => list.onStateChange({ ...list.state, view: view.id }, 'view')}>{t(view.label)}</PrimitiveButton>)}</div>}
     {availableCalendar(model, entity, caps) && <div role="group" aria-label={t('listPresentation')} className="flex flex-wrap gap-2 py-2">{(['table', 'calendar'] as const).map(presentation => <PrimitiveButton key={presentation} variant={list.state.presentation === presentation ? 'secondary' : 'ghost'} aria-pressed={list.state.presentation === presentation} onClick={() => list.onStateChange({ ...list.state, presentation }, 'view')}>{t(`${presentation}View`)}</PrimitiveButton>)}</div>}
     <DataTableActiveFilters filters={chips} label={t('activeFilters')} clearLabel={t('clearAllFilters')} onClear={() => list.onStateChange({ ...list.state, userFilters: [] }, 'filter')} />
     {list.state.presentation === 'calendar' ? <>
@@ -235,7 +235,7 @@ export function ContextList({ model, caps, orgId, entity, id, name, request, cre
   const { t } = useEntityTranslation(entity)
   if (!list || !caps.entities[entity]?.operations.includes('read') || !caps.entities[entity]?.readable.includes('id') || !caps.entities[list.entity]?.operations.includes('read') || !caps.entities[list.entity]?.readable.includes('id') || !caps.entities[list.entity]?.readable.includes(list.bind.field)) return null
   const target = model.entities[list.entity]
-  const configured = { ...model, entities: { ...model.entities, [list.entity]: { ...target, list: { ...target.list, ...(list.columns ? { columns: list.columns } : {}), compact: true, mobileCards: target.list?.mobileCards ?? true } } } }
+  const configured = { ...model, entities: { ...model.entities, [list.entity]: { ...target, list: { ...target.list, ...(list.columns ? { columns: list.columns.map(field => ({ field })) } : {}), compact: true, mobileCards: target.list?.mobileCards ?? true } } } }
   return <GeneratedListPage key={`${model.instance}/${orgId}/${entity}/${id}/${name}/${caps.revision}`} model={configured} caps={caps} orgId={orgId} entity={list.entity} request={request} contextList={{ entity, id, list: name }} title={t(list.label, { defaultValue: list.label })} actions={() => list.create && create?.(list.entity, { [list.bind.field]: id })} />
 }
 function EmbeddedListCard({ title, actions, children, count }: { title: string; actions?: ReactNode; children?: ReactNode; count?: string; actionLabel?: string; onAction?: () => void }) {
