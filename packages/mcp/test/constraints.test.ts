@@ -269,7 +269,7 @@ it.each([
     expect(await readFile(join(root, 'schema/worker.ts'), 'utf8')).toBe(source)
   } finally { await server.close() }
 })
-it('rejects pre-existing equality mismatches without cleaning or authorizing promotion', async () => {
+it('rejects pre-existing equality mismatches without altering data or authorizing promotion', async () => {
   const { root, server, call, propose } = await fixture(true, true)
   try {
     const source = await readFile(join(root, 'schema/worker.ts'), 'utf8')
