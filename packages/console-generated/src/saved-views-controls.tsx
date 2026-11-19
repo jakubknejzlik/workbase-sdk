@@ -82,7 +82,7 @@ function Catalogue({ scope, entity, state, current, initial, fingerprint, onAppl
   return <section aria-label={t('savedViews')} className="flex min-w-0 max-w-full flex-wrap items-center gap-2">
     {dirty && <Button type="button" variant="outline" disabled={disabled} onClick={saveFromBar}>{entry ? t('savedViewsSaveChanges') : t('savedViewsSaveView')}</Button>}
     <Popover open={open} onOpenChange={value => { if (value) { outsideInteraction.current = false; setCandidate(selected); setMessage('') } setOpen(value) }}>
-      <PopoverTrigger asChild><Button ref={trigger} type="button" variant="outline" disabled={disabled} className="max-w-full min-w-0">
+      <PopoverTrigger asChild><Button ref={trigger} type="button" title={t('savedViewsMenu')} variant="outline" disabled={disabled} className="max-w-full min-w-0">
         <span className="min-w-0 truncate">{entry?.name ?? t('savedViewsMenu')}</span>
         {dirty && <span role="img" aria-label={t('savedViewsUnsaved')} title={t('savedViewsUnsaved')} className="size-2 shrink-0 rounded-full bg-amber-500" />}
 

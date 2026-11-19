@@ -45,7 +45,7 @@ export function ListPageFooter({ total, page, limit, pageSize, maxOffset, busy, 
 
 export function ListFilterPanel({ label, children, invalid, hint, applyLabel, cancelLabel, clearLabel, onApply, onCancel, onClear }: { label: string; children: ReactNode; invalid: boolean; hint: string; applyLabel: string; cancelLabel: string; clearLabel: string; onApply: () => void; onCancel: () => void; onClear: () => void }) {
   return <form role="group" aria-label={label} className="grid gap-4" onSubmit={event => { event.preventDefault(); if (!invalid) onApply() }}>
-    <div className="grid grid-cols-1 gap-4 min-[390px]:grid-cols-2 lg:grid-cols-4">{children}</div>
+    <div className="grid grid-cols-1 items-start gap-4 min-[390px]:grid-cols-2 lg:grid-cols-4">{children}</div>
     <div className="flex flex-wrap items-center justify-end gap-2"><p className="mr-auto text-xs text-muted-foreground">{hint}</p><Button type="button" variant="ghost" onClick={onClear}>{clearLabel}</Button><Button type="button" variant="ghost" onClick={onCancel}>{cancelLabel}</Button><Button type="submit" disabled={invalid}>{applyLabel}</Button></div>
   </form>
 }

@@ -36,13 +36,13 @@ function FilterEditor(props: Props & { close: () => void }) {
 }
 export const emptyFilterValue = (value: FilterValue | undefined) => value === undefined || value === '' || Array.isArray(value) && !value.length || typeof value === 'object' && !Array.isArray(value) && !Object.values(value).some(Boolean)
 /** Controlled inputs shared by headers, toolbar and the panel's uncommitted draft. */
-export function FilterInput(props: FilterContext & { descriptor: FilterDescriptor; value?: FilterValue; onChange: (value?: FilterValue) => void }) {
+export function FilterInput(props: FilterContext & { descriptor: FilterDescriptor; hideTextLabel?: boolean; value?: FilterValue; onChange: (value?: FilterValue) => void }) {
   const { t, i18n } = useEntityTranslation(props.entity)
   const { kind, field } = props.descriptor
   const spec = props.model.entities[props.entity].fields[field]
   const value = props.value, setValue = props.onChange
   const capLabel = t('filterCap', { count: selectionCap })
-  if (kind === 'text') return <TextFilter description={t((!spec || spec.type === 'ref') ? 'filterCaseInsensitive' : 'filterCaseSensitive')} label={t('filterContains')} value={typeof value === 'string' ? value : ''} onChange={setValue} />
+  if (kind === 'text') return <TextFilter description={t((!spec || spec.type === 'ref') ? 'filterCaseInsensitive' : 'filterCaseSensitive')} label={props.hideTextLabel ? <span className="sr-only">{t('filterContains')}</span> : t('filterContains')} value={typeof value === 'string' ? value : ''} onChange={setValue} />
   if (kind === 'enum') return <MultiSelectFilter options={(spec.values ?? []).map(id => ({ id, label: t(`value_${id}`, { defaultValue: id }) }))} value={Array.isArray(value) ? value : []} onChange={setValue} capLabel={capLabel} />
   if (kind === 'relation') return <RelationFilterInput {...props} target={spec.entity!} />
   if (kind === 'number' || kind === 'date') {

@@ -585,3 +585,48 @@ test('G6: held initial and new-query skeletons become results; filtered empty cl
     await page.screenshot({ path: `${process.env.LIST_V2_OUTPUT}/polish-empty-recovery.png`, fullPage: true })
   } finally { release?.(); await page.unrouteAll({ behavior: 'wait' }) }
 })
+
+for (const width of [1440, 390]) for (const language of ['en', 'cs'] as const) {
+  test(`#259 filter control geometry ${width} ${language}`, async ({ page, context }) => {
+    const copy = language === 'cs' ? cs : en
+    await page.setViewportSize({ width, height: 900 })
+    await context.addInitScript(language => localStorage.setItem('console-language', language), language)
+    await page.goto(route)
+    await expect(list(page).locator('[data-list-range]')).toBeVisible()
+    await page.getByRole('button', { name: copy.sortAndFilter, exact: true }).click()
+    const filters = page.getByRole('group', { name: copy.sortAndFilter, exact: true })
+    await page.evaluate(async () => { await document.fonts.ready })
+    // Checkboxes/radios are choice indicators, not input-height text/select controls.
+    const geometry = await filters.locator('input:not([type="checkbox"]):not([type="radio"]), select, button[role="combobox"]').evaluateAll(controls => controls.map(control => {
+      const field = control.closest('form')!.firstElementChild!
+      const cell = [...field.children].find(child => child.contains(control))!
+      const rect = control.getBoundingClientRect()
+      return { tag: control.tagName, name: control.getAttribute('aria-label'), top: rect.top, height: rect.height, row: cell.getBoundingClientRect().top }
+    }))
+    observations.push({ kind: 'filter-control-geometry', width, language, geometry })
+    expect(geometry.length).toBeGreaterThanOrEqual(2)
+    const standardHeight = (await filters.getByRole('textbox').first().boundingBox())!.height
+    for (const control of geometry) expect.soft(Math.abs(control.height - standardHeight), JSON.stringify(control)).toBeLessThanOrEqual(1)
+    for (const control of geometry) for (const neighbour of geometry.filter(item => Math.abs(item.row - control.row) <= 1)) {
+      expect.soft(Math.abs(control.top - neighbour.top), `same grid row: ${JSON.stringify({ control, neighbour })}`).toBeLessThanOrEqual(1)
+    }
+  })
+
+  test(`#259 trigger and panel labels ${width} ${language}`, async ({ page, context }) => {
+    const expected = language === 'cs' ? { saved: 'Uložené pohledy', columns: 'Sloupce', filters: 'Filtry' } : { saved: 'Saved views', columns: 'Columns', filters: 'Filters' }
+    await page.setViewportSize({ width, height: 900 })
+    await context.addInitScript(language => localStorage.setItem('console-language', language), language)
+    await page.goto(route)
+    await expect(list(page).locator('[data-list-range]')).toBeVisible()
+    const copy = language === 'cs' ? cs : en
+    for (const [current, label] of [[copy.savedViewsMenu, expected.saved], [copy.listDisplay, expected.columns], [copy.sortAndFilter, expected.filters]]) {
+      const trigger = page.getByRole('button', { name: current, exact: true })
+      await expect.soft(trigger).toHaveText(label, { timeout: 500 })
+      await expect.soft(trigger).toHaveAccessibleName(label, { timeout: 500 })
+      await expect(trigger).toHaveAttribute('title', label)
+      await expect(trigger).toHaveAccessibleDescription(label)
+    }
+    await page.getByRole('button', { name: copy.sortAndFilter, exact: true }).click()
+    await expect.soft(page.getByRole('group', { name: copy.sortAndFilter, exact: true })).toHaveAccessibleName(expected.filters, { timeout: 500 })
+  })
+}
