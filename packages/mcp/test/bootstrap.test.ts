@@ -404,9 +404,11 @@ it.each([
       { kind: 'set_catalog_entries', language: 'en', namespace: 'domain', entries: { 'field.worker.name': 'Name' } },
       { kind: 'set_instance_display_name', displayName: 'Field Ops' },
       { kind: 'set_roles', roles: ['owner', 'viewer'], organizationOwnerRole: 'owner' },
+      { kind: 'set_constraints', entity: 'worker', constraints: [{ kind: 'unique', name: 'worker_name_unique', fields: ['name'] }] },
+      { kind: 'add_index', entity: 'worker', name: 'worker_name_idx', fields: ['name'] },
     ] : []),
   ]
-  const kinds = examples.map(change => compositionChangeSchema.parse(change).kind)
+  const kinds = examples.map(change => schemas.propose_change.parse({ instance: 'example', baseRevision: 1, changes: [change] }).changes[0].kind)
   for (const kind of kinds) expect(guide, kind).toContain('`' + kind + '`')
   for (const [kind] of guide.matchAll(/\b(?:set|add|remove)_[a-z_]+\b/g)) {
     expect(kinds).toContain(kind)

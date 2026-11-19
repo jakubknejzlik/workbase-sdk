@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { changeSchema, compositionChangeSchema, initialCompositionSchema, exactVersion, fail } from './schemas.ts'
+import { changeSchema, compositionChangeSchema, initialCompositionSchema, schemaChangeSchema, exactVersion, fail } from './schemas.ts'
 import { migrationPreviewSchema, promotedFilesSchema } from './submit-change.ts'
 import { digestBytes, inputHashesSchema, inputPath, resultSchema, sha256Schema } from './sdk-upgrade-protocol.ts'
 import { hash } from './planning.ts'
@@ -67,6 +67,8 @@ const initialCompositionProposalSchema = z.strictObject({
     ctx.addIssue({ code: 'custom', message: 'Inconsistent initial composition identity or receipt' })
   }
 })
+const schemaProposalSchema = legacyConfigSchema.extend({ kind: z.literal('schema_change'), changes: z.array(schemaChangeSchema).min(1).max(50) })
+export type SchemaProposal = z.infer<typeof schemaProposalSchema>
 const digest = z.string().regex(/^[a-f0-9]{64}$/).refine(value => !/\s/.test(value))
 const packageName = z.enum(['@workbasehq/core', '@workbasehq/plugins', '@workbasehq/mcp'])
 const artifact = z.strictObject({
@@ -129,7 +131,7 @@ const sdkUpgradeSchema = z.strictObject({
       || Object.entries(expected).some(([path, digest]) => actual[path] !== digest)) reject()
   }
 })
-export const proposalSchema = z.discriminatedUnion('kind', [configChangeSchema, sdkUpgradeSchema, compositionProposalSchema, initialCompositionProposalSchema])
+export const proposalSchema = z.discriminatedUnion('kind', [configChangeSchema, sdkUpgradeSchema, compositionProposalSchema, initialCompositionProposalSchema, schemaProposalSchema])
 export type InitialCompositionProposal = z.infer<typeof initialCompositionProposalSchema>
 export type CompositionProposal = z.infer<typeof compositionProposalSchema>
 export type ConfigChangeProposal = z.infer<typeof configChangeSchema>

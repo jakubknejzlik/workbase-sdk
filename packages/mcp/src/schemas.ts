@@ -129,6 +129,14 @@ export type CompositionChange = z.infer<typeof compositionChangeSchema>
 export const isPresentationChange = (change: { kind: string }): change is PresentationChange | CatalogChange | LabelChange =>
   change.kind === 'set_locale' || change.kind === 'set_instance_display_name' || change.kind === 'set_catalog_entries' || change.kind === 'set_label'
 
+// Wire shape mirrors the #214 entity constraint contract. The V3 literal loader
+// performs authoritative semantic validation against authored fields.
+export const schemaChangeSchema = z.strictObject({
+  kind: z.literal('set_constraints'), entity: identifier,
+  constraints: z.array(z.strictObject({ kind: z.literal('unique'), name: identifier, fields: z.array(identifier).min(1).max(16) })).max(32),
+})
+export type SchemaChange = z.infer<typeof schemaChangeSchema>
+
 export const changeSchema = z.discriminatedUnion('kind', [
   setLabel,
   setLocale,
@@ -161,7 +169,7 @@ export const schemas = {
   rollback: z.strictObject({ instance, to: z.string().regex(/^v[1-9][0-9]*$/), expectedRevision: revision, allowDestructive: z.boolean().optional(), preview: z.boolean().optional() }),
   inspect_schema: z.strictObject({ instance }),
   upgrade_sdk: z.strictObject({ instance, baseRevision: revision, targetVersion: z.string().regex(exactVersion).refine(value => !/\s/.test(value)) }),
-  propose_change: z.strictObject({ instance, baseRevision: revision, changes: z.array(z.union([changeSchema, compositionChangeSchema])).min(1).max(50) }),
+  propose_change: z.strictObject({ instance, baseRevision: revision, changes: z.array(z.union([changeSchema, compositionChangeSchema, schemaChangeSchema])).min(1).max(50) }),
   propose_initial_composition: z.strictObject({ instance, composition: initialCompositionSchema }),
   propose_composition: z.strictObject({ instance, baseRevision: revision, changes: z.array(compositionChangeSchema).min(1).max(50) }),
   validate: z.strictObject({ proposalId: proposalId.optional(), instance: instance.optional() })

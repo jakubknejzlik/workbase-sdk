@@ -288,3 +288,29 @@ test.each([undefined, null, [], { close: { enabled: 'yes' } }])('invalid detail 
   await screen.findByText('Server')
   expectNoExecutableAvailability()
 })
+
+test.each(['en', 'cs'] as const)('unique conflict is localized, retains draft and permits corrected retry (%s)', async language => {
+  const i18n = createI18n({ languages: ['en', 'cs'], profile: { language }, catalogs: {} })
+  const fetch = vi.fn(async (_url: string, init: ClientRequestInit) => {
+    if (init.method !== 'PATCH') return json(row)
+    const data = JSON.parse(String(init.body))
+    return data.name === 'Duplicate' ? json({ error: 'unique_conflict', detail: { constraintId: 'probe.name_unique' } }, 409) : json({ ...row, ...data, version: 2 })
+  })
+  render(h(ConsoleProvider, { caps: grants({ probe: meta }), identity: { actorId: 'a', orgId: 'one' }, t: i18n.t, fetch }, h(PageView, { definition: route('edit'), route: route('edit'), entities: { probe: meta }, params: { itemId: 'x' }, search: {}, navigate })))
+  const name = await screen.findByLabelText(i18n.t('domain:field.probe.name'))
+  fireEvent.change(name, { target: { value: 'Duplicate' } }); fireEvent.click(screen.getByText(i18n.t('sdk:save')))
+  const message = language === 'cs' ? 'Záznam se stejnou kombinací hodnot již existuje. Změňte hodnoty a zkuste to znovu.' : 'A record with the same combination of values already exists. Change the values and try again.'
+  expect(await screen.findByText(message)).toBeTruthy()
+  expect(screen.queryByText(i18n.t('sdk:network'))).toBeNull()
+  expect((name as unknown as { value: string }).value).toBe('Duplicate'); expect(navigate).not.toHaveBeenCalled()
+  fireEvent.change(name, { target: { value: 'Corrected' } }); fireEvent.click(screen.getByText(i18n.t('sdk:save')))
+  await waitFor(() => expect(navigate).toHaveBeenCalledWith('/items/x'))
+  expect(JSON.parse(String(fetch.mock.calls.filter(([, init]) => init.method === 'PATCH').at(-1)![1].body))).toEqual({ name: 'Corrected' })
+})
+test('generic constraint_conflict retains the current network fallback', async () => {
+  render(view(async (_url, init) => init.method === 'PATCH' ? json({ error: 'constraint_conflict' }, 409) : json(row), 'edit'))
+  fireEvent.change(await screen.findByLabelText('domain:field.probe.name'), { target: { value: 'Draft' } })
+  fireEvent.click(screen.getByText('sdk:save'))
+  expect(await screen.findByText('sdk:network')).toBeTruthy()
+  expect((screen.getByLabelText('domain:field.probe.name') as unknown as { value: string }).value).toBe('Draft')
+})

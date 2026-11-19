@@ -3,6 +3,7 @@
   "empty": "No records",
   "notFound": "Not found",
   "forbidden": "Access denied",
+  "uniqueConflict": "A record with the same combination of values already exists. Change the values and try again.",
   "network": "Network error",
   "validation": "Check the form",
   "unsupported": "Unsupported",
