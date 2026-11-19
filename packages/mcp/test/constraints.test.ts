@@ -299,7 +299,9 @@ it('authors ref immutability through V3 validation, preview, disposable D1, prom
     expect(removal).toMatchObject({ ok: true })
     expect(await call('validate', { proposalId: removal.proposalId })).toMatchObject({ ok: true })
     const dropped = await call('preview_migration', { proposalId: removal.proposalId })
-    expect(dropped.sql.match(/DROP TRIGGER/g)).toHaveLength(2)
+    expect(dropped.sql.match(/DROP TRIGGER/g)).toHaveLength(4)
+    expect(dropped.sql).toContain('_snapshot')
+    expect(dropped.sql).toContain('DROP TABLE')
     expect(await call('apply_to_disposable', { proposalId: removal.proposalId })).toMatchObject({ ok: true, verified: true })
     expect(await call('promote', { proposalId: removal.proposalId, expectedRevision: 2 })).toMatchObject({ ok: true, revision: 3 })
   } finally { await server.close() }
