@@ -399,7 +399,7 @@ This core slice does not add a V3 MCP constraint editor or localized console con
 UX. Those remain explicit follow-ups: authoring must use schema files plus the
 bundle/lock planner until the supported V3 editing flow is delivered. Existing
 non-unique MCP `add_index` keeps its semantics. Partial uniqueness, cross-relation
-equality and referenced-field immutability belong to later slices of #198.
+equality and referenced-field immutability are delivered by slices 2-4 of #198 (below).
 
 ### One-hop reference equality
 
@@ -430,8 +430,8 @@ SDK-generated AFTER triggers check inserts and updates of either participating
 field (also organization_id), using the final row so self references work. Reverse
 triggers reject target-field changes (including INSERT OR REPLACE) that would
 invalidate any incoming row in the same organization. Same-value updates and unreferenced target changes
-are allowed. Slice 4 referenced-field immutability is a separate, stricter rule;
-this declaration does not implement it. Multi-row writes must preserve the rule
+are allowed. Referenced-field immutability (`ref_immutable`, below) is a separate,
+stricter rule and composes with this one. Multi-row writes must preserve the rule
 at each row; the SDK does not defer equality checks to transaction commit.
 
 Lock v3 records the typed declaration and physical FK dependency, from which the
@@ -451,3 +451,62 @@ constraints, with bounded D1 wrappers/causes, are mapped; arbitrary database tex
 keeps the generic fallback. Failed writes roll back domain, audit and idempotency
 changes. Data MCP forwards the same status/code; the console displays an English
 or Czech message, retains the draft, and permits a corrected retry.
+
+### Referenced-field immutability
+
+```ts
+// declared on location
+constraints: [{
+  kind: 'ref_immutable', name: 'location_client_locked', field: 'client',
+  referencedBy: { entity: 'booking', field: 'location' },
+}]
+```
+
+`location.client` cannot change while any same-organization `booking.location`
+points at the row. `field` is a stored authored ref on the constrained entity;
+`referencedBy.field` is a stored authored ref on `referencedBy.entity` whose target
+is the constrained entity (self references are allowed). Identifiers only: unknown
+entities/fields, computed fields, wrong targets, paths (`a.b`), multi-hop shapes,
+extra properties and SQL are rejected with declaration diagnostics in the DSL and
+the V3 MCP `set_constraints` contract. The SDK account entity cannot be the
+referencing entity.
+
+Semantics are `NEW.field IS NOT OLD.field` and explicit: NULL to value and value to
+NULL are changes (rejected while referenced); NULL to NULL, same-value updates,
+unrelated field edits and updates of unreferenced rows are allowed. There is no
+status filter: cancelled references count. References from another organization
+never block (the lookup is scoped by `organization_id`), and deleting or reparenting
+the last reference releases the field. Referencing rows need no trigger: adding a
+reference after a change is always valid.
+
+Two SDK-generated BEFORE triggers implement it: `<token>_update` (UPDATE OF the field;
+keyed on the OLD row so an id change cannot hide a change; a plain id change of a
+referenced row is already blocked by the composite FK) and `<token>_replace`
+(BEFORE INSERT whose primary key already exists with a different field value while
+referenced, which covers INSERT OR REPLACE and upsert, where OLD is unavailable). The
+replace trigger therefore also rejects an upsert whose proposed row carries a different
+field value while the row is referenced, even if DO UPDATE would not write the field; a plain
+INSERT of an existing id is rejected with the same token instead of a primary key
+error. Names/tokens derive from `workbase_ref_immutable_<table hex>_<name>`.
+
+Composition with `ref_equality`: both may exist. Equality's reverse guards are AFTER
+triggers, immutability's are BEFORE triggers, so when both would reject, the
+immutability token is raised first and exactly one error is reported (`stricter wins`).
+Equality still guards the referencing side independently.
+
+Lock v3 records the typed declaration; old v1/v2 and unique/equality-only locks keep
+their bytes. No data preflight is needed (existing data cannot violate a rule about
+future changes). Adding the constraint is trigger-only SQL (no table rebuild); removal
+drops both triggers; changing a definition requires a new name. Renames and rebuilds
+in a trigger-constrained graph are rejected for a manually reviewed migration.
+`checkEntityConstraints` verifies the exact trigger definitions at runtime.
+
+HTTP CRUD and atomic writes return `409 ref_immutable` with `detail.constraintId`
+(for example `location.location_client_locked`). 409 is used (not 422) because the
+request is well-formed and conflicts with current state - whether the row is
+referenced - and it keeps the triage contract; the distinct code separates it from
+generic `constraint_conflict` and `unique_conflict`. Only exact tokens generated for
+configured constraints are mapped (bounded causes and lengths); unknown trigger text
+keeps the generic fallback. Failed writes roll back domain, audit and idempotency
+changes. Data MCP forwards status/code; the console shows a localized EN/CS message,
+keeps the draft and permits retry.

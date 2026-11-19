@@ -1,4 +1,4 @@
-import { uniqueIndexName, refEqualityToken, type EntityConstraint, type UniqueConstraint, type RefEqualityConstraint } from '../entity-constraints'
+import { uniqueIndexName, refEqualityToken, refImmutableToken, type EntityConstraint, type UniqueConstraint, type RefEqualityConstraint, type RefImmutableConstraint } from '../entity-constraints'
 import { systemSchema } from './system-schema'
 export { systemSchema } from './system-schema'
 import { workflowSchema } from '../workflow-schema'
@@ -99,8 +99,8 @@ export function initialSchema(config: InstanceConfig) {
   const legacy = !usesSdkBaseline(config)
     ? configuredSystemSchema(config) + opsSchema + (config.account?.entity === 'users' ? betterAuthSchema.replace('user_id TEXT NOT NULL REFERENCES users(id)', 'user_id TEXT NOT NULL REFERENCES "user"(id)') : betterAuthSchema) + emailDeliverySchema + workflowSchema
     : ''
-  if (usesSdkBaseline(config)) return physicalTables(config).map(renderTable).join('\n') + renderRefEqualities(physicalTables(config)) + '\n'
-  return legacy + Object.entries(config.entities).filter(([n]) => !(n === 'users' && config.account?.entity === n)).map(([n, e]) => createEntity(n, e)).join('\n') + renderRefEqualities(physicalTables(config)) + '\n' + revisionSQL(config.revision) + '\n'
+  if (usesSdkBaseline(config)) return physicalTables(config).map(renderTable).join('\n') + renderConstraintTriggers(physicalTables(config)) + '\n'
+  return legacy + Object.entries(config.entities).filter(([n]) => !(n === 'users' && config.account?.entity === n)).map(([n, e]) => createEntity(n, e)).join('\n') + renderConstraintTriggers(physicalTables(config)) + '\n' + revisionSQL(config.revision) + '\n'
 }
 
 /** Fresh schemas support configured application roles and the explicit users/account extension.
@@ -143,11 +143,35 @@ INSERT INTO ${guard} SELECT 0 FROM ${source} AS source WHERE ${mismatch('source'
 DROP TABLE ${guard};`
   return { token, target, triggers, preflight }
 }
-export function renderRefEqualities(tables: readonly TableSpec[]) {
-  const sql = tables.flatMap(table => (table.constraints ?? []).flatMap(c => c.kind === 'ref_equality' ? refEqualityDefinition(table, c).triggers.map(t => t.sql) : []))
+/** The stored ref `field` of the constrained table cannot change while a same-organization
+ * row of `referencedBy` points at the row. `IS NOT` makes NULL<->value changes
+ * rejected and same-value/NULL->NULL updates allowed; there is no status filter.
+ * Both triggers are BEFORE triggers, so they always fire ahead of slice 3's AFTER
+ * equality guards: when both reject, the stricter immutability token is the one raised.
+ * A plain INSERT whose primary key already exists with a different field value is
+ * also reported here while referenced (the row is only reachable through REPLACE
+ * or upsert); an upsert that never writes the field is likewise rejected. */
+export function refImmutableDefinition(table: TableSpec, constraint: RefImmutableConstraint) {
+  const token = refImmutableToken(table.name, constraint.name)
+  const self = quote(table.name), source = quote(constraint.referencedBy.entity)
+  const field = quote(constraint.field), hop = quote(constraint.referencedBy.field)
+  const referenced = (row: string) => `EXISTS (SELECT 1 FROM ${source} AS referrer WHERE referrer."organization_id" = ${row}."organization_id" AND referrer.${hop} = ${row}."id")`
+  const abort = `SELECT RAISE(ABORT, ${literal(token)});`
+  const triggers = [
+    { name: `${token}_update`, sql: `CREATE TRIGGER ${quote(`${token}_update`)} BEFORE UPDATE OF ${field} ON ${self} WHEN NEW.${field} IS NOT OLD.${field} AND ${referenced('OLD')} BEGIN ${abort} END;` },
+    { name: `${token}_replace`, sql: `CREATE TRIGGER ${quote(`${token}_replace`)} BEFORE INSERT ON ${self} WHEN EXISTS (SELECT 1 FROM ${self} AS previous WHERE previous."id" = NEW."id" AND previous.${field} IS NOT NEW.${field} AND ${referenced('previous')}) BEGIN ${abort} END;` },
+  ]
+  return { token, triggers }
+}
+/** Trigger-backed constraints install after every table exists; unique indexes are rendered inline. */
+export function constraintTriggers(table: TableSpec, constraint: EntityConstraint): { preflight?: string; triggers: { name: string; sql: string }[] } {
+  return constraint.kind === 'ref_equality' ? refEqualityDefinition(table, constraint) : constraint.kind === 'ref_immutable' ? refImmutableDefinition(table, constraint) : { triggers: [] }
+}
+export function renderConstraintTriggers(tables: readonly TableSpec[]) {
+  const sql = tables.flatMap(table => (table.constraints ?? []).flatMap(c => constraintTriggers(table, c).triggers.map(t => t.sql)))
   return sql.length ? '\n' + sql.join('\n') : ''
 }
 export function dropConstraint(table: TableSpec, constraint: EntityConstraint) {
   return constraint.kind === 'unique' ? `DROP INDEX ${quote(uniqueIndexName(table.name, constraint.name))};`
-    : refEqualityDefinition(table, constraint).triggers.map(t => `DROP TRIGGER ${quote(t.name)};`).join('\n')
+    : constraintTriggers(table, constraint).triggers.map(t => `DROP TRIGGER ${quote(t.name)};`).join('\n')
 }

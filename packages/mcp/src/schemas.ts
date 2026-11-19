@@ -133,7 +133,7 @@ export const isPresentationChange = (change: { kind: string }): change is Presen
 // performs authoritative semantic validation against authored fields.
 export const schemaChangeSchema = z.strictObject({
   kind: z.literal('set_constraints'), entity: identifier,
-  constraints: z.array(z.discriminatedUnion('kind', [z.strictObject({ kind: z.literal('ref_equality'), name: identifier, field: identifier, through: identifier, targetField: identifier }), z.strictObject({ kind: z.literal('unique'), name: identifier, fields: z.array(identifier).min(1).max(16), where: z.strictObject({ field: identifier, op: z.literal('eq'), value: z.union([z.string().refine(value => !value.includes('\u0000'), 'SQL literals cannot contain NUL'), z.number().finite(), z.boolean()]) }).optional() })])).max(32),
+  constraints: z.array(z.discriminatedUnion('kind', [z.strictObject({ kind: z.literal('ref_immutable'), name: identifier, field: identifier, referencedBy: z.strictObject({ entity: identifier, field: identifier }) }), z.strictObject({ kind: z.literal('ref_equality'), name: identifier, field: identifier, through: identifier, targetField: identifier }), z.strictObject({ kind: z.literal('unique'), name: identifier, fields: z.array(identifier).min(1).max(16), where: z.strictObject({ field: identifier, op: z.literal('eq'), value: z.union([z.string().refine(value => !value.includes('\u0000'), 'SQL literals cannot contain NUL'), z.number().finite(), z.boolean()]) }).optional() })])).max(32),
 })
 export type SchemaChange = z.infer<typeof schemaChangeSchema>
 

@@ -80,7 +80,7 @@ it('rejects constrained graph rebuilds and target/source renames explicitly; rem
   const migration = legacyPlan(defineInstance({ ...raw, revision: 1 }), rebuilt)
   expect(migration.blocked.join(' ')).toContain('manually reviewed migration'); expect(migration.sql).not.toContain('DROP TABLE')
   const renamed = defineInstance({ ...raw, entities: { ...raw.entities, location: { ...raw.entities.location, fields: { ...raw.entities.location.fields, new_client: { type: 'ref', entity: 'client', renameFrom: 'client' } } } } })
-  expect(() => schemaLock(renamed, lock)).toThrow('Renaming a ref equality graph')
+  expect(() => schemaLock(renamed, lock)).toThrow('Renaming a trigger-constrained graph')
   const removed = diffSpecs(lock.tables, schemaLock(config([]), lock).tables)
   expect(removed.match(/DROP TRIGGER/g)).toHaveLength(4)
   const { db } = fixture()

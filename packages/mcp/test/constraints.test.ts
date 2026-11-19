@@ -3,6 +3,8 @@ import { mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterEach, expect, it } from 'vitest'
+import { Client } from '@modelcontextprotocol/sdk/client/index.js'
+import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
 import { loadConfig } from '@workbasehq/core/schema/load'
 import { checkLinkage } from '@workbasehq/core/migrations/schema-plan'
 import { createServer } from '../src/server'
@@ -177,7 +179,7 @@ it('keeps the MCP wire shape compatible with the shared constraint contract', as
   const { schemaChangeSchema } = await import('../src/schemas')
   const { declarationSchema } = await import('@workbasehq/core/schema')
   const shared = declarationSchema.shape.constraints.unwrap()
-  for (const constraints of [[constraint], [partial], [equality], [], Array.from({ length: 33 }, () => constraint), [{ ...constraint, fields: Array(17).fill('name') }], [{ ...constraint, where: '1=1' }], [{ ...constraint, kind: 'partial_unique' }]]) {
+  for (const constraints of [[constraint], [partial], [equality], [immutable], [{ ...immutable, referencedBy: { entity: 'worker', field: 'location', where: '1=1' } }], [{ ...immutable, referencedBy: 'worker.location' }], [], Array.from({ length: 33 }, () => constraint), [{ ...constraint, fields: Array(17).fill('name') }], [{ ...constraint, where: '1=1' }], [{ ...constraint, kind: 'partial_unique' }]]) {
     expect(schemaChangeSchema.safeParse({ kind: 'set_constraints', entity: 'worker', constraints }).success).toBe(shared.safeParse(constraints).success)
   }
 })
@@ -279,4 +281,55 @@ it('rejects pre-existing equality mismatches without altering data or authorizin
     expect(await call('promote', { proposalId: result.proposalId, expectedRevision: 1 })).toMatchObject({ ok: false })
     expect(await readFile(join(root, 'schema/worker.ts'), 'utf8')).toBe(source)
   } finally { await server.close() }
+})
+
+const immutable = { kind: 'ref_immutable', name: 'worker_client_locked', field: 'client', referencedBy: { entity: 'worker', field: 'location' } }
+it('authors ref immutability through V3 validation, preview, disposable D1, promote and removal', async () => {
+  const { root, server, call, propose } = await fixture(false, true)
+  try {
+    const result = await propose([immutable]); expect(result, JSON.stringify(result)).toMatchObject({ ok: true })
+    const validation = await call('validate', { proposalId: result.proposalId }); expect(validation, JSON.stringify(validation)).toMatchObject({ ok: true })
+    const preview = await call('preview_migration', { proposalId: result.proposalId })
+    expect(preview.sql).toContain('CREATE TRIGGER'); expect(preview.sql).toContain('workbase_ref_immutable_'); expect(preview.sql).toContain('_replace')
+    expect(preview.sql).not.toMatch(/ALTER TABLE|CHECK \("valid"/)
+    expect(await call('apply_to_disposable', { proposalId: result.proposalId })).toMatchObject({ ok: true, verified: true, diffs: [] })
+    expect(await call('promote', { proposalId: result.proposalId, expectedRevision: 1 })).toMatchObject({ ok: true, revision: 2 })
+    expect((await loadConfig(join(root, 'config.ts'))).config.entities.worker.constraints).toEqual([immutable])
+    const removal = await call('propose_change', { instance: 'constraint-fixture', baseRevision: 2, changes: [{ kind: 'set_constraints', entity: 'worker', constraints: [] }] })
+    expect(removal).toMatchObject({ ok: true })
+    expect(await call('validate', { proposalId: removal.proposalId })).toMatchObject({ ok: true })
+    const dropped = await call('preview_migration', { proposalId: removal.proposalId })
+    expect(dropped.sql.match(/DROP TRIGGER/g)).toHaveLength(2)
+    expect(await call('apply_to_disposable', { proposalId: removal.proposalId })).toMatchObject({ ok: true, verified: true })
+    expect(await call('promote', { proposalId: removal.proposalId, expectedRevision: 2 })).toMatchObject({ ok: true, revision: 3 })
+  } finally { await server.close() }
+})
+it.each([
+  [{ ...immutable, field: 'missing' }, 'stored authored ref'],
+  [{ ...immutable, field: 'name' }, 'stored authored ref'],
+  [{ ...immutable, referencedBy: { entity: 'missing', field: 'location' } }, 'Unknown referencing entity'],
+  [{ ...immutable, referencedBy: { entity: 'worker', field: 'missing' } }, 'targets the constrained entity'],
+  [{ ...immutable, referencedBy: { entity: 'worker', field: 'name' } }, 'targets the constrained entity'],
+  [{ ...immutable, referencedBy: { entity: 'worker', field: 'location.client' } }, 'Input does not match'],
+  [{ ...immutable, referencedBy: { entity: 'worker.location', field: 'client' } }, 'Input does not match'],
+  [{ ...immutable, field: 'client.name' }, 'Input does not match'],
+  [{ ...immutable, sql: 'client IS NOT OLD.client' }, 'Input does not match'],
+  [{ ...immutable, referencedBy: { entity: 'worker', field: 'location', where: "status='x'" } }, 'Input does not match'],
+  [{ ...immutable, referencedBy: 'worker.location' }, 'Input does not match'],
+])('rejects invalid/raw/multi-hop MCP immutability with diagnostics: %j', async (constraint, message) => {
+  const { root, server, propose } = await fixture(false, true)
+  try {
+    const source = await readFile(join(root, 'schema/worker.ts'), 'utf8')
+    expect(await propose([constraint])).toMatchObject({ ok: false, error: { message: expect.stringContaining(message) } })
+    expect(await readFile(join(root, 'schema/worker.ts'), 'utf8')).toBe(source)
+  } finally { await server.close() }
+})
+it('documents every constraint kind and its public error in the propose_change description', async () => {
+  const { server } = await createServer({ root: await mkdtemp(join(tmpdir(), 'mcp-constraints-')).then(root => (roots.push(root), root)) })
+  const client = new Client({ name: 'constraint-docs', version: '1' }); const [a, b] = InMemoryTransport.createLinkedPair()
+  try {
+    await server.connect(b); await client.connect(a)
+    const description = (await client.listTools()).tools.find(tool => tool.name === 'propose_change')?.description ?? ''
+    for (const text of ['ref_equality', '422 ref_equality_mismatch', 'ref_immutable', '409 ref_immutable', 'referencedBy', 'targetField']) expect(description).toContain(text)
+  } finally { await client.close(); await server.close() }
 })

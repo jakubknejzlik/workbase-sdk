@@ -1,6 +1,6 @@
 import type { InstanceConfig } from './config'
 import { ApiError } from './errors'
-import { MAX_UNIQUE_CONSTRAINT_FIELDS, uniqueConstraintIdentity, refEqualityToken } from './entity-constraints'
+import { MAX_UNIQUE_CONSTRAINT_FIELDS, uniqueConstraintIdentity, refEqualityToken, refImmutableToken } from './entity-constraints'
 
 const d1Prefix = 'D1_ERROR: '
 const sqlitePrefix = 'UNIQUE constraint failed: '
@@ -48,8 +48,8 @@ export function uniqueConflict(error: unknown, config: InstanceConfig): ApiError
 
 /** Exact SDK-generated tokens only; bounded cause traversal and declared identity
  * bound message lengths. No substring matching or arbitrary database prose. */
-export function refEqualityMismatch(error: unknown, config: InstanceConfig): ApiError | undefined {
-  const declared = Object.entries(config.entities).flatMap(([entity, spec]) => (spec.constraints ?? []).filter(c => c.kind === 'ref_equality').map(c => ({ token: refEqualityToken(entity, c.name), id: `${entity}.${c.name}` })))
+function generatedToken(error: unknown, config: InstanceConfig, kind: 'ref_equality' | 'ref_immutable', tokenFor: (table: string, name: string) => string): string | undefined {
+  const declared = Object.entries(config.entities).flatMap(([entity, spec]) => (spec.constraints ?? []).filter(c => c.kind === kind).map(c => ({ token: tokenFor(entity, c.name), id: `${entity}.${c.name}` })))
   const matches = new Set<string>(), seen = new Set<unknown>()
   const maxLength = declared.reduce((n, c) => Math.max(n, c.token.length), 0) + 100
   let current = error
@@ -64,8 +64,17 @@ export function refEqualityMismatch(error: unknown, config: InstanceConfig): Api
     }
     current = current.cause
   }
-  if (matches.size === 1) return new ApiError(422, 'ref_equality_mismatch', undefined, { constraintId: [...matches][0] })
+  if (matches.size === 1) return [...matches][0]
+}
+export function refEqualityMismatch(error: unknown, config: InstanceConfig): ApiError | undefined {
+  const constraintId = generatedToken(error, config, 'ref_equality', refEqualityToken)
+  if (constraintId) return new ApiError(422, 'ref_equality_mismatch', undefined, { constraintId })
+}
+/** 409: the write is well-formed but conflicts with current state (the row is referenced). */
+export function refImmutableViolation(error: unknown, config: InstanceConfig): ApiError | undefined {
+  const constraintId = generatedToken(error, config, 'ref_immutable', refImmutableToken)
+  if (constraintId) return new ApiError(409, 'ref_immutable', undefined, { constraintId })
 }
 export function constraintError(error: unknown, config: InstanceConfig): ApiError | undefined {
-  return refEqualityMismatch(error, config) ?? uniqueConflict(error, config)
+  return refImmutableViolation(error, config) ?? refEqualityMismatch(error, config) ?? uniqueConflict(error, config)
 }

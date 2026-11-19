@@ -15,10 +15,11 @@ export { useAuthDirty } from './auth-dirty'
 export { Session } from './session'
 export { AuthShell, authReturnTo, createAuthI18n, type AuthShellProps } from './auth-shell'
 export { Shell } from './shell'
-export type State<T> = { kind: 'loading' | 'empty' | 'notFound' | 'forbidden' | 'network' | 'uniqueConflict' | 'refEqualityMismatch' } | { kind: 'ready'; data: T } | { kind: 'validation'; issues: Issue[] }
+export type State<T> = { kind: 'loading' | 'empty' | 'notFound' | 'forbidden' | 'network' | 'uniqueConflict' | 'refEqualityMismatch' | 'refImmutable' } | { kind: 'ready'; data: T } | { kind: 'validation'; issues: Issue[] }
 export function failureState(error: unknown): State<never> {
   return error instanceof ApiFailure && error.status === 404 ? { kind: 'notFound' } : error instanceof ApiFailure && error.status === 403 ? { kind: 'forbidden' }
     : error instanceof ApiFailure && error.status === 422 && error.code === 'ref_equality_mismatch' ? { kind: 'refEqualityMismatch' }
+    : error instanceof ApiFailure && error.status === 409 && error.code === 'ref_immutable' ? { kind: 'refImmutable' }
     : error instanceof ApiFailure && error.status === 409 && error.code === 'unique_conflict' ? { kind: 'uniqueConflict' }
     : error instanceof ApiFailure && error.issues ? { kind: 'validation', issues: error.issues } : { kind: 'network' }
 }

@@ -306,8 +306,8 @@ normal SDK migration engine at deploy. Promotion does not install dependencies,
 configure infrastructure, send mail or apply a live database migration.
 
 Legacy V3 domain-change promotion is unsupported and returns `v3_promote_unsupported`.
-The constraint-only flow below supports named unique constraints through authored
-schema files and the bundle/lock planner. Other physical schema changes require
+The constraint-only flow below supports named unique, `ref_equality` and
+`ref_immutable` constraints through authored schema files and the bundle/lock planner. Other physical schema changes require
 reviewed source edits and migration generation.
 Custom plugins/commands and plugin removal require reviewed
 source changes. Runtime authoring accepts only the canonical built-in composition
@@ -316,7 +316,8 @@ shape; noncanonical sources fail closed with `runtime_not_canonical`.
 ### V3 entity constraints
 
 Use `propose_change` with a constraint-only `set_constraints` proposal to replace an entity's complete
-constraint list. This uses the typed unique constraint contract and the shared
+constraint list. This uses the typed constraint contract (`unique`, `ref_equality`,
+`ref_immutable`) and the shared
 bundle/lock planner; it preserves the authored module, imports and unrelated
 literal properties.
 
@@ -368,5 +369,41 @@ migration. Existing matching duplicates reject validation without data cleanup.
 Constrained rebuilds and rename publication still require a manually reviewed
 migration. Violations use the existing `409 unique_conflict` API/MCP and console path.
 
-Raw predicates and cross-relation constraints are not supported. The existing legacy `add_index` operation still creates an ordinary
+Raw predicates and expressions are not supported. The existing legacy `add_index` operation still creates an ordinary
 non-unique index and accepts neither `unique` nor `where`.
+
+#### One-hop reference equality (`ref_equality`)
+
+```json
+{ "kind": "ref_equality", "name": "booking_location_client",
+  "field": "client", "through": "location", "targetField": "client" }
+```
+
+Declares `booking.client == booking.location.client` on the entity that owns `field` and
+`through`. All three are identifiers (no paths, SQL or multiple hops); `field` and `through`
+are stored authored refs and `targetField` is a stored ref on the `through` target with the
+same target entity as `field`. Null equals null; missing and foreign-organization references
+never pass. The SDK generates insert/update triggers plus reverse guards on the target.
+Adding it over mismatching rows fails validation through a read-only preflight, with no data
+cleanup. Violations return `422 ref_equality_mismatch` (`detail.constraintId`) over HTTP and the
+data MCP, with a localized console message and retained draft.
+
+#### Referenced-field immutability (`ref_immutable`)
+
+```json
+{ "kind": "ref_immutable", "name": "location_client_locked", "field": "client",
+  "referencedBy": { "entity": "booking", "field": "location" } }
+```
+
+Declared on the referenced entity (`location`): its stored ref `field` cannot change while at
+least one same-organization row of `referencedBy.entity` points at the row through the stored
+ref `referencedBy.field` (which must target the constrained entity). One hop only; status is
+never filtered, so cancelled rows still count. A change is any `IS NOT` difference: NULL to a
+value and value to NULL are rejected, same-value and NULL-to-NULL updates are allowed, and
+unrelated fields stay editable. Unreferenced rows and rows referenced only from another
+organization may change; deleting or reparenting the last reference releases the field.
+INSERT OR REPLACE and upsert paths are guarded too. Violations return `409 ref_immutable`
+(`detail.constraintId`, for example `location.location_client_locked`) over HTTP and the data MCP,
+with a localized console message and retained draft. When `ref_equality` also exists, both
+may be declared; the immutability trigger fires first, so the stricter `ref_immutable` error is
+reported. Constrained rebuilds and renames still require a manually reviewed migration.

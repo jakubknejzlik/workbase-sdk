@@ -1,5 +1,5 @@
 import type { InstanceConfig } from '../config'
-import { physicalTables, renderTable, renderColumn, renderUniqueConstraint, refEqualityDefinition, dropConstraint, quote, type TableSpec } from './schema'
+import { physicalTables, renderTable, renderColumn, renderUniqueConstraint, constraintTriggers, dropConstraint, quote, type TableSpec } from './schema'
 import type { SourceMap } from '../schema/source-location'
 import { initialEntityId, initialFieldId, transitionId, validateLock, type EntityLineage, type RenameTransition, type SchemaLock } from '../schema/lock-format'
 export type { SchemaLock, EntityLineage, FieldLineage, RenameTransition } from '../schema/lock-format'
@@ -43,9 +43,9 @@ export function diffSpecs(baseTables: readonly TableSpec[], tables: readonly Tab
   }
   for (const table of tables) if (!baseTables.some(t => t.name === table.name)) sql.push(renderTable(table))
   for (const table of tables) for (const constraint of table.constraints ?? []) {
-    if (constraint.kind !== 'ref_equality' || baseTables.find(t => t.name === table.name)?.constraints?.some(c => equal(c, constraint))) continue
-    const definition = refEqualityDefinition(table, constraint)
-    sql.push(definition.preflight, ...definition.triggers.map(t => t.sql))
+    if (constraint.kind === 'unique' || baseTables.find(t => t.name === table.name)?.constraints?.some(c => equal(c, constraint))) continue
+    const definition = constraintTriggers(table, constraint)
+    sql.push(...(definition.preflight ? [definition.preflight] : []), ...definition.triggers.map(t => t.sql))
   }
   return sql.length ? sql.join('\n') + '\n' : ''
 }
@@ -58,8 +58,8 @@ function located(error: unknown, sources: SourceMap): never {
 export function schemaLock(config: InstanceConfig, base?: SchemaLock, sources: SourceMap = {}): SchemaLock {
   try {
     const previous = base && validateLock(base)
-    if (previous && (previous.tables.some(t => t.constraints?.some(c => c.kind === 'ref_equality')) || Object.values(config.entities).some(e => e.constraints?.some(c => c.kind === 'ref_equality')))
-      && Object.values(config.entities).some(e => e.renameFrom || Object.values(e.fields).some(f => f.renameFrom))) throw new SpecError('', undefined, 'Renaming a ref equality graph requires a manually reviewed migration')
+    if (previous && (previous.tables.some(t => t.constraints?.some(c => c.kind !== 'unique')) || Object.values(config.entities).some(e => e.constraints?.some(c => c.kind !== 'unique')))
+      && Object.values(config.entities).some(e => e.renameFrom || Object.values(e.fields).some(f => f.renameFrom))) throw new SpecError('', undefined, 'Renaming a trigger-constrained graph (ref equality / ref immutability) requires a manually reviewed migration')
     const transitions = previous ? structuredClone(previous.transitions) : []
     const entities: EntityLineage[] = []
     const normalized = { account: config.account, entities: {} as InstanceConfig['entities'] }
@@ -119,7 +119,7 @@ export function schemaLock(config: InstanceConfig, base?: SchemaLock, sources: S
         fields[physical] = { ...field, renameFrom: undefined }
       }
       normalized.entities[entity.physicalName] = { ...input, renameFrom: undefined, fields,
-        ...(input.constraints?.length ? { constraints: input.constraints.map(c => c.kind === 'ref_equality' ? c : ({ ...c, fields: c.fields.map(key => fieldNames.get(key) ?? key), ...(c.where ? { where: { ...c.where, field: fieldNames.get(c.where.field) ?? c.where.field } } : {}) })) } : {}),
+        ...(input.constraints?.length ? { constraints: input.constraints.map(c => c.kind !== 'unique' ? c : ({ ...c, fields: c.fields.map(key => fieldNames.get(key) ?? key), ...(c.where ? { where: { ...c.where, field: fieldNames.get(c.where.field) ?? c.where.field } } : {}) })) } : {}),
         checks: input.checks.map(c => ({ ...c, left: fieldNames.get(c.left) ?? c.left, right: fieldNames.get(c.right) ?? c.right })),
       }
       entities.push(entity)

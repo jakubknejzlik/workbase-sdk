@@ -22,9 +22,9 @@ export function plan(fromConfig: InstanceConfig | null, toConfig: InstanceConfig
   const from = inspectInstance(fromConfig).config
   if (from.id !== to.id) throw new Error('Cannot migrate between different instance IDs')
   if (to.revision <= from.revision) throw new Error('Target revision must increase')
-  if ([from, to].some(config => Object.values(config.entities).some(e => e.constraints?.some(c => c.kind === 'ref_equality')))) {
+  if ([from, to].some(config => Object.values(config.entities).some(e => e.constraints?.some(c => c.kind !== 'unique')))) {
     try {
-      if (Object.values(to.entities).some(e => e.renameFrom || Object.values(e.fields).some(f => f.renameFrom))) throw new Error('Renaming a ref equality graph requires a manually reviewed migration')
+      if (Object.values(to.entities).some(e => e.renameFrom || Object.values(e.fields).some(f => f.renameFrom))) throw new Error('Renaming a trigger-constrained graph (ref equality / ref immutability) requires a manually reviewed migration')
       return { sql: diffSpecs(physicalTables(from), physicalTables(to)) + (to.baseline !== 'workbase-sdk' ? revisionSQL(to.revision) + '\n' : ''), destructive: [], blocked: [], warnings: [] }
     } catch (error) {
       const reason = `Rebuilding a constrained table requires a manually reviewed migration: ${error instanceof Error ? error.message : String(error)}`
