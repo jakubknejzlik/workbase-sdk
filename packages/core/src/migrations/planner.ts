@@ -25,7 +25,7 @@ export function plan(fromConfig: InstanceConfig | null, toConfig: InstanceConfig
   if ([from, to].some(config => Object.values(config.entities).some(e => e.constraints?.some(c => c.kind === 'ref_equality')))) {
     try {
       if (Object.values(to.entities).some(e => e.renameFrom || Object.values(e.fields).some(f => f.renameFrom))) throw new Error('Renaming a ref equality graph requires a manually reviewed migration')
-      return { sql: diffSpecs(physicalTables(from), physicalTables(to)) + revisionSQL(to.revision) + '\n', destructive: [], blocked: [], warnings: [] }
+      return { sql: diffSpecs(physicalTables(from), physicalTables(to)) + (to.baseline !== 'workbase-sdk' ? revisionSQL(to.revision) + '\n' : ''), destructive: [], blocked: [], warnings: [] }
     } catch (error) {
       const reason = `Rebuilding a constrained table requires a manually reviewed migration: ${error instanceof Error ? error.message : String(error)}`
       return { sql: `-- BLOCKED: ${reason}\n`, destructive: [], blocked: [reason], warnings: [] }

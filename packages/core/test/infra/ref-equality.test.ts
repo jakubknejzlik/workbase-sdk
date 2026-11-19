@@ -114,3 +114,12 @@ it('keeps generated bundle/lock bytes deterministic across constraint order and 
   const invalid = JSON.parse(a.lock); invalid.tables.find((t: any) => t.name === 'booking').constraints.find((c: any) => c.kind === 'ref_equality').targetField = 'missing'
   expect(() => parseLock(JSON.stringify(invalid))).toThrow('Invalid schema.lock.json')
 })
+it('keeps the legacy planner domain-only for SDK-baseline constraint migrations', async () => {
+  const { plan } = await import('../../src/migrations/planner')
+  const from = config([]), base = schemaLock(from); bindSchemaLock(from, base)
+  const to = config(), next = schemaLock(to, base); bindSchemaLock(to, next)
+  const migration = plan(from, to)
+  expect(migration.blocked).toEqual([])
+  expect(migration.sql).toContain('CREATE TRIGGER')
+  expect(migration.sql).not.toContain('instance_meta')
+})

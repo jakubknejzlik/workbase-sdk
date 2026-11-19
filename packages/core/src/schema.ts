@@ -1,4 +1,4 @@
-import { entityConstraintsSchema, validateEntityConstraints, type EntityConstraint, type UniqueConstraint, type RefEqualityConstraint } from './entity-constraints'
+import { entityConstraintsSchema, validateEntityConstraints, type UniqueConstraint, type RefEqualityConstraint } from './entity-constraints'
 export type { EntityConstraint } from './entity-constraints'
 import { assertSchemaLockBound } from './schema/revision'
 export { bindSchemaLock } from './schema/revision'
