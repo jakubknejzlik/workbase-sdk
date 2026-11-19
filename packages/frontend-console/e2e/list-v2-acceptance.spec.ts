@@ -314,6 +314,57 @@ test('access: allowed admin actions; denied staff controls and real API authoriz
   await expect(page.getByRole('columnheader', { name: en.rowAccess, exact: true })).toHaveCount(0); await expect(page.getByRole('button', { name: new RegExp(en.rowAccessActions) })).toHaveCount(0)
 })
 
+for (const width of [360, 390]) for (const language of ['en', 'cs'] as const) test(`paging: 200% text middle page ${width} ${language}`, async ({ page, context }) => {
+  const copy = language === 'cs' ? cs : en
+  await page.setViewportSize({ width, height: 1000 })
+  await context.addInitScript(language => localStorage.setItem('console-language', language), language)
+  await page.goto(`${route}?page=3`)
+  await expect(list(page).locator('[data-list-range]')).toBeVisible()
+  await page.evaluate(async () => {
+    document.documentElement.style.fontSize = '32px'
+    await document.fonts.ready
+    await Promise.all(document.getAnimations().filter(animation => animation.effect?.getComputedTiming().iterations !== Infinity).map(animation => animation.finished.catch(() => {})))
+  })
+  const paging = list(page).locator('[data-list-paging]')
+  const previous = paging.getByRole('button', { name: copy.previousPage, exact: true })
+  const current = paging.getByRole('button', { name: '3', exact: true })
+  const next = paging.getByRole('button', { name: copy.nextPage, exact: true })
+  await expect(current).toHaveAttribute('aria-current', 'page')
+  await expect(previous).toBeEnabled()
+  await expect(next).toBeEnabled()
+  await paging.scrollIntoViewIfNeeded()
+  // Based on the review's paging-focus/probe geometry: DOM visibility alone
+  // misses controls clipped by the paging group's own horizontal viewport.
+  const checkPaging = async (phase: string) => {
+    const viewport = await paging.evaluate(element => {
+      const box = element.getBoundingClientRect()
+      return { left: box.left + element.clientLeft, right: box.left + element.clientLeft + element.clientWidth, top: box.top, bottom: box.bottom, scrollLeft: element.scrollLeft, clientWidth: element.clientWidth, scrollWidth: element.scrollWidth }
+    })
+    for (const control of [previous, current, next]) {
+      await expect(control).toBeVisible()
+      const box = (await control.boundingBox())!
+      observations.push({ kind: 'paging-clip', phase, viewport, name: await control.getAttribute('aria-label') ?? await control.textContent(), box })
+      expect.soft(box.x).toBeGreaterThanOrEqual(viewport.left)
+      expect.soft(box.x + box.width).toBeLessThanOrEqual(viewport.right)
+      expect.soft(box.y).toBeGreaterThanOrEqual(viewport.top)
+      expect.soft(box.y + box.height).toBeLessThanOrEqual(viewport.bottom)
+    }
+    expect.soft(viewport.scrollWidth).toBeLessThanOrEqual(viewport.clientWidth)
+    expect.soft(viewport.scrollLeft).toBe(0)
+  }
+  await checkPaging('before focus')
+  await next.focus()
+  await expect(next).toBeFocused()
+  await checkPaging('after focusing Next')
+  await page.screenshot({ path: `${process.env.LIST_V2_OUTPUT}/paging-200-${width}-${language}.png` })
+  // Collapsed page numbers must also leave the keyboard order.
+  await previous.focus()
+  await page.keyboard.press('Tab'); await expect(current).toBeFocused()
+  await page.keyboard.press('Tab'); await expect(next).toBeFocused()
+  await page.keyboard.press('Enter')
+  await expect.poll(() => new URL(page.url()).searchParams.get('page')).toBe('4')
+})
+
 for (const width of [1440, 390, 360]) for (const actor of ['admin', 'staff'] as const) for (const language of ['en', 'cs'] as const) test(`G4–G6 polish ${width} ${actor} ${language}`, async ({ page, context }) => {
   const copy = language === 'cs' ? cs : en
   await page.setViewportSize({ width, height: 1000 })
@@ -328,7 +379,7 @@ for (const width of [1440, 390, 360]) for (const actor of ['admin', 'staff'] as 
   expect(Math.round((await row.boundingBox())!.height)).toBe(actor === 'admin' ? 53 : 61)
   if (width === 1440) {
     expect(await page.locator('h1').evaluate(element => [getComputedStyle(element).fontSize, getComputedStyle(element).fontWeight])).toEqual(['29px', '400'])
-    expect(Math.round((await page.locator('[data-slot="sidebar-gap"]').boundingBox())!.width)).toBe(206)
+    await expect.poll(async () => Math.round((await page.locator('[data-slot="sidebar-gap"]').boundingBox())!.width)).toBe(206)
   }
   await page.getByRole('button', { name: copy.listDisplay, exact: true }).click()
   const display = page.getByRole('dialog', { name: copy.listDisplayHeading })
