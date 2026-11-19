@@ -18,7 +18,7 @@ async function mount(commands: string[], canInvite: boolean, canCancel: boolean)
   const write = vi.fn(async (_path: string, _method: string) => ({ state: 'invited', can_invite: canInvite, can_cancel: canCancel, inconsistency: null, linked_accounts: [], invitation: { id: 'pending', email: 'pending@example.test', expires_at: '2099-11-20T10:00:00.000Z' } }))
   render(<I18nextProvider i18n={i18n}><QueryClientProvider client={new QueryClient({defaultOptions:{queries:{retry:false}}})}><GeneratedRowInvitation model={model} caps={caps} orgId="org" entity="people" row={{id:'person'}} request={vi.fn()} write={write} /></QueryClientProvider></I18nextProvider>)
   const user = userEvent.setup()
-  await user.click(await screen.findByRole('button', { name: /Invited, Application access actions/ }))
+  await user.click(await screen.findByRole('button', { name: /Invitation sent, Application access actions/ }))
   expect(write.mock.calls.every(([, method]) => method === 'GET')).toBe(true)
   return user
 }

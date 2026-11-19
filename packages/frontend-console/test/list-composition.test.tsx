@@ -9,7 +9,7 @@ import { GeneratedReadPage } from '../../console-generated/src/screens'
 import { validateListSearch } from '../../console-generated/src/list-model'
 import type { Model, Capabilities, ReadQuery } from '../../console-generated/src/read'
 import en from '../src/locales/en.json'
-const model: Model = { instance: 'composition', revision: 1, limits: { root: 100, maxOffset: 40, children: 20, relations: 4, exists: 4 }, entities: {
+const model: Model = { instance: 'composition', revision: 1, timeZone: 'Europe/Prague', limits: { root: 100, maxOffset: 40, children: 20, relations: 4, exists: 4 }, entities: {
   entries: { displayField: 'name', fields: { id: { type: 'string' }, name: { type: 'string' }, status: { type: 'enum', values: ['active', 'inactive'] }, quick: { type: 'bool' } }, columns: ['name', 'status'], relations: {}, routes: { list: '', detail: '' }, list: { pageSize: 10, columns: [{ field: 'name' }, { field: 'status' }], filter: { status: { kind: 'enum', placement: 'panel', operators: ['in'] }, quick: { kind: 'boolean', placement: 'toolbar', operators: ['eq'] } }, views: [{ id: 'active', label: 'Active view', where: { status: { eq: 'active' } } }] } },
 } }
 const caps: Capabilities = { revision: 1, entities: { entries: { readable: Object.keys(model.entities.entries.fields), writable: [], operations: ['read'] } } }
@@ -144,10 +144,10 @@ it('stages row access in the panel, keeps confirmed chips until Apply and clears
   await test.user.selectOptions(within(panel).getByRole('combobox', { name: en.rowAccessFilter }), 'invited')
   expect(test.request.mock.calls).toHaveLength(before)
   expect(test.router.state.location.href).toBe(url)
-  expect(screen.queryByRole('button', { name: /Remove.*Invited/ })).toBeNull()
+  expect(screen.queryByRole('button', { name: /Remove.*Invitation sent/ })).toBeNull()
   await test.user.click(within(panel).getByRole('button', { name: en.applyFilter }))
   await waitFor(() => expect(test.request.mock.calls.at(-1)?.[0]).toMatchObject({ rowAccess: 'invited', offset: 0 }))
-  await test.user.click(screen.getByRole('button', { name: /Remove.*Invited/ }))
+  await test.user.click(screen.getByRole('button', { name: /Remove.*Invitation sent/ }))
   await waitFor(() => expect(test.router.state.location.search.rowAccess).toBeUndefined())
 })
 it('resets the numbered page after a page size change', async () => {

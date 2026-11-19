@@ -11,6 +11,7 @@ import type { Model, Capabilities, ReadQuery } from '../../console-generated/src
 import { ReadPage } from '../src/read'
 import { refreshRuntimeModel } from '../src/api/runtime-model'
 import en from '../src/locales/en.json'
+import { applyView } from './saved-views-menu'
 
 const scope = { instance: 'reconciliation', userId: 'actor', orgId: 'org' }
 const model: Model = { instance: scope.instance, revision: 1, limits: { root: 2, children: 10, relations: 4, exists: 4 }, entities: {
@@ -67,7 +68,7 @@ async function mount(ids: string[] = [], saved = false, picker = false, panel = 
   const i18n = i18next.createInstance(); await i18n.use(initReactI18next).init({ lng: 'en', resources: { en: { translation: { ...en, entity_entries: 'Entries', field_name: 'Name', field_team_id: 'Team', entitySingular_entries: 'Entry' } } } })
   const view = render(<I18nextProvider i18n={i18n}><QueryClientProvider client={client}><RouterProvider router={router} /></QueryClientProvider></I18nextProvider>)
   const user = userEvent.setup()
-  if (entry) { await user.selectOptions(await screen.findByRole('combobox', { name: en.savedViews }), entry.id); await user.click(screen.getByRole('button', { name: en.savedViewsApply })) }
+  if (entry) { await screen.findByRole('region', { name: en.savedViews }); await applyView(user, entry.name) }
   return { view, client, router, user, queries, source: () => queries.filter(query => query.entity === 'entries'),
     revoke: () => { readable = new Set(['readable']) }, deny: () => { denied = true },
     hold: () => { gate = new Promise<void>(resolve => { release = resolve }) }, release: () => { release?.(); gate = undefined },
@@ -107,7 +108,9 @@ it.each(['permission', 'actor', 'definition'] as const)('revalidates warm select
   else {
     await waitFor(() => expect(test.router.state.location.search.filters).toBeUndefined())
     expect(test.source().at(-1)?.cursor).toBeUndefined()
-    expect(screen.getByText(en.listStateDropped)).toBeTruthy()
+    // A different actor does not inherit (and then revalidate) the previous confirmed state: it is discarded outright.
+    if (change === 'actor') expect(screen.queryByText(en.listStateDropped)).toBeNull()
+    else expect(screen.getByText(en.listStateDropped)).toBeTruthy()
   }
 })
 it('does not apply unverified IDs or revive labels when revalidation fails', async () => {
@@ -152,7 +155,7 @@ it('rechecks an explicitly reapplied saved view even when its selected IDs have 
   const test = await mount(['revoked'], true)
   await waitFor(() => expect(screen.queryAllByText(/REVOKED_LABEL_CANARY/).length).toBeGreaterThan(0))
   test.revoke()
-  await test.user.click(screen.getByRole('button', { name: en.savedViewsApply }))
+  await applyView(test.user, 'Restored')
   await waitFor(() => expect(test.router.state.location.search.filters).toBeUndefined())
   expect(screen.queryAllByText(/REVOKED_LABEL_CANARY/)).toHaveLength(0)
   expect(screen.getByText(en.listStateDropped)).toBeTruthy()
@@ -196,6 +199,15 @@ it.each(['permission', 'actor'] as const)('revalidates a panel draft applied aft
   if (change === 'actor') await act(async () => { test.client.setQueryData(['me'], { user: { id: 'other-actor' }, memberships: [{ organization_id: 'org' }] }) })
   else await test.refresh()
   await waitFor(() => expect(screen.queryAllByText(/REVOKED_LABEL_CANARY/)).toHaveLength(0))
+  if (change === 'actor') {
+    // The draft belonged to the previous actor: the panel is gone and nothing from it can be applied.
+    expect(document.body.contains(panel)).toBe(false)
+    expect(screen.queryByRole('group', { name: en.sortAndFilter })).toBeNull()
+    await waitFor(() => expect(test.router.state.location.search.filters).toBeUndefined())
+    for (const query of test.source()) expect(JSON.stringify(query.where ?? {})).not.toContain('revoked')
+    expect(screen.queryByText(en.listStateDropped)).toBeNull()
+    return
+  }
   const beforeApply = test.queries.length
   await test.user.click(within(panel).getByRole('button', { name: en.applyFilter }))
 

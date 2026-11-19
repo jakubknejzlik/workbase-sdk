@@ -10,6 +10,7 @@ import type { ComponentProps, ReactNode } from 'react'
 import { createDataTableQueryKey } from '@workbasehq/ui'
 import { useEffect, useRef, useState } from 'react'
 import { useIsMutating, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useReferenceAuthority } from './reference-authority'
 import { useNavigate } from '@tanstack/react-router'
 import { useTranslation } from 'react-i18next'
 import { useEntityTranslation } from './entity-translation'
@@ -135,7 +136,7 @@ function formLabel(model: Model, entity: string, name: string, translate: (key: 
 }
 interface InlineField { field: string; label: string; value: ReactNode; refresh: () => Promise<Result> }
 function EntityMutation(props: Context & { row?: Record<string, any>; controls: { close: () => void; submissionKey: string }; inline?: InlineField }) {
-  const { t, i18n } = useEntityTranslation(props.entity); const { model, caps, entity, row, controls, write, request, inline } = props; const refreshAll = useRefresh()
+  const { t, i18n } = useEntityTranslation(props.entity); const { model, caps, entity, row, controls, write, request, inline } = props; const refreshAll = useRefresh(); const actor = useReferenceAuthority()?.actor
   const refresh = inline?.refresh ?? refreshAll
   const [current, setCurrent] = useState(row); const [generation, setGeneration] = useState(0)
   const needsEditRead = !inline && !!row && !!model.entities[entity].detail?.groups
@@ -200,7 +201,7 @@ function EntityMutation(props: Context & { row?: Record<string, any>; controls: 
       setSavedRow(saved.current.row)
       try {
         // Always establish live status after saving, including before a retry.
-        const status = await client.fetchQuery({ ...accessQuery(accessProps), staleTime: 0 })
+        const status = await client.fetchQuery({ ...accessQuery(accessProps, actor), staleTime: 0 })
         if (!accessGuard(status).valid) throw { code: 'action_unavailable' }
         // An uncertain prior response may already have created the invitation.
         if (status.state !== 'invited') {
@@ -355,8 +356,9 @@ export function ContextCreateAction(props: Context & { lockedValues: Record<stri
 
 type AccessContext = Omit<Context, 'write'> & { write?: WriteRequest; row: Record<string, any>; disabled?: boolean; email?: string; onChanged?: () => Promise<void> }
 type AccessStatus = RowAccessStatus & { recordActions?: Record<string, { enabled: boolean }>; invitationUnavailable?: boolean }
-function accessQuery(props: Omit<AccessContext, 'row'> & { row?: Record<string, any> }) {
-  return { queryKey: ['row-access', props.orgId, props.entity, props.row?.id, props.caps], retry: false as const,
+/** The verified actor is part of every identity-bearing key, so a different actor never reads another's cached status. */
+function accessQuery(props: Omit<AccessContext, 'row'> & { row?: Record<string, any> }, actor?: string) {
+  return { queryKey: ['row-access', actor ?? null, props.orgId, props.entity, props.row?.id, props.caps], retry: false as const,
     queryFn: async (): Promise<AccessStatus> => {
       if (!hasRecordAccess(props.model, props.entity)) return props.write!(`/orgs/${encodeURIComponent(props.orgId)}/row-access/${encodeURIComponent(props.entity)}/${encodeURIComponent(props.row!.id)}`, 'GET')
       const row = await props.write!(`/api/${encodeURIComponent(props.entity)}/${encodeURIComponent(props.row!.id)}`, 'GET')
@@ -373,11 +375,12 @@ function accessGuard(data?: AccessStatus) {
 }
 export function canReadApplicationAccess(caps: Capabilities) { return caps.resources?.['invitations.read'] === true }
 function useApplicationAccess(props: Omit<AccessContext, 'row'> & { row?: Record<string, any> }) {
+  const actor = useReferenceAuthority()?.actor
   const pending = useIsMutating({ mutationKey: ['account-access', props.orgId, props.entity] }) > 0
   const definition = props.model.entities[props.entity]
   const supported = hasRecordAccess(props.model, props.entity) || !!(definition?.rowAccess ?? definition?.rowInvitations)
   const enabled = canReadApplicationAccess(props.caps) && !!props.write && !!props.row && supported
-  const status = useQuery({ ...accessQuery(props), enabled })
+  const status = useQuery({ ...accessQuery(props, actor), enabled })
   const data = enabled && !status.error ? status.data : undefined
   const { multiple, valid } = accessGuard(data)
   const granted = (name: string) => props.caps.commands?.includes(`${props.entity}/${name}`)
@@ -412,6 +415,7 @@ export function ApplicationAccessCard(props: AccessContext) {
   return <Card data-application-access=""><CardHeader><CardTitle>{t('rowAccess')}</CardTitle></CardHeader><CardContent><ApplicationAccess {...props} /></CardContent></Card>
 }
 function ApplicationAccess(props: AccessContext & { rowMenu?: boolean }) {
+  const actor = useReferenceAuthority()?.actor
   const [selected, setSelected] = useState<string>()
   const [menuOpen, setMenuOpen] = useState(false)
   const trigger = useRef<HTMLButtonElement | null>(null)
@@ -429,7 +433,7 @@ function ApplicationAccess(props: AccessContext & { rowMenu?: boolean }) {
     window.addEventListener('keydown', escape, true)
     return () => window.removeEventListener('keydown', escape, true)
   }, [menuOpen])
-  const delivery = useQuery({ queryKey: ['row-access-delivery', props.orgId, props.entity, props.row.id, data?.invitation?.id, props.caps], retry: false,
+  const delivery = useQuery({ queryKey: ['row-access-delivery', actor ?? null, props.orgId, props.entity, props.row.id, data?.invitation?.id, props.caps], retry: false,
     enabled: !blocked && data?.state === 'invited' && !!data.invitation && actions.includes('resend'),
     queryFn: async () => {
       const result = await props.write!(`/orgs/${encodeURIComponent(props.orgId)}/invitations/${encodeURIComponent(data!.invitation!.id)}/delivery`, 'GET')
@@ -507,7 +511,7 @@ async function inviteRecord(props: AccessContext & { write: WriteRequest }, emai
 }
 type InvitationMutationProps = Context & AccessContext & { action: string; controls: { close: () => void; submissionKey: string }; onLinkConflict?: (id: string) => Promise<void> }
 function useInvitationMutation(props: InvitationMutationProps, access: ReturnType<typeof useApplicationAccess>) {
-  const refresh = useRefresh(); const client = useQueryClient()
+  const refresh = useRefresh(); const client = useQueryClient(); const actor = useReferenceAuthority()?.actor
   const mutation = useMutation({ mutationKey: ['account-access', props.orgId, props.entity], gcTime: 0, retry: false, mutationFn: async (values: Record<string, any>) => {
     const base = `/orgs/${encodeURIComponent(props.orgId)}/invitations`
     const record = `/api/${encodeURIComponent(props.entity)}/${encodeURIComponent(props.row.id)}/actions`
@@ -523,7 +527,7 @@ function useInvitationMutation(props: InvitationMutationProps, access: ReturnTyp
       } else if (props.action === 'change') {
         if (!['invited', 'expired'].includes(access.status.data?.state ?? '')) throw { code: 'action_unavailable' }
         if (access.status.data?.state !== 'expired') await cancel()
-        const data = await client.fetchQuery({ ...accessQuery(props), staleTime: 0 })
+        const data = await client.fetchQuery({ ...accessQuery(props, actor), staleTime: 0 })
         if (!accessGuard(data).valid || !data.can_invite) throw { code: 'action_unavailable' }
         await inviteRecord(props, values.email)
       } else if (props.action === 'copy') {
@@ -549,11 +553,11 @@ function useInvitationMutation(props: InvitationMutationProps, access: ReturnTyp
   return mutation
 }
 function RowInvitationMutation(props: InvitationMutationProps) {
-  const { t } = useTranslation(); const access = useApplicationAccess(props)
+  const { t } = useTranslation(); const access = useApplicationAccess(props); const actor = useReferenceAuthority()?.actor
   const [generation, setGeneration] = useState(0)
   const [rejected, setRejected] = useState<string>()
   const canLink = props.action === 'link' && access.actions.includes('link')
-  const members = useQuery({ queryKey: ['account-link-members', props.orgId, props.entity, props.row.id, props.caps], retry: false,
+  const members = useQuery({ queryKey: ['account-link-members', actor ?? null, props.orgId, props.entity, props.row.id, props.caps], retry: false,
     enabled: canLink && !access.blocked,
     queryFn: async (): Promise<{ data: LinkMember[] }> => props.write(`/orgs/${encodeURIComponent(props.orgId)}/members?eligible=link_account&target_entity=${encodeURIComponent(props.entity)}&target_row=${encodeURIComponent(props.row.id)}`, 'GET'),
   })
@@ -575,14 +579,14 @@ function RowInvitationMutation(props: InvitationMutationProps) {
 type LinkMember = { user_id: string; display_name?: string | null; email?: string; linkable?: boolean; link_reason?: 'account_already_linked' | 'account_not_linkable' }
 const memberLabel = (member: LinkMember) => [member.display_name, member.email !== member.display_name ? member.email : undefined].filter(Boolean).join(' · ') || member.user_id
 function FindMemberOrInvite(props: Omit<InvitationMutationProps, 'action'>) {
-  const { t } = useTranslation(); const access = useApplicationAccess(props)
+  const { t } = useTranslation(); const access = useApplicationAccess(props); const actor = useReferenceAuthority()?.actor
   const [search, setSearch] = useState(props.email ?? ''); const [query, setQuery] = useState('')
   const [selectedMember, setSelected] = useState<LinkMember>()
   const [rejected, setRejected] = useState<string>()
   const canSearch = access.actions.includes('link')
   const selected = canSearch ? selectedMember : undefined
   useEffect(() => { const timer = setTimeout(() => setQuery(search.trim()), 300); return () => clearTimeout(timer) }, [search])
-  const members = useQuery({ queryKey: ['account-link-members', props.orgId, props.entity, props.row.id, props.caps, query], retry: false,
+  const members = useQuery({ queryKey: ['account-link-members', actor ?? null, props.orgId, props.entity, props.row.id, props.caps, query], retry: false,
     enabled: canSearch && !access.blocked && !!query && search.trim() === query,
     queryFn: async (): Promise<{ data: LinkMember[] }> => props.write(`/orgs/${encodeURIComponent(props.orgId)}/members?eligible=link_account&target_entity=${encodeURIComponent(props.entity)}&target_row=${encodeURIComponent(props.row.id)}&q=${encodeURIComponent(query)}`, 'GET'),
   })

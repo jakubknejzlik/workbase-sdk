@@ -80,11 +80,11 @@ it('detail suppression preserves generic edit projection and authorization metad
 it('authorized linked account appears once inside the shared access card', async () => {
   await mount({ status: { state: 'signed_in', can_invite: false, can_cancel: false, inconsistency: null, linked_accounts: [{ id: 'account', label: 'Authorized account' }] } })
   expect(await screen.findByText('Authorized account')).toBeTruthy()
-  expect(screen.getAllByText('Signed in')).toHaveLength(1)
+  expect(screen.getAllByText('Linked account')).toHaveLength(1)
 })
 it('policy-hidden linked identity preserves signed-in status and authorized account actions', async () => {
   await mount({ status: { state: 'signed_in', can_invite: true, can_cancel: true, inconsistency: null, linked_accounts: [] } })
-  expect(await screen.findByText('Signed in')).toBeTruthy()
+  expect(await screen.findByText('Linked account')).toBeTruthy()
   expect(screen.queryAllByRole('button', { name: 'Link account' })).toHaveLength(0)
   expect(screen.getAllByRole('button', { name: 'Remove access' })).toHaveLength(1)
   expect(screen.queryByText('Raw account')).toBeNull()
@@ -107,7 +107,7 @@ it.each(['link_account', 'remove_access'])('unavailable status preserves the aut
 it.each(['no_account', 'invited', 'expired', 'signed_in'])('available %s status offers each authorized account command exactly once', async state => {
   await mount({ status: { state, can_invite: true, can_cancel: true, inconsistency: null,
     ...(['invited', 'expired'].includes(state) ? { invitation: { id: 'pending', email: 'one@example.test' } } : {}) } })
-  await screen.findByText({ no_account: 'No access', invited: 'Invited', expired: 'Expired', signed_in: 'Signed in' }[state]!)
+  await screen.findByText({ no_account: 'No access', invited: 'Invitation sent', expired: 'Invitation expired', signed_in: 'Linked account' }[state]!)
   expect(screen.queryAllByRole('button', { name: state === 'signed_in' ? 'Link account' : 'Find member or invite' })).toHaveLength(state === 'signed_in' ? 0 : 1)
   expect(screen.getAllByRole('button', { name: 'Remove access' })).toHaveLength(1)
   const card = screen.getByText('Application access').closest('[data-application-access]') as HTMLElement
@@ -115,13 +115,13 @@ it.each(['no_account', 'invited', 'expired', 'signed_in'])('available %s status 
 })
 it.each([false, true])('account commands remain individually capability gated with status available=%s', async available => {
   await mount({ available, manage: available, commands: ['entries/link_account'], status: { state: 'signed_in', can_invite: false, can_cancel: false, inconsistency: null } })
-  await screen.findByText(available ? 'Signed in' : 'Access status unavailable')
+  await screen.findByText(available ? 'Linked account' : 'Access status unavailable')
   expect(screen.queryAllByRole('button', { name: 'Link account' })).toHaveLength(available ? 0 : 1)
   expect(screen.queryByRole('button', { name: 'Remove access' })).toBeNull()
 })
 it.each([false, true])('no account command is exposed without a grant with status available=%s', async available => {
   const { write } = await mount({ available, manage: available, commands: [], status: { state: 'signed_in', can_invite: false, can_cancel: false, inconsistency: null } })
-  await screen.findByText(available ? 'Signed in' : 'Access status unavailable')
+  await screen.findByText(available ? 'Linked account' : 'Access status unavailable')
   expect(screen.queryByRole('button', { name: 'Link account' })).toBeNull()
   expect(screen.queryByRole('button', { name: 'Remove access' })).toBeNull()
   if (!available) expect(write).not.toHaveBeenCalled()
@@ -208,7 +208,7 @@ it.each([{ available: false }, { transport: false }])('unavailable access retain
 })
 it.each(['invited', 'expired', 'signed_in'])('status-only %s reveals no identity or actions', async state => {
   await mount({ manage: false, status: { state, can_invite: false, can_cancel: false, inconsistency: null } })
-  await waitFor(() => expect(screen.getByText({ invited: 'Invited', expired: 'Expired', signed_in: 'Signed in' }[state]!)).toBeTruthy())
+  await waitFor(() => expect(screen.getByText({ invited: 'Invitation sent', expired: 'Invitation expired', signed_in: 'Linked account' }[state]!)).toBeTruthy())
   expect(screen.queryByRole('button', { name: 'Find member or invite' })).toBeNull()
   expect(screen.queryByRole('button', { name: 'Remove access' })).toBeNull()
 })
@@ -238,7 +238,7 @@ it('unknown status is a failure, never an access grant or no-access fallback', a
 it.each(['no_account', 'invited', 'expired', 'signed_in'])('178 search capability offers the unified action only before linking: %s', async state => {
   const { write } = await mount({ searchLinkAccount: true, status: { state, can_invite: true, can_cancel: true, inconsistency: null,
     ...(['invited', 'expired'].includes(state) ? { invitation: { id: 'pending', email: 'one@example.test' } } : {}) } })
-  await screen.findByText({ no_account: 'No access', invited: 'Invited', expired: 'Expired', signed_in: 'Signed in' }[state]!)
+  await screen.findByText({ no_account: 'No access', invited: 'Invitation sent', expired: 'Invitation expired', signed_in: 'Linked account' }[state]!)
   expect(screen.queryAllByRole('button', { name: 'Find member or invite' })).toHaveLength(state === 'signed_in' ? 0 : 1)
   expect(screen.getAllByRole('button', { name: 'Remove access' })).toHaveLength(1)
   expect(screen.queryByRole('button', { name: 'Link account' })).toBeNull()
@@ -277,7 +277,7 @@ it.each([false, true])('178 staff without invitations.read hides access in list=
 
 it('209 generated list gives record and access controls distinct visible and accessible names', async () => {
   await mount({ list: true, recordActions: true, status: { state: 'invited', can_invite: true, can_cancel: true, invitation: { id: 'pending', email: 'one@example.test' }, inconsistency: null } })
-  const access = await screen.findByRole('button', { name: /one@example.test – Invited, Application access actions/ })
+  const access = await screen.findByRole('button', { name: /one@example.test – Invitation sent, Application access actions/ })
   expect(access.closest('td')!.textContent).toBe('one@example.test')
   const record = screen.getByRole('button', { name: 'Actions for Neutral entry' })
   expect(record.textContent).toBe('')

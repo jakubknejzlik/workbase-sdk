@@ -8,14 +8,14 @@ import { createDataTableQueryKey, type DataTableState } from '@workbasehq/ui'
 import { searchFromState, stateFromSearch, toQueryDocument, validateListSearch, type ListSearch, type ListState } from './list-model'
 import { restoreSavedView } from './saved-views'
 import { selectedReferenceOptions } from './use-selected-references'
-import { useReferenceAuthority } from './reference-authority'
+import { ownerKey, useReferenceAuthority } from './reference-authority'
 import { useReconciledFilters } from './use-reconciled-filters'
 import type { Capabilities, Model, ReadQuery, Result } from './read'
 type ListNotice = 'listStateDropped' | 'listCursorRestarted'
 interface PageHistory { scope: string; signature: string; cursors: string[]; page?: number; notice?: ListNotice }
 interface PreviousState { scope: string; search: ListSearch; cursors: string[]; page?: number }
 /** Root state lives in Router; embedded state lives in its card. Query isolates rows by scope. */
-export function useGeneratedList({ model, caps, orgId, entity, request, contextList }: { contextList?: ReadQuery['contextList']; model: Model; caps: Capabilities; orgId: string; entity: string; request: (input: ReadQuery) => Promise<Result> }) {
+export function useGeneratedList({ model, caps, orgId, entity, request, contextList, discard = false, onDiscarded }: { discard?: boolean; onDiscarded?: () => void; contextList?: ReadQuery['contextList']; model: Model; caps: Capabilities; orgId: string; entity: string; request: (input: ReadQuery) => Promise<Result> }) {
   const location = useLocation(); const navigate = useNavigate()
   // Router location can advance before the outgoing route's props unmount. Never
   // canonicalize the destination's saved view against that outgoing entity.
@@ -23,7 +23,8 @@ export function useGeneratedList({ model, caps, orgId, entity, request, contextL
   const currentRoute = !!contextList || location.pathname.replace(/\/$/, '') === `/o/${encodeURIComponent(orgId)}/e/${encodeURIComponent(entity)}`
   // Read search and cursor state from one Router location snapshot. Separate match/search
   // subscriptions can briefly combine old search with new history state during navigation.
-  const search = contextList ? local.search : validateListSearch(location.search as Record<string, unknown>)
+  // After an actor/org change the previous scope's URL state must never be interpreted again, not even for one render.
+  const search = contextList ? local.search : discard ? {} : validateListSearch(location.search as Record<string, unknown>)
   const filters = filterDescriptors(model, entity, caps)
   const restored = stateFromSearch(search, model, entity, caps, filters, !!contextList)
   const [restoreAttempt, setRestoreAttempt] = useState(0)
@@ -54,6 +55,12 @@ export function useGeneratedList({ model, caps, orgId, entity, request, contextL
     const legacyCursor = !contextList && Object.hasOwn(location.search, 'cursor')
     if (reconciled.ready && (dropped || canonicalFiltersChanged || legacyCursor)) void go(searchFromState(state), [], true, dropped ? 'listStateDropped' : legacyCursor ? 'listCursorRestarted' : undefined)
   }, [currentRoute, reconciled.ready, dropped, canonicalFiltersChanged, signature, location.searchStr])
+  useEffect(() => {
+    if (!discard) return
+    let active = true
+    void Promise.resolve(contextList || !currentRoute ? undefined : go({}, [], true)).finally(() => { if (active) onDiscarded?.() })
+    return () => { active = false }
+  }, [discard])
   const { i18n } = useTranslation()
   const document = toQueryDocument(state, model, entity, caps, i18n.language?.startsWith('cs') ? 'cs' : 'en', filters, !!contextList)
   if (contextList) {
@@ -64,7 +71,7 @@ export function useGeneratedList({ model, caps, orgId, entity, request, contextL
     // Embedded cards fetch rendered values and identities; search/filter/sort stay server operands.
     document.select = [...new Set(['id', ...columns.flatMap(field => [definition.list?.relatedColumns?.[field]?.via ?? field, ...definition.fields[field]?.ui?.signedBy ? [definition.fields[field].ui!.signedBy!.field] : []])])].filter(field => caps.entities[entity]?.readable.includes(field))
   }
-  const key = createDataTableQueryKey(queryScope, 'list', document)
+  const key = createDataTableQueryKey(queryScope, 'list', document, ownerKey({ instance: model.instance, orgId, actor: authority?.actor }))
   const queryResult = useQuery({ queryKey: key, queryFn: () => request(document), retry: false, enabled: currentRoute && reconciled.ready,
     placeholderData: (data, query) => !offsetPaging && reconciled.ready && state.presentation !== 'calendar' && query?.queryKey[1] === queryScope ? keepPreviousData(data) : undefined })
   const reconciling = !reconciled.ready && !reconciled.error
@@ -107,7 +114,7 @@ export function useGeneratedList({ model, caps, orgId, entity, request, contextL
     setRestoreAttempt(value => value + 1)
     const restored = restoreSavedView(search, model, entity, caps)
     previous.current = undefined
-    void go(restored.search, [], false, restored.dropped ? 'listStateDropped' : undefined)
+    return go(restored.search, [], false, restored.dropped ? 'listStateDropped' : undefined)
   }
   return { confirmedState: restored.state, offsetPaging, filters, applySavedView, stale: !offsetPaging && failure?.code === 'query_too_expensive' && !!data, state, document, result, data, notice, onStateChange, onPage, page, range: lastGood.current?.scope === queryScope ? { page: lastGood.current.page, limit: lastGood.current.limit } : { page: 0, limit: state.limit }, undo: previous.current?.scope === scope ? undo : undefined }
 }

@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { I18nextProvider, initReactI18next } from 'react-i18next'
@@ -8,6 +8,7 @@ import type { ConsoleModelContract } from '@workbasehq/core/console-contract'
 import { getMutationSafetySnapshot } from '@workbasehq/ui'
 import { changeSavedViews } from '@workbasehq/console-generated/saved-views'
 import en from '../src/locales/en.json'
+import { viewsTrigger } from './saved-views-menu'
 import { ReadPage } from '../src/read'
 import { adaptConsoleModel, refreshRuntimeModel } from '../src/api/runtime-model'
 import { fetchCapabilities } from '../src/api/queries'
@@ -72,17 +73,19 @@ it('revision refresh preserves the verified saved-view selection alongside a dir
   const saved = changeSavedViews({ instance: 'drafts', userId: 'verified', orgId: 'org' }, 'entries', {
     kind: 'save', name: 'Personal', state: { search: '', sort: { key: 'name', direction: 'desc' }, userFilters: [], presetFilters: [], limit: 30 },
   }).entries[0]
-  let select!: HTMLSelectElement
   const test = await setup(undefined, () => {
-    select = screen.getByRole('combobox', { name: en.savedViews }) as HTMLSelectElement
-    fireEvent.change(select, { target: { value: saved.id } })
+    // Choosing is separate from applying: open the menu and select, but never confirm.
+    fireEvent.click(viewsTrigger())
+    fireEvent.click(within(screen.getByRole('dialog', { name: en.savedViews })).getByRole('button', { name: 'Personal' }))
   })
   test.next(document(2))
   try {
     await act(async () => { await fetchCapabilities(test.client, 'org') })
     await waitFor(() => expect(test.client.getQueryData<ReturnType<typeof adaptConsoleModel>>(['console-model', 'org'])?.capabilities.revision).toBe(2))
-    expect(screen.getByLabelText(en.savedViews, { selector: 'select' })).toBe(select)
-    expect(select.value).toBe(saved.id)
+    // The modal create draft dismissed the menu; reopening it shows the same (unapplied) choice, so the refresh neither lost nor applied it.
+    if (!screen.queryByRole('dialog', { name: en.savedViews, hidden: true })) fireEvent.click(viewsTrigger())
+    expect(within(screen.getByRole('dialog', { name: en.savedViews, hidden: true })).getByRole('button', { name: 'Personal', hidden: true }).getAttribute('aria-pressed')).toBe('true')
+    expect(saved.id).toBeTruthy()
     expect(navigate).not.toHaveBeenCalled()
     expect(screen.getByRole('textbox', { name: 'Name' })).toBe(test.input)
     expect(test.input).toHaveProperty('value', 'Grace'); expect(getMutationSafetySnapshot().dirty).toBe(true)

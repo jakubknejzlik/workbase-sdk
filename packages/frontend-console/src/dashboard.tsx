@@ -40,7 +40,7 @@ export function WidgetCards({ orgId, page, result, pending, error, model, caps }
     }
     if (spec?.type === 'ref') return t('unavailableRecord')
     if (!spec) return row[field] == null ? t('nullValue') : String(row[field])
-    return spec.ui?.signedBy ? signedValue(row, spec, row[field], i18n.language) : formatFieldValue(row[field], spec, i18n.language, key => t(key, { context: entity }))
+    return spec.ui?.signedBy ? signedValue(row, spec, row[field], i18n.language) : formatFieldValue(row[field], spec, i18n.language, key => t(key, { context: entity }), model?.timeZone)
   }
   const content = (widget: ConsoleWidgetResult) => {
     if (widget.kind === 'stat') {

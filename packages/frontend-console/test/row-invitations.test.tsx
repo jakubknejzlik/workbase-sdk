@@ -136,7 +136,7 @@ it('209 never requests or renders access without invitation-read authority', asy
 
 it('209 status-only rows can inspect the header without receiving any actions', async () => {
   const { user } = await mount('signed_in', false, 'en', true, false, [])
-  const button = await screen.findByRole('button', { name: /Signed in, Application access actions/ })
+  const button = await screen.findByRole('button', { name: /Linked account, Application access actions/ })
   expect(button.textContent).toBe('–')
   await user.click(button)
   expect(screen.getByRole('menu').textContent).toContain(en.rowAccess_signed_in)
@@ -145,7 +145,7 @@ it('209 status-only rows can inspect the header without receiving any actions', 
 
 it.each([[true, true], [true, false], [false, true], [false, false]])('209 pending menu filters live invite=%s cancel=%s authority', async (invite, cancel) => {
   const { user, write } = await mount('invited', invite, 'en', true, false, [], cancel)
-  await user.click(await screen.findByRole('button', { name: /Invited, Application access actions/ }))
+  await user.click(await screen.findByRole('button', { name: /Invitation sent, Application access actions/ }))
   expect(write.mock.calls.every(([, method]) => method === 'GET')).toBe(true)
   const expected = [...(invite ? [en.rowInvite_resend, en.rowInvite_copy] : []), ...(invite && cancel ? [en.rowChangeMemberOrEmail] : []), ...(cancel ? [en.rowInvite_cancel] : [])]
   expect(screen.queryAllByRole('menuitem').map(item => item.textContent)).toEqual(expected)

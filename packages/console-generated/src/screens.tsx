@@ -2,8 +2,8 @@ import { accountLinkField, accountLinkRelation } from './account-link'
 import { EntityCalendar } from './calendar'
 import { availableCalendar } from './calendar-model'
 import { relationEmptyKey } from './many-to-many'
-import { useState, type ReactNode } from 'react'
-import { useQuery, useInfiniteQuery } from '@tanstack/react-query'
+import { useEffect, useState, type ReactNode } from 'react'
+import { useQuery, useInfiniteQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useNavigate } from '@tanstack/react-router'
 import { useEntityTranslation } from './entity-translation'
 import { Button, DataTable, DataTableSearch, DataTableActiveFilters, DetailFields, DetailPage, ResourcePage, QueryBoundary, ListPageComposition, ListViewTabs, ListPageFooter } from '@workbasehq/ui'
@@ -15,9 +15,10 @@ import { useGeneratedList, useRelationLabels } from './useGeneratedList'
 import { filterMapping } from './filter-kinds'
 import { FilterPanel } from './filter-panel'
 import { HeaderFilter, ToolbarFilter } from './header-filter'
-import { readableWhere, sortableFields } from './list-model'
+import { readableWhere, searchFromState, sortableFields } from './list-model'
 import { SavedViewsControls } from './saved-views-controls'
-import type { SavedViewsScope } from './saved-views'
+import { DisplayMenu } from './display-menu'
+import { restoreSavedView, savedFingerprint, type SavedViewsScope } from './saved-views'
 import { hasRowActions } from './write'
 import { breadcrumbRecordLabel, usePublishRecordBreadcrumb } from './breadcrumbs'
 import { DetailCards } from './detail-layout'
@@ -26,6 +27,7 @@ import { detailPlan, detailReadableField } from './detail-plan'
 import { selectedReferenceRow } from './use-selected-references'
 import { shortRecordId } from './labels'
 import { useScopeHome } from './scope-home'
+import { teardownScope, useReferenceAuthority, type ListOwner } from './reference-authority'
 import { canReadApplicationAccess, ApplicationAccessCard, GeneratedRowInvitation, GeneratedInlineEdit, type WriteRequest } from './write-screens'
 const queryCodes = ['query_invalid', 'field_forbidden', 'relation_forbidden', 'query_too_expensive', 'entity_not_found', 'policy_violation'] as const
 export { formatValue } from './labels'
@@ -69,7 +71,7 @@ function GeneratedDetailPage({ model, caps, orgId, entity, id, request, actions,
     }
     if (field === (caps.entities[entity]?.displayField ?? definition.displayField)) return rowName(entity, row)
     if (definition.fields[field].type === 'enum' && row[field] != null) return t(`value_${row[field]}`)
-    return formatValue(row[field], definition.fields[field], i18n.language, t('yes'), t('no'), t('nullValue'))
+    return formatValue(row[field], definition.fields[field], i18n.language, t('yes'), t('no'), t('nullValue'), model.timeZone)
   }
   const notFound = () => <ResourcePage title={t('notFound')}><p>{t('notFoundDescription')}</p><Link to={home}>{t(home === '/organizations' ? 'organizations' : 'overview')}</Link></ResourcePage>
   if ((result.error as { status?: number } | null)?.status === 403) return <ResourcePage title={t('forbidden')}><p>{t('resourceForbidden', { resource: t(`entity_${entity}`).toLocaleLowerCase(i18n.language) })}</p></ResourcePage>
@@ -106,12 +108,35 @@ function GeneratedDetailPage({ model, caps, orgId, entity, id, request, actions,
   return notFound()
 }
 
-function GeneratedListPage({ savedViewsScope, model, caps, orgId, entity, request, actions, rowActions, primaryAction, contextList, title, calendarCreate, write, onDenied }: ReadPageProps) {
+/**
+ * Owns the lifetime of a list's state. When the verified actor or the org/instance changes, the whole body is
+ * replaced (draft panel, saved-view selection, display preference, confirmed URL state) and the previous scope's
+ * cached rows, counts, totals and access identities are removed. An actor that is merely being established
+ * (unknown -> known) keeps a deep-linked state.
+ */
+function GeneratedListPage(props: ReadPageProps) {
+  const client = useQueryClient()
+  const actor = useReferenceAuthority()?.actor
+  const [scope, setScope] = useState<{ owner: ListOwner; generation: number; discard: boolean; previous?: ListOwner }>({ owner: { instance: props.model.instance, orgId: props.orgId, actor }, generation: 0, discard: false })
+  const moved = scope.owner.instance !== props.model.instance || scope.owner.orgId !== props.orgId || scope.owner.actor !== actor
+  if (moved) {
+    // Render-phase transition: React re-renders before committing, so no child ever shows the old scope with the new one.
+    const established = scope.owner.instance === props.model.instance && scope.owner.orgId === props.orgId && scope.owner.actor === undefined
+    setScope(old => ({ owner: { instance: props.model.instance, orgId: props.orgId, actor }, generation: established ? old.generation : old.generation + 1, discard: established ? old.discard : true, previous: established ? old.previous : old.owner }))
+  }
+  useEffect(() => { if (scope.previous) teardownScope(client, scope.previous) }, [scope.generation])
+  if (moved) return null
+  return <ListPageBody key={scope.generation} {...props} discard={scope.discard} onDiscarded={() => setScope(old => old.discard ? { ...old, discard: false } : old)} />
+}
+function ListPageBody({ discard, onDiscarded, savedViewsScope, model, caps, orgId, entity, request, actions, rowActions, primaryAction, contextList, title, calendarCreate, write, onDenied }: ReadPageProps & { discard: boolean; onDiscarded: () => void }) {
   const { t, i18n } = useEntityTranslation(entity); const navigate = useNavigate()
   const definition = model.entities[entity]
   const [searchPending, setSearchPending] = useState(false)
   const [filterOpen, setFilterOpen] = useState(false)
-  const list = useGeneratedList({ model, caps, orgId, entity, request, contextList })
+  // Session-local display preference: separate from the query, counts, URL and personal views.
+  const [visibility, setVisibility] = useState<Record<string, boolean>>({})
+  const [compactPreference, setCompactPreference] = useState<boolean>()
+  const list = useGeneratedList({ model, caps, orgId, entity, request, contextList, discard, onDiscarded })
   const readable = projection(model, entity, caps)
   const display = caps.entities[entity]?.displayField ?? definition.displayField
   const configured = definition.list?.columns?.map(column => column.field) ?? definition.listColumns
@@ -119,6 +144,8 @@ function GeneratedListPage({ savedViewsScope, model, caps, orgId, entity, reques
   // Explicit columns own the order; only automatically derived columns promote the display field.
   const listFields = [...new Set(configured ?? [defaultPrimary, ...definition.columns])].filter(field => readable.includes(field) || !!definition.list?.relatedColumns?.[field] && readable.includes(definition.list.relatedColumns[field].via))
   const primary = listFields[0]
+  // Only the date/number renderers of the cell whitelist are honored here; zone and locale come from the model and UI language.
+  const columnCell = Object.fromEntries((definition.list?.columns ?? []).flatMap(column => column.cell && ['date', 'datetime', 'number'].includes(column.cell.kind) ? [[column.field, column.cell.kind as 'date' | 'datetime' | 'number']] : []))
   const rows = list.data?.data ?? []
   const setFilter = (field: string, predicate?: Record<string, unknown>) => list.onStateChange({ ...list.state, userFilters: [...list.confirmedState.userFilters.filter(filter => filter.field !== field), ...(predicate ? [{ field, predicate }] : [])] }, 'filter')
   const relationFilters = list.filters.filter(filter => filter.kind === 'relation')
@@ -126,7 +153,7 @@ function GeneratedListPage({ savedViewsScope, model, caps, orgId, entity, reques
   const chips = list.state.userFilters.flatMap(filter => {
     const descriptor = list.filters.find(descriptor => descriptor.field === filter.field)
     if (!descriptor) return []
-    const spec = definition.fields[filter.field]; const mapping = filterMapping(descriptor.kind, spec, i18n.language, descriptor.operators)
+    const spec = definition.fields[filter.field]; const mapping = filterMapping(descriptor.kind, spec, i18n.language, descriptor.operators, model.timeZone)
     const value = mapping.fromPredicate(filter.predicate)
     const label = mapping.label(value, key => {
       if (descriptor.kind === 'relation') { const record = selectedLabels(filter.field, key); return record ? recordLabel(model, record.entity, record.row, caps, i18n.language, t) : t('unavailableRecord') }
@@ -157,7 +184,7 @@ function GeneratedListPage({ savedViewsScope, model, caps, orgId, entity, reques
     if (field === display) return recordLabel(model, entity, row, caps, i18n.language, t)
     if (row[field] == null) return '—'
     if (spec?.type === 'enum' && row[field] != null) return t(`value_${row[field]}`)
-    return spec.ui?.signedBy && row[field] != null ? signedValue(row, spec, row[field], i18n.language) : formatValue(row[field], spec, i18n.language, t('yes'), t('no'), t('nullValue'))
+    return spec.ui?.signedBy && row[field] != null ? signedValue(row, spec, row[field], i18n.language) : formatValue(row[field], spec, i18n.language, t('yes'), t('no'), t('nullValue'), model.timeZone, columnCell[field])
   }
   const error = list.result.error as { status?: number; code?: string } | null
   const Page = contextList ? EmbeddedListCard : ResourcePage
@@ -167,20 +194,26 @@ function GeneratedListPage({ savedViewsScope, model, caps, orgId, entity, reques
   const accessInput = (value: ReadQuery['rowAccess'], onChange: (value: ReadQuery['rowAccess']) => void) => <label className="grid min-w-0 max-w-full gap-2 text-sm">{t('rowAccessFilter')}<select aria-label={t('rowAccessFilter')} className="rounded-md border bg-background p-2" value={value ?? ''} onChange={event => onChange((event.target.value || undefined) as ReadQuery['rowAccess'])}><option value="">{t('rowAccessAll')}</option>{(['no_account', 'invited', 'expired', 'signed_in'] as const).map(state => <option key={state} value={state}>{t(`rowAccess_${state}`)}</option>)}</select></label>
   const search = listSearchableFields(model, entity, caps, contextList && list.state.presentation !== 'calendar' ? 'embedded' : list.state.presentation).length > 0 && <DataTableSearch value={list.state.search} onChange={search => list.onStateChange({ ...list.state, search }, 'search')} label={t('search')} clearLabel={t('clearSearch')} onPendingChange={setSearchPending} description={definition.list?.search && list.offsetPaging ? t('searchConfiguredFields', { fields: listSearchableFields(model, entity, caps, contextList && list.state.presentation !== 'calendar' ? 'embedded' : list.state.presentation).map(field => t(`field_${field}`)).join(', ') }) : t('searchAllColumns')} />
   const access = accessAllowed && !panelAccess && accessInput(list.state.rowAccess, rowAccess => list.onStateChange({ ...list.confirmedState, rowAccess }, 'filter'))
-  const savedViews = !contextList && savedViewsScope && savedViewsScope.instance === model.instance && savedViewsScope.orgId === orgId && <SavedViewsControls scope={savedViewsScope} entity={entity} state={list.state} onApply={list.applySavedView} />
+  const savedViews = !contextList && savedViewsScope && savedViewsScope.instance === model.instance && savedViewsScope.orgId === orgId && <SavedViewsControls scope={savedViewsScope} entity={entity} state={list.state} current={savedFingerprint(searchFromState(list.state))} initial={savedFingerprint(restoreSavedView({}, model, entity, caps).search)} fingerprint={search => savedFingerprint(restoreSavedView(search, model, entity, caps).search)} onApply={list.applySavedView} />
   const tabs = views.length > 0 && <ListViewTabs label={t('listViews')} views={[...(!views.some(view => view.id === 'all') ? [{ id: 'all', label: 'viewAll' }] : []), ...views].map(view => ({ id: view.id, label: t(view.label), count: list.offsetPaging ? list.data?.viewTotals?.[view.id] : undefined }))} value={list.state.view ?? 'all'} onChange={view => list.onStateChange({ ...list.state, view }, 'view')} />
   const immediateFilters = list.filters.filter(filter => filter.placement === 'toolbar').map(descriptor => <ToolbarFilter key={descriptor.field} model={model} caps={caps} orgId={orgId} entity={entity} descriptor={descriptor} request={request} predicate={list.state.userFilters.find(filter => filter.field === descriptor.field)?.predicate} onChange={predicate => setFilter(descriptor.field, predicate)} />)
   const hasPanel = panelAccess || list.filters.some(filter => filter.placement === 'panel')
   const panel = <FilterPanel model={model} caps={caps} orgId={orgId} entity={entity} request={request} descriptors={list.filters} filters={list.state.userFilters} confirmedFilters={list.confirmedState.userFilters} rowAccess={list.state.rowAccess} accessInput={panelAccess ? accessInput : undefined} onChange={(userFilters, rowAccess) => list.onStateChange({ ...list.state, userFilters, rowAccess }, 'filter')} {...(list.offsetPaging ? { open: filterOpen, onOpenChange: setFilterOpen } : {})} />
   const activeChips = <DataTableActiveFilters filters={chips} label={t('activeFilters')} clearLabel={t('clearAllFilters')} onClear={() => list.onStateChange({ ...list.state, userFilters: [], rowAccess: undefined }, 'filter')} />
   const presentation = availableCalendar(model, entity, caps) && <div role="group" aria-label={t('listPresentation')} className="flex flex-wrap gap-2 py-2">{(['table', 'calendar'] as const).map(presentation => <PrimitiveButton key={presentation} variant={list.state.presentation === presentation ? 'secondary' : 'ghost'} aria-pressed={list.state.presentation === presentation} onClick={() => list.onStateChange({ ...list.state, presentation }, 'view')}>{t(`${presentation}View`)}</PrimitiveButton>)}</div>
-  const content = list.state.presentation === 'calendar' ? <>
-      <EntityCalendar model={model} entity={entity} caps={caps} orgId={orgId} state={list.state} data={list.data} pending={list.result.isFetching} error={error ? t(queryCodes.includes(error.code as any) ? `query_${error.code}` : 'requestFailed') : undefined} onChange={state => list.onStateChange(state, 'view')} onCreate={calendarCreate} onPage={list.onPage} previous={list.page > 0} />
-    </> : <div className="caption-bottom"><DataTable hideFooter={list.offsetPaging} scrollOnNarrow={list.offsetPaging} compact={definition.list?.compact} mobileCards={definition.list?.mobileCards} rows={rows} columns={[
+  const tableColumns = [
       ...listFields.map((field, index) => ({ id: field, label: field === 'id' || field === primary ? t(`field_${field}`) : t(`listField_${field}`, { defaultValue: t(`field_${field}`) }), sortable: sortable.includes(field), filter: !list.offsetPaging && list.filters.some(filter => filter.field === field) ? <HeaderFilter model={model} caps={caps} orgId={orgId} entity={entity} descriptor={list.filters.find(filter => filter.field === field)!} request={request} predicate={list.state.userFilters.find(filter => filter.field === field)?.predicate} onChange={predicate => setFilter(field, predicate)} /> : undefined, cell: (row: Record<string, any>) => index === 0 ? <Link data-row-name="" title={String(row.id)} to="/o/$orgId/e/$entity/$id" params={{ orgId, entity, id: String(row.id) }}>{fieldValue(row, field)}</Link> : fieldValue(row, field) })),
       ...((definition.accountLink || definition.rowInvitations) && (definition.list?.rowAccess === undefined || !!definition.list.rowAccess && definition.list.rowAccess.column) && write && canReadApplicationAccess(caps) ? [{ id: '_access', keepOnNarrow: true, wrap: true, label: t('rowAccess'), cell: (row: Record<string, any>) => <GeneratedRowInvitation model={model} caps={caps} orgId={orgId} entity={entity} request={request} write={write} onDenied={onDenied} row={row} disabled={list.stale || list.result.isFetching || searchPending} /> }] : []),
       ...(rowActions && hasRowActions(model, entity, caps) ? [{ id: '_actions', label: t('actions'), cell: (row: Record<string, any>) => <>{rowActions!(row, list.stale || list.result.isFetching || searchPending)}</> }] : []),
-    ]} state={list.state} onStateChange={list.onStateChange} page={list.page} range={list.range} onPage={list.onPage} nextCursor={error ? null : list.data?.next_cursor} isFetching={list.result.isFetching} error={error ? new Error(t(queryCodes.includes(error.code as any) ? `query_${error.code}` : 'requestFailed')) : null}
+    ]
+  const columnConfig = new Map((definition.list?.columns ?? []).map(column => [column.field, column]))
+  const shown = (id: string) => visibility[id] ?? (columnConfig.get(id)?.defaultVisible !== false)
+  // The first column is the record link and stays; hiding only drops presentation, never a selected field, filter, sort or count.
+  const displayable = list.offsetPaging ? tableColumns.filter(column => column.id !== primary && column.id !== '_actions') : []
+  const columns = list.offsetPaging ? tableColumns.filter(column => column.id === primary || column.id === '_actions' || shown(column.id)) : tableColumns
+  const content = list.state.presentation === 'calendar' ? <>
+      <EntityCalendar model={model} entity={entity} caps={caps} orgId={orgId} state={list.state} data={list.data} pending={list.result.isFetching} error={error ? t(queryCodes.includes(error.code as any) ? `query_${error.code}` : 'requestFailed') : undefined} onChange={state => list.onStateChange(state, 'view')} onCreate={calendarCreate} onPage={list.onPage} previous={list.page > 0} />
+    </> : <div className="caption-bottom"><DataTable hideFooter={list.offsetPaging} scrollOnNarrow={list.offsetPaging} compact={compactPreference ?? definition.list?.compact} mobileCards={definition.list?.mobileCards} rows={rows} columns={columns} state={list.state} onStateChange={list.onStateChange} page={list.page} range={list.range} onPage={list.onPage} nextCursor={error ? null : list.data?.next_cursor} isFetching={list.result.isFetching} error={error ? new Error(t(queryCodes.includes(error.code as any) ? `query_${error.code}` : 'requestFailed')) : null}
       label={t(`entity_${entity}`)} labels={{ error: t('requestFailed'), search: t('search'), clearSearch: t('clearSearch'), noResults: list.result.isPending ? t('loading') : t('noResults'), previous: t('previousPage'), next: t('nextPage'), previousText: t('paginationPrevious'), nextText: t('paginationNext'), pageSizeOption: size => t('paginationSize', { count: size }), pageSize: t('rowsPerPage'), sort: column => t('sortColumn', { column }), sortAndFilter: t('sortAndFilter'), sortStates: { asc: t('sortAscending'), desc: t('sortDescending'), none: t('sortNone') }, range: (start, end) => t('listRange', { start: new Intl.NumberFormat(i18n.language).format(start), end: new Intl.NumberFormat(i18n.language).format(end) }) }}
       staleLabel={list.stale ? t('listRowsStale') : undefined}
       clearFilters={t('clearSearchFilters')} onClearFilters={list.state.search || chips.length ? () => list.onStateChange({ ...list.state, search: '', userFilters: [], rowAccess: undefined }, 'filter') : undefined}
@@ -193,7 +226,7 @@ function GeneratedListPage({ savedViewsScope, model, caps, orgId, entity, reques
     {error?.code === 'query_too_expensive' && list.undo && <PrimitiveButton variant="outline" onClick={list.undo}>{t('undoLastChange')}</PrimitiveButton>}
     {list.offsetPaging ? <ListPageComposition tabs={tabs} toolbar={<>
       {search}{immediateFilters}{access}{hasPanel && <PrimitiveButton variant="outline" aria-expanded={filterOpen} onClick={() => setFilterOpen(value => !value)}>{t('sortAndFilter')}</PrimitiveButton>}
-      <div className="flex w-full min-w-0 max-w-full flex-wrap items-center gap-2"><div className="w-full min-w-0 max-w-full [&>section]:min-w-0 [&>section]:max-w-full">{savedViews}</div>{presentation}</div>
+      <div className="ml-auto flex min-w-0 max-w-full flex-wrap items-center justify-end gap-2">{savedViews}{displayable.length > 0 && list.state.presentation !== 'calendar' && <DisplayMenu columns={displayable.map(column => ({ id: column.id, label: column.label, visible: shown(column.id) }))} compact={compactPreference ?? !!definition.list?.compact} labels={{ trigger: t('listDisplay'), heading: t('listDisplayHeading'), hint: t('listDisplayHint'), compact: t('listDisplayCompact'), reset: t('listDisplayReset') }} onToggle={(id, visible) => setVisibility(old => ({ ...old, [id]: visible }))} onCompact={setCompactPreference} onReset={() => { setVisibility({}); setCompactPreference(undefined) }} />}{presentation}</div>
     </>} panel={filterOpen && hasPanel ? panel : undefined} chips={activeChips} footer={<ListPageFooter total={list.data?.total} page={list.page} limit={list.document.limit} pageSize={list.state.limit} maxOffset={model.limits.maxOffset ?? 10_000} busy={list.result.isFetching || searchPending} onPage={list.onPage} onPageSize={limit => list.onStateChange({ ...list.state, limit }, 'limit')} labels={{ previous: t('previousPage'), next: t('nextPage'), pageSize: t('rowsPerPage'), pageSizeOption: size => t('paginationSize', { count: size }), range: (start, end, total) => t('listRangeTotal', { start: new Intl.NumberFormat(i18n.language).format(start), end: new Intl.NumberFormat(i18n.language).format(end), total: new Intl.NumberFormat(i18n.language).format(total) }) }} />}>{content}</ListPageComposition> : <>{savedViews}{tabs}{presentation}{immediateFilters}{panel}{activeChips}{content}</>}
 
   </Page>
@@ -243,7 +276,7 @@ function RelationRecords({ model, caps, orgId, request, entity, rows, columns }:
     if (row[field] == null) return '—'
     if (field === definition.displayField && row[field] != null) return <Link to="/o/$orgId/e/$entity/$id" params={{ orgId, entity, id: String(row.id) }}>{recordLabel(model, entity, row, caps, i18n.language, t)}</Link>
     if (spec.ui?.signedBy && row[field] != null && caps.entities[entity]?.readable.includes(spec.ui.signedBy.field)) return signedValue(row, spec, row[field], i18n.language)
-    return spec.type === 'enum' && row[field] != null ? t(`value_${row[field]}`) : formatValue(row[field], spec, i18n.language, t('yes'), t('no'), t('nullValue'))
+    return spec.type === 'enum' && row[field] != null ? t(`value_${row[field]}`) : formatValue(row[field], spec, i18n.language, t('yes'), t('no'), t('nullValue'), model.timeZone)
   }
   return <div className="generated-related-records">
     <table className="generated-relation-table"><thead><tr>{visible.map(field => <th key={field} scope="col">{t(`field_${field}`)}</th>)}</tr></thead>

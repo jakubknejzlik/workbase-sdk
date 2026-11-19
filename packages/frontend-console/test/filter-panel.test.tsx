@@ -11,6 +11,7 @@ import { validateListSearch } from '../../console-generated/src/list-model'
 import { changeSavedViews } from '../../console-generated/src/saved-views'
 import type { Model, Capabilities, ReadQuery } from '../../console-generated/src/read'
 import en from '../src/locales/en.json'
+import { applyView } from './saved-views-menu'
 
 const scope = { instance: 'filter-panel', userId: 'actor', orgId: 'org' }
 const model: Model = { instance: scope.instance, revision: 1, limits: { root: 100, children: 100, relations: 4, exists: 4 }, pickerHints: { entries: { team_id: { labelTemplate: '{secret}' } } }, entities: {
@@ -95,7 +96,7 @@ it('uses the same synchronous pruning for URL and saved views, resets paging, an
   await waitFor(() => expect(router.state.location.search.filters).toBeUndefined())
   expect(source().cursor).toBeUndefined()
   expect(screen.getByText(en.listStateDropped)).toBeTruthy()
-  await user.click(screen.getByRole('button', { name: en.savedViewsApply }))
+  await applyView(user, 'Hidden filters')
   await waitFor(() => expect((router.state.location.state as any).generatedList).toMatchObject({ cursors: [], notice: 'listStateDropped' }))
   expect(router.state.location.search.filters).toBeUndefined()
 })
