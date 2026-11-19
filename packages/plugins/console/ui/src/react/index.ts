@@ -31,17 +31,30 @@ export function ConsoleProvider({ identity, t, baseURL = '', fetch: transport = 
   const translate = useMemo<Translate>(() => Object.assign(t.bind(null), { exists: t.exists }), [t, language])
   const scopeKey = canonicalJSON([identity.actorId, identity.orgId, caps ?? null])
   const client = useMemo(() => createClient({ baseURL, ...identity, fetch: transport, onAuthorizationFailure }), [baseURL, scopeKey, transport, onAuthorizationFailure])
-  const queries = useMemo(() => new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity, refetchOnWindowFocus: false } } }), [client])
-  useEffect(() => client.subscribe(() => { void queries.invalidateQueries() }), [client, queries])
+  const queries = useMemo(() => new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity, refetchOnWindowFocus: false, structuralSharing: false } } }), [client])
+  useEffect(() => client.subscribe(event => {
+    if (event.kind === 'detail') queries.setQueryData([cacheKey('one', event.entity, { id: event.id })], event.record)
+    else if (event.kind === 'invalidate') {
+      void queries.cancelQueries()
+      void queries.invalidateQueries({ refetchType: event.refetch ? 'active' : 'none' })
+    } else {
+      const owner = cacheKey('one', event.entity, { id: event.id })
+      // The client already attempted this owner once, including on refusals.
+      void queries.invalidateQueries({ predicate: query => query.queryKey[0] !== owner })
+    }
+  }), [client, queries])
   useEffect(() => () => queries.clear(), [queries])
   return h(Context.Provider, { value: { client, identity, t: translate, slots, caps }, key: canonicalJSON([baseURL, scopeKey]) }, h(TranslationContext.Provider, { value: translate }, h(QueryClientProvider, { client: queries }, children)))
 }
 export function useRuntime() { const runtime = useContext(Context); if (!runtime) throw new Error('ConsoleProvider is required'); return runtime }
 export function useRecord(entity: string, id: string) {
   const { client } = useRuntime()
+  useSyncExternalStore(client.subscribe, client.snapshot, client.snapshot)
   const query = useQuery({ queryKey: [cacheKey('one', entity, { id })], queryFn: ({ signal }) => client.one(entity, { id }, signal, true) })
-  const state: State<RecordData> = query.data ? { kind: 'ready', data: query.data } : query.isPending ? { kind: 'loading' } : failureState(query.error)
-  return { state, reload: async () => { client.invalidate(); const result = await query.refetch(); if (result.error) throw result.error; return result.data! } }
+  const availabilityFresh = !!query.data && !query.isFetching && !query.isError && client.detailFresh(entity, id, query.data)
+  const data = query.data && (availabilityFresh ? query.data : { ...query.data, actions: undefined })
+  const state: State<RecordData> = data ? { kind: 'ready', data } : query.isPending ? { kind: 'loading' } : failureState(query.error)
+  return { state, availabilityFresh, reload: async () => { client.invalidate(); const result = await query.refetch(); if (result.error) throw result.error; return result.data! } }
 }
 export function useList(entity: string, metadata: EntityMeta, bind: Record<string, string>) {
   const { client, caps } = useRuntime(), queries = useQueryClient(), key = canonicalJSON(bind), metaKey = canonicalJSON(metadata)
@@ -171,7 +184,7 @@ function Form({ props, metadata, initial, reload }: { props: ViewProps; metadata
   }
   const conflict = hadConflict
   const state = failure ? failureState(failure) : undefined
-  const ctx: RenderContext = { ...runtime, slots: props.slots ?? runtime.slots, metadata, entity: definition.entity!, mode: definition.mode, record: base, draft, change: (name, value) => setDraft(current => ({ ...current, [name]: value })), issues: state?.kind === 'validation' ? state.issues : [] }
+  const ctx: RenderContext = { ...runtime, slots: props.slots ?? runtime.slots, metadata, entity: definition.entity!, mode: definition.mode, record: { ...base, actions: initial.actions, access: initial.access }, draft, change: (name, value) => setDraft(current => ({ ...current, [name]: value })), issues: state?.kind === 'validation' ? state.issues : [] }
   const singularKey = 'domain:entity.' + definition.entity + '.singular'
   return h('form', { 'aria-label': translate.exists?.(singularKey) ? translate(singularKey) : undefined, noValidate: true, onSubmit: (e: { preventDefault(): void }) => { e.preventDefault(); void save() } },
     conflict ? h('div', { role: 'alert' }, translate('sdk:conflict'), h('button', { type: 'button', disabled: saving, onClick: () => { void reloadCopy() } }, translate('sdk:reloadServerCopy'))) : state && message(state, translate),
