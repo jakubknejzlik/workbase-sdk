@@ -1,6 +1,6 @@
 # SDK candidate inventory
 
-This inventory describes the integration branch at `f9b800e`, without publishing
+This inventory describes the 0.4.0 release candidate, without publishing
 or deploying. Consumption instructions are in [consumption.md](consumption.md);
 remote acceptance belongs to the [instance checklist](phase-2-checklist.md).
 
@@ -8,9 +8,9 @@ remote acceptance belongs to the [instance checklist](phase-2-checklist.md).
 
 | Field | Value | Command / source |
 | --- | --- | --- |
-| Coordinated SDK version | `0.3.1` for core, plugins and mcp | `node -e 'for (const p of ["core","plugins","mcp"]) console.log(p,require("./packages/"+p+"/package.json").version)'` |
-| Integration SHA | `f9b800e93cdf0350c6518e4b825e606f0022c34f` | `git rev-parse f9b800e` |
-| Producer `bun.lock` sha256 (hex) | `180184306f610836f4cdf16d2a8029c45c15926f8260de439282dc7f989fadf9` | `shasum -a 256 bun.lock` |
+| Coordinated SDK version | `0.4.0` for core, plugins and mcp | `node -e 'for (const p of ["core","plugins","mcp"]) console.log(p,require("./packages/"+p+"/package.json").version)'` |
+| Integration input SHA | `a51c635eb84cf4e4bd128f28f4704e226fdf6e55` | Release branch also merges main; final source identity is the release PR head. |
+| Producer `bun.lock` sha256 (hex) | Compute for the release candidate | `shasum -a 256 bun.lock` |
 
 The producer lock hash identifies tool dependency resolution; it is not the
 installed consumer's `package-lock.json` hash. Source versions are declared in
@@ -21,14 +21,10 @@ the three archive versions agree and match installed versions
 
 ## Release artifacts and generated consumer
 
-Local `bash scripts/sdk-pack.sh` exited **1** because `WORKBASE_PRIVATE_TERMS` was
-unavailable. Its console-build imports load the vocabulary guard before staging or
-packing. The subsequent `bun scripts/smoke-template.ts --directory dist-sdk` exited
-**1** because no fresh `dist-sdk` existed. No fresh tarball or consumer artifact
-hash is claimed, and no earlier supplemental archive is treated as this release
-set. Sources: [packer](../../scripts/sdk-pack.sh),
-[private vocabulary guard](../../scripts/lib/private-terms.ts),
-[smoke](../../scripts/smoke-template.ts).
+Fresh archive identities belong to the final release candidate and its CI run;
+see [release preparation](release.md). The earlier integration measurement is
+not evidence for the 0.4.0 release set. Archive-only local packing does not
+establish installed-template or registry consumer acceptance.
 
 Each pending value below is **computed in CI** by the exact step
 `run: bash scripts/sdk-pack.sh` in job `check` of
@@ -39,9 +35,9 @@ are computed; it does not claim that a hosted run has passed or captured them.
 
 | Field | Value | Computation within that CI step |
 | --- | --- | --- |
-| `workbasehq-core-0.3.1.tgz` sha512 | computed in CI | `sdkArchives()` in `scripts/sdk-provenance.ts`; base64 SRI in `dist-sdk/PROVENANCE.json`. |
-| `workbasehq-plugins-0.3.1.tgz` sha512 | computed in CI | Same `sdkArchives()` computation. |
-| `workbasehq-mcp-0.3.1.tgz` sha512 | computed in CI | Same `sdkArchives()` computation. |
+| `workbasehq-core-0.4.0.tgz` sha512 | computed in CI | `sdkArchives()` in `scripts/sdk-provenance.ts`; base64 SRI in `dist-sdk/PROVENANCE.json`. |
+| `workbasehq-plugins-0.4.0.tgz` sha512 | computed in CI | Same `sdkArchives()` computation. |
+| `workbasehq-mcp-0.4.0.tgz` sha512 | computed in CI | Same `sdkArchives()` computation. |
 | Consumer `package-lock.json` sha256 | computed in CI | `scripts/smoke-template.ts` step 2 hashes lock bytes before/after npm ci; the final success line prints the hex hash. |
 | Consumer `openapi.json` `x-workbase-config-hash` | computed in CI | Smoke step 3 runs `bun run openapi:write` and compares the property with packaged `loadConfig('./config.ts').configHash`. |
 

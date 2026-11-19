@@ -1,6 +1,8 @@
 # Consuming the V3 SDK candidate
 
-This runbook describes the integration branch at `f9b800e`. The SDK version,
+This runbook describes the 0.4.0 release candidate. Publication is pending green
+CI and review; see [release.md](release.md) and [migration notes](migration-0.4.0.md).
+The SDK version,
 artifact inventory and limits of local measurement are in [inventory.md](inventory.md).
 See [getting-started.md](getting-started.md) for authoring and deployment inputs.
 
@@ -28,14 +30,14 @@ template dependencies. For the current coordinated version:
 ```json
 {
   "dependencies": {
-    "@workbasehq/core": "file:vendor/sdk/workbasehq-core-0.3.1.tgz",
-    "@workbasehq/plugins": "file:vendor/sdk/workbasehq-plugins-0.3.1.tgz",
-    "@workbasehq/mcp": "file:vendor/sdk/workbasehq-mcp-0.3.1.tgz"
+    "@workbasehq/core": "file:vendor/sdk/workbasehq-core-0.4.0.tgz",
+    "@workbasehq/plugins": "file:vendor/sdk/workbasehq-plugins-0.4.0.tgz",
+    "@workbasehq/mcp": "file:vendor/sdk/workbasehq-mcp-0.4.0.tgz"
   },
   "overrides": {
-    "@workbasehq/core": "file:vendor/sdk/workbasehq-core-0.3.1.tgz",
-    "@workbasehq/plugins": "file:vendor/sdk/workbasehq-plugins-0.3.1.tgz",
-    "@workbasehq/mcp": "file:vendor/sdk/workbasehq-mcp-0.3.1.tgz"
+    "@workbasehq/core": "file:vendor/sdk/workbasehq-core-0.4.0.tgz",
+    "@workbasehq/plugins": "file:vendor/sdk/workbasehq-plugins-0.4.0.tgz",
+    "@workbasehq/mcp": "file:vendor/sdk/workbasehq-mcp-0.4.0.tgz"
   }
 }
 ```

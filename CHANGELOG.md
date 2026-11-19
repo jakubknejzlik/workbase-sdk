@@ -2,10 +2,42 @@
 
 ## Unreleased
 
-- `POST /query` supports central limit/offset paging and opt-in exact authorized
-  totals (`includeTotal: true`). Existing cursor-only requests retain their
-  response shape and signed cursors; offset and cursor cannot be combined.
-  List rows and totals share policy, search, label and user filtering. (#230, slice 1)
+## 0.4.0 — 2026-11-19
+
+Pre-1.0 minor release with a canonical list wire contract and numbered root-list
+pagination. See [migration notes](docs/sdk/migration-0.4.0.md) and the
+[validated Workers example](packages/core/examples/list-v2-workers.ts).
+Publication is pending green release-PR CI and review.
+
+- Add List config v2: canonical columns, built-in cells, secondary text, filter
+  placement/operator configuration, row-access controls and configured views.
+  Authoring column/filter strings remain compatible. (#237)
+- Add bounded offset paging, exact authorized totals and shared view predicates/tab
+  counts to `POST /query`; retain signed query cursors and reject mixed paging.
+  Default `maxOffset` is 10,000. (#238, #243, #244)
+- Add independent staged filter panels, exact relation IDs, selected-ID
+  reconciliation and fresh authority checks. (#239, #241)
+- Compose root lists with numbered pages, exact counts and confirmed filter state;
+  refresh saved-view menus, column visibility, access wording, actor/org teardown,
+  built-in renderers and instance-zone calendar behavior. (#246, #248, #251)
+- Add local List v2 acceptance harness and acceptance fixes, including query retry
+  recovery and compound-sort saved-view persistence. (#252, #253, #254)
+- Add typed composite/partial unique, cross-relation equality and referenced-relation
+  immutability constraints; MCP editing and console unique-conflict feedback.
+  (#214, #218, #245, #247, #249)
+- Publish V3 locale/caption presentation forms, bind presentation validation and
+  freshness to exact input bytes, and contain responsive headers/saved views.
+  (#195, #197, #213, #215)
+- Replace public origin input with validated `publicHostname`. (#203)
+- Add typed fresh-composition planning, proposal/promotion, initial role/access
+  graph selection and attested server-managed local targets. (#227, #226, #228, #229)
+- Refresh detail-action availability and transport contracts. (#240, #242)
+- Ignore staged console assets to preserve clean source provenance. (#223)
+
+Included integration PRs (first-parent history since the 0.3.1 main release):
+#203, #197, #213, #195, #215, #214, #223, #227, #226, #228, #229,
+#237, #239, #238, #240, #242, #243, #241, #218, #244, #246, #245,
+#247, #248, #252, #251, #253, #249, #254.
 
 ## 0.3.1 — 2026-11-18
 
