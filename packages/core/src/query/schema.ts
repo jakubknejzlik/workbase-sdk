@@ -1,3 +1,4 @@
+import { readableListViews, listPredicate } from './list-views'
 import { organizationPermission } from '../organization-permissions'
 import { userLinks } from '../user-link-fields'
 import { baseFields } from '../model-inputs'
@@ -27,7 +28,7 @@ function preflight(input: unknown) {
   }
   visit(input, 0)
 }
-export function validateQuery(kernel: KernelRegistry, scope: Scope, input: unknown, legacyErrors = false): { query: QueryInput; cost: QueryCost } {
+export function validateQuery(kernel: KernelRegistry, scope: Scope, input: unknown, legacyErrors = false): { query: QueryInput; cost: QueryCost; viewQueries: { id: string; query: QueryInput }[] } {
   preflight(input)
   if (!input || typeof input !== 'object' || Array.isArray(input)) invalid()
   const entity = (input as QueryInput).entity
@@ -52,7 +53,7 @@ export function validateQuery(kernel: KernelRegistry, scope: Scope, input: unkno
   if (!parsed.success) {
     const issue = parsed.error.issues[0]
     // Unknown client keys/values never become error text or paths.
-    const known = new Set(['entity', 'rowAccess', 'select', 'where', 'search', 'text', 'fields', 'locale', 'labelWhere', 'labels', 'label', 'orderBy', 'field', 'dir', 'limit', 'cursor', 'offset', 'includeTotal', 'include', 'and', 'or', 'not', 'some', 'none',
+    const known = new Set(['entity', 'rowAccess', 'select', 'where', 'search', 'text', 'fields', 'locale', 'labelWhere', 'labels', 'label', 'orderBy', 'field', 'dir', 'limit', 'cursor', 'offset', 'includeTotal', 'view', 'includeViewTotals', 'include', 'and', 'or', 'not', 'some', 'none',
       ...Object.values(kernel.config.entities).flatMap(e => [...Object.keys(e.fields), ...Object.keys(e.relations)]), ...baseFields,
       ...operatorsFor('string')])
     invalid(issue.path.map(p => typeof p === 'number' ? p : known.has(String(p)) ? String(p) : '?'))
@@ -79,7 +80,12 @@ export function validateQuery(kernel: KernelRegistry, scope: Scope, input: unkno
     // This predicate goes through normal field masks, policy-scoped sources and cursor hashing.
     delete query.contextList
   }
-  const cost: QueryCost = { statements: 0, depth: 0, relations: 0, fieldRows: 0, exists: query.rowAccess ? 2 : 0, nodes: 0 }
+  const views = query.view || query.includeViewTotals ? readableListViews(kernel, scope, entity) : []
+  // Unknown and projected-out IDs share one error so guessing a view cannot
+  // reveal whether a forbidden configured predicate exists.
+  if (query.view && query.view !== 'all' && !views.some(view => view.id === query.view)) invalid(['view'])
+  const activeView = views.find(view => view.id === query.view)
+  const cost: QueryCost = { statements: 0, depth: 0, relations: 0, fieldRows: 0, exists: (query.rowAccess ? 2 : 0) + (activeView?.rowAccess ? 2 : 0), nodes: 0 }
   // Every compiled client table source masks each readable FK once. Visibility
   // probes only test the target's scoped predicate, so do not recursively mask it.
   function foreignKeyCost(name: string) {
@@ -178,9 +184,23 @@ export function validateQuery(kernel: KernelRegistry, scope: Scope, input: unkno
       selection(r.entity, child, depth + 1, parents * limit, [...path, 'include', key], !r.many)
     }
   }
-  selection(entity, query, 0, 1, [])
+  selection(entity, listPredicate(kernel, query), 0, 1, [])
   if (query.includeTotal) cost.statements++
+  const viewQueries: { id: string; query: QueryInput }[] = []
+  if (query.includeViewTotals) for (const view of views) {
+    // Count sources need conditions, not includes, labels or ordering. Validate
+    // each variant independently, then charge the complete request before SQL.
+    const validated = validateQuery(kernel, scope, { entity, limit: 1, select: ['id'], view: view.id,
+      ...(query.where ? { where: query.where } : {}), ...(query.rowAccess ? { rowAccess: query.rowAccess } : {}),
+      ...(query.search ? { search: query.search } : {}), ...(query.labelWhere ? { labelWhere: query.labelWhere } : {}),
+    })
+    viewQueries.push({ id: view.id, query: validated.query })
+    for (const key of ['statements', 'relations', 'exists', 'fieldRows', 'nodes', 'expressionSources'] as const) {
+      if (validated.cost[key] !== undefined) cost[key] = (cost[key] ?? 0) + validated.cost[key]!
+    }
+    cost.depth = Math.max(cost.depth, validated.cost.depth)
+  }
   if (cost.statements > L.statements || cost.depth > L.relationDepth || cost.relations > L.relations || cost.exists > L.exists || cost.fieldRows > L.fieldRows || cost.nodes > L.nodes)
     throw new QueryError('query_too_expensive', [], cost)
-  return { query, cost }
+  return { query, cost, viewQueries }
 }

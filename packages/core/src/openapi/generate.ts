@@ -105,6 +105,7 @@ export function generate(config: InstanceConfig, kernel: Pick<KernelRegistry, 'c
     insert(`Result_${name}`, object({
       ...page('Opaque signed query cursor, or null. Pass unchanged to POST /query; it is not a row id. Offset paging returns null.').properties,
       total: { type: 'integer', minimum: 0, description: 'Exact authorized, filtered total when includeTotal is true; independent of paging.' },
+      viewTotals: { type: 'object', additionalProperties: { type: 'integer', minimum: 0 }, description: 'Exact totals keyed by readable configured view ID when includeViewTotals is true. Unreadable views are omitted.' },
       offset: { type: 'integer', minimum: 0, description: 'Requested offset, present for offset paging.' },
       limit: { type: 'integer', minimum: 1, maximum: 100, description: 'Page size, present for offset paging.' },
     }, ['data', 'next_cursor']))
