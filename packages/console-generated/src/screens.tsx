@@ -38,10 +38,11 @@ export function signedValue(row: Record<string, any>, field: Field, value: React
   const delta = row[field.ui.signedBy.field] === field.ui.signedBy.negativeValue ? -Math.abs(amount) : amount
   return <span className={delta < 0 ? 'text-red-700 tabular-nums font-medium' : 'text-green-700 tabular-nums font-medium'}>{new Intl.NumberFormat(locale, { signDisplay: 'always' }).format(delta)}</span>
 }
-interface ReadPageProps { savedViewsScope?: SavedViewsScope; calendarCreate?: (values: Record<string, string>) => void; write?: WriteRequest; onDenied?: () => void; contextList?: ReadQuery['contextList']; title?: string; embeddedCreate?: (entity: string, values: Record<string, string>) => ReactNode; model: Model; caps: Capabilities; orgId: string; entity: string; id?: string; request: (input: ReadQuery) => Promise<Result>; primaryAction?: { label: string; onAction: () => void }; actions?: (row?: Record<string, any>) => ReactNode; rowActions?: (row: Record<string, any>, disabled: boolean) => ReactNode }
+interface ReadPageProps { unavailable?: ReactNode; savedViewsScope?: SavedViewsScope; calendarCreate?: (values: Record<string, string>) => void; write?: WriteRequest; onDenied?: () => void; contextList?: ReadQuery['contextList']; title?: string; embeddedCreate?: (entity: string, values: Record<string, string>) => ReactNode; model: Model; caps: Capabilities; orgId: string; entity: string; id?: string; request: (input: ReadQuery) => Promise<Result>; primaryAction?: { label: string; onAction: () => void }; actions?: (row?: Record<string, any>) => ReactNode; rowActions?: (row: Record<string, any>, disabled: boolean) => ReactNode }
 export function GeneratedReadPage(props: ReadPageProps) {
   const authority = useReferenceAuthority()
   // An unknown host actor has no verified namespace for identity-bearing reads.
+  if (props.id && props.unavailable !== undefined) return props.unavailable
   if (props.id && authority && authority.actor === undefined) return null
   return props.id ? <GeneratedDetailPage {...props} /> : <GeneratedListPage {...props} />
 }
@@ -130,8 +131,15 @@ function GeneratedListPage(props: ReadPageProps) {
     // Render-phase transition: React re-renders before committing, so no child ever shows the old scope with the new one.
     setScope(old => ({ owner: { instance: props.model.instance, orgId: props.orgId, actor }, generation: old.generation + 1, discard: true, previous: old.owner }))
   } else if (actor !== undefined && scope.owner.actor === undefined) setScope(old => ({ ...old, owner: { ...old.owner, actor } }))
-  useEffect(() => { if (scope.previous) teardownScope(client, scope.previous) }, [scope.generation])
-  if (moved || authority && actor === undefined) return null
+  useEffect(() => {
+    if (!scope.previous) return
+    teardownScope(client, scope.previous)
+    setScope(old => old.previous === scope.previous ? { ...old, previous: undefined } : old)
+  }, [client, scope.previous])
+  // Keep ownership above the host's error UI, while unmounting all identity-bearing content.
+  if (props.unavailable !== undefined) return props.unavailable
+  // The incoming body can mount only after the outgoing cache teardown has committed.
+  if (moved || scope.previous || authority && actor === undefined) return null
   return <ListPageBody key={scope.generation} {...props} discard={scope.discard} onDiscarded={() => setScope(old => old.discard ? { ...old, discard: false } : old)} />
 }
 function ListPageBody({ discard, onDiscarded, savedViewsScope, model, caps, orgId, entity, request, actions, rowActions, primaryAction, contextList, title, calendarCreate, write, onDenied }: ReadPageProps & { discard: boolean; onDiscarded: () => void }) {
