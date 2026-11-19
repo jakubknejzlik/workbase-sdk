@@ -8,6 +8,7 @@ import { canonicalJSON, diff, type ClientRequestInit } from '../src/client'
 import { entityCreatePage, entityDetailPage, entityEditPage, entityListPage, page, type Page } from '../src/index'
 import type { Manifest } from '../src/check'
 import { grants } from './grants'
+import { createI18n } from '../src/i18n'
 const metadata = { displayField: 'name', fields: Object.fromEntries(['name', 'secret', 'locked'].map(name => [name, { type: 'text', required: name === 'name', readOnly: false, userLink: false, computed: false }])) }
 const entities = { probe: metadata }
 const admin = grants(entities)
@@ -201,6 +202,37 @@ test('actions use exact own keys from the detail with a translated disabled reas
   render(h(ConsoleProvider, { identity: { actorId: 'a', orgId: 'one' }, caps: staff, t, fetch }, h(PageView, { definition: detail, route: detail, routes, entities, params: { itemId: 'x' }, search: {}, navigate: () => {} })))
   expect((await screen.findByText('ui:actions.allowed')).hasAttribute('disabled')).toBe(true); expect(screen.getByText('ui:items.pending')).toBeTruthy()
   expect(screen.queryByText('ui:actions.missing')).toBeNull(); expect(screen.queryByText('ui:actions.constructor')).toBeNull()
+})
+test.each([['en', 'This action is unavailable'], ['cs', 'Tato akce není dostupná']])('renders the bundled action fallback in %s', async (language, reason) => {
+  const i18n = createI18n({ languages: [language], catalogs: { [language]: { ui: { 'actions.close': 'Close', 'items.detail': 'Detail' } } } })
+  const detail = { ...routes[2], layout: [{ kind: 'action' as const, name: 'close' }] }
+  render(h(ConsoleProvider, { identity: { actorId: 'a', orgId: 'one' }, caps: staff, t: i18n.t, i18n, fetch: async () => json({ ...row, actions: { close: { enabled: false, reason: 'sdk.action_unavailable' } } }) },
+    h(PageView, { definition: detail, route: detail, routes, entities, params: { itemId: 'x' }, search: {}, navigate: () => {} })))
+  const button = await screen.findByRole('button', { name: 'Close' })
+  expect(button.hasAttribute('disabled')).toBe(true)
+  expect(screen.getByText(reason)).toBeTruthy()
+  expect(screen.queryByText(/sdk\.action_unavailable/)).toBeNull()
+})
+test('disabled action buttons describe their own reason and keep native disabled semantics', async () => {
+  const detail = { ...routes[2], layout: ['close', 'reopen', 'touch'].map(name => ({ kind: 'action' as const, name })) }
+  const fetch = vi.fn(async () => json({ ...row, actions: { close: { enabled: false, reason: 'items.pending' }, reopen: { enabled: false, reason: 'items.closed' }, touch: { enabled: true } } }))
+  render(h(ConsoleProvider, { identity: { actorId: 'a', orgId: 'one' }, caps: staff, t, fetch }, h(PageView, { definition: detail, route: detail, routes, entities, params: { itemId: 'x' }, search: {}, navigate: () => {} })))
+  const close = await screen.findByRole('button', { name: 'ui:actions.close' })
+  const reopen = screen.getByRole('button', { name: 'ui:actions.reopen' })
+  const pendingId = screen.getByText('ui:items.pending').getAttribute('id')
+  const closedId = screen.getByText('ui:items.closed').getAttribute('id')
+  expect(pendingId).toBeTruthy(); expect(closedId).toBeTruthy(); expect(pendingId).not.toBe(closedId)
+  expect(screen.getByRole('button', { name: 'ui:actions.close', description: 'ui:items.pending' })).toBe(close)
+  expect(close.getAttribute('aria-describedby')).toBe(pendingId)
+  expect(reopen.getAttribute('aria-describedby')).toBe(closedId)
+  for (const button of [close, reopen]) {
+    expect(button.hasAttribute('disabled')).toBe(true)
+    ;(button as unknown as { focus(): void }).focus()
+    expect(document.activeElement).not.toBe(button)
+    fireEvent.click(button)
+  }
+  expect(fetch).toHaveBeenCalledTimes(1)
+  expect(screen.getByRole('button', { name: 'ui:actions.touch' }).hasAttribute('aria-describedby')).toBe(false)
 })
 test.each(['unauthenticated', 'removed'])('%s does not wait for a hung parallel boot request', async terminal => {
   const fetch = vi.fn(async (url: string) => url !== '/me' ? new Promise<Response>(() => {}) : terminal === 'removed' ? json({ ...me, memberships: [] }) : json({}, 401))

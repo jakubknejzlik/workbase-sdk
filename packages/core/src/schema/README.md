@@ -277,12 +277,26 @@ field dependencies and declaration sources live in `effectiveAccess.actions` and
 both access locks; command bodies remain opaque guards. `actionReasonKeys(config)`
 from `@workbasehq/core/schema` exposes the finite authored reason keys.
 
-SDK-era detail GETs include an `actions` map, independent of projection. Forbidden
-or masked-dependency actions are omitted. SQL evaluates availability and selects
-the first failing reason. List, query and generic mutation responses omit the map.
+Under the D3 A contract, SDK-era detail GETs include a top-level `actions` map,
+independent of projection, with `Cache-Control: private, no-store`. The map key is
+the exact entity-scoped action name (`close` above), not a globally prefixed ID.
+Its identity is `(entity, action name)`: the entity and action path parameters
+select the declaration, whose `command` must be the full registered command
+identity (`record/close` above). Names may be reused by other entities; clients
+must retain the owning entity and record ID when dispatching or refreshing.
+No command-name shortening or action-ID re-encoding is performed.
+
+Forbidden or masked-dependency actions are omitted. SQL evaluates availability
+and selects the first failing reason, an i18n key. A command write-filter denial
+without an authored failing reason uses `sdk.action_unavailable`, translated by
+the console's bundled SDK catalog. List, query and generic mutation responses
+omit availability metadata; their cache-header behavior is unchanged.
 The SDK era marker is `baseline: 'workbase-sdk'`; domain fields and relations named
-`actions` and `access` are reserved in that era, including declarations without compiled access.
-Legacy configurations retain their existing response and naming contracts.
+`actions` and `access` are reserved in that era, including declarations without
+compiled access. In particular, an `actions` field or relation is rejected to
+prevent collision with the detail metadata. Legacy configurations intentionally
+retain their existing response and naming contracts: they may declare an
+`actions` field or relation, and detail GET does not inject the SDK availability map.
 
 `POST /api/:entity/:id/actions/:name` accepts `{}` for input-less commands.
 Object-shaped command schemas declare other accepted body keys; body `id`,

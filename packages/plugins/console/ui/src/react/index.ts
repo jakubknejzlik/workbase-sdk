@@ -1,4 +1,4 @@
-import { createContext, createElement as h, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
+import { createContext, createElement as h, useContext, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { QueryClient, QueryClientProvider, useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useBlocker, useNavigate } from '@tanstack/react-router'
 import { ApiFailure, cacheKey, canonicalJSON, createClient, diff, type Client, type ClientRequestInit, type EntityMeta, type FieldMeta, type Issue, type RecordData } from '../client'
@@ -118,14 +118,16 @@ function ResolvedSlot({ slot, props, ctx }: { slot: Slot; props: Record<string, 
   }
   return h(slot.component, { ...resolved, t: ctx.t })
 }
-export function reasonKey(reason: string) { return (reason.startsWith('access.') ? 'sdk:' : 'ui:') + reason }
+export function reasonKey(reason: string) { return reason === 'sdk.action_unavailable' ? 'sdk:action_unavailable' : (reason.startsWith('access.') ? 'sdk:' : 'ui:') + reason }
 function RecordAction({ ctx, name }: { ctx: RenderContext; name: string }) {
   const [pending, setPending] = useState(false), [failure, setFailure] = useState<unknown>()
+  const reasonId = useId()
   const controller = useRef<AbortController | null>(null)
   useEffect(() => () => controller.current?.abort(), [])
   const actions = ctx.record.actions as Record<string, { enabled: boolean; reason?: string }> | undefined
   if (!actions || !Object.hasOwn(actions, name)) return null
   const action = actions[name]
+  const reason = !action.enabled && action.reason
   async function run() {
     if (pending || !action.enabled) return
     controller.current = new AbortController(); setPending(true); setFailure(undefined)
@@ -133,8 +135,8 @@ function RecordAction({ ctx, name }: { ctx: RenderContext; name: string }) {
     catch (error) { if (!controller.current.signal.aborted) setFailure(error) }
     finally { if (!controller.current.signal.aborted) setPending(false) }
   }
-  return h('div', null, h('button', { type: 'button', disabled: pending || !action.enabled, onClick: () => { void run() } }, ctx.t('ui:actions.' + name)),
-    !action.enabled && action.reason && h('span', null, ctx.t(reasonKey(action.reason))), !!failure && message(failureState(failure), ctx.t))
+  return h('div', null, h('button', { type: 'button', disabled: pending || !action.enabled, 'aria-describedby': reason ? reasonId : undefined, onClick: () => { void run() } }, ctx.t('ui:actions.' + name)),
+    reason && h('span', { id: reasonId }, ctx.t(reasonKey(reason))), !!failure && message(failureState(failure), ctx.t))
 }
 function Tabs({ node, ctx }: { node: Exclude<Node, string | { kind: 'slot' } | { kind: 'action' }>; ctx: RenderContext }) {
   const [active, setActive] = useState(0)

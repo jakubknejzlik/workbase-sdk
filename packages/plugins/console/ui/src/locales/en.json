@@ -31,6 +31,7 @@
   "removed": "Access is no longer available",
   "navigation": "Navigation",
   "identifier": "Identifier",
+  "action_unavailable": "This action is unavailable",
   "access.invitation_pending": "An invitation is pending",
   "access.already_linked": "An account is already linked",
   "access.no_invitation": "No pending invitation",
