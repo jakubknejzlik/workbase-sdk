@@ -46,3 +46,19 @@ HTTP 500 fails acceptance and attaches timestamp, method, URL, status, and body
 failure. A separate diagnostic regression verifies an auxiliary-page 500 is
 rejected and its body retained; it is not part of the 147 acceptance cases.
 There are no request retries, proxy patch changes, or runtime readiness changes.
+
+A later supplementary popup diagnostic on the reserved second port 20229 failed
+at B-normal iteration 20: the initial console document returned a real HTTP 500,
+and the select was absent. Its worker log records that response, two local
+reloads, and a crash warning. Native events record unexpected SIGKILL exits at
+13:36:17.846Z and 13:36:18.173Z, replacements at 13:36:17.847Z and
+13:36:18.175Z, and owned teardown beginning only at 13:36:22.744Z. There is no
+preview-disconnect warning in this runtime. The sender/reason of SIGKILL and the
+relationship of the response to the reloads are unproven; untimestamped log lines
+cannot supply missing timing. The diagnostic overlapped local SDK-pack work,
+which is context, not proof of causality. This failed diagnostic is retained and
+is not counted as a passing probe or merged into the 100-load startup result.
+Its response body/browser trace was not retained by that scratch probe; this is
+an explicit evidence gap. Subsequent diagnostic collection retains HAR/error
+artifacts and runs serially after builds. No restart-based or connection-reuse
+root cause is claimed for either occurrence.
