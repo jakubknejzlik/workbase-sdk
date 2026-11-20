@@ -1,5 +1,6 @@
 import { test, expect, type Page, type Locator } from '@playwright/test'
 import setup from './runtime/setup'
+import { layoutDiagnostics, attachLayoutDiagnostics } from './list-v2-layout-diagnostics'
 import { workers, expectedRows, expectedCounts, type Selection } from './runtime/list-v2-data'
 import { capture, provenance, result, record } from './list-v2-evidence'
 import en from '../src/locales/en.json' with { type: 'json' }
@@ -367,7 +368,7 @@ for (const width of [360, 390]) for (const language of ['en', 'cs'] as const) te
 
 // The review's app-boundary probe uses synthetic rows/total to exercise the
 // supported offset bound without changing the backend pagination fixtures.
-for (const width of [1110, 1231, 1233]) for (const language of ['en', 'cs'] as const) for (const number of [900, 1000]) test(`paging: 200% text boundary ${width} ${language} page ${number}`, async ({ page, context }) => {
+for (const width of [1110, 1231, 1233]) for (const language of ['en', 'cs'] as const) for (const number of [900, 1000]) test(`paging: 200% text boundary ${width} ${language} page ${number}`, async ({ page, context }, testInfo) => {
   const copy = language === 'cs' ? cs : en
   await page.setViewportSize({ width, height: 1000 })
   await context.addInitScript(language => localStorage.setItem('console-language', language), language)
@@ -409,6 +410,10 @@ for (const width of [1110, 1231, 1233]) for (const language of ['en', 'cs'] as c
         return { left: box.left, right: box.right, clipLeft: Math.max(...clips.map(clip => clip.left)), clipRight: Math.min(...clips.map(clip => clip.right)) }
       })
       observations.push({ kind: 'paging-boundary', phase, number, width, language, geometry })
+      if (width === 1110 && number === 1000) {
+        const diagnostic = await layoutDiagnostics(control)
+        await attachLayoutDiagnostics(page, testInfo, `case-A-${language}-${phase}-${diagnostic.controls[0].name}`, { scenarioWidth: width, phase, number, language, geometry, ...diagnostic })
+      }
       await expect(control).toBeVisible()
       expect.soft(geometry.left).toBeGreaterThanOrEqual(geometry.clipLeft)
       expect.soft(geometry.right).toBeLessThanOrEqual(geometry.clipRight)
@@ -448,7 +453,7 @@ for (const width of [1110, 1231, 1233]) for (const language of ['en', 'cs'] as c
   await page.unrouteAll({ behavior: 'wait' })
 })
 
-for (const width of [1440, 390, 360]) for (const actor of ['admin', 'staff'] as const) for (const language of ['en', 'cs'] as const) test(`G4–G6 polish ${width} ${actor} ${language}`, async ({ page, context }) => {
+for (const width of [1440, 390, 360]) for (const actor of ['admin', 'staff'] as const) for (const language of ['en', 'cs'] as const) test(`G4–G6 polish ${width} ${actor} ${language}`, async ({ page, context }, testInfo) => {
   const copy = language === 'cs' ? cs : en
   await page.setViewportSize({ width, height: 1000 })
   await context.setExtraHTTPHeaders({ Authorization: `Bearer list-v2-${actor}-session` })
@@ -504,11 +509,45 @@ for (const width of [1440, 390, 360]) for (const actor of ['admin', 'staff'] as 
   expect((await lookup.boundingBox())!.width).toBeGreaterThanOrEqual(130)
   await expect(lookup).toHaveAttribute('placeholder', copy.listLookupPlaceholder)
   const paging = list(page).locator('[data-list-paging]')
-  const prev = await paging.getByRole('button', { name: copy.previousPage, exact: true }).boundingBox()
-  const next = await paging.getByRole('button', { name: copy.nextPage, exact: true }).boundingBox()
-  expect(Math.abs(prev!.y - next!.y)).toBeLessThan(2)
-  expect(prev!.x).toBeGreaterThanOrEqual(0)
-  expect(next!.x + next!.width).toBeLessThanOrEqual(width)
+  const previous = paging.getByRole('button', { name: copy.previousPage, exact: true })
+  const current = paging.locator('[aria-current="page"]')
+  const next = paging.getByRole('button', { name: copy.nextPage, exact: true })
+  const diagnostic = await layoutDiagnostics(previous.or(current).or(next), true)
+  await attachLayoutDiagnostics(page, testInfo, `pagination-atomic-${width}-${actor}-${language}`, { width, actor, language, ...diagnostic })
+  const controls = diagnostic.controls
+  expect(controls).toHaveLength(3)
+  // The group may move to another row as a unit. Its three controls must still
+  // share a row; no individual-control wrap exception or wider tolerance.
+  expect(Math.abs(controls[0].box.top - controls[2].box.top)).toBeLessThan(2)
+  // The numbered button is shorter than Previous/Next; compare its centerline.
+  const centers = controls.map(control => control.box.top + control.box.height / 2)
+  expect(Math.max(...centers) - Math.min(...centers)).toBeLessThan(2)
+  for (const { box, clip, hitAtCenter, disabled } of controls) {
+    expect(box.left).toBeGreaterThanOrEqual(clip.left)
+    expect(box.right).toBeLessThanOrEqual(clip.right)
+    expect(box.top).toBeGreaterThanOrEqual(clip.top)
+    expect(box.bottom).toBeLessThanOrEqual(clip.bottom)
+    if (!disabled) expect(hitAtCenter).toBe(true)
+  }
+  for (let i = 0; i < controls.length; i++) for (let j = i + 1; j < controls.length; j++) {
+    const a = controls[i].box; const b = controls[j].box
+    expect(a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom).toBe(false)
+  }
+  const onPage = async (number: number) => {
+    await expect(current).toHaveText(String(number))
+    await expect.poll(() => ids(page)).toEqual(expectedRows({ actor }).slice((number - 1) * 10, number * 10).map(row => row.id))
+  }
+  await next.click(); await onPage(2)
+  await previous.click(); await onPage(1)
+  const visibleButtons = paging.getByRole('button')
+  await current.focus()
+  for (let index = 2; index < await visibleButtons.count(); index++) {
+    await page.keyboard.press('Tab'); await expect(visibleButtons.nth(index)).toBeFocused()
+  }
+  await expect(next).toBeFocused()
+  await page.keyboard.press('Enter'); await onPage(2)
+  await visibleButtons.nth(1).focus(); await page.keyboard.press('Shift+Tab'); await expect(previous).toBeFocused()
+  await page.keyboard.press('Space'); await onPage(1)
   await expect(list(page).locator('[data-list-page-summary] select')).toBeVisible()
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
   // Every actor/locale/viewport exercises a held new key and contextual empty recovery.
