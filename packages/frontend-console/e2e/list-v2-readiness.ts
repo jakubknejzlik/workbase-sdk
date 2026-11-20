@@ -16,7 +16,9 @@ export async function sdkStylesheetReady(page: Page) {
   const sdkLinks = links.filter(sdkAsset)
   const statuses = sdkLinks.map(url => ({ url, status: responses.get(page)?.get(url) ?? 'missing response' }))
   expect(sdkLinks.length, 'SDK stylesheet readiness: missing real SDK stylesheet link').toBeGreaterThan(0)
-  expect(statuses.every(({ status }) => typeof status === 'number' && status >= 200 && status < 300),
+  // A 304 revalidates the browser cache; the loaded-sheet/style sentinel below
+  // still has to prove those cached SDK bytes are applied.
+  expect(statuses.every(({ status }) => typeof status === 'number' && ((status >= 200 && status < 300) || status === 304)),
     `SDK stylesheet readiness: stylesheet response must succeed: ${JSON.stringify(statuses)}`).toBe(true)
   await expect.poll(() => page.evaluate(urls => {
     const element = document.querySelector('[data-slot="list-page"]')

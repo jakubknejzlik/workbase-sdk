@@ -36,3 +36,6 @@ The dedicated `playwright.list-v2-readiness.config.ts` checks normal CSS, an
 injected CSS 500, and HTTP 200 without SDK styles. These guard regression checks
 are separate from the unchanged 147-case acceptance inventory; injections never
 provide a passing acceptance path.
+A cache-revalidated HTTP 304 is also allowed, but only while loaded-sheet and
+applied-style checks pass. The dedicated reload regression records both the
+initial 200 and subsequent 304; 304 alone never proves stylesheet readiness.
