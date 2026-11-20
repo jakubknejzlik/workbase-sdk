@@ -23,3 +23,16 @@ Review failures in results.json/manifest.json with the retained traces. Product 
 Runtime teardown retains `worker.log` and writes `runtime-<port>-<pid>/runtime-diagnostics.json` in the current Playwright test output directory when a test fails or a runtime exits/disconnects unexpectedly. The record includes test identity, worktree, ports, wrapper/Wrangler/workerd identities and PGID, timestamps, redacted stderr tails, and native child exit code/signal observed inside Wrangler. Missing native exit events are explicitly unavailable; wrapper status is never substituted. Passing runtimes remove their temporary state/log and leave a compact diagnostics record. No environment or full command lines are recorded. Teardown signals only its own detached group; native children are stopped first to allow their parent to record exit events. These diagnostics preserve evidence; they do not establish or fix the cause of historical HTTP 500s.
 
 Numbered root-list pages use the one-based `page` URL search parameter (omitted for page 1). Copied URLs, reload and Back/Forward restore the same page and committed settings. Invalid pages or pages beyond the configured offset cap reset to page 1; changing settings, applying a personal view or changing actor resets paging. Saved views remain settings-only. The toolbar uses Saved views, Columns and Filters (Uložené pohledy, Sloupce and Filtry); sorting stays in column headers. Actor-bound embedded/calendar cursors stay in browser history or card state and are never copied into URLs.
+
+#271 stylesheet readiness is checked after every full navigation/reload, including
+copied-URL pages, and again before settled-page assertions. A real SDK CSS link
+must have a successful observed response, a loaded CSSStyleSheet, and applied
+`min-w-0` / `overflow-hidden` styles on the SDK list container. Missing/failed CSS
+fails with `SDK stylesheet readiness` before visual or geometry checks. Native
+popup assertions retain their original timing and geometry oracles: a targeted
+blocked-CSS probe found stale click coordinates, not delayed popup opening.
+
+The dedicated `playwright.list-v2-readiness.config.ts` checks normal CSS, an
+injected CSS 500, and HTTP 200 without SDK styles. These guard regression checks
+are separate from the unchanged 147-case acceptance inventory; injections never
+provide a passing acceptance path.
