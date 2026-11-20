@@ -3,6 +3,8 @@ import { useCallback, useId, useLayoutEffect, useRef, useState, type KeyboardEve
 /** Observe the viewport AND table: display toggles can change only the content width. */
 export function useTableOverflow(enabled = false, columns: string, pinnedActions = false) {
   const ref = useRef<HTMLDivElement>(null)
+  const resizeObserver = useRef<ResizeObserver | null>(null)
+  const observedControl = useRef<HTMLElement | null>(null)
   const hintId = useId()
   const [edge, setEdge] = useState<'start' | 'end' | 'both'>()
   const update = useCallback(() => {
@@ -24,6 +26,12 @@ export function useTableOverflow(enabled = false, columns: string, pinnedActions
     node.style.scrollPaddingInlineEnd = `${sticky.width + ring}px`
     const active = node.ownerDocument.activeElement
     if (!(active instanceof HTMLElement) || active === node || !node.contains(active) || active.closest('[data-pinned-actions]')) return
+    // Row controls can resize from their own async state without resizing a column.
+    if (active !== observedControl.current) {
+      if (observedControl.current) resizeObserver.current?.unobserve(observedControl.current)
+      observedControl.current = active
+      resizeObserver.current?.observe(active)
+    }
     const port = node.getBoundingClientRect()
     // clientLeft/clientWidth exclude the overflow-cue borders and scrollbar.
     const left = port.left + node.clientLeft + ring
@@ -43,12 +51,13 @@ export function useTableOverflow(enabled = false, columns: string, pinnedActions
     if (!enabled || !ref.current) return
     const node = ref.current
     const observer = new ResizeObserver(() => { revealFocus(); update() })
+    resizeObserver.current = observer
     observer.observe(node)
     if (node.firstElementChild) observer.observe(node.firstElementChild)
     // A column can change width without changing the table's total width.
     if (pinnedActions) node.querySelectorAll('th').forEach(header => observer.observe(header))
     update()
-    return () => observer.disconnect()
+    return () => { observer.disconnect(); resizeObserver.current = null; observedControl.current = null }
   }, [enabled, columns, pinnedActions, revealFocus, update])
   useLayoutEffect(() => {
     if (!enabled || !pinnedActions || !ref.current) return

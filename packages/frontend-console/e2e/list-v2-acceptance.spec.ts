@@ -19,17 +19,28 @@ const panel = (page: Page) => page.getByRole('group', { name: en.sortAndFilter, 
 const savedTrigger = (page: Page) => page.getByRole('region', { name: en.savedViews, exact: true }).locator('button[aria-haspopup="dialog"]')
 const savedMenu = (page: Page) => page.getByRole('dialog', { name: en.savedViews, exact: true })
 // Measure the painted ring against the scrollport's inner border and opaque Actions.
-async function focusClear(control: Locator) {
+async function focusClear(control: Locator, allowOversized = false) {
   await expect(control).toBeFocused()
-  await expect.poll(() => control.evaluate(element => {
+  const geometry = () => control.evaluate(element => {
+    const port = element.closest('[data-slot="table-container"]') as HTMLElement
+    const box = element.getBoundingClientRect(); const clip = port.getBoundingClientRect()
+    const actions = port.querySelector('th.sticky')?.getBoundingClientRect()
+    return { name: element.getAttribute('aria-label') ?? element.textContent, left: box.left, right: box.right, clipLeft: clip.left + port.clientLeft, clipRight: clip.left + port.clientLeft + port.clientWidth, actionsLeft: actions?.left, scrollLeft: port.scrollLeft }
+  })
+  try { await expect.poll(() => control.evaluate((element, allowOversized) => {
     const port = element.closest('[data-slot="table-container"]') as HTMLElement
     const box = element.getBoundingClientRect()
     const clip = port.getBoundingClientRect()
     const actions = port.querySelector('th.sticky')?.getBoundingClientRect()
     const left = clip.left + port.clientLeft
     const right = Math.min(left + port.clientWidth, actions?.left ?? Infinity)
+    // At 200% text some controls are wider than the entire clear interval.
+    // Nearest-edge reveal must leave that interval covered without oscillation.
+    if (allowOversized && box.width + 6 > right - left && box.left - 3 <= left && box.right + 3 >= right) return { left: 0, right: 0 }
     return { left: Math.max(0, left - (box.left - 3)), right: Math.max(0, box.right + 3 - right) }
-  }), { message: 'full 3px ring clears both clip edges and sticky Actions' }).toEqual({ left: 0, right: 0 })
+  }, allowOversized), { message: 'full 3px ring clears both clip edges and sticky Actions (oversized: nearest edge)' }).toEqual({ left: 0, right: 0 })
+  } catch (error) { throw new Error(`${String(error)}\nGeometry: ${JSON.stringify(await geometry())}`) }
+  observations.push({ kind: 'focused-ring', ...await geometry() })
 }
 
 test('focus reveal: Code Tab at zero clears opaque Actions', async ({ page }) => {
@@ -43,6 +54,143 @@ test('focus reveal: Code Tab at zero clears opaque Actions', async ({ page }) =>
   // Name's filter follows its sort control in the natural keyboard order.
   for (let index = 0; index < 4 && !await code.evaluate(element => element === document.activeElement); index++) await page.keyboard.press('Tab')
   await focusClear(code)
+})
+
+for (const width of [360, 390, 1440]) for (const language of ['en', 'cs'] as const) for (const compact of [false, true]) for (const fontSize of [16, 32]) test(`focus reveal: keyboard ${width} ${language} ${compact ? 'compact' : 'comfortable'} text ${fontSize}`, async ({ page, context }) => {
+  const copy = language === 'cs' ? cs : en
+  await page.setViewportSize({ width, height: 844 })
+  await context.addInitScript(language => localStorage.setItem('console-language', language), language)
+  await page.goto(route); await settled(page)
+  if (compact) {
+    await page.getByRole('button', { name: copy.listDisplay, exact: true }).click()
+    await page.getByRole('checkbox', { name: copy.listDisplayCompact, exact: true }).click()
+    await page.keyboard.press('Escape')
+  }
+  await page.evaluate(async fontSize => { document.documentElement.style.fontSize = `${fontSize}px`; await document.fonts.ready }, fontSize)
+  const port = list(page).locator('[data-slot="table-container"]')
+  // Access metadata arrives independently of the list. Freeze the traversal
+  // only once all row controls have joined the enabled keyboard sequence.
+  await expect.poll(() => port.locator('tbody button:disabled').count()).toBe(0)
+  const controls = port.locator('button:enabled, a[href], input:enabled, select:enabled')
+  expect(await controls.count()).toBeGreaterThan(25)
+  await expect.poll(() => port.evaluate(element => parseFloat(getComputedStyle(element).scrollPaddingInlineEnd) - element.querySelector('[data-pinned-actions]')!.getBoundingClientRect().width)).toBe(3)
+  expect(await port.evaluate(element => getComputedStyle(element).scrollPaddingInlineStart)).toBe('3px')
+  for (const offset of [0, 0.5, 1]) {
+    await port.focus()
+    await port.evaluate((element, offset) => { element.scrollLeft = (element.scrollWidth - element.clientWidth) * offset }, offset)
+    for (const control of await controls.all()) {
+      await page.keyboard.press('Tab')
+      await expect(control).toBeFocused()
+      if (!await control.evaluate(element => !!element.closest('[data-pinned-actions]'))) await focusClear(control, true)
+    }
+    // Reverse the same natural DOM sequence, including sortable/filter headers.
+    for (let index = await controls.count() - 2; index >= 0; index--) {
+      await page.keyboard.press('Shift+Tab')
+      const control = controls.nth(index)
+      await expect(control).toBeFocused()
+      if (!await control.evaluate(element => !!element.closest('[data-pinned-actions]'))) await focusClear(control, true)
+    }
+    observations.push({ kind: 'focus-traversal', width, language, compact, fontSize, offset, controls: await controls.count(), scrollLeft: await port.evaluate(element => element.scrollLeft) })
+  }
+  await page.screenshot({ path: `${process.env.LIST_V2_OUTPUT}/focus-${width}-${language}-${compact}-${fontSize}.png` })
+})
+
+for (const language of ['en', 'cs'] as const) test(`focus reveal: sorting, layout changes, restoration and pointer ${language}`, async ({ page, context, request }) => {
+  const copy = language === 'cs' ? cs : en
+  await page.setViewportSize({ width: 390, height: 844 })
+  await context.addInitScript(language => localStorage.setItem('console-language', language), language)
+  await page.goto(route); await settled(page)
+  const port = list(page).locator('[data-slot="table-container"]')
+  const codeHeader = port.getByRole('columnheader', { name: /Code/ })
+  const code = codeHeader.getByRole('button').first()
+  await code.focus(); await focusClear(code)
+  const byCode = [...workers].sort((a, b) => a.code < b.code ? -1 : a.code > b.code ? 1 : 0)
+  await code.click(); await expect.poll(() => ids(page)).toEqual(byCode.slice(0, 10).map(row => row.id)); await focusClear(code)
+  await page.keyboard.press('Enter'); await expect.poll(() => ids(page)).toEqual([...byCode].reverse().slice(0, 10).map(row => row.id)); await focusClear(code)
+  await page.keyboard.press('Space'); await expect.poll(() => ids(page)).toEqual(workers.slice(0, 10).map(row => row.id)); await focusClear(code)
+  // Active focus must be rechecked without another focus event on viewport change.
+  await page.setViewportSize({ width: 360, height: 844 }); await focusClear(code)
+  await page.setViewportSize({ width: 1440, height: 844 }); await focusClear(code)
+  await page.setViewportSize({ width: 390, height: 844 }); await focusClear(code)
+  await page.evaluate(() => { document.documentElement.style.fontSize = '32px' }); await focusClear(code)
+  await page.evaluate(() => { document.documentElement.style.fontSize = '16px' }); await focusClear(code)
+  // Resize the active control independently of the fixed-width column/table.
+  await code.evaluate(element => { element.style.minWidth = '240px' })
+  await focusClear(code)
+  await code.evaluate(element => { element.style.minWidth = '' })
+  await focusClear(code)
+  await page.getByRole('button', { name: copy.listDisplay, exact: true }).click()
+  const display = page.getByRole('dialog', { name: copy.listDisplayHeading })
+  await display.getByRole('checkbox').nth(1).click()
+  await page.keyboard.press('Escape')
+  await code.focus(); await focusClear(code)
+  const access = port.getByRole('button', { name: new RegExp(copy.rowAccessActions) }).first()
+  await access.focus(); await focusClear(access)
+  await access.press('Enter'); await expect(page.getByRole('menu')).toBeVisible()
+  await page.keyboard.press('Escape'); await focusClear(access)
+  await access.press('Enter'); await page.getByRole('menuitem', { name: copy.rowFindMember, exact: true }).click()
+  await expect(page.getByRole('dialog')).toBeVisible()
+  await page.getByRole('dialog').getByRole('button', { name: copy.cancel, exact: true }).click()
+  await focusClear(access)
+  // The opaque Actions overlay keeps its own pointer targets at scrollLeft zero.
+  await port.focus(); await page.keyboard.press('Home')
+  await expect.poll(() => port.evaluate(element => element.scrollLeft)).toBe(0)
+  const action = port.locator('tbody [data-pinned-actions] button').first()
+  await action.click(); await expect(page.getByRole('menu')).toBeVisible()
+  await page.keyboard.press('Escape'); await expect(action).toBeFocused()
+  const actionScroll = await port.evaluate(element => element.scrollLeft)
+  await action.press('Enter'); await page.getByRole('menuitem', { name: copy.edit, exact: true }).click()
+  const edit = page.getByRole('dialog')
+  await expect(edit).toBeVisible()
+  await edit.getByRole('button', { name: copy.cancel, exact: true }).click()
+  await expect(action).toBeFocused()
+  // Native restoration may scroll a sticky trigger into view; the reveal hook
+  // must preserve its identity and leave it in the pinned pointer target.
+  observations.push({ kind: 'pinned-restoration', before: actionScroll, after: await port.evaluate(element => element.scrollLeft) })
+  expect(await action.evaluate(element => !!element.closest('[data-pinned-actions]'))).toBe(true)
+  // A real save refreshes the list and restores the same Actions trigger.
+  await action.click(); await page.getByRole('menuitem', { name: copy.edit, exact: true }).click()
+  try {
+    await edit.getByRole('textbox', { name: 'Code', exact: true }).fill('W1 focus refresh')
+    await edit.getByRole('button', { name: copy.save, exact: true }).click()
+    await expect(edit).toHaveCount(0); await settled(page); await expect(action).toBeFocused()
+  } finally {
+    // Keep the shared synthetic fixture identical for the remaining acceptance tests.
+    const headers = { 'X-Organization-Id': 'org-a' }
+    const current = await request.get('/api/worker/w001', { headers })
+    const row = await current.json()
+    if (row.code !== 'W1') expect((await request.patch('/api/worker/w001', { headers, data: { code: 'W1', version: row.version } })).ok()).toBe(true)
+  }
+  await code.focus(); await focusClear(code)
+  const columnIndex = await codeHeader.evaluate(element => (element as HTMLTableCellElement).cellIndex)
+  for (const cell of [codeHeader, ...await port.locator(`tbody tr[data-row-id] td:nth-child(${columnIndex + 1})`).all()]) {
+    // Scroll vertically only, preserving the horizontal reveal being verified.
+    await cell.evaluate(element => { const box = element.getBoundingClientRect(); window.scrollBy(0, box.top + box.height / 2 - innerHeight / 2) })
+    expect(await cell.evaluate(element => { const box = element.getBoundingClientRect(); return element.contains(document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2)) })).toBe(true)
+  }
+  for (const sticky of await port.locator('[data-pinned-actions]').all()) {
+    expect(await sticky.evaluate(element => { const style = getComputedStyle(element); return { background: style.backgroundColor, position: style.position, z: style.zIndex } })).toMatchObject({ position: 'sticky', z: '10' })
+    expect(await sticky.evaluate(element => getComputedStyle(element).backgroundColor)).toMatch(/^(rgb\(|color\(srgb [^/]+\)$|oklch\([^/]+\)$)/)
+  }
+  await port.focus(); await page.keyboard.press('End')
+  await expect.poll(() => port.evaluate(element => element.scrollWidth - element.clientWidth - element.scrollLeft)).toBe(0)
+  await expect(list(page).locator('[data-list-overflow]')).toHaveAttribute('data-list-overflow', 'start')
+  await page.keyboard.press('Home')
+  await expect.poll(() => port.evaluate(element => element.scrollLeft)).toBe(0)
+  await expect(list(page).locator('[data-list-overflow]')).toHaveAttribute('data-list-overflow', 'end')
+})
+
+test('focus reveal: no Actions leaves native padding and keyboard scrolling unchanged', async ({ page, context }) => {
+  await context.setExtraHTTPHeaders({ Authorization: 'Bearer list-v2-staff-session' })
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto(route); await settled(page)
+  const port = list(page).locator('[data-slot="table-container"]')
+  await expect(port.locator('[data-pinned-actions]')).toHaveCount(0)
+  expect(await port.evaluate(element => [element.style.scrollPaddingInlineStart, element.style.scrollPaddingInlineEnd])).toEqual(['', ''])
+  await port.focus(); await page.keyboard.press('End')
+  await expect(list(page).locator('[data-list-overflow]')).toHaveAttribute('data-list-overflow', 'start')
+  await page.keyboard.press('Home')
+  await expect.poll(() => port.evaluate(element => element.scrollLeft)).toBe(0)
 })
 async function settled(page: Page) {
   await expect(list(page)).toBeVisible()
