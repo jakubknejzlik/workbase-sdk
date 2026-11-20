@@ -1,6 +1,6 @@
 import { registerTempDir, retainTempDir, cleanupTempDir } from '../../../../scripts/lib/test-temp-dir.mjs'
 import { spawn, execFileSync, type ChildProcess } from 'node:child_process'
-import { mkdtempSync, openSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, writeFileSync } from 'node:fs'
 import { resolve, join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { assertPortsFree } from '../harness-ports'
@@ -20,21 +20,26 @@ export default async function setup(fixture = { worker: 'worker.ts', seed: 'seed
     }))
     const persist = resolve(directory, 'state')
     execFileSync('bun', [resolve(import.meta.dirname, fixture.seed), configPath, persist], { cwd: root, stdio: 'inherit' })
-    const log = openSync(resolve(directory, 'worker.log'), 'a')
+    const { runtimeDiagnostics } = await import('./diagnostics')
+    writeFileSync(resolve(directory, 'worker.log'), '')
+    const diagnostics = runtimeDiagnostics(directory, root, port)
     let child: ChildProcess | undefined
     const stop = async () => {
+      await diagnostics.stopping()
       if (child?.pid) try { process.kill(-child.pid, 'SIGTERM') } catch {}
       if (child?.exitCode === null) await new Promise<void>(done => { child!.once('exit', () => done()); setTimeout(() => { if (child?.pid) try { process.kill(-child.pid, 'SIGKILL') } catch {}; done() }, 3000).unref() })
+      diagnostics.finish()
       cleanupTempDir(directory)
     }
     try {
-      child = spawn('bun', ['x', '--no-install', 'wrangler', 'dev', '--local', '--config', configPath, '--persist-to', persist, '--ip', '127.0.0.1', '--port', String(port), '--inspector-port', '0'], { cwd: root, detached: true, stdio: ['ignore', log, log], env: { ...process.env, WRANGLER_REGISTRY_PATH: resolve(directory, 'registry'), CLOUDFLARE_SEND_METRICS: 'false', WRANGLER_SEND_METRICS: 'false' } })
+      child = spawn('bun', ['x', '--no-install', 'wrangler', 'dev', '--local', '--config', configPath, '--persist-to', persist, '--ip', '127.0.0.1', '--port', String(port), '--inspector-port', '0'], { cwd: root, detached: true, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, ...diagnostics.environment, WRANGLER_REGISTRY_PATH: resolve(directory, 'registry'), CLOUDFLARE_SEND_METRICS: 'false', WRANGLER_SEND_METRICS: 'false' } })
+      diagnostics.observe(child)
       for (let attempt = 0; attempt < 200; attempt++) {
         if (child.exitCode !== null) throw new Error(`Neutral Worker exited; ${directory}/worker.log`)
         try { if ((await fetch(`${origin}/health`)).ok) { console.log(`Neutral Worker ready: ${directory}`); return stop } } catch {}
         await new Promise(done => setTimeout(done, 100))
       }
       throw new Error(`Neutral Worker not ready; ${directory}/worker.log`)
-    } catch (error) { retainTempDir(directory); await stop(); throw error }
+    } catch (error) { retainTempDir(directory); await stop(); diagnostics.finish(true); throw error }
   } catch (error) { cleanupTempDir(directory); throw error }
 }
