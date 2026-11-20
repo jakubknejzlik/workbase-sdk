@@ -6,7 +6,7 @@ import { observePreview500, assertNoPreview500 } from './list-v2-http'
 import { observeSDKStylesheet, sdkStylesheetReady, gotoSDK, reloadSDK } from './list-v2-readiness'
 import { layoutDiagnostics, attachLayoutDiagnostics } from './list-v2-layout-diagnostics'
 import { workers, expectedRows, expectedCounts, type Selection } from './runtime/list-v2-data'
-import { capture, captureSDK, provenance, result, record } from './list-v2-evidence'
+import { capture, captureSDK, provenance, result, record, output } from './list-v2-evidence'
 import en from '../src/locales/en.json' with { type: 'json' }
 import cs from '../src/locales/cs.json' with { type: 'json' }
 
@@ -125,8 +125,8 @@ for (const width of [1440, 390]) for (const scenario of scenarios) test(`capture
   }
   try {
     await gotoSDK(page, route)
-    if (scenario === 'loading') { await expect(list(page).locator('[aria-busy="true"]')).toBeVisible(); await expect(footer(page).locator('[data-list-range]')).toHaveCount(0); await expect(list(page).locator('[data-list-slot="tabs"] span')).toHaveCount(0) }
-    else if (scenario === 'error') { await expect(list(page).getByText(en.requestFailed, { exact: true }).first()).toBeVisible(); await expect(footer(page).locator('[data-list-range]')).toHaveCount(0); await expect(list(page).locator('[data-list-slot="tabs"] span')).toHaveCount(0) }
+    if (scenario === 'loading') { await expect(list(page).locator('[aria-busy="true"]')).toBeVisible(); await expect(footer(page).locator('[data-list-range]')).toHaveCount(0); await expect(list(page).locator('[data-list-slot="tabs"] .tabular-nums')).toHaveCount(0) }
+    else if (scenario === 'error') { await expect(list(page).getByText(en.requestFailed, { exact: true }).first()).toBeVisible(); await expect(footer(page).locator('[data-list-range]')).toHaveCount(0); await expect(list(page).locator('[data-list-slot="tabs"] .tabular-nums')).toHaveCount(0) }
     else {
       await settled(page)
       if (scenario !== 'populated-restricted-staff') { await expect(page.getByRole('button', { name: new RegExp(en.rowAccessActions) })).toHaveCount(10); await expect(page.getByText(en.rowAccessRefreshing, { exact: true })).toHaveCount(0) }
@@ -970,3 +970,150 @@ for (const language of ['en', 'cs'] as const) for (const width of [320, 360, 390
   await info.attach('page-size-options.json', { body: JSON.stringify({ language, font, offered, value, options }), contentType: 'application/json' })
   await cdp.detach()
 })
+// #265: reuse the reachability probe's real Tab path and raw CSS outline /
+// shadow envelope. DOM visibility alone misses clipping by the tabs scroller.
+async function viewTabGeometry(target: Locator) {
+  return target.evaluate(element => {
+    const tab = element as HTMLElement
+    const group = tab.parentElement!
+    const box = tab.getBoundingClientRect()
+    const style = getComputedStyle(tab)
+    const outline = style.outlineStyle === 'none' ? 0 : Math.max(0, parseFloat(style.outlineWidth) + parseFloat(style.outlineOffset))
+    const extent = { left: outline, right: outline, top: outline, bottom: outline }
+    for (const shadow of style.boxShadow.replace(/(?:rgba?|hsla?|oklab|oklch|color)\([^)]*\)/g, 'COLOR').split(',')) {
+      if (shadow.includes('inset') || shadow === 'none') continue
+      const [x, y, blur = 0, spread = 0] = [...shadow.matchAll(/(-?[\d.]+)px/g)].map(match => Number(match[1]))
+      if (x === undefined || y === undefined) continue
+      const radius = spread + 1.5 * blur
+      extent.left = Math.max(extent.left, radius - x); extent.right = Math.max(extent.right, radius + x)
+      extent.top = Math.max(extent.top, radius - y); extent.bottom = Math.max(extent.bottom, radius + y)
+    }
+    const ring = { left: box.left - extent.left, right: box.right + extent.right, top: box.top - extent.top, bottom: box.bottom + extent.bottom }
+    const clip = { left: 0, right: innerWidth, top: 0, bottom: innerHeight }
+    for (let parent = tab.parentElement; parent; parent = parent.parentElement) {
+      const css = getComputedStyle(parent), rect = parent.getBoundingClientRect()
+      if (/auto|scroll|hidden|clip/.test(css.overflowX)) { clip.left = Math.max(clip.left, rect.left + parseFloat(css.borderLeftWidth)); clip.right = Math.min(clip.right, rect.right - parseFloat(css.borderRightWidth)) }
+      if (/auto|scroll|hidden|clip/.test(css.overflowY)) { clip.top = Math.max(clip.top, rect.top + parseFloat(css.borderTopWidth)); clip.bottom = Math.min(clip.bottom, rect.bottom - parseFloat(css.borderBottomWidth)) }
+    }
+    const labelNode = tab.firstChild!
+    const label = document.createRange(); label.selectNodeContents(labelNode)
+    const badge = tab.lastElementChild as HTMLElement
+    const badgeText = document.createRange(); badgeText.selectNodeContents(badge)
+    const labelStyle = getComputedStyle(labelNode instanceof Element ? labelNode : tab)
+    const badgeStyle = getComputedStyle(badge)
+    const text = { label: label.toString(), badge: badgeText.toString(), labelFont: labelStyle.fontSize, badgeFont: badgeStyle.fontSize,
+      labelOverflow: labelStyle.textOverflow, badgeOverflow: badgeStyle.textOverflow,
+      labelWidth: labelNode instanceof HTMLElement ? labelNode.clientWidth : null, labelScrollWidth: labelNode instanceof HTMLElement ? labelNode.scrollWidth : null,
+      badgeWidth: badge.clientWidth, badgeScrollWidth: badge.scrollWidth }
+    const labelLines = [...label.getClientRects()].map(rect => rect.toJSON())
+    return { box: box.toJSON(), ring, label: label.getBoundingClientRect().toJSON(), labelLines, badge: badge.getBoundingClientRect().toJSON(), badgeText: badgeText.getBoundingClientRect().toJSON(), text, clip, outline: style.outline, boxShadow: style.boxShadow,
+      focused: document.activeElement === tab, focusVisible: tab.matches(':focus-visible'), scrollLeft: group.scrollLeft, clientWidth: group.clientWidth, scrollWidth: group.scrollWidth,
+      window: { x: scrollX, y: scrollY }, font: getComputedStyle(document.documentElement).fontSize, dpr: devicePixelRatio }
+  })
+}
+
+for (const language of ['en', 'cs'] as const) for (const width of [768, 390, 360]) for (const font of [16, 32]) for (const state of ['focus', 'enter', 'reload'] as const) {
+  test(`#265 tabs reveal: ${language} ${width}px ${font}px ${state}`, async ({ page, context, browser }, info) => {
+    await page.setViewportSize({ width, height: 900 })
+    await page.emulateMedia({ reducedMotion: 'reduce' })
+    await context.addInitScript(({ language, font }) => {
+      localStorage.setItem('console-language', language)
+      const apply = () => { if (document.documentElement) document.documentElement.style.fontSize = `${font}px` }
+      apply(); new MutationObserver(apply).observe(document, { childList: true })
+    }, { language, font })
+    const group = list(page).locator('[data-list-slot="tabs"] [role="group"]')
+    const tabs = group.getByRole('button'), last = tabs.last()
+    const settleTabs = async () => {
+      await expect(tabs).toHaveCount(5)
+      await expect(list(page).locator('[data-list-range]')).toBeVisible()
+      await page.evaluate(async () => {
+        await document.fonts.ready
+        await Promise.all(document.getAnimations().filter(animation => animation.effect?.getComputedTiming().iterations !== Infinity).map(animation => animation.finished.catch(() => {})))
+        await new Promise<void>(done => requestAnimationFrame(() => requestAnimationFrame(() => done())))
+      })
+    }
+    await page.goto(state === 'reload' ? `${route}?view=invited` : route)
+    await settleTabs()
+    const initialWindow = { x: 0, y: 0 }
+    // Render the original tab markup/classes at intrinsic width, using this
+    // browser's font metrics. Exact equality stays portable across Mac/Linux.
+    const baseSize = async (target: Locator = last) => target.evaluate(element => {
+      const reference = element.cloneNode(true) as HTMLButtonElement
+      reference.className = 'flex min-h-12 shrink-0 items-center gap-2 border-b-2 border-transparent text-sm text-muted-foreground aria-pressed:border-primary aria-pressed:font-semibold aria-pressed:text-foreground'
+      if (reference.firstChild instanceof HTMLElement) reference.firstChild.replaceWith(document.createTextNode(reference.firstChild.textContent!))
+      Object.assign(reference.style, { position: 'fixed', left: '0', top: '0', width: 'max-content', visibility: 'hidden', pointerEvents: 'none' })
+      element.parentElement!.append(reference)
+      const { width, height } = reference.getBoundingClientRect()
+      reference.remove()
+      return { width, height }
+    })
+    if (state === 'focus') {
+      const path = `${output}/${language}-${width}-${font}-initial.png`
+      await page.screenshot({ path, animations: 'disabled' })
+      record('tabsInitial', `${language}-${width}-${font}`, { screenshot: path, locale: language, viewport: page.viewportSize(), rootFont: font, browser: browser.version(), geometry: await viewTabGeometry(last) })
+    }
+    const check = async (phase: string, focus = false, target: Locator = last, expectedLabel = 'Pending invitations', expectedBadge = '1') => {
+      await settleTabs()
+      const geometry = await viewTabGeometry(target)
+      const key = `${language}-${width}-${font}-${state}-${phase}`
+      const path = `${output}/${key}.png`
+      await page.screenshot({ path, animations: 'disabled' })
+      record('tabsReveal', key, { locale: language, viewport: page.viewportSize(), rootFont: font, state, phase, browser: browser.version(), screenshot: path, ...geometry })
+      await info.attach(`${key}.json`, { body: JSON.stringify(geometry), contentType: 'application/json' })
+      expect.soft(geometry.font).toBe(`${font}px`)
+      expect.soft(geometry.window).toEqual(initialWindow)
+      for (const [name, box] of Object.entries({ tab: geometry.box, ring: geometry.ring, label: geometry.label, badge: geometry.badge, badgeText: geometry.badgeText, ...Object.fromEntries(geometry.labelLines.map((line, index) => [`labelLine${index}`, line])) })) {
+        expect.soft(box.left, `${phase} ${name} left`).toBeGreaterThanOrEqual(geometry.clip.left)
+        expect.soft(box.right, `${phase} ${name} right`).toBeLessThanOrEqual(geometry.clip.right)
+        expect.soft(box.top, `${phase} ${name} top`).toBeGreaterThanOrEqual(geometry.clip.top)
+        expect.soft(box.bottom, `${phase} ${name} bottom`).toBeLessThanOrEqual(geometry.clip.bottom)
+      }
+      expect.soft(geometry.text.label).toBe(expectedLabel)
+      expect.soft(geometry.text.badge).toBe(expectedBadge)
+      expect.soft(geometry.text.labelOverflow).not.toBe('ellipsis')
+      expect.soft(geometry.text.badgeOverflow).not.toBe('ellipsis')
+      expect.soft(geometry.text.labelFont).toBe(`${font * .875}px`)
+      expect.soft(geometry.text.badgeFont).toBe(`${font * .75}px`)
+      expect.soft(geometry.text.badgeScrollWidth).toBeLessThanOrEqual(geometry.text.badgeWidth)
+      if (geometry.text.labelWidth !== null) expect.soft(geometry.text.labelScrollWidth).toBeLessThanOrEqual(geometry.text.labelWidth)
+      // Base probe dimensions: fitting tabs retain their exact box; only an
+      // oversized individual tab may become narrower and wrap its label.
+      const reference = await baseSize(target)
+      const available = await group.evaluate(element => element.clientWidth - parseFloat(getComputedStyle(element).paddingLeft) - parseFloat(getComputedStyle(element).paddingRight))
+      if (reference.width <= available) expect.soft({ width: geometry.box.width, height: geometry.box.height }).toEqual(reference)
+      expect.soft(geometry.scrollWidth).toBeGreaterThan(geometry.clientWidth)
+      expect.soft(await page.locator('html').getAttribute('lang')).toBe(language)
+      if (focus) { expect.soft(geometry.focused).toBe(true); expect.soft(geometry.focusVisible).toBe(true) }
+    }
+    if (state === 'reload') {
+      await expect(last).toHaveAttribute('aria-pressed', 'true')
+      await check('initial-selected')
+      await page.reload(); await expect(last).toHaveAttribute('aria-pressed', 'true')
+      await check('reloaded-selected')
+    } else {
+      // Start at the body and use the browser's actual sequential focus order.
+      for (let index = 0; index < 100 && !await last.evaluate(element => element === document.activeElement); index++) await page.keyboard.press('Tab')
+      await expect(last).toBeFocused()
+      if (state === 'focus') {
+        await check('tab', true)
+        await page.keyboard.press('Tab'); await page.keyboard.press('Shift+Tab')
+        await expect(last).toBeFocused(); await check('shift-tab', true)
+      } else {
+        await page.keyboard.press('Enter'); await expect(last).toHaveAttribute('aria-pressed', 'true')
+        expect(new URL(page.url()).searchParams.get('view')).toBe('invited')
+        await check('activated', true)
+        await page.goBack(); await expect(tabs.first()).toHaveAttribute('aria-pressed', 'true')
+        await check('history-back-selected', false, tabs.first(), 'All workers', '47')
+        await page.goForward(); await expect(last).toHaveAttribute('aria-pressed', 'true')
+        await check('history-selected')
+        await page.goBack(); await expect(tabs.first()).toHaveAttribute('aria-pressed', 'true')
+        for (let index = 0; index < 100 && !await last.evaluate(element => element === document.activeElement); index++) await page.keyboard.press('Tab')
+        await page.keyboard.press('Space'); await expect(last).toHaveAttribute('aria-pressed', 'true')
+        await check('space-selected', true)
+        await page.goBack(); await expect(tabs.first()).toHaveAttribute('aria-pressed', 'true')
+        await last.click(); await expect(last).toHaveAttribute('aria-pressed', 'true')
+        await check('click-selected')
+      }
+    }
+  })
+}
