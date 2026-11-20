@@ -18,6 +18,32 @@ const footer = (page: Page) => list(page).locator('footer')
 const panel = (page: Page) => page.getByRole('group', { name: en.sortAndFilter, exact: true })
 const savedTrigger = (page: Page) => page.getByRole('region', { name: en.savedViews, exact: true }).locator('button[aria-haspopup="dialog"]')
 const savedMenu = (page: Page) => page.getByRole('dialog', { name: en.savedViews, exact: true })
+// Measure the painted ring against the scrollport's inner border and opaque Actions.
+async function focusClear(control: Locator) {
+  await expect(control).toBeFocused()
+  await expect.poll(() => control.evaluate(element => {
+    const port = element.closest('[data-slot="table-container"]') as HTMLElement
+    const box = element.getBoundingClientRect()
+    const clip = port.getBoundingClientRect()
+    const actions = port.querySelector('th.sticky')?.getBoundingClientRect()
+    const left = clip.left + port.clientLeft
+    const right = Math.min(left + port.clientWidth, actions?.left ?? Infinity)
+    return { left: Math.max(0, left - (box.left - 3)), right: Math.max(0, box.right + 3 - right) }
+  }), { message: 'full 3px ring clears both clip edges and sticky Actions' }).toEqual({ left: 0, right: 0 })
+}
+
+test('focus reveal: Code Tab at zero clears opaque Actions', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto(route); await settled(page)
+  const port = list(page).locator('[data-slot="table-container"]')
+  await port.evaluate(element => { element.scrollLeft = 0 })
+  const name = list(page).getByRole('columnheader', { name: /Name/ }).getByRole('button').first()
+  const code = list(page).getByRole('columnheader', { name: /Code/ }).getByRole('button').first()
+  await name.focus()
+  // Name's filter follows its sort control in the natural keyboard order.
+  for (let index = 0; index < 4 && !await code.evaluate(element => element === document.activeElement); index++) await page.keyboard.press('Tab')
+  await focusClear(code)
+})
 async function settled(page: Page) {
   await expect(list(page)).toBeVisible()
   await expect(list(page).getByText(en.loading, { exact: true })).toHaveCount(0)

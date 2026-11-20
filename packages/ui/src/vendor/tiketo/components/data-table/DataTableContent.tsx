@@ -49,11 +49,12 @@ export const DataTableContent = <RecordType,>() => {
 
   // Get all visible columns to create colgroup
   const visibleColumns = table.getVisibleLeafColumns()
-  const overflow = useTableOverflow(presentation.listV2, visibleColumns.map(column => column.id).join(','))
+  const pinnedActions = !!presentation.listV2 && visibleColumns.some(column => column.id === '_actions' && column.getIsPinned() === 'right')
+  const overflow = useTableOverflow(presentation.listV2, visibleColumns.map(column => `${column.id}:${column.getSize()}`).join(','), pinnedActions)
 
   return (
     <div className="relative">
-      <Table containerProps={presentation.listV2 ? { ref: overflow.ref, role: 'region', tabIndex: 0, 'aria-label': presentation.scrollRegion, 'aria-describedby': overflow.edge ? overflow.hintId : undefined, 'data-overflow-edge': overflow.edge, onScroll: overflow.update, onKeyDown: overflow.onKeyDown } : undefined} className={`table-fixed ${presentation.tableClass ?? 'min-w-[600px]'}`} aria-label={presentation.label}>
+      <Table containerProps={presentation.listV2 ? { ref: overflow.ref, role: 'region', tabIndex: 0, 'aria-label': presentation.scrollRegion, 'aria-describedby': overflow.edge ? overflow.hintId : undefined, 'data-overflow-edge': overflow.edge, onScroll: overflow.update, onKeyDown: overflow.onKeyDown, onFocusCapture: overflow.onFocusCapture } : undefined} className={`table-fixed ${presentation.tableClass ?? 'min-w-[600px]'}`} aria-label={presentation.label}>
         <colgroup>
           {visibleColumns.map((column) => {
             return <col key={column.id} className={columnClass(column)} />
@@ -69,6 +70,7 @@ export const DataTableContent = <RecordType,>() => {
                   <TableHead
                     key={header.id}
                     scope="col"
+                    data-pinned-actions={pinnedActions && column.id === '_actions' ? '' : undefined}
                     aria-labelledby={presentation.headerId?.(column.id)}
                     aria-sort={column.getIsSorted() === 'asc' ? 'ascending' : column.getIsSorted() === 'desc' ? 'descending' : undefined}
                     className={columnClass(column, true)}
@@ -111,6 +113,7 @@ export const DataTableContent = <RecordType,>() => {
                   return (
                     <TableCell
                       key={cell.id}
+                      data-pinned-actions={pinnedActions && cell.column.id === '_actions' ? '' : undefined}
                       data-selection-cell={isSelectionCell ? 'true' : undefined}
                       className={columnClass(cell.column, true)}
                     >
