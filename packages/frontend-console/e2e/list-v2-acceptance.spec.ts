@@ -1,4 +1,6 @@
-import { test, expect, type Page, type Locator } from '@playwright/test'
+import { execFileSync } from 'node:child_process'
+const provenanceSHA = () => execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()
+import { test, expect, type Page, type Locator, type CDPSession } from '@playwright/test'
 import setup from './runtime/setup'
 import { layoutDiagnostics, attachLayoutDiagnostics } from './list-v2-layout-diagnostics'
 import { workers, expectedRows, expectedCounts, type Selection } from './runtime/list-v2-data'
@@ -826,4 +828,142 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
     await expect(page.getByRole('menu')).toBeVisible()
   }
   await captureSDK(page, state, language, testInfo)
+})
+
+
+// #266: adapted from wb261-select/measure.ts. Native Chromium selects expose
+// their full selected text through the UA shadow tree. The painted arrow has no
+// DOM glyph box: its reserved gutter is checked in full and clicked at center.
+async function pageSizeGeometry(select: Locator, cdp: CDPSession) {
+  const geometry = await select.evaluate((element: HTMLSelectElement) => {
+    const rect = (element: Element) => element.getBoundingClientRect().toJSON()
+    const style = getComputedStyle(element)
+    const box = rect(element)
+    const clips = [{ name: 'viewport', clipsX: true, clipsY: true, box: { left: 0, right: innerWidth, top: 0, bottom: innerHeight } }]
+    for (let parent = element.parentElement; parent; parent = parent.parentElement) {
+      const css = getComputedStyle(parent), bounds = rect(parent)
+      const paint = /paint|strict|content/.test(css.contain)
+      const clipsX = /auto|scroll|hidden|clip/.test(css.overflowX) || paint
+      const clipsY = /auto|scroll|hidden|clip/.test(css.overflowY) || paint
+      if (clipsX || clipsY) clips.push({ name: `${parent.tagName}.${parent.className}`, clipsX, clipsY, box: {
+        left: bounds.left + parseFloat(css.borderLeftWidth), right: bounds.right - parseFloat(css.borderRightWidth),
+        top: bounds.top + parseFloat(css.borderTopWidth), bottom: bounds.bottom - parseFloat(css.borderBottomWidth),
+      } })
+    }
+    const outline = style.outlineStyle === 'none' ? 0 : Math.max(0, parseFloat(style.outlineWidth) + parseFloat(style.outlineOffset))
+    const ring = Math.max(0, ...style.boxShadow.split(/,(?![^()]*\))/).filter(shadow => !shadow.includes('inset')).map(shadow => {
+      const lengths = Array.from(shadow.matchAll(/(-?[\d.]+)px/g), match => Number(match[1]))
+      return lengths.length >= 4 ? lengths[3] : 0
+    }))
+    const extent = Math.max(outline, ring)
+    return { box, clips, focusBox: { left: box.left - extent, right: box.right + extent, top: box.top - extent, bottom: box.bottom + extent },
+      extent, focusVisible: element.matches(':focus-visible'), focused: document.activeElement === element,
+      value: element.value, text: element.selectedOptions[0].text, borderRight: parseFloat(style.borderRightWidth), rootFont: getComputedStyle(document.documentElement).fontSize, dpr: devicePixelRatio }
+  })
+  const documentNode = await cdp.send('DOM.getDocument', { depth: -1, pierce: true })
+  type Node = { nodeName: string; nodeId: number; attributes?: string[]; children?: Node[]; shadowRoots?: Node[] }
+  const find = (node: Node, predicate: (node: Node) => boolean): Node | undefined => predicate(node) ? node : [...node.children ?? [], ...node.shadowRoots ?? []].map(child => find(child, predicate)).find(Boolean)
+  const native = find(documentNode.root, node => node.nodeName === 'SELECT')!
+  const inner = find(native, node => !!node.attributes?.includes('-internal-select-inner-element'))!
+  const resolved = await cdp.send('DOM.resolveNode', { nodeId: inner.nodeId })
+  const response = await cdp.send('Runtime.callFunctionOn', { objectId: resolved.object.objectId, returnByValue: true, functionDeclaration: `function() {
+    const range = document.createRange(); range.selectNodeContents(this);
+    return { box: this.getBoundingClientRect().toJSON(), text: range.getBoundingClientRect().toJSON(), content: this.textContent };
+  }` })
+  const nativeText = response.result.value as { box: { left: number; right: number; top: number; bottom: number }; text: { left: number; right: number; top: number; bottom: number }; content: string }
+  return { ...geometry, nativeText, caret: { left: nativeText.box.right, right: geometry.box.right - geometry.borderRight, top: geometry.box.top, bottom: geometry.box.bottom } }
+}
+
+for (const language of ['en', 'cs'] as const) for (const width of [320, 360, 390]) for (const font of [16, 32]) for (const offered of ['10', 'widest'] as const) test(`page-size fit: ${language} ${width}px font ${font} value ${offered}`, async ({ page, context, browser }, info) => {
+  const copy = language === 'cs' ? cs : en
+  await page.setViewportSize({ width, height: width === 320 ? 1000 : 844 })
+  await context.addInitScript(language => localStorage.setItem('console-language', language), language)
+  // Same high-page fixture as the measurement harness and #264 boundary cases.
+  await page.route('**/query', async intercepted => {
+    const query = intercepted.request().postDataJSON()
+    if (query.entity !== 'worker' || !query.includeTotal) return intercepted.continue()
+    const response = await intercepted.fetch({ postData: JSON.stringify({ ...query, offset: 0 }) })
+    await intercepted.fulfill({ response, json: { ...await response.json(), total: 10010 } })
+  })
+  await page.goto(`${route}?page=1000`); await settled(page)
+  await page.evaluate(font => { document.documentElement.style.fontSize = `${font}px` }, font)
+  const select = footer(page).getByRole('combobox', { name: copy.rowsPerPage, exact: true })
+  await layoutDiagnostics(select, true)
+  // Read the real offered strings and measure their rendered text, per locale
+  // and font. Do not assume that the largest numeric option is the widest.
+  const options = await select.evaluate((element: HTMLSelectElement) => {
+    const probe = document.createElement('span')
+    probe.style.cssText = 'position:fixed;visibility:hidden;white-space:pre'
+    probe.style.font = getComputedStyle(element).font
+    document.body.append(probe)
+    try { return Array.from(element.options, option => {
+      probe.textContent = option.text
+      const range = document.createRange(); range.selectNodeContents(probe)
+      return { value: option.value, text: option.text, width: range.getBoundingClientRect().width }
+    }) } finally { probe.remove() }
+  })
+  const value = offered === '10' ? '10' : options.reduce((a, b) => a.width >= b.width ? a : b).value
+  if (offered === 'widest') {
+    await select.selectOption(value)
+    await expect(select).toHaveValue(value)
+    // Page-size changes reset the page. Return to the supported offset bound
+    // so Previous and Next are both focusable for the widest selected option.
+    await page.goto(`${route}?page=${Math.floor(9990 / Number(value)) + 1}&pageSize=${value}`); await settled(page)
+    await page.evaluate(font => { document.documentElement.style.fontSize = `${font}px` }, font)
+  }
+  await expect(select).toHaveValue(value)
+  const cdp = await context.newCDPSession(page)
+  const paging = footer(page).locator('[data-list-paging]')
+  for (const state of ['default', 'Previous', 'Next', 'selectFocused'] as const) {
+    await paging.scrollIntoViewIfNeeded()
+    if (state === 'default') await select.evaluate(element => (element as HTMLElement).blur())
+    else if (state === 'selectFocused') {
+      // Real Tab from the preceding focusable DOM control, as in measure.ts.
+      await select.evaluate(element => {
+        const controls = Array.from(document.querySelectorAll<HTMLElement>('button,a[href],input,select,textarea,[tabindex]')).filter(control => control.tabIndex >= 0 && !control.hasAttribute('disabled') && control.getBoundingClientRect().width > 0)
+        controls[controls.indexOf(element as HTMLElement) - 1].focus()
+      })
+      await page.keyboard.press('Tab'); await expect(select).toBeFocused()
+    } else {
+      const button = paging.getByRole('button', { name: state === 'Previous' ? copy.previousPage : copy.nextPage, exact: true })
+      await expect(button).toBeEnabled(); await button.focus(); await expect(button).toBeFocused()
+    }
+    await layoutDiagnostics(select, true)
+    const geometry = await pageSizeGeometry(select, cdp)
+    const key = `${language}-${width}-${font}-${value}-${state}`
+    const png = `${process.env.LIST_V2_OUTPUT}/page-size-${key}.png`
+    await page.screenshot({ path: png, animations: 'disabled' })
+    const sample = { sha: provenanceSHA(), locale: language, viewport: page.viewportSize(), font, offered, value, options, state, browser: browser.version(), geometry, png }
+    record('pageSize', key, sample)
+    observations.push({ kind: 'page-size', ...sample })
+    expect(geometry.nativeText.content).toBe(geometry.text)
+    expect(geometry.caret.right - geometry.caret.left).toBeGreaterThan(0)
+    if (state === 'selectFocused') { expect(geometry.focused).toBe(true); expect(geometry.focusVisible).toBe(true); expect(geometry.extent).toBeGreaterThan(0) }
+    const boxes = { trigger: geometry.box, focus: geometry.focusBox, text: geometry.nativeText.text, caret: geometry.caret }
+    for (const [name, box] of Object.entries(boxes)) for (const clip of geometry.clips) {
+      if (clip.clipsX) { expect.soft(box.left, `${key} ${name} left vs ${clip.name}`).toBeGreaterThanOrEqual(clip.box.left); expect.soft(box.right, `${key} ${name} right vs ${clip.name}`).toBeLessThanOrEqual(clip.box.right) }
+      if (clip.clipsY) { expect.soft(box.top, `${key} ${name} top vs ${clip.name}`).toBeGreaterThanOrEqual(clip.box.top); expect.soft(box.bottom, `${key} ${name} bottom vs ${clip.name}`).toBeLessThanOrEqual(clip.box.bottom) }
+    }
+    // Text must also fit the native select's own inner overflow clip.
+    for (const edge of ['left', 'top'] as const) expect.soft(geometry.nativeText.text[edge], `${key} native text ${edge}`).toBeGreaterThanOrEqual(geometry.nativeText.box[edge])
+    for (const edge of ['right', 'bottom'] as const) expect.soft(geometry.nativeText.text[edge], `${key} native text ${edge}`).toBeLessThanOrEqual(geometry.nativeText.box[edge])
+    for (const [name, box] of Object.entries({ trigger: geometry.box, caret: geometry.caret })) {
+      await page.mouse.click((box.left + box.right) / 2, (box.top + box.bottom) / 2)
+      expect.soft(await select.evaluate(element => element.matches(':open')), `${key} ${name} click opens`).toBe(true)
+      // macOS native menus ignore synthetic Escape; Tab reliably dismisses.
+      await page.keyboard.press('Tab'); await page.keyboard.press('Shift+Tab')
+    }
+    if (state === 'selectFocused') {
+      await select.focus(); await page.keyboard.press('Space')
+      expect(await select.evaluate(element => element.matches(':open'))).toBe(true)
+      await page.keyboard.press('Tab')
+    }
+  }
+  // Explicit programmatic change, not a claim of native menu key selection.
+  await select.selectOption('20')
+  await expect(select).toHaveValue('20')
+  await expect(page.locator('tbody tr')).toHaveCount(20)
+  await expect.poll(() => new URL(page.url()).searchParams.get('page')).not.toBe('1000')
+  await info.attach('page-size-options.json', { body: JSON.stringify({ language, font, offered, value, options }), contentType: 'application/json' })
+  await cdp.detach()
 })
