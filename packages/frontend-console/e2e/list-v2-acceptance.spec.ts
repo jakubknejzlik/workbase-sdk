@@ -2,7 +2,7 @@ import { test, expect, type Page, type Locator } from '@playwright/test'
 import setup from './runtime/setup'
 import { layoutDiagnostics, attachLayoutDiagnostics } from './list-v2-layout-diagnostics'
 import { workers, expectedRows, expectedCounts, type Selection } from './runtime/list-v2-data'
-import { capture, provenance, result, record } from './list-v2-evidence'
+import { capture, captureSDK, provenance, result, record } from './list-v2-evidence'
 import en from '../src/locales/en.json' with { type: 'json' }
 import cs from '../src/locales/cs.json' with { type: 'json' }
 
@@ -434,9 +434,11 @@ for (const width of [1110, 1231, 1233]) for (const language of ['en', 'cs'] as c
   await paging.scrollIntoViewIfNeeded()
   // Check every clipping ancestor as well as the paging viewport; visible DOM
   // alone missed the section's overflow:hidden in the review reproduction.
-  const checkPaging = async (phase: string, controls = [previous, current, next]) => {
+  const checkPaging = async (phase: string, controls = [previous, current, next], focusRing = false) => {
+    // Observe the completed native focus-ring transition before measuring.
+    if (focusRing) await layoutDiagnostics(controls[0], true)
     for (const control of controls) {
-      const geometry = await control.evaluate(element => {
+      const geometry = await control.evaluate((element, focusRing) => {
         const box = element.getBoundingClientRect()
         const clips = [{ left: 0, right: innerWidth }]
         for (let parent = element.parentElement; parent; parent = parent.parentElement) {
@@ -446,8 +448,18 @@ for (const width of [1110, 1231, 1233]) for (const language of ['en', 'cs'] as c
             clips.push({ left: rect.left + parseFloat(style.borderLeftWidth), right: rect.right - parseFloat(style.borderRightWidth) })
           }
         }
-        return { left: box.left, right: box.right, clipLeft: Math.max(...clips.map(clip => clip.left)), clipRight: Math.min(...clips.map(clip => clip.right)) }
-      })
+        const style = getComputedStyle(element)
+        const outlineWidth = style.outlineStyle === 'none' ? 0 : parseFloat(style.outlineWidth)
+        const outlineOffset = parseFloat(style.outlineOffset)
+        // The shipped Button uses a box-shadow ring; include it as well as any
+        // CSS outline so this oracle measures the visible focus indicator.
+        const ringWidth = Math.max(0, ...style.boxShadow.split(/,(?![^()]*\))/).filter(shadow => !shadow.includes('inset')).map(shadow => {
+          const lengths = Array.from(shadow.matchAll(/(-?[\d.]+)px/g), match => Number(match[1]))
+          return lengths.length >= 4 ? lengths[3] : 0
+        }))
+        const focusExtent = focusRing ? Math.max(0, outlineWidth + outlineOffset, ringWidth) : 0
+        return { left: box.left, right: box.right, focusLeft: box.left - focusExtent, focusRight: box.right + focusExtent, outlineWidth, outlineOffset, ringWidth, focusExtent, focused: element === document.activeElement, focusVisible: element.matches(':focus-visible'), clipLeft: Math.max(...clips.map(clip => clip.left)), clipRight: Math.min(...clips.map(clip => clip.right)) }
+      }, focusRing)
       observations.push({ kind: 'paging-boundary', phase, number, width, language, geometry })
       if (width === 1110 && number === 1000) {
         const diagnostic = await layoutDiagnostics(control)
@@ -456,18 +468,34 @@ for (const width of [1110, 1231, 1233]) for (const language of ['en', 'cs'] as c
       await expect(control).toBeVisible()
       expect.soft(geometry.left).toBeGreaterThanOrEqual(geometry.clipLeft)
       expect.soft(geometry.right).toBeLessThanOrEqual(geometry.clipRight)
+      if (focusRing) {
+        expect(geometry.focused).toBe(true)
+        expect(geometry.focusVisible).toBe(true)
+        expect(geometry.focusExtent).toBeGreaterThan(0)
+        expect.soft(geometry.focusLeft).toBeGreaterThanOrEqual(geometry.clipLeft)
+        expect.soft(geometry.focusRight).toBeLessThanOrEqual(geometry.clipRight)
+      }
     }
   }
   await checkPaging('before focus')
+  if (width === 1110 && number === 1000) await captureSDK(page, 'pagination-before-focus', language, testInfo)
   await next.focus()
   await expect(next).toBeFocused()
   await checkPaging('after focusing Next')
+  if (width === 1110 && number === 1000) {
+    await captureSDK(page, 'pagination-focused-Next', language, testInfo)
+    await previous.focus()
+    await checkPaging('after focusing Previous')
+    await captureSDK(page, 'pagination-focused-Previous', language, testInfo)
+  }
   if (width === 1110 && number === 1000) {
     // Below the supported layout widths, retain native focus/scroll recovery
     // even when Previous/current/Next themselves cannot fit on one line.
     await page.setViewportSize({ width: 320, height: 1000 })
     await paging.scrollIntoViewIfNeeded()
     await previous.focus()
+    await checkPaging('overflow fallback after focusing Previous', [previous], true)
+    await captureSDK(page, 'pagination-focused-Previous', language, testInfo)
     const overflow = await paging.evaluate(element => ({ clientWidth: element.clientWidth, scrollWidth: element.scrollWidth }))
     expect(overflow.scrollWidth).toBeGreaterThan(overflow.clientWidth)
     await page.keyboard.press('Tab')
@@ -475,7 +503,8 @@ for (const width of [1110, 1231, 1233]) for (const language of ['en', 'cs'] as c
     await page.keyboard.press('Tab')
     await expect(next).toBeFocused()
     expect.soft(await paging.evaluate(element => element.scrollLeft)).toBeGreaterThan(0)
-    await checkPaging('overflow fallback after focusing Next', [next])
+    await checkPaging('overflow fallback after focusing Next', [next], true)
+    await captureSDK(page, 'pagination-focused-Next', language, testInfo)
     await page.setViewportSize({ width, height: 1000 })
   }
   // Exercise the visible buttons in DOM order, excluding collapsed numbers.
@@ -777,3 +806,24 @@ for (const width of [1440, 1024, 768, 390, 360]) for (const language of ['en', '
     await page.keyboard.press('Escape'); await expect(trigger).toBeFocused()
   })
 }
+
+for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }, { width: 360, height: 800 }]) for (const language of ['en', 'cs'] as const) for (const state of ['populated-list', 'Filters-open', 'Columns-open', 'access-menu-open'] as const) test(`SDK preview: ${viewport.width}x${viewport.height} ${language} ${state}`, async ({ page, context }, testInfo) => {
+  const copy = language === 'cs' ? cs : en
+  await page.setViewportSize(viewport)
+  await context.addInitScript(language => localStorage.setItem('console-language', language), language)
+  await page.goto(route); await settled(page)
+  if (state === 'Filters-open') {
+    await page.getByRole('button', { name: copy.sortAndFilter, exact: true }).click()
+    await expect(page.getByRole('group', { name: copy.sortAndFilter, exact: true })).toBeVisible()
+  }
+  if (state === 'Columns-open') {
+    await page.getByRole('button', { name: copy.listDisplay, exact: true }).click()
+    await expect(page.getByRole('dialog', { name: copy.listDisplayHeading })).toBeVisible()
+  }
+  if (state === 'access-menu-open') {
+    const trigger = page.getByRole('row').filter({ has: page.getByRole('link', { name: 'Worker 002', exact: true }) }).getByRole('button', { name: new RegExp(copy.rowAccessActions) })
+    await trigger.click()
+    await expect(page.getByRole('menu')).toBeVisible()
+  }
+  await captureSDK(page, state, language, testInfo)
+})

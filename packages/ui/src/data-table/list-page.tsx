@@ -30,7 +30,8 @@ export function ListPageFooter({ total, page, limit, pageSize, maxOffset, busy, 
       {known && <p data-list-range="" role={busy ? undefined : "status"} aria-live="polite" className="tabular-nums text-muted-foreground">{labels.range(total === 0 ? 0 : Math.min(page * limit + 1, total!), Math.min((page + 1) * limit, total!), total!)}</p>}
       <label className="mr-auto flex items-center gap-2 sm:mr-3">{labels.pageSize}<select aria-label={labels.pageSize} className="rounded border bg-background p-1" value={pageSize} disabled={busy} onChange={event => onPageSize(Number(event.target.value))}>{[10, 20, 30, 50, 100].map(size => <option key={size} value={size}>{labels.pageSizeOption?.(size) ?? size}</option>)}</select></label>
     </div>
-    <div data-list-paging="" className="ml-auto flex max-w-full items-center gap-1 overflow-x-auto" onFocusCapture={event => {
+    {/* Keep focus rings inside the clip and reachable at both scroll limits. */}
+    <div data-list-paging="" className="ml-auto flex max-w-full items-center gap-1 overflow-x-auto p-1 scroll-p-1" onFocusCapture={event => {
       if (event.currentTarget.scrollWidth > event.currentTarget.clientWidth) event.target.scrollIntoView({ block: 'nearest', inline: 'nearest' })
     }}>
       <Button type="button" variant="ghost" size="icon" aria-label={labels.previous} disabled={busy || !known || page <= 0} onClick={() => onPage(page - 1)}><ChevronLeft aria-hidden="true" className="size-4" /></Button>
