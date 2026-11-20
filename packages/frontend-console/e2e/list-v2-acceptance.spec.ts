@@ -1032,7 +1032,7 @@ for (const language of ['en', 'cs'] as const) for (const width of [768, 390, 360
         await new Promise<void>(done => requestAnimationFrame(() => requestAnimationFrame(() => done())))
       })
     }
-    await page.goto(state === 'reload' ? `${route}?view=invited` : route)
+    await gotoSDK(page, state === 'reload' ? `${route}?view=invited` : route)
     await settleTabs()
     const initialWindow = { x: 0, y: 0 }
     // Render the original tab markup/classes at intrinsic width, using this
@@ -1097,7 +1097,7 @@ for (const language of ['en', 'cs'] as const) for (const width of [768, 390, 360
     if (state === 'reload') {
       await expect(last).toHaveAttribute('aria-pressed', 'true')
       await check('initial-selected')
-      await page.reload(); await expect(last).toHaveAttribute('aria-pressed', 'true')
+      await reloadSDK(page); await expect(last).toHaveAttribute('aria-pressed', 'true')
       await check('reloaded-selected')
     } else {
       // Start at the body and use the browser's actual sequential focus order.
@@ -1165,7 +1165,7 @@ for (const language of ['en', 'cs'] as const) for (const font of [16, 32]) {
       }
     }
     try {
-      await page.goto(route)
+      await gotoSDK(page, route)
       await expect(tabs).toHaveCount(5)
       await expect(group.locator('.tabular-nums')).toHaveCount(0)
       await expect(list(page).locator('[aria-busy="true"]')).toBeVisible()
