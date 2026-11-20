@@ -1038,9 +1038,18 @@ for (const language of ['en', 'cs'] as const) for (const width of [768, 390, 360
     // Render the original tab markup/classes at intrinsic width, using this
     // browser's font metrics. Exact equality stays portable across Mac/Linux.
     const baseSize = async (target: Locator = last) => target.evaluate(element => {
-      const reference = element.cloneNode(true) as HTMLButtonElement
+      const reference = document.createElement('button')
+      reference.type = 'button'
+      reference.setAttribute('aria-pressed', element.getAttribute('aria-pressed')!)
       reference.className = 'flex min-h-12 shrink-0 items-center gap-2 border-b-2 border-transparent text-sm text-muted-foreground aria-pressed:border-primary aria-pressed:font-semibold aria-pressed:text-foreground'
-      if (reference.firstChild instanceof HTMLElement) reference.firstChild.replaceWith(document.createTextNode(reference.firstChild.textContent!))
+      reference.append(document.createTextNode(element.firstChild!.textContent!))
+      const count = element.querySelector('.tabular-nums')
+      if (count) {
+        const badge = document.createElement('span')
+        badge.className = 'rounded bg-muted px-1.5 py-0.5 text-xs tabular-nums'
+        badge.textContent = count.textContent
+        reference.append(badge)
+      }
       Object.assign(reference.style, { position: 'fixed', left: '0', top: '0', width: 'max-content', visibility: 'hidden', pointerEvents: 'none' })
       element.parentElement!.append(reference)
       const { width, height } = reference.getBoundingClientRect()
@@ -1115,5 +1124,65 @@ for (const language of ['en', 'cs'] as const) for (const width of [768, 390, 360
         await check('click-selected')
       }
     }
+  })
+}
+
+// #265: counts must not displace a tab focused while the real query is pending.
+for (const language of ['en', 'cs'] as const) for (const font of [16, 32]) {
+  test(`#265 tabs focus-pending: ${language} 360px ${font}px`, async ({ page, context, browser }, info) => {
+    await page.setViewportSize({ width: 360, height: 900 })
+    await page.emulateMedia({ reducedMotion: 'reduce' })
+    await context.addInitScript(({ language, font }) => {
+      localStorage.setItem('console-language', language)
+      const apply = () => { if (document.documentElement) document.documentElement.style.fontSize = `${font}px` }
+      apply(); new MutationObserver(apply).observe(document, { childList: true })
+    }, { language, font })
+    let release!: () => void
+    const held = new Promise<void>(resolve => { release = resolve })
+    await page.route('**/query', async intercepted => {
+      const response = await intercepted.fetch()
+      await held
+      await intercepted.fulfill({ response })
+    })
+    const group = list(page).locator('[data-list-slot="tabs"] [role="group"]')
+    const tabs = group.getByRole('button'), last = tabs.last()
+    const check = async (phase: string) => {
+      const geometry = await viewTabGeometry(last)
+      const key = `${language}-360-${font}-focus-pending-${phase}`
+      const path = `${output}/${key}.png`
+      await page.screenshot({ path, animations: 'disabled' })
+      record('tabsFocusPending', key, { locale: language, viewport: page.viewportSize(), rootFont: font, browser: browser.version(), phase, screenshot: path, ...geometry })
+      await info.attach(`${key}.json`, { body: JSON.stringify(geometry), contentType: 'application/json' })
+      expect.soft(geometry.focused).toBe(true)
+      expect.soft(geometry.focusVisible).toBe(true)
+      expect.soft(geometry.font).toBe(`${font}px`)
+      expect.soft(geometry.window).toEqual({ x: 0, y: 0 })
+      for (const [name, box] of Object.entries({ tab: geometry.box, ring: geometry.ring, label: geometry.label, ...(phase === 'after-counts' ? { badge: geometry.badge, badgeText: geometry.badgeText } : {}), ...Object.fromEntries(geometry.labelLines.map((line, index) => [`labelLine${index}`, line])) })) {
+        expect.soft(box.left, `${phase} ${name} left`).toBeGreaterThanOrEqual(geometry.clip.left)
+        expect.soft(box.right, `${phase} ${name} right`).toBeLessThanOrEqual(geometry.clip.right)
+        expect.soft(box.top, `${phase} ${name} top`).toBeGreaterThanOrEqual(geometry.clip.top)
+        expect.soft(box.bottom, `${phase} ${name} bottom`).toBeLessThanOrEqual(geometry.clip.bottom)
+      }
+    }
+    try {
+      await page.goto(route)
+      await expect(tabs).toHaveCount(5)
+      await expect(group.locator('.tabular-nums')).toHaveCount(0)
+      await expect(list(page).locator('[aria-busy="true"]')).toBeVisible()
+      await page.evaluate(async () => { await document.fonts.ready })
+      for (let index = 0; index < 100 && !await last.evaluate(element => element === document.activeElement); index++) await page.keyboard.press('Tab')
+      await expect(last).toBeFocused()
+      await expect(tabs.first()).toHaveAttribute('aria-pressed', 'true')
+      await check('before-counts')
+      release()
+      await expect(last.locator('.tabular-nums')).toHaveText('1')
+      await expect(list(page).locator('[data-list-range]')).toBeVisible()
+      await page.evaluate(() => new Promise<void>(done => requestAnimationFrame(() => requestAnimationFrame(() => done()))))
+      await expect(tabs.first()).toHaveAttribute('aria-pressed', 'true')
+      await expect(last).toHaveAttribute('aria-pressed', 'false')
+      await check('after-counts')
+      await expect(page.locator('html')).toHaveAttribute('lang', language)
+      expect(new URL(page.url()).searchParams.get('view')).toBeNull()
+    } finally { release(); await page.unrouteAll({ behavior: 'wait' }) }
   })
 }

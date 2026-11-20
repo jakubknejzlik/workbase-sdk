@@ -26,15 +26,28 @@ function revealViewTab(tab: HTMLElement) {
 }
 export function ListViewTabs({ label, views, value, onChange }: { label: string; views: { id: string; label: string; count?: number }[]; value: string; onChange: (id: string) => void }) {
   const scroller = useRef<HTMLDivElement>(null)
+  const previousValue = useRef<string | undefined>(undefined)
+  const anchor = useRef<{ tab: HTMLElement; scrollLeft: number } | null>(null)
+  const reveal = (tab: HTMLElement) => {
+    revealViewTab(tab)
+    anchor.current = { tab, scrollLeft: scroller.current!.scrollLeft }
+  }
   useLayoutEffect(() => {
     const group = scroller.current!
-    const selected = group.querySelector<HTMLElement>('[aria-pressed="true"]')
-    if (selected) revealViewTab(selected)
+    const selectionChanged = previousValue.current !== value
+    previousValue.current = value
+    // Navigation chooses the selected tab; keyboard focus chooses its own tab.
+    // Preserve that anchor as counts change widths, including on initial load.
+    // Manual scrolling cancels an unfocused anchor instead of snapping back.
+    const target = selectionChanged ? group.querySelector<HTMLElement>('[aria-pressed="true"]')
+      : anchor.current && group.contains(anchor.current.tab) && (anchor.current.tab === document.activeElement || anchor.current.scrollLeft === group.scrollLeft) ? anchor.current.tab : null
+    if (target) reveal(target)
+    else anchor.current = null
   }, [value, views])
   // Padding exposes the focus outline; negative margins preserve the row's
   // existing tab positions and height when labels already fit. Inset the
   // outline at the panel's top edge, where the rounded panel also clips.
-  return <div ref={scroller} role="group" aria-label={label} onFocusCapture={event => revealViewTab(event.target)} className="-my-1 -ml-1 flex gap-5 overflow-x-auto scroll-p-1 whitespace-nowrap p-1">{views.map(view => <button type="button" key={view.id} aria-pressed={value === view.id} onClick={() => onChange(view.id)} className="flex min-h-12 max-w-full shrink-0 items-center gap-2 border-b-2 border-transparent text-sm text-muted-foreground focus-visible:-outline-offset-1 aria-pressed:border-primary aria-pressed:font-semibold aria-pressed:text-foreground">
+  return <div ref={scroller} role="group" aria-label={label} onFocusCapture={event => reveal(event.target)} className="-my-1 -ml-1 flex gap-5 overflow-x-auto scroll-p-1 whitespace-nowrap p-1">{views.map(view => <button type="button" key={view.id} aria-pressed={value === view.id} onClick={() => onChange(view.id)} className="flex min-h-12 max-w-full shrink-0 items-center gap-2 border-b-2 border-transparent text-sm text-muted-foreground focus-visible:-outline-offset-1 aria-pressed:border-primary aria-pressed:font-semibold aria-pressed:text-foreground">
     <span className="min-w-0 whitespace-normal">{view.label}</span>{Number.isSafeInteger(view.count) && view.count! >= 0 && <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-xs tabular-nums">{view.count}</span>}
   </button>)}</div>
 }
