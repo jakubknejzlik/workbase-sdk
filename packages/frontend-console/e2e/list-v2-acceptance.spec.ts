@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process'
 const provenanceSHA = () => execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()
 import { test, expect, type Page, type Locator, type CDPSession } from '@playwright/test'
 import setup from './runtime/setup'
+import { observePreview500, assertNoPreview500 } from './list-v2-http'
 import { observeSDKStylesheet, sdkStylesheetReady, gotoSDK, reloadSDK } from './list-v2-readiness'
 import { layoutDiagnostics, attachLayoutDiagnostics } from './list-v2-layout-diagnostics'
 import { workers, expectedRows, expectedCounts, type Selection } from './runtime/list-v2-data'
@@ -15,8 +16,8 @@ const route = '/o/org-a/e/worker'
 const labels: Record<string, string> = { all: 'All workers', active: 'Active workers', inactive: 'Inactive workers', empty: 'Archived workers', invited: 'Pending invitations' }
 test.beforeAll(async ({ browser }) => { stop = await setup({ worker: 'list-v2-worker.ts', seed: 'list-v2-seed.ts' }); provenance(browser.version()) })
 test.afterAll(async () => { await stop?.() })
-test.beforeEach(async ({ context, page }) => { observations = []; observeSDKStylesheet(page); page.on('response', response => { if (new URL(response.url()).pathname === '/query') void response.json().then(body => observations.push({ kind: 'query', request: response.request().postDataJSON(), status: response.status(), response: body })).catch(() => {}) }); await context.addInitScript(() => localStorage.setItem('console-language', 'en')) })
-test.afterEach(async ({ page }, info) => { observations.push({ kind: 'final', url: page.url(), ids: await ids(page).catch(() => []), footer: await footer(page).textContent().catch(() => null), tabs: await list(page).locator('[data-list-slot="tabs"]').textContent().catch(() => null) }); record('functionalEvidence', info.title, observations); result(info) })
+test.beforeEach(async ({ context, page }) => { observations = []; observeSDKStylesheet(page); observePreview500(context); page.on('response', response => { if (new URL(response.url()).pathname === '/query') void response.json().then(body => observations.push({ kind: 'query', request: response.request().postDataJSON(), status: response.status(), response: body })).catch(() => {}) }); await context.addInitScript(() => localStorage.setItem('console-language', 'en')) })
+test.afterEach(async ({ page, context }, info) => { observations.push({ kind: 'final', url: page.url(), ids: await ids(page).catch(() => []), footer: await footer(page).textContent().catch(() => null), tabs: await list(page).locator('[data-list-slot="tabs"]').textContent().catch(() => null) }); record('functionalEvidence', info.title, observations); try { await assertNoPreview500(context, info); result(info) } catch (error) { result(info, error); throw error } })
 const list = (page: Page) => page.locator('[data-slot="list-page"]')
 const footer = (page: Page) => list(page).locator('footer')
 const panel = (page: Page) => page.getByRole('group', { name: en.sortAndFilter, exact: true })

@@ -36,8 +36,8 @@ export async function capture(page: Page, scenario: string, reference: string, i
   await page.screenshot({ path, fullPage: true, animations: 'disabled' })
   record('captures', `${scenario}-${width}`, { scenario, referenceAsset: reference, referenceScenario: scenario, capturePath: path, viewport: page.viewportSize(), locale: 'en', fullPage: true, injection: injection ?? null, ...JSON.parse(readFileSync(join(output, 'manifest.json'), 'utf8')).provenance.run })
 }
-export function result(info: TestInfo) {
-  record('checks', info.title, { status: info.status, expectedStatus: info.expectedStatus, errors: info.errors.map(error => error.message), tracePath: info.status === 'passed' ? null : info.outputPath('trace.zip'), attachments: info.attachments.map(({ name, path }) => ({ name, path })) })
+export function result(info: TestInfo, failure?: unknown) {
+  record('checks', info.title, { status: failure ? 'failed' : info.status, expectedStatus: info.expectedStatus, errors: [...info.errors.map(error => error.message), ...(failure ? [failure instanceof Error ? failure.message : String(failure)] : [])], tracePath: info.status === 'passed' && !failure ? null : info.outputPath('trace.zip'), attachments: info.attachments.map(({ name, path }) => ({ name, path })) })
 }
 
 /** SDK review evidence, captured in the acceptance run that proves the source. */
