@@ -1,5 +1,6 @@
 import { test, expect, type Page, type Locator } from '@playwright/test'
 import setup from './runtime/setup'
+import { layoutDiagnostics, attachLayoutDiagnostics } from './list-v2-layout-diagnostics'
 import { workers, expectedRows, expectedCounts, type Selection } from './runtime/list-v2-data'
 import { capture, provenance, result, record } from './list-v2-evidence'
 import en from '../src/locales/en.json' with { type: 'json' }
@@ -65,6 +66,45 @@ async function save(page: Page, name: string) {
   await expect(savedTrigger(page)).toHaveText(name)
 }
 const scenarios = ['populated-admin', 'populated-restricted-staff', 'expanded-filters', 'view-menu', 'access-menu', 'personal-views', 'empty', 'error', 'loading'] as const
+for (const language of ['en', 'cs'] as const) {
+  const copy = language === 'cs' ? cs : en
+  test(`R4: ${language} toolbar relation filter visibly identifies its configured label`, async ({ page }) => {
+    await page.addInitScript(language => localStorage.setItem('console-language', language), language)
+    await page.goto(route); await settled(page)
+    const team = page.getByRole('combobox', { name: 'Team', exact: true })
+    await expect(team).toBeVisible()
+    await expect(team).toHaveValue('')
+    await expect(team).toHaveAttribute('placeholder', 'Team')
+  })
+  for (const width of [767, 768, 769, 800, 1023, 1024]) test(`R1: ${language} shell navigation at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 })
+    await page.addInitScript(language => localStorage.setItem('console-language', language), language)
+    await page.goto(route); await settled(page)
+    const gap = page.locator('[data-slot="sidebar-gap"]')
+    if (width >= 1024) {
+      await expect(page.locator('[data-slot="sidebar-container"]')).toBeVisible()
+      expect(await gap.evaluate(element => element.getBoundingClientRect().width)).toBeGreaterThan(0)
+      return
+    }
+    await expect(gap).toHaveCount(0)
+    expect((await page.locator('main').boundingBox())!.width).toBe(width)
+    const toolbar = list(page).locator('[data-list-slot="toolbar"]')
+    const search = toolbar.getByRole('searchbox', { name: copy.search, exact: true })
+    const geometry = await toolbar.evaluate(element => {
+      const style = getComputedStyle(element)
+      return element.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight)
+    })
+    expect((await search.boundingBox())!.width).toBe(geometry)
+    const trigger = page.getByRole('button', { name: copy.openNavigation, exact: true })
+    await trigger.click()
+    const dialog = page.getByRole('dialog')
+    await expect(dialog).toBeVisible()
+    await expect(dialog.getByRole('navigation')).toBeVisible()
+    await page.keyboard.press('Escape')
+    await expect(dialog).not.toBeVisible()
+    await expect(trigger).toBeFocused()
+  })
+}
 for (const width of [1440, 390]) for (const scenario of scenarios) test(`capture ${width} ${scenario}`, async ({ page, context }) => {
   await page.setViewportSize({ width, height: 900 })
   if (scenario === 'populated-restricted-staff') await context.setExtraHTTPHeaders({ Authorization: 'Bearer list-v2-staff-session' })
@@ -367,7 +407,7 @@ for (const width of [360, 390]) for (const language of ['en', 'cs'] as const) te
 
 // The review's app-boundary probe uses synthetic rows/total to exercise the
 // supported offset bound without changing the backend pagination fixtures.
-for (const width of [1110, 1231, 1233]) for (const language of ['en', 'cs'] as const) for (const number of [900, 1000]) test(`paging: 200% text boundary ${width} ${language} page ${number}`, async ({ page, context }) => {
+for (const width of [1110, 1231, 1233]) for (const language of ['en', 'cs'] as const) for (const number of [900, 1000]) test(`paging: 200% text boundary ${width} ${language} page ${number}`, async ({ page, context }, testInfo) => {
   const copy = language === 'cs' ? cs : en
   await page.setViewportSize({ width, height: 1000 })
   await context.addInitScript(language => localStorage.setItem('console-language', language), language)
@@ -409,6 +449,10 @@ for (const width of [1110, 1231, 1233]) for (const language of ['en', 'cs'] as c
         return { left: box.left, right: box.right, clipLeft: Math.max(...clips.map(clip => clip.left)), clipRight: Math.min(...clips.map(clip => clip.right)) }
       })
       observations.push({ kind: 'paging-boundary', phase, number, width, language, geometry })
+      if (width === 1110 && number === 1000) {
+        const diagnostic = await layoutDiagnostics(control)
+        await attachLayoutDiagnostics(page, testInfo, `case-A-${language}-${phase}-${diagnostic.controls[0].name}`, { scenarioWidth: width, phase, number, language, geometry, ...diagnostic })
+      }
       await expect(control).toBeVisible()
       expect.soft(geometry.left).toBeGreaterThanOrEqual(geometry.clipLeft)
       expect.soft(geometry.right).toBeLessThanOrEqual(geometry.clipRight)
@@ -448,7 +492,7 @@ for (const width of [1110, 1231, 1233]) for (const language of ['en', 'cs'] as c
   await page.unrouteAll({ behavior: 'wait' })
 })
 
-for (const width of [1440, 390, 360]) for (const actor of ['admin', 'staff'] as const) for (const language of ['en', 'cs'] as const) test(`G4–G6 polish ${width} ${actor} ${language}`, async ({ page, context }) => {
+for (const width of [1440, 390, 360]) for (const actor of ['admin', 'staff'] as const) for (const language of ['en', 'cs'] as const) test(`G4–G6 polish ${width} ${actor} ${language}`, async ({ page, context }, testInfo) => {
   const copy = language === 'cs' ? cs : en
   await page.setViewportSize({ width, height: 1000 })
   await context.setExtraHTTPHeaders({ Authorization: `Bearer list-v2-${actor}-session` })
@@ -502,13 +546,47 @@ for (const width of [1440, 390, 360]) for (const actor of ['admin', 'staff'] as 
   const lookup = page.getByRole('combobox', { name: 'Team', exact: true })
   await insideViewport(lookup)
   expect((await lookup.boundingBox())!.width).toBeGreaterThanOrEqual(130)
-  await expect(lookup).toHaveAttribute('placeholder', copy.listLookupPlaceholder)
+  await expect(lookup).toHaveAttribute('placeholder', 'Team')
   const paging = list(page).locator('[data-list-paging]')
-  const prev = await paging.getByRole('button', { name: copy.previousPage, exact: true }).boundingBox()
-  const next = await paging.getByRole('button', { name: copy.nextPage, exact: true }).boundingBox()
-  expect(Math.abs(prev!.y - next!.y)).toBeLessThan(2)
-  expect(prev!.x).toBeGreaterThanOrEqual(0)
-  expect(next!.x + next!.width).toBeLessThanOrEqual(width)
+  const previous = paging.getByRole('button', { name: copy.previousPage, exact: true })
+  const current = paging.locator('[aria-current="page"]')
+  const next = paging.getByRole('button', { name: copy.nextPage, exact: true })
+  const diagnostic = await layoutDiagnostics(previous.or(current).or(next), true)
+  await attachLayoutDiagnostics(page, testInfo, `pagination-atomic-${width}-${actor}-${language}`, { width, actor, language, ...diagnostic })
+  const controls = diagnostic.controls
+  expect(controls).toHaveLength(3)
+  // The group may move to another row as a unit. Its three controls must still
+  // share a row; no individual-control wrap exception or wider tolerance.
+  expect(Math.abs(controls[0].box.top - controls[2].box.top)).toBeLessThan(2)
+  // The numbered button is shorter than Previous/Next; compare its centerline.
+  const centers = controls.map(control => control.box.top + control.box.height / 2)
+  expect(Math.max(...centers) - Math.min(...centers)).toBeLessThan(2)
+  for (const { box, clip, hitAtCenter, disabled } of controls) {
+    expect(box.left).toBeGreaterThanOrEqual(clip.left)
+    expect(box.right).toBeLessThanOrEqual(clip.right)
+    expect(box.top).toBeGreaterThanOrEqual(clip.top)
+    expect(box.bottom).toBeLessThanOrEqual(clip.bottom)
+    if (!disabled) expect(hitAtCenter).toBe(true)
+  }
+  for (let i = 0; i < controls.length; i++) for (let j = i + 1; j < controls.length; j++) {
+    const a = controls[i].box; const b = controls[j].box
+    expect(a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom).toBe(false)
+  }
+  const onPage = async (number: number) => {
+    await expect(current).toHaveText(String(number))
+    await expect.poll(() => ids(page)).toEqual(expectedRows({ actor }).slice((number - 1) * 10, number * 10).map(row => row.id))
+  }
+  await next.click(); await onPage(2)
+  await previous.click(); await onPage(1)
+  const visibleButtons = paging.getByRole('button')
+  await current.focus()
+  for (let index = 2; index < await visibleButtons.count(); index++) {
+    await page.keyboard.press('Tab'); await expect(visibleButtons.nth(index)).toBeFocused()
+  }
+  await expect(next).toBeFocused()
+  await page.keyboard.press('Enter'); await onPage(2)
+  await visibleButtons.nth(1).focus(); await page.keyboard.press('Shift+Tab'); await expect(previous).toBeFocused()
+  await page.keyboard.press('Space'); await onPage(1)
   await expect(list(page).locator('[data-list-page-summary] select')).toBeVisible()
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
   // Every actor/locale/viewport exercises a held new key and contextual empty recovery.
@@ -585,3 +663,117 @@ test('G6: held initial and new-query skeletons become results; filtered empty cl
     await page.screenshot({ path: `${process.env.LIST_V2_OUTPUT}/polish-empty-recovery.png`, fullPage: true })
   } finally { release?.(); await page.unrouteAll({ behavior: 'wait' }) }
 })
+
+for (const width of [1440, 390]) for (const language of ['en', 'cs'] as const) {
+  test(`#259 filter control geometry ${width} ${language}`, async ({ page, context }) => {
+    const copy = language === 'cs' ? cs : en
+    await page.setViewportSize({ width, height: 900 })
+    await context.addInitScript(language => localStorage.setItem('console-language', language), language)
+    await page.goto(route)
+    await expect(list(page).locator('[data-list-range]')).toBeVisible()
+    await page.getByRole('button', { name: copy.sortAndFilter, exact: true }).click()
+    const filters = page.getByRole('group', { name: copy.sortAndFilter, exact: true })
+    await page.evaluate(async () => { await document.fonts.ready })
+    // Checkboxes/radios are choice indicators, not input-height text/select controls.
+    const geometry = await filters.locator('input:not([type="checkbox"]):not([type="radio"]), select, button[role="combobox"]').evaluateAll(controls => controls.map(control => {
+      const field = control.closest('form')!.firstElementChild!
+      const cell = [...field.children].find(child => child.contains(control))!
+      const rect = control.getBoundingClientRect()
+      return { tag: control.tagName, name: control.getAttribute('aria-label'), top: rect.top, height: rect.height, row: cell.getBoundingClientRect().top }
+    }))
+    observations.push({ kind: 'filter-control-geometry', width, language, geometry })
+    expect(geometry.length).toBeGreaterThanOrEqual(2)
+    const standardHeight = (await filters.getByRole('textbox').first().boundingBox())!.height
+    for (const control of geometry) expect.soft(Math.abs(control.height - standardHeight), JSON.stringify(control)).toBeLessThanOrEqual(1)
+    for (const control of geometry) for (const neighbour of geometry.filter(item => Math.abs(item.row - control.row) <= 1)) {
+      expect.soft(Math.abs(control.top - neighbour.top), `same grid row: ${JSON.stringify({ control, neighbour })}`).toBeLessThanOrEqual(1)
+    }
+  })
+
+  test(`#259 trigger and panel labels ${width} ${language}`, async ({ page, context }) => {
+    const expected = language === 'cs' ? { saved: 'Uložené pohledy', columns: 'Sloupce', filters: 'Filtry' } : { saved: 'Saved views', columns: 'Columns', filters: 'Filters' }
+    await page.setViewportSize({ width, height: 900 })
+    await context.addInitScript(language => localStorage.setItem('console-language', language), language)
+    await page.goto(route)
+    await expect(list(page).locator('[data-list-range]')).toBeVisible()
+    const copy = language === 'cs' ? cs : en
+    for (const [current, label] of [[copy.savedViewsMenu, expected.saved], [copy.listDisplay, expected.columns], [copy.sortAndFilter, expected.filters]]) {
+      const trigger = page.getByRole('button', { name: current, exact: true })
+      await expect.soft(trigger).toHaveText(label, { timeout: 500 })
+      await expect.soft(trigger).toHaveAccessibleName(label, { timeout: 500 })
+      await expect(trigger).toHaveAttribute('title', label)
+      await expect(trigger).toHaveAccessibleDescription(label)
+    }
+    await page.getByRole('button', { name: copy.sortAndFilter, exact: true }).click()
+    await expect.soft(page.getByRole('group', { name: copy.sortAndFilter, exact: true })).toHaveAccessibleName(expected.filters, { timeout: 500 })
+  })
+}
+
+for (const width of [1440, 360]) for (const language of ['en', 'cs'] as const) {
+  test(`#259 Columns icon ${width} ${language}`, async ({ page, context }) => {
+    const copy = language === 'cs' ? cs : en
+    await page.setViewportSize({ width, height: 900 })
+    await context.addInitScript(language => localStorage.setItem('console-language', language), language)
+    await page.goto(route)
+    await settled(page)
+    const trigger = page.getByRole('button', { name: copy.listDisplay, exact: true })
+    await expect(trigger).toHaveAccessibleName(copy.listDisplay)
+    await expect(trigger).toHaveAttribute('title', copy.listDisplay)
+    await expect(trigger.locator('svg.lucide-columns-3')).toHaveCount(1)
+    await expect(trigger.locator('svg')).toHaveAttribute('aria-hidden', 'true')
+    expect(await trigger.evaluate(button => button.firstElementChild?.tagName.toLowerCase())).toBe('svg')
+  })
+}
+
+for (const width of [1440, 1024, 768, 390, 360]) for (const language of ['en', 'cs'] as const) {
+  test(`#259 long Columns containment ${width} ${language}`, async ({ page, context }) => {
+    const copy = language === 'cs' ? cs : en
+    await page.setViewportSize({ width, height: 900 })
+    await context.addInitScript(language => localStorage.setItem('console-language', language), language)
+    // Reuse review1's real console-model probe: 30 hidden fields; Worker/D1 still supplies all rows.
+    await page.route('**/console-model', async intercepted => {
+      const response = await intercepted.fetch(); const body = await response.json()
+      for (let index = 0; index < 30; index++) {
+        const field = `probe_${index}`
+        body.model.entities.worker.fields[field] = { ...body.model.entities.worker.fields.code }
+        body.console.entities.worker.list.filter[field] = false
+        body.model.entities.worker.listColumns.push(field)
+        body.capabilities.entities.worker.readable.push(field)
+        body.console.entities.worker.list.columns.push({ field, defaultVisible: false })
+      }
+      await intercepted.fulfill({ response, json: body })
+    })
+    await page.route('**/query', async intercepted => {
+      const strip = (value: any): any => Array.isArray(value) ? value.filter(item => typeof item !== 'string' || !item.startsWith('probe_')).map(strip) : value && typeof value === 'object' ? Object.fromEntries(Object.entries(value).map(([key, item]) => [key, strip(item)])) : value
+      const response = await intercepted.fetch({ postData: JSON.stringify(strip(intercepted.request().postDataJSON())) })
+      await intercepted.fulfill({ response })
+    })
+    await page.goto(route); await settled(page)
+    await expect.poll(() => ids(page)).toEqual(expectedRows({}).slice(0, 10).map(row => row.id))
+    const trigger = page.getByRole('button', { name: copy.listDisplay, exact: true })
+    await trigger.focus(); await page.keyboard.press('Enter')
+    const dialog = page.getByRole('dialog', { name: copy.listDisplayHeading, exact: true })
+    await expect(dialog.getByRole('checkbox')).toHaveCount(36)
+    await page.evaluate(async () => { await Promise.all(document.getAnimations().filter(animation => animation.effect?.getComputedTiming().iterations !== Infinity).map(animation => animation.finished.catch(() => {}))) })
+    const bounds = await dialog.boundingBox()
+    observations.push({ kind: 'long-columns-bounds', width, language, bounds })
+    expect(bounds!.height).toBeLessThanOrEqual(675)
+    await insideViewport(dialog)
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+    const columnList = dialog.locator('[data-list-display-columns]')
+    await expect(columnList).toHaveCount(1)
+    const scrolling = await columnList.evaluate(element => ({ client: element.clientHeight, scroll: element.scrollHeight, overflow: getComputedStyle(element).overflowY }))
+    expect(scrolling.scroll).toBeGreaterThan(scrolling.client)
+    expect(scrolling.overflow).toBe('auto')
+    const compact = dialog.getByRole('checkbox', { name: copy.listDisplayCompact, exact: true })
+    const reset = dialog.getByRole('button', { name: copy.listDisplayReset, exact: true })
+    await insideViewport(compact); await insideViewport(reset)
+    await columnList.getByRole('checkbox').last().focus()
+    expect(await columnList.evaluate(element => element.scrollTop)).toBeGreaterThan(0)
+    await insideViewport(columnList.getByRole('checkbox').last())
+    await insideViewport(compact); await insideViewport(reset)
+    await compact.click(); await expect(compact).toBeChecked()
+    await reset.click(); await expect(compact).not.toBeChecked()
+    await page.keyboard.press('Escape'); await expect(trigger).toBeFocused()
+  })
+}

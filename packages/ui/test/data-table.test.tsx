@@ -206,7 +206,7 @@ it('mobile hidden columns retain keyboard sort, three accessible states and filt
       { id: '_actions', label: 'Actions', cell: () => <button>Row actions</button> },
     ]} state={{ search: '', sort, limit: 30 }} onStateChange={change} page={0} onPage={vi.fn()} isFetching={fetching} label="Records" labels={labels} onRowClick={vi.fn()} />
     const view = render(content(null))
-    const disclosure = screen.getByRole('button', { name: 'Sort and filter' })
+    const disclosure = screen.getByRole('button', { name: 'Filters' })
     expect(disclosure.getAttribute('aria-expanded')).toBe('false')
     disclosure.focus(); await user.keyboard('{Enter}')
     expect(disclosure.getAttribute('aria-expanded')).toBe('true')
@@ -231,7 +231,7 @@ it('mobile hidden columns retain keyboard sort, three accessible states and filt
     await user.click(disclosure); expect(screen.queryByRole('button', { name: 'Sort Date' })).toBeNull()
     vi.mocked(window.matchMedia).mockReturnValue({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() } as any)
     view.rerender(content({ key: 'date', direction: 'desc' }))
-    expect(screen.queryByRole('button', { name: 'Sort and filter' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Filters' })).toBeNull()
     expect(screen.getByRole('columnheader', { name: 'Date' }).getAttribute('aria-sort')).toBe('descending')
     expect(screen.getAllByRole('cell').map(cell => cell.textContent)).toEqual(['John Doe', '2026-11-05', 'Row actions'])
   } finally { vi.restoreAllMocks() }
