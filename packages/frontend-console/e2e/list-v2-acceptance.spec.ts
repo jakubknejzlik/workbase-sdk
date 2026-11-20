@@ -2,6 +2,8 @@ import { execFileSync } from 'node:child_process'
 const provenanceSHA = () => execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()
 import { test, expect, type Page, type Locator, type CDPSession } from '@playwright/test'
 import setup from './runtime/setup'
+import { observePreview500, assertNoPreview500 } from './list-v2-http'
+import { observeSDKStylesheet, sdkStylesheetReady, gotoSDK, reloadSDK } from './list-v2-readiness'
 import { layoutDiagnostics, attachLayoutDiagnostics } from './list-v2-layout-diagnostics'
 import { workers, expectedRows, expectedCounts, type Selection } from './runtime/list-v2-data'
 import { capture, captureSDK, provenance, result, record } from './list-v2-evidence'
@@ -14,14 +16,15 @@ const route = '/o/org-a/e/worker'
 const labels: Record<string, string> = { all: 'All workers', active: 'Active workers', inactive: 'Inactive workers', empty: 'Archived workers', invited: 'Pending invitations' }
 test.beforeAll(async ({ browser }) => { stop = await setup({ worker: 'list-v2-worker.ts', seed: 'list-v2-seed.ts' }); provenance(browser.version()) })
 test.afterAll(async () => { await stop?.() })
-test.beforeEach(async ({ context, page }) => { observations = []; page.on('response', response => { if (new URL(response.url()).pathname === '/query') void response.json().then(body => observations.push({ kind: 'query', request: response.request().postDataJSON(), status: response.status(), response: body })).catch(() => {}) }); await context.addInitScript(() => localStorage.setItem('console-language', 'en')) })
-test.afterEach(async ({ page }, info) => { observations.push({ kind: 'final', url: page.url(), ids: await ids(page).catch(() => []), footer: await footer(page).textContent().catch(() => null), tabs: await list(page).locator('[data-list-slot="tabs"]').textContent().catch(() => null) }); record('functionalEvidence', info.title, observations); result(info) })
+test.beforeEach(async ({ context, page }) => { observations = []; observeSDKStylesheet(page); observePreview500(context); page.on('response', response => { if (new URL(response.url()).pathname === '/query') void response.json().then(body => observations.push({ kind: 'query', request: response.request().postDataJSON(), status: response.status(), response: body })).catch(() => {}) }); await context.addInitScript(() => localStorage.setItem('console-language', 'en')) })
+test.afterEach(async ({ page, context }, info) => { observations.push({ kind: 'final', url: page.url(), ids: await ids(page).catch(() => []), footer: await footer(page).textContent().catch(() => null), tabs: await list(page).locator('[data-list-slot="tabs"]').textContent().catch(() => null) }); record('functionalEvidence', info.title, observations); try { await assertNoPreview500(context, info); result(info) } catch (error) { result(info, error); throw error } })
 const list = (page: Page) => page.locator('[data-slot="list-page"]')
 const footer = (page: Page) => list(page).locator('footer')
 const panel = (page: Page) => page.getByRole('group', { name: en.sortAndFilter, exact: true })
 const savedTrigger = (page: Page) => page.getByRole('region', { name: en.savedViews, exact: true }).locator('button[aria-haspopup="dialog"]')
 const savedMenu = (page: Page) => page.getByRole('dialog', { name: en.savedViews, exact: true })
 async function settled(page: Page) {
+  await sdkStylesheetReady(page)
   await expect(list(page)).toBeVisible()
   await expect(list(page).getByText(en.loading, { exact: true })).toHaveCount(0)
   await expect(list(page).getByText(en.rowAccessRefreshing, { exact: true })).toHaveCount(0)
@@ -72,7 +75,7 @@ for (const language of ['en', 'cs'] as const) {
   const copy = language === 'cs' ? cs : en
   test(`R4: ${language} toolbar relation filter visibly identifies its configured label`, async ({ page }) => {
     await page.addInitScript(language => localStorage.setItem('console-language', language), language)
-    await page.goto(route); await settled(page)
+    await gotoSDK(page, route); await settled(page)
     const team = page.getByRole('combobox', { name: 'Team', exact: true })
     await expect(team).toBeVisible()
     await expect(team).toHaveValue('')
@@ -81,7 +84,7 @@ for (const language of ['en', 'cs'] as const) {
   for (const width of [767, 768, 769, 800, 1023, 1024]) test(`R1: ${language} shell navigation at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 900 })
     await page.addInitScript(language => localStorage.setItem('console-language', language), language)
-    await page.goto(route); await settled(page)
+    await gotoSDK(page, route); await settled(page)
     const gap = page.locator('[data-slot="sidebar-gap"]')
     if (width >= 1024) {
       await expect(page.locator('[data-slot="sidebar-container"]')).toBeVisible()
@@ -121,7 +124,7 @@ for (const width of [1440, 390]) for (const scenario of scenarios) test(`capture
     })
   }
   try {
-    await page.goto(route)
+    await gotoSDK(page, route)
     if (scenario === 'loading') { await expect(list(page).locator('[aria-busy="true"]')).toBeVisible(); await expect(footer(page).locator('[data-list-range]')).toHaveCount(0); await expect(list(page).locator('[data-list-slot="tabs"] span')).toHaveCount(0) }
     else if (scenario === 'error') { await expect(list(page).getByText(en.requestFailed, { exact: true }).first()).toBeVisible(); await expect(footer(page).locator('[data-list-range]')).toHaveCount(0); await expect(list(page).locator('[data-list-slot="tabs"] span')).toHaveCount(0) }
     else {
@@ -140,7 +143,7 @@ for (const width of [1440, 390]) for (const scenario of scenarios) test(`capture
 })
 
 test('paging: exact total, next, previous, last and page-size reset', async ({ page }) => {
-  await page.goto(route); await settled(page); await rows(page); await counts(page)
+  await gotoSDK(page, route); await settled(page); await rows(page); await counts(page)
   await footer(page).getByRole('button', { name: en.nextPage, exact: true }).click(); await rows(page, {}, 10)
   await footer(page).getByRole('button', { name: en.previousPage, exact: true }).click(); await rows(page)
   await footer(page).getByRole('button', { name: '5', exact: true }).click(); await rows(page, {}, 40)
@@ -149,7 +152,7 @@ test('paging: exact total, next, previous, last and page-size reset', async ({ p
 })
 
 test('G1: desktop configured access column fits beside separate Actions without scrolling or coverage', async ({ page }) => {
-  await page.goto(route); await settled(page); await rows(page); await atScrollStart(page)
+  await gotoSDK(page, route); await settled(page); await rows(page); await atScrollStart(page)
   const headers = list(page).getByRole('columnheader')
   await expect(headers).toHaveCount(6)
   for (const header of await headers.all()) await insideViewport(header)
@@ -175,7 +178,7 @@ for (const state of ['empty', 'error'] as const) test(`G2: mobile ${state} messa
     const query = intercepted.request().postDataJSON()
     return query.entity === 'worker' && query.includeTotal ? intercepted.fulfill({ status: 503, contentType: 'application/json', body: '{"error":"list_v2_injected_failure"}' }) : intercepted.continue()
   })
-  await page.goto(route)
+  await gotoSDK(page, route)
   if (state === 'empty') { await settled(page); await tab(page, 'empty'); await rows(page, { view: 'empty' }) }
   const message = list(page).getByText(state === 'empty' ? en.noResults : en.requestFailed, { exact: true }).first()
   await expect(message).toBeVisible(); await atScrollStart(page); await insideViewport(message); await atScrollStart(page)
@@ -188,7 +191,7 @@ for (const state of ['empty', 'error'] as const) test(`G2: mobile ${state} messa
 })
 
 test('G3: in-panel retry repeats the failed query and preserves committed settings and page', async ({ page }) => {
-  await page.goto(route); await settled(page)
+  await gotoSDK(page, route); await settled(page)
   await page.getByRole('searchbox', { name: en.search, exact: true }).fill('Worker')
   await expect.poll(() => new URL(page.url()).searchParams.get('search')).toBe('Worker')
   await rows(page, { search: 'Worker' }); await tab(page, 'inactive'); await rows(page, { view: 'inactive', search: 'Worker' })
@@ -218,13 +221,13 @@ test('G3: in-panel retry repeats the failed query and preserves committed settin
 })
 
 test('tab counts replace only the view under search, relation filter and restricted grants', async ({ page, context }) => {
-  await page.goto(route); await settled(page)
+  await gotoSDK(page, route); await settled(page)
   for (const view of Object.keys(labels)) { await tab(page, view); await rows(page, { view }); await counts(page) }
   await tab(page, 'all'); await page.getByRole('searchbox', { name: en.search, exact: true }).fill('Worker 04')
   await rows(page, { search: 'Worker 04' }); await counts(page, { search: 'Worker 04' })
   await chooseTeam(page, 'North team'); await rows(page, { search: 'Worker 04', team: 'north' }); await counts(page, { search: 'Worker 04', team: 'north' })
   await page.getByRole('searchbox', { name: en.search, exact: true }).fill('no-such-seeded-worker'); await rows(page, { search: 'no-such-seeded-worker', team: 'north' }); await counts(page, { search: 'no-such-seeded-worker', team: 'north' })
-  await context.setExtraHTTPHeaders({ Authorization: 'Bearer list-v2-staff-session' }); await page.goto(route); await settled(page)
+  await context.setExtraHTTPHeaders({ Authorization: 'Bearer list-v2-staff-session' }); await gotoSDK(page, route); await settled(page)
   await rows(page, { actor: 'staff' }); await counts(page, { actor: 'staff' })
   await page.getByRole('searchbox', { name: en.search, exact: true }).fill('Worker 04'); await rows(page, { actor: 'staff', search: 'Worker 04' }); await counts(page, { actor: 'staff', search: 'Worker 04' })
   await chooseTeam(page, 'South team'); await rows(page, { actor: 'staff', search: 'Worker 04', team: 'south' }); await counts(page, { actor: 'staff', search: 'Worker 04', team: 'south' })
@@ -233,7 +236,7 @@ test('tab counts replace only the view under search, relation filter and restric
 test('panel: staged rows/counts/URL, Cancel discard, Apply once and reset page', async ({ page }) => {
   const requests: unknown[] = []
   page.on('request', request => { if (new URL(request.url()).pathname === '/query') { const q = request.postDataJSON(); if (q.entity === 'worker' && q.includeTotal) requests.push(q) } })
-  await page.goto(route); await settled(page); await footer(page).getByRole('button', { name: '3', exact: true }).click(); await rows(page, {}, 20)
+  await gotoSDK(page, route); await settled(page); await footer(page).getByRole('button', { name: '3', exact: true }).click(); await rows(page, {}, 20)
   const url = page.url(); const before = requests.length
   await openPanel(page); await panel(page).getByRole('group', { name: 'Name', exact: true }).getByRole('textbox').fill('Worker 04'); await panel(page).getByRole('checkbox', { name: 'active', exact: true }).check()
   await rows(page, {}, 20); await counts(page); expect(page.url()).toBe(url); expect(requests).toHaveLength(before)
@@ -248,20 +251,20 @@ test('panel: staged rows/counts/URL, Cancel discard, Apply once and reset page',
 })
 
 test('URL: reload restores committed settings and current page', async ({ page }) => {
-  await page.goto(route); await settled(page); await tab(page, 'inactive'); await rows(page, { view: 'inactive' })
+  await gotoSDK(page, route); await settled(page); await tab(page, 'inactive'); await rows(page, { view: 'inactive' })
   await footer(page).getByRole('button', { name: '2', exact: true }).click(); await rows(page, { view: 'inactive' }, 10)
-  await page.reload(); await settled(page); await rows(page, { view: 'inactive' }, 10)
+  await reloadSDK(page); await settled(page); await rows(page, { view: 'inactive' }, 10)
 })
 
 test('URL: copied URL restores the current page as well as settings', async ({ page, context }) => {
-  await page.goto(route); await settled(page); await tab(page, 'inactive'); await rows(page, { view: 'inactive' })
+  await gotoSDK(page, route); await settled(page); await tab(page, 'inactive'); await rows(page, { view: 'inactive' })
   await footer(page).getByRole('button', { name: '2', exact: true }).click(); await rows(page, { view: 'inactive' }, 10)
   const other = await context.newPage()
-  try { await other.goto(page.url()); await settled(other); await rows(other, { view: 'inactive' }, 10) } finally { await other.close() }
+  try { await gotoSDK(other, page.url()); await settled(other); await rows(other, { view: 'inactive' }, 10) } finally { await other.close() }
 })
 
 test('URL: back and forward restore settings and history paging', async ({ page }) => {
-  await page.goto(route); await settled(page); await tab(page, 'inactive'); await rows(page, { view: 'inactive' })
+  await gotoSDK(page, route); await settled(page); await tab(page, 'inactive'); await rows(page, { view: 'inactive' })
   await footer(page).getByRole('button', { name: '2', exact: true }).click(); await rows(page, { view: 'inactive' }, 10)
   await tab(page, 'active'); await rows(page, { view: 'active' }); await page.goBack(); await rows(page, { view: 'inactive' }, 10)
   await page.goForward(); await rows(page, { view: 'active' })
@@ -270,15 +273,15 @@ test('URL: back and forward restore settings and history paging', async ({ page 
 test('URL: invalid and forbidden parameters and relation IDs are sanitized', async ({ page, context }) => {
   await context.setExtraHTTPHeaders({ Authorization: 'Bearer list-v2-staff-session' })
   const filters = JSON.stringify([{ field: 'user', predicate: { eq: 'admin' } }, { field: 'team_id', predicate: { in: ['north'] } }])
-  await page.goto(`${route}?view=invited&rowAccess=invited&sort=forbidden&page=-7&pageSize=13&filters=${encodeURIComponent(filters)}`)
+  await gotoSDK(page, `${route}?view=invited&rowAccess=invited&sort=forbidden&page=-7&pageSize=13&filters=${encodeURIComponent(filters)}`)
   await settled(page); await rows(page, { actor: 'staff' }); await counts(page, { actor: 'staff' })
   await expect.poll(() => page.url()).not.toMatch(/north|invited|forbidden|pageSize=13/)
   await expect(page.getByText('North team', { exact: true })).toHaveCount(0)
 })
 
 test('personal views: save, apply, rename, delete and reload; settings only', async ({ page }) => {
-  await page.goto(route); await settled(page); await tab(page, 'inactive'); await rows(page, { view: 'inactive' }); await save(page, 'My inactive')
-  await page.reload(); await settled(page); await expect(savedTrigger(page)).toHaveText(en.savedViewsMenu)
+  await gotoSDK(page, route); await settled(page); await tab(page, 'inactive'); await rows(page, { view: 'inactive' }); await save(page, 'My inactive')
+  await reloadSDK(page); await settled(page); await expect(savedTrigger(page)).toHaveText(en.savedViewsMenu)
   await tab(page, 'active'); await rows(page, { view: 'active' }); await savedTrigger(page).click()
   await savedMenu(page).getByRole('button', { name: 'My inactive', exact: true }).click(); await rows(page, { view: 'active' })
   await savedMenu(page).getByRole('button', { name: en.savedViewsApplyView, exact: true }).click(); await rows(page, { view: 'inactive' })
@@ -288,24 +291,24 @@ test('personal views: save, apply, rename, delete and reload; settings only', as
   record('observations', 'personal-views-storage', stored)
   expect(stored).toHaveLength(1)
   for (const entry of stored[0].entries) expect(Object.keys(entry.search).sort()).toEqual(['direction', 'sort', 'view'])
-  await page.reload(); await settled(page); await savedTrigger(page).click(); await savedMenu(page).getByRole('button', { name: 'Renamed inactive', exact: true }).click(); await savedMenu(page).getByRole('button', { name: en.savedViewsApplyView, exact: true }).click(); await rows(page, { view: 'inactive' })
+  await reloadSDK(page); await settled(page); await savedTrigger(page).click(); await savedMenu(page).getByRole('button', { name: 'Renamed inactive', exact: true }).click(); await savedMenu(page).getByRole('button', { name: en.savedViewsApplyView, exact: true }).click(); await rows(page, { view: 'inactive' })
   await savedTrigger(page).click(); await savedMenu(page).getByRole('button', { name: en.savedViewsDeleteThis, exact: true }).click(); await page.getByRole('button', { name: en.savedViewsDelete, exact: true }).click()
-  await page.reload(); await settled(page); await savedTrigger(page).click(); await expect(savedMenu(page).getByRole('button', { name: 'Renamed inactive', exact: true })).toHaveCount(0)
+  await reloadSDK(page); await settled(page); await savedTrigger(page).click(); await expect(savedMenu(page).getByRole('button', { name: 'Renamed inactive', exact: true })).toHaveCount(0)
 })
 
 test('personal views: update current view through the naming dialog and reload', async ({ page }) => {
-  await page.goto(route); await settled(page); await tab(page, 'inactive'); await rows(page, { view: 'inactive' }); await save(page, 'Update me')
+  await gotoSDK(page, route); await settled(page); await tab(page, 'inactive'); await rows(page, { view: 'inactive' }); await save(page, 'Update me')
   await tab(page, 'active'); await rows(page, { view: 'active' })
   await page.getByRole('button', { name: en.savedViewsSaveChanges, exact: true }).click()
   const naming = page.getByRole('dialog').filter({ has: page.getByRole('textbox', { name: en.savedViewsName, exact: true }) })
   await naming.getByRole('button', { name: en.savedViewsConfirm, exact: true }).click({ timeout: 5000 })
-  await page.reload(); await settled(page); await tab(page, 'inactive'); await rows(page, { view: 'inactive' })
+  await reloadSDK(page); await settled(page); await tab(page, 'inactive'); await rows(page, { view: 'inactive' })
   await savedTrigger(page).click(); await savedMenu(page).getByRole('button', { name: 'Update me', exact: true }).click(); await savedMenu(page).getByRole('button', { name: en.savedViewsApplyView, exact: true }).click(); await rows(page, { view: 'active' })
 })
 
 test('personal views: rename then update in the same mounted session', async ({ page }) => {
-  await page.goto(route); await settled(page); await tab(page, 'inactive'); await rows(page, { view: 'inactive' }); await save(page, 'Compound inactive')
-  await page.reload(); await settled(page); await tab(page, 'active'); await rows(page, { view: 'active' })
+  await gotoSDK(page, route); await settled(page); await tab(page, 'inactive'); await rows(page, { view: 'inactive' }); await save(page, 'Compound inactive')
+  await reloadSDK(page); await settled(page); await tab(page, 'active'); await rows(page, { view: 'active' })
   await savedTrigger(page).click(); await savedMenu(page).getByRole('button', { name: 'Compound inactive', exact: true }).click(); await savedMenu(page).getByRole('button', { name: en.savedViewsApplyView, exact: true }).click(); await rows(page, { view: 'inactive' })
   await savedTrigger(page).click(); await savedMenu(page).getByRole('button', { name: en.savedViewsRenameThis, exact: true }).click()
   await page.getByRole('textbox', { name: en.savedViewsName, exact: true }).fill('Compound renamed')
@@ -314,12 +317,12 @@ test('personal views: rename then update in the same mounted session', async ({ 
   await tab(page, 'active'); await rows(page, { view: 'active' }); await page.getByRole('button', { name: en.savedViewsSaveChanges, exact: true }).click()
   // Preserve the original pointer-interaction oracle; never force past an overlay.
   await naming().getByRole('button', { name: en.savedViewsConfirm, exact: true }).click({ timeout: 5000 })
-  await page.reload(); await settled(page); await tab(page, 'inactive'); await rows(page, { view: 'inactive' }); await savedTrigger(page).click(); await savedMenu(page).getByRole('button', { name: 'Compound renamed', exact: true }).click(); await savedMenu(page).getByRole('button', { name: en.savedViewsApplyView, exact: true }).click(); await rows(page, { view: 'active' })
+  await reloadSDK(page); await settled(page); await tab(page, 'inactive'); await rows(page, { view: 'inactive' }); await savedTrigger(page).click(); await savedMenu(page).getByRole('button', { name: 'Compound renamed', exact: true }).click(); await savedMenu(page).getByRole('button', { name: en.savedViewsApplyView, exact: true }).click(); await rows(page, { view: 'active' })
 })
 
 test('same mounted tab: admin → staff → admin must replace rows, totals, counts and personal namespace', async ({ page, context }) => {
   test.setTimeout(120_000)
-  await page.goto(route); await settled(page); await rows(page); await save(page, 'Admin private view')
+  await gotoSDK(page, route); await settled(page); await rows(page); await save(page, 'Admin private view')
   await footer(page).getByRole('button', { name: '3', exact: true }).click(); await rows(page, {}, 20)
   await openPanel(page); await panel(page).getByRole('group', { name: 'Name', exact: true }).getByRole('textbox').fill('admin-only-draft')
   // Real session replacement; observe the shipped authority poll in the same mounted document.
@@ -341,7 +344,7 @@ test('same mounted tab: admin → staff → admin must replace rows, totals, cou
 })
 
 test('access: allowed admin actions; denied staff controls and real API authorization', async ({ page, context, request }) => {
-  await page.goto(route); await settled(page)
+  await gotoSDK(page, route); await settled(page)
   for (const [id, state] of [['w001', 'no_account'], ['w002', 'invited'], ['w003', 'signed_in'], ['w005', 'expired']] as const) {
     const row = page.getByRole('row').filter({ has: page.getByRole('link', { name: workers.find(worker => worker.id === id)!.name, exact: true }) })
     const trigger = row.getByRole('button', { name: new RegExp(en.rowAccessActions) })
@@ -352,7 +355,7 @@ test('access: allowed admin actions; denied staff controls and real API authoriz
   const headers = { Authorization: 'Bearer list-v2-staff-session', 'X-Organization-Id': 'org-a' }
   const denied = await request.get('/orgs/org-a/row-access/worker/w004', { headers }); expect(denied.status()).toBe(403)
   const mutation = await request.post('/orgs/org-a/invitations', { headers, data: { email: 'denied@example.test', target: { entity: 'worker', row: 'w004' } } }); expect(mutation.status()).toBe(403)
-  await context.setExtraHTTPHeaders({ Authorization: 'Bearer list-v2-staff-session' }); await page.goto(route); await settled(page); await rows(page, { actor: 'staff' })
+  await context.setExtraHTTPHeaders({ Authorization: 'Bearer list-v2-staff-session' }); await gotoSDK(page, route); await settled(page); await rows(page, { actor: 'staff' })
   await expect(page.getByRole('columnheader', { name: en.rowAccess, exact: true })).toHaveCount(0); await expect(page.getByRole('button', { name: new RegExp(en.rowAccessActions) })).toHaveCount(0)
 })
 
@@ -360,7 +363,7 @@ for (const width of [360, 390]) for (const language of ['en', 'cs'] as const) te
   const copy = language === 'cs' ? cs : en
   await page.setViewportSize({ width, height: 1000 })
   await context.addInitScript(language => localStorage.setItem('console-language', language), language)
-  await page.goto(`${route}?page=3`)
+  await gotoSDK(page, `${route}?page=3`)
   await expect(list(page).locator('[data-list-range]')).toBeVisible()
   await page.evaluate(async () => {
     document.documentElement.style.fontSize = '32px'
@@ -419,7 +422,7 @@ for (const width of [1110, 1231, 1233]) for (const language of ['en', 'cs'] as c
     const response = await intercepted.fetch({ postData: JSON.stringify({ ...query, offset: 0 }) })
     await intercepted.fulfill({ response, json: { ...await response.json(), total: 10010 } })
   })
-  await page.goto(`${route}?page=${number}`)
+  await gotoSDK(page, `${route}?page=${number}`)
   await expect(list(page).locator('[data-list-range]')).toBeVisible()
   await page.evaluate(async () => {
     document.documentElement.style.fontSize = '32px'
@@ -528,7 +531,7 @@ for (const width of [1440, 390, 360]) for (const actor of ['admin', 'staff'] as 
   await page.setViewportSize({ width, height: 1000 })
   await context.setExtraHTTPHeaders({ Authorization: `Bearer list-v2-${actor}-session` })
   await context.addInitScript(language => localStorage.setItem('console-language', language), language)
-  await page.goto(route)
+  await gotoSDK(page, route)
   await expect(list(page).locator('[data-list-range]')).toBeVisible()
   const table = list(page).locator('[data-slot="data-table"]')
   const row = table.locator('tbody [data-row-id]').first()
@@ -661,7 +664,7 @@ test('G6: held initial and new-query skeletons become results; filtered empty cl
     await intercepted.continue()
   })
   try {
-    await page.goto(route)
+    await gotoSDK(page, route)
     await expect(list(page).locator('[data-list-skeleton]')).toHaveCount(5)
     await expect(footer(page).getByRole('status')).toHaveText(en.loading)
     await expect(list(page).locator('[data-list-range]')).toHaveCount(0)
@@ -700,7 +703,7 @@ for (const width of [1440, 390]) for (const language of ['en', 'cs'] as const) {
     const copy = language === 'cs' ? cs : en
     await page.setViewportSize({ width, height: 900 })
     await context.addInitScript(language => localStorage.setItem('console-language', language), language)
-    await page.goto(route)
+    await gotoSDK(page, route)
     await expect(list(page).locator('[data-list-range]')).toBeVisible()
     await page.getByRole('button', { name: copy.sortAndFilter, exact: true }).click()
     const filters = page.getByRole('group', { name: copy.sortAndFilter, exact: true })
@@ -725,7 +728,7 @@ for (const width of [1440, 390]) for (const language of ['en', 'cs'] as const) {
     const expected = language === 'cs' ? { saved: 'Uložené pohledy', columns: 'Sloupce', filters: 'Filtry' } : { saved: 'Saved views', columns: 'Columns', filters: 'Filters' }
     await page.setViewportSize({ width, height: 900 })
     await context.addInitScript(language => localStorage.setItem('console-language', language), language)
-    await page.goto(route)
+    await gotoSDK(page, route)
     await expect(list(page).locator('[data-list-range]')).toBeVisible()
     const copy = language === 'cs' ? cs : en
     for (const [current, label] of [[copy.savedViewsMenu, expected.saved], [copy.listDisplay, expected.columns], [copy.sortAndFilter, expected.filters]]) {
@@ -745,7 +748,7 @@ for (const width of [1440, 360]) for (const language of ['en', 'cs'] as const) {
     const copy = language === 'cs' ? cs : en
     await page.setViewportSize({ width, height: 900 })
     await context.addInitScript(language => localStorage.setItem('console-language', language), language)
-    await page.goto(route)
+    await gotoSDK(page, route)
     await settled(page)
     const trigger = page.getByRole('button', { name: copy.listDisplay, exact: true })
     await expect(trigger).toHaveAccessibleName(copy.listDisplay)
@@ -779,7 +782,7 @@ for (const width of [1440, 1024, 768, 390, 360]) for (const language of ['en', '
       const response = await intercepted.fetch({ postData: JSON.stringify(strip(intercepted.request().postDataJSON())) })
       await intercepted.fulfill({ response })
     })
-    await page.goto(route); await settled(page)
+    await gotoSDK(page, route); await settled(page)
     await expect.poll(() => ids(page)).toEqual(expectedRows({}).slice(0, 10).map(row => row.id))
     const trigger = page.getByRole('button', { name: copy.listDisplay, exact: true })
     await trigger.focus(); await page.keyboard.press('Enter')
@@ -813,7 +816,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
   const copy = language === 'cs' ? cs : en
   await page.setViewportSize(viewport)
   await context.addInitScript(language => localStorage.setItem('console-language', language), language)
-  await page.goto(route); await settled(page)
+  await gotoSDK(page, route); await settled(page)
   if (state === 'Filters-open') {
     await page.getByRole('button', { name: copy.sortAndFilter, exact: true }).click()
     await expect(page.getByRole('group', { name: copy.sortAndFilter, exact: true })).toBeVisible()
@@ -885,7 +888,7 @@ for (const language of ['en', 'cs'] as const) for (const width of [320, 360, 390
     const response = await intercepted.fetch({ postData: JSON.stringify({ ...query, offset: 0 }) })
     await intercepted.fulfill({ response, json: { ...await response.json(), total: 10010 } })
   })
-  await page.goto(`${route}?page=1000`); await settled(page)
+  await gotoSDK(page, `${route}?page=1000`); await settled(page)
   await page.evaluate(font => { document.documentElement.style.fontSize = `${font}px` }, font)
   const select = footer(page).getByRole('combobox', { name: copy.rowsPerPage, exact: true })
   await layoutDiagnostics(select, true)
@@ -908,7 +911,7 @@ for (const language of ['en', 'cs'] as const) for (const width of [320, 360, 390
     await expect(select).toHaveValue(value)
     // Page-size changes reset the page. Return to the supported offset bound
     // so Previous and Next are both focusable for the widest selected option.
-    await page.goto(`${route}?page=${Math.floor(9990 / Number(value)) + 1}&pageSize=${value}`); await settled(page)
+    await gotoSDK(page, `${route}?page=${Math.floor(9990 / Number(value)) + 1}&pageSize=${value}`); await settled(page)
     await page.evaluate(font => { document.documentElement.style.fontSize = `${font}px` }, font)
   }
   await expect(select).toHaveValue(value)
