@@ -70,6 +70,7 @@ for (const width of [360, 390, 1440]) for (const language of ['en', 'cs'] as con
   const port = list(page).locator('[data-slot="table-container"]')
   // Access metadata arrives independently of the list. Freeze the traversal
   // only once all row controls have joined the enabled keyboard sequence.
+  await expect(port.getByRole('button', { name: new RegExp(copy.rowAccessActions) })).toHaveCount(10)
   await expect.poll(() => port.locator('tbody button:disabled').count()).toBe(0)
   const controls = port.locator('button:enabled, a[href], input:enabled, select:enabled')
   expect(await controls.count()).toBeGreaterThan(25)
@@ -92,6 +93,7 @@ for (const width of [360, 390, 1440]) for (const language of ['en', 'cs'] as con
     }
     observations.push({ kind: 'focus-traversal', width, language, compact, fontSize, offset, controls: await controls.count(), scrollLeft: await port.evaluate(element => element.scrollLeft) })
   }
+  await controls.first().evaluate(element => { const box = element.getBoundingClientRect(); window.scrollBy(0, box.top + box.height / 2 - innerHeight / 2) })
   await page.screenshot({ path: `${process.env.LIST_V2_OUTPUT}/focus-${width}-${language}-${compact}-${fontSize}.png` })
 })
 
