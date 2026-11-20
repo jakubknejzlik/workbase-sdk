@@ -129,8 +129,10 @@ main:has([data-slot="list-page"]) h1 { font-weight: 400; }
 .list-v2-skeleton { display: block; width: 80%; height: .625rem; border-radius: .25rem; background: #edf1f7; }
 [data-list-display] { gap: .25rem; padding: .5rem; }
 [data-list-display] > label { min-height: 2.0625rem; padding: .5rem .625rem; font-size: .75rem; }
-@media (max-width: 767px) {
+@media (max-width: 1023px) {
   .list-v2-search, .list-v2-lookup-panel { flex-basis: 100%; max-width: none; }
+}
+@media (max-width: 767px) {
   [data-list-paging] [data-page-distance]:not([data-page-distance="0"]):not([data-page-distance="1"]) { display: none; }
 }
 

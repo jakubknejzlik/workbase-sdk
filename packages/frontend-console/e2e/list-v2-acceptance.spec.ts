@@ -66,6 +66,45 @@ async function save(page: Page, name: string) {
   await expect(savedTrigger(page)).toHaveText(name)
 }
 const scenarios = ['populated-admin', 'populated-restricted-staff', 'expanded-filters', 'view-menu', 'access-menu', 'personal-views', 'empty', 'error', 'loading'] as const
+for (const language of ['en', 'cs'] as const) {
+  const copy = language === 'cs' ? cs : en
+  test(`R4: ${language} toolbar relation filter visibly identifies its configured label`, async ({ page }) => {
+    await page.addInitScript(language => localStorage.setItem('console-language', language), language)
+    await page.goto(route); await settled(page)
+    const team = page.getByRole('combobox', { name: 'Team', exact: true })
+    await expect(team).toBeVisible()
+    await expect(team).toHaveValue('')
+    await expect(team).toHaveAttribute('placeholder', 'Team')
+  })
+  for (const width of [767, 768, 769, 800, 1023, 1024]) test(`R1: ${language} shell navigation at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 })
+    await page.addInitScript(language => localStorage.setItem('console-language', language), language)
+    await page.goto(route); await settled(page)
+    const gap = page.locator('[data-slot="sidebar-gap"]')
+    if (width >= 1024) {
+      await expect(page.locator('[data-slot="sidebar-container"]')).toBeVisible()
+      expect(await gap.evaluate(element => element.getBoundingClientRect().width)).toBeGreaterThan(0)
+      return
+    }
+    await expect(gap).toHaveCount(0)
+    expect((await page.locator('main').boundingBox())!.width).toBe(width)
+    const toolbar = list(page).locator('[data-list-slot="toolbar"]')
+    const search = toolbar.getByRole('searchbox', { name: copy.search, exact: true })
+    const geometry = await toolbar.evaluate(element => {
+      const style = getComputedStyle(element)
+      return element.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight)
+    })
+    expect((await search.boundingBox())!.width).toBe(geometry)
+    const trigger = page.getByRole('button', { name: copy.openNavigation, exact: true })
+    await trigger.click()
+    const dialog = page.getByRole('dialog')
+    await expect(dialog).toBeVisible()
+    await expect(dialog.getByRole('navigation')).toBeVisible()
+    await page.keyboard.press('Escape')
+    await expect(dialog).not.toBeVisible()
+    await expect(trigger).toBeFocused()
+  })
+}
 for (const width of [1440, 390]) for (const scenario of scenarios) test(`capture ${width} ${scenario}`, async ({ page, context }) => {
   await page.setViewportSize({ width, height: 900 })
   if (scenario === 'populated-restricted-staff') await context.setExtraHTTPHeaders({ Authorization: 'Bearer list-v2-staff-session' })
@@ -507,7 +546,7 @@ for (const width of [1440, 390, 360]) for (const actor of ['admin', 'staff'] as 
   const lookup = page.getByRole('combobox', { name: 'Team', exact: true })
   await insideViewport(lookup)
   expect((await lookup.boundingBox())!.width).toBeGreaterThanOrEqual(130)
-  await expect(lookup).toHaveAttribute('placeholder', copy.listLookupPlaceholder)
+  await expect(lookup).toHaveAttribute('placeholder', 'Team')
   const paging = list(page).locator('[data-list-paging]')
   const previous = paging.getByRole('button', { name: copy.previousPage, exact: true })
   const current = paging.locator('[aria-current="page"]')
