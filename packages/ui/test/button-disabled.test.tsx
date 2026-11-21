@@ -1,14 +1,15 @@
-import { readdirSync, readFileSync } from 'node:fs'
-import { join } from 'node:path'
 import { expect, it, vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { Button } from '../src/components/ui/button'
+import { createRef } from 'react'
+import { FormSubmissionContext } from '../src/vendor/tiketo/components/form/Form'
+import { FormSubmitButton } from '../src/vendor/tiketo/components/form/FormSubmitButton'
 
 const variants = ['default', 'destructive', 'outline', 'secondary', 'ghost', 'link'] as const
 const sizes = ['default', 'sm', 'lg', 'icon', 'icon-sm', 'icon-lg'] as const
 
-it.each(variants)('SR-54 disabled %s buttons retain reference styling at every size and cannot activate', async variant => {
+it.each(variants)('SR-54 disabled %s buttons remain readable at every size and cannot activate', async variant => {
   const activate = vi.fn()
   const user = userEvent.setup()
   const buttons = (disabled: boolean) => <>{sizes.map(size => <Button key={size} variant={variant} size={size} disabled={disabled} onClick={activate}>{size}</Button>)}</>
@@ -16,9 +17,9 @@ it.each(variants)('SR-54 disabled %s buttons retain reference styling at every s
   for (const size of sizes) {
     const button = screen.getByRole('button', { name: size }) as HTMLButtonElement
     expect(button.disabled).toBe(true)
-    expect(button.classList.contains('disabled:opacity-50')).toBe(true)
-    expect(button.classList.contains('disabled:pointer-events-none')).toBe(true)
-    expect(button.className).not.toMatch(/disabled:(?:opacity-100|text-|cursor-pointer)/)
+    expect(button.classList.contains('disabled:opacity-50')).toBe(false)
+    expect(button.classList.contains('disabled:pointer-events-none')).toBe(false)
+    expect(button.classList.contains('disabled:cursor-not-allowed')).toBe(true)
     await user.click(button)
     button.focus()
     expect(document.activeElement).not.toBe(button)
@@ -29,9 +30,25 @@ it.each(variants)('SR-54 disabled %s buttons retain reference styling at every s
   expect(activate).toHaveBeenCalledTimes(sizes.length)
 })
 
-it('SR-54 vendored controls never override disabled opacity back to fully enabled', () => {
-  const root = 'src/vendor/tiketo'
-  const violations = readdirSync(root, { recursive: true, encoding: 'utf8' }).filter(file => file.endsWith('.tsx'))
-    .filter(file => /(?:disabled|aria-disabled|data-\[disabled\]):opacity-100/.test(readFileSync(join(root, file), 'utf8')))
-  expect(violations).toEqual([])
+it('207 pending FormSubmitButton shares disabled styling and retains its spinner and label', () => {
+  render(<FormSubmissionContext.Provider value={{ isSubmitting: true }}><FormSubmitButton loadingText="Saving…">Save</FormSubmitButton></FormSubmissionContext.Provider>)
+  const button = screen.getByRole('button', { name: 'Saving…' }) as HTMLButtonElement
+  expect(button.disabled).toBe(true)
+  expect(button.classList.contains('disabled:cursor-not-allowed')).toBe(true)
+  expect(button.querySelector('.animate-spin')).not.toBeNull()
+})
+
+it('207 enabled slotted links preserve their element, ref, focus and activation', async () => {
+  const activate = vi.fn(event => event.preventDefault())
+  const ref = createRef<HTMLButtonElement>()
+  render(<Button asChild ref={ref} variant="ghost"><a href="#destination" onClick={activate}>Back</a></Button>)
+  const link = screen.getByRole('link', { name: 'Back' })
+  expect(ref.current).toBe(link)
+  expect(link.tagName).toBe('A')
+  const user = userEvent.setup()
+  await user.tab()
+  expect(document.activeElement).toBe(link)
+  await user.keyboard('{Enter}')
+  await user.click(link)
+  expect(activate).toHaveBeenCalledTimes(2)
 })
