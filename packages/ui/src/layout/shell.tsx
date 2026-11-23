@@ -1,10 +1,18 @@
-import { useEffect, useRef, type ReactNode } from 'react'
+import { useEffect, useRef, useSyncExternalStore, type ReactNode } from 'react'
 import { Layout, LayoutBase, LayoutHeader } from '../vendor/tiketo/components/layout/Layout'
 import { useSidebar } from '../components/ui/sidebar'
 
 export interface LayoutProps {
   title: ReactNode; navigationLabel: string; navigation: ReactNode; workspace?: ReactNode; account?: ReactNode; skipLabel?: string; navigationTriggerLabel?: string; mobileNavigationLabel?: string; sidebarTitle?: string; routeKey?: string; children: ReactNode; closeLabel?: string; noContentPadding?: boolean
 }
+// Preserve the full content width on tablets; desktop navigation starts at 1024px.
+const mobileNavigationQuery = '(max-width: 1023px)'
+function subscribeMobileNavigation(change: () => void) {
+  const media = window.matchMedia(mobileNavigationQuery)
+  media.addEventListener('change', change)
+  return () => media.removeEventListener('change', change)
+}
+const mobileNavigationSnapshot = () => window.matchMedia(mobileNavigationQuery).matches
 function ShellBody(props: LayoutProps) {
   const { setOpenMobile, openMobile, isMobile } = useSidebar()
   const navigationTrigger = useRef<HTMLButtonElement>(null)
@@ -14,7 +22,7 @@ function ShellBody(props: LayoutProps) {
   return <>
     <a className="wb-skip" href="#main">{props.skipLabel}</a>
     <Layout noContentPadding={props.noContentPadding} sidebar={{
-      props: { title: props.sidebarTitle ?? props.navigationLabel, description: props.navigationLabel, closeLabel: props.closeLabel, onCloseAutoFocus: event => {
+      props: { mobile: isMobile, title: props.sidebarTitle ?? props.navigationLabel, description: props.navigationLabel, closeLabel: props.closeLabel, onCloseAutoFocus: event => {
         event.preventDefault()
         if (closedByNavigation.current) document.querySelector<HTMLElement>('main h1')?.focus()
         else navigationTrigger.current?.focus()
@@ -27,4 +35,7 @@ function ShellBody(props: LayoutProps) {
     </Layout>
   </>
 }
-export function ConsoleLayout(props: LayoutProps) { return <LayoutBase><ShellBody {...props} /></LayoutBase> }
+export function ConsoleLayout(props: LayoutProps) {
+  const mobile = useSyncExternalStore(subscribeMobileNavigation, mobileNavigationSnapshot, () => false)
+  return <LayoutBase mobile={mobile}><ShellBody {...props} /></LayoutBase>
+}

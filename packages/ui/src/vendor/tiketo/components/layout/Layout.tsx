@@ -7,8 +7,8 @@ import { LayoutSidebarHeader } from './LayoutSidebarHeader'
 import { LayoutSidebarContent } from './LayoutSidebarContent'
 import { LayoutContent } from './LayoutContent'
 
-export function LayoutBase({ children }: PropsWithChildren) {
-  return <div className="[--header-height:calc(--spacing(14))]"><SidebarProvider><div className="flex flex-1 min-w-0 w-full">{children}</div></SidebarProvider></div>
+export function LayoutBase({ children, mobile }: PropsWithChildren<{ mobile?: boolean }>) {
+  return <div className="[--header-height:calc(--spacing(14))]"><SidebarProvider mobile={mobile}><div className="flex flex-1 min-w-0 w-full">{children}</div></SidebarProvider></div>
 }
 
 /** Route, capability and focus controllers are host-owned slots. */

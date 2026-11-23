@@ -36,13 +36,13 @@ function FilterEditor(props: Props & { close: () => void }) {
 }
 export const emptyFilterValue = (value: FilterValue | undefined) => value === undefined || value === '' || Array.isArray(value) && !value.length || typeof value === 'object' && !Array.isArray(value) && !Object.values(value).some(Boolean)
 /** Controlled inputs shared by headers, toolbar and the panel's uncommitted draft. */
-export function FilterInput(props: FilterContext & { descriptor: FilterDescriptor; value?: FilterValue; onChange: (value?: FilterValue) => void }) {
+export function FilterInput(props: FilterContext & { descriptor: FilterDescriptor; hideTextLabel?: boolean; value?: FilterValue; onChange: (value?: FilterValue) => void }) {
   const { t, i18n } = useEntityTranslation(props.entity)
   const { kind, field } = props.descriptor
   const spec = props.model.entities[props.entity].fields[field]
   const value = props.value, setValue = props.onChange
   const capLabel = t('filterCap', { count: selectionCap })
-  if (kind === 'text') return <TextFilter description={t((!spec || spec.type === 'ref') ? 'filterCaseInsensitive' : 'filterCaseSensitive')} label={t('filterContains')} value={typeof value === 'string' ? value : ''} onChange={setValue} />
+  if (kind === 'text') return <TextFilter description={t((!spec || spec.type === 'ref') ? 'filterCaseInsensitive' : 'filterCaseSensitive')} label={props.hideTextLabel ? <span className="sr-only">{t('filterContains')}</span> : t('filterContains')} value={typeof value === 'string' ? value : ''} onChange={setValue} />
   if (kind === 'enum') return <MultiSelectFilter options={(spec.values ?? []).map(id => ({ id, label: t(`value_${id}`, { defaultValue: id }) }))} value={Array.isArray(value) ? value : []} onChange={setValue} capLabel={capLabel} />
   if (kind === 'relation') return <RelationFilterInput {...props} target={spec.entity!} />
   if (kind === 'number' || kind === 'date') {
@@ -56,6 +56,7 @@ export function FilterInput(props: FilterContext & { descriptor: FilterDescripto
 function RelationFilterInput(props: FilterContext & { descriptor: FilterDescriptor; target: string; value?: FilterValue; onChange: (value?: FilterValue) => void }) {
   const { t, i18n } = useEntityTranslation(props.entity)
   const { model, caps, orgId, target, request, descriptor } = props
+  const label = descriptor.label ?? t(`field_${descriptor.field}`)
   const choices = usePickerSearch(model, caps, orgId, target, request)
   const values = Array.isArray(props.value) ? props.value : []
   const selected = useSelectedReferences(model, caps, orgId, target, values, request)
@@ -65,7 +66,7 @@ function RelationFilterInput(props: FilterContext & { descriptor: FilterDescript
   return <div className="grid gap-2">
     {(choices.result.error || selected.error) && <p role="alert">{t('requestFailed')}</p>}
     {values.length > 0 && <MultiSelectFilter options={values.map(id => { const row = selected.rows.find(row => row.id === id); return { id, label: row ? name(row) : t('unavailableRecord') } })} value={values} onChange={props.onChange} capLabel={t('filterCap', { count: selectionCap })} />}
-    {values.length < selectionCap && <EntityPicker remote label={descriptor.label ?? t(`field_${descriptor.field}`)} placeholder={t('listLookupPlaceholder')} options={choices.rows.map(row => ({ id: row.id, label: name(row) }))} value={pickerValue} selectedLabel="" onChange={id => {
+    {values.length < selectionCap && <EntityPicker remote label={label} placeholder={label} options={choices.rows.map(row => ({ id: row.id, label: name(row) }))} value={pickerValue} selectedLabel="" onChange={id => {
       if (id && !values.includes(id)) { selected.seed(choices.rows.find(row => row.id === id)); props.onChange([...values, id]); setPickerValue(id) }
     }} onFocus={choices.focus} onSearch={choices.setSearch} onClose={choices.close} loading={choices.loading} hasMore={choices.hasMore} loadMore={choices.loadMore} loadingLabel={t('loading')} moreLabel={t('loadMore')} clearLabel={t('clearRelation')} emptyLabel={t('noResults')} />}
     {values.length > 0 && <Button type="button" variant="outline" onClick={() => { props.onChange([]); setPickerValue('') }}>{t('clearFilter')}</Button>}

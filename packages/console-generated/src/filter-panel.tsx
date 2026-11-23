@@ -40,7 +40,8 @@ function PanelDraft(props: Props & { close: () => void }) {
   }}>
     {props.descriptors.map(descriptor => <fieldset key={descriptor.field} className="min-w-0 space-y-2">
       <legend className={descriptor.kind === 'relation' ? 'sr-only' : 'text-sm font-medium'}>{descriptor.label ?? t(`field_${descriptor.field}`)}</legend>
-      <FilterInput {...props} descriptor={descriptor} value={draft[descriptor.field]} onChange={value => setDraft(old => ({ ...old, [descriptor.field]: value }))} />
+      {/* The legend labels panel fields; keep the text operator accessible without a second label row. */}
+      <FilterInput {...props} hideTextLabel descriptor={descriptor} value={draft[descriptor.field]} onChange={value => setDraft(old => ({ ...old, [descriptor.field]: value }))} />
       {!emptyFilterValue(draft[descriptor.field]) && !mapping(descriptor).toPredicate(draft[descriptor.field]) && <p role="alert" className="text-sm text-destructive">{t('filterInvalidValueRange')}</p>}
     </fieldset>)}{props.accessInput?.(rowAccess, setRowAccess)}
   </ListFilterPanel>

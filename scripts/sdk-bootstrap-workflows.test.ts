@@ -6,9 +6,9 @@ import { existsSync, mkdtempSync, readFileSync, readdirSync, mkdirSync, writeFil
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 
-type Step = { uses?: string; run?: string; if?: string; with?: Record<string, unknown>; env?: Record<string, string> }
-type Job = { 'runs-on': string; if?: string; permissions?: Record<string, string>; steps: Step[]; needs?: unknown }
-type Workflow = { on: Record<string, any>; permissions: Record<string, string>; jobs: Record<string, Job> }
+type Step = { name?: string; uses?: string; run?: string; if?: string; with?: Record<string, unknown>; env?: Record<string, string> }
+type Job = { env?: Record<string, string>; 'runs-on': string; if?: string; permissions?: Record<string, string>; steps: Step[]; needs?: unknown }
+type Workflow = { env?: Record<string, string>; on: Record<string, any>; permissions: Record<string, string>; jobs: Record<string, Job> }
 let root = process.env.SDK_BOOTSTRAP_EXPORT ?? process.cwd()
 let temporary: string | undefined
 beforeAll(() => {
@@ -46,6 +46,93 @@ function workflow(name: string): { source: string; parsed: Workflow } {
   return { source, parsed: JSON.parse(execFileSync('bun', ['--no-install', '--eval', 'console.log(JSON.stringify(Bun.YAML.parse(await Bun.stdin.text())))'], { input: source, encoding: 'utf8' })) }
 }
 const ciCommands = ['bun install --frozen-lockfile', 'bun x --no-install playwright install --with-deps chromium', 'bun run lint', 'bun run typecheck', 'bun run check:ci-invariants', 'bun run test', 'bun run test:mcp', 'bash scripts/sdk-pack.sh', 'bun scripts/check-sdk-boundary.ts', 'bun scripts/scan-sdk-public.ts']
+
+const diagnosticUploadName = 'Upload List v2 acceptance evidence'
+const diagnosticUploadAction = 'actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02'
+const diagnosticUpload: Step = {
+  name: diagnosticUploadName,
+  if: 'always()',
+  uses: diagnosticUploadAction,
+  with: {
+    name: 'list-v2-acceptance-${{ github.run_attempt }}',
+    path: [
+      '${{ runner.temp }}/list-v2-acceptance/test-results/',
+      '${{ runner.temp }}/list-v2-acceptance/playwright-report/',
+      '${{ runner.temp }}/list-v2-acceptance/results.json',
+      '${{ runner.temp }}/list-v2-acceptance/manifest.json',
+      '',
+    ].join('\n'),
+    'retention-days': 14,
+    'if-no-files-found': 'warn',
+  },
+}
+const privateTermsCommands = ['bun run check:ci-invariants', 'bun run test', 'bash scripts/sdk-pack.sh', 'bun scripts/check-sdk-boundary.ts', 'bun scripts/scan-sdk-public.ts', 'bun scripts/smoke-mcp-template.ts --directory dist-sdk']
+function assertDiagnosticUploads(parsed: Workflow) {
+  let uploads = 0
+  for (const [jobName, job] of Object.entries(parsed.jobs)) {
+    for (const step of job.steps) {
+      if (step.name !== diagnosticUploadName && !/upload-artifact/i.test(step.uses ?? '')) continue
+      uploads++
+      expect(jobName).toBe('check')
+      // Exact equality disallows extra inputs, env, permissions and alternative paths.
+      expect(step).toEqual(diagnosticUpload)
+    }
+  }
+  expect(uploads).toBeLessThanOrEqual(1)
+}
+function assertCommonWorkflowPolicy({ source, parsed }: { source: string; parsed: Workflow }) {
+  assertDiagnosticUploads(parsed)
+  expect(parsed.permissions).toEqual({ contents: 'read' })
+  expect(Object.keys(parsed.on)).not.toContain('pull_request_target')
+  expect(source.replaceAll('${{ secrets.WORKBASE_PRIVATE_TERMS }}', '').replace(diagnosticUploadAction, '')).not.toMatch(/secrets\s*[.\[]|self-hosted|CLOUDFLARE_|git clone|instances\/|upload-artifact|download-artifact/i)
+  for (const job of Object.values(parsed.jobs)) {
+    expect(job['runs-on']).toBe('ubuntu-24.04')
+    expect(job.needs).toBeUndefined()
+    for (const step of job.steps) {
+      if (step.uses) expect(step.uses).toMatch(/^[\w-]+\/[\w-]+@[a-f0-9]{40}$/)
+      expect(step.with?.repository).toBeUndefined()
+      if (privateTermsCommands.includes(step.run ?? '')) {
+        expect(step.env).toEqual({ WORKBASE_PRIVATE_TERMS: '${{ secrets.WORKBASE_PRIVATE_TERMS }}' })
+        expect(step.if).toBeUndefined()
+      }
+      for (const curl of step.run?.match(/curl[^\n]+/g) ?? []) {
+        expect(curl).toMatch(/curl -fsSL --retry 5 --retry-all-errors /)
+        expect(curl).toContain('/v8.24.3/')
+      }
+    }
+    const download = job.steps.find(step => step.run?.includes('curl '))!.run!
+    expect(download).toContain('9991e0b2903da4c8f6122b5c3186448b927a5da4deef1fe45271c3793f4ee29c')
+    expect(download).toContain('sha256sum -c -')
+    expect(download.indexOf('sha256sum -c -')).toBeLessThan(download.indexOf('tar -xzf'))
+    expect(job.steps.filter(step => step.run && ciCommands.includes(step.run)).map(step => step.run)).toEqual(ciCommands)
+  }
+}
+function assertCiWorkflowPolicy(document: { source: string; parsed: Workflow }) {
+  assertCommonWorkflowPolicy(document)
+  const { source, parsed } = document
+  expect(Object.keys(parsed.on).sort()).toEqual(['pull_request', 'push', 'workflow_dispatch'])
+  expect(parsed.on.push).toEqual({ branches: ['main'] })
+  expect(parsed.on.pull_request).toEqual({ branches: ['main'] })
+  expect(parsed.on.workflow_dispatch).toBeNull()
+  expect(source).not.toContain('id-token')
+  expect(Object.keys(parsed.jobs)).toEqual(['check'])
+  expect(parsed.jobs.check.if).toBeUndefined()
+  expect(parsed.jobs.check.permissions).toBeUndefined()
+  expect(parsed.env).toBeUndefined()
+  expect(parsed.jobs.check.env).toBeUndefined()
+  for (const step of parsed.jobs.check.steps) {
+    if (step.name !== diagnosticUploadName) expect(step.if).toBeUndefined()
+    const expectedEnv = step.run === 'bun run console:build && bun run test:list-v2-acceptance'
+      ? { LIST_V2_OUTPUT: '${{ runner.temp }}/list-v2-acceptance', WORKBASE_PRIVATE_TERMS: '${{ secrets.WORKBASE_PRIVATE_TERMS }}' }
+      : privateTermsCommands.includes(step.run ?? '')
+        ? { WORKBASE_PRIVATE_TERMS: '${{ secrets.WORKBASE_PRIVATE_TERMS }}' }
+        : undefined
+    expect(step.env).toEqual(expectedEnv)
+    // The existing vocabulary secret belongs only in the exact env maps above.
+    expect(JSON.stringify({ ...step, env: undefined })).not.toMatch(/secrets\s*[.\[]/i)
+  }
+}
+
 describe('exported public bootstrap workflow policy', () => {
   it('contains exactly the two public workflows and SDK root documentation', () => {
     expect(readdirSync(join(root, '.github'))).toEqual(['workflows'])
@@ -62,42 +149,10 @@ describe('exported public bootstrap workflow policy', () => {
   })
   it.each(['ci', 'release'])('%s uses hosted runners, immutable actions and credential-free checks', name => {
     const { source, parsed } = workflow(name)
-    expect(parsed.permissions).toEqual({ contents: 'read' })
-    expect(Object.keys(parsed.on)).not.toContain('pull_request_target')
-    expect(source.replaceAll('${{ secrets.WORKBASE_PRIVATE_TERMS }}', '')).not.toMatch(/secrets\s*[.\[]|self-hosted|CLOUDFLARE_|git clone|instances\/|upload-artifact|download-artifact/)
-    for (const job of Object.values(parsed.jobs)) {
-      expect(job['runs-on']).toBe('ubuntu-24.04')
-      expect(job.needs).toBeUndefined()
-      for (const step of job.steps) {
-        if (step.uses) expect(step.uses).toMatch(/^[\w-]+\/[\w-]+@[a-f0-9]{40}$/)
-        expect(step.with?.repository).toBeUndefined()
-        if (['bun run check:ci-invariants', 'bun run test', 'bash scripts/sdk-pack.sh', 'bun scripts/check-sdk-boundary.ts', 'bun scripts/scan-sdk-public.ts', 'bun scripts/smoke-mcp-template.ts --directory dist-sdk'].includes(step.run ?? '')) {
-          expect(step.env).toEqual({ WORKBASE_PRIVATE_TERMS: '${{ secrets.WORKBASE_PRIVATE_TERMS }}' })
-          expect(step.if).toBeUndefined()
-        }
-        for (const curl of step.run?.match(/curl[^\n]+/g) ?? []) {
-          expect(curl).toMatch(/curl -fsSL --retry 5 --retry-all-errors /)
-          expect(curl).toContain('/v8.24.3/')
-        }
-      }
-      const download = job.steps.find(step => step.run?.includes('curl '))!.run!
-      expect(download).toContain('9991e0b2903da4c8f6122b5c3186448b927a5da4deef1fe45271c3793f4ee29c')
-      expect(download).toContain('sha256sum -c -')
-      expect(download.indexOf('sha256sum -c -')).toBeLessThan(download.indexOf('tar -xzf'))
-      expect(job.steps.filter(step => step.run && ciCommands.includes(step.run)).map(step => step.run)).toEqual(ciCommands)
-    }
+    assertCommonWorkflowPolicy({ source, parsed })
   })
   it('runs read-only CI for PRs into main, pushes to main and manual dispatch, without OIDC', () => {
-    const { source, parsed } = workflow('ci')
-    expect(Object.keys(parsed.on).sort()).toEqual(['pull_request', 'push', 'workflow_dispatch'])
-    expect(parsed.on.push).toEqual({ branches: ['main'] })
-    expect(parsed.on.pull_request).toEqual({ branches: ['main'] })
-    expect(parsed.on.workflow_dispatch).toBeNull()
-    expect(source).not.toContain('id-token')
-    expect(Object.keys(parsed.jobs)).toEqual(['check'])
-    expect(parsed.jobs.check.if).toBeUndefined()
-    expect(parsed.jobs.check.permissions).toBeUndefined()
-    expect(parsed.jobs.check.steps.every(step => !step.if)).toBe(true)
+    assertCiWorkflowPolicy(workflow('ci'))
   })
   it('checks, builds, packs, rehearses and publishes the same archives in one non-PR release job', () => {
     const { source, parsed } = workflow('release')
@@ -167,4 +222,61 @@ it('CI checks the committed worker OpenAPI after the access lock', () => {
   expect(invariants.indexOf('await runOpenApiCli(')).toBeGreaterThan(invariants.indexOf('await runAccessCli('))
   expect(invariants).toContain("'packages/core/test/fixtures/worker-access/config.ts'")
   expect(JSON.parse(readFileSync(join(root, 'packages/core/package.json'), 'utf8')).exports['./openapi/cli']).toBe('./src/openapi/cli.ts')
+})
+
+describe('CI diagnostic upload security regressions', () => {
+  const upload = (document: Workflow) => document.jobs.check.steps.find(step => step.name === diagnosticUploadName)!
+  const required = (document: Workflow) => document.jobs.check.steps.find(step => step.run === 'bun run test')!
+  const cases: [string, (document: Workflow) => void][] = [
+    ['unknown upload step', document => { delete upload(document).if; upload(document).name = 'Upload other files' }],
+    ['additional upload step', document => { document.jobs.check.steps.push(structuredClone(upload(document))) }],
+    ['upload with a tag', document => { upload(document).uses = 'actions/upload-artifact@v4' }],
+    ['upload with a branch', document => { upload(document).uses = 'actions/upload-artifact@main' }],
+    ['upload with a short SHA', document => { upload(document).uses = 'actions/upload-artifact@ea165f8' }],
+    ['upload with an unknown full SHA', document => { upload(document).uses = 'actions/upload-artifact@' + 'a'.repeat(40) }],
+    ['upload of workspace', document => { upload(document).with!.path = '${{ github.workspace }}/test-results/' }],
+    ['upload of dot', document => { upload(document).with!.path = '.' }],
+    ['upload with parent traversal', document => { upload(document).with!.path = '${{ runner.temp }}/list-v2-acceptance/../../**' }],
+    ['upload with a broad glob', document => { upload(document).with!.path = '${{ runner.temp }}/**' }],
+    ['upload of checkout directory', document => { upload(document).with!.path = './test-results/' }],
+    ['upload with an extra path', document => { upload(document).with!.path += '\n${{ runner.temp }}/other-output/' }],
+    ['upload with dynamic path', document => { upload(document).with!.path = '${{ env.LIST_V2_OUTPUT }}/results.json' }],
+    ['upload without retention', document => { delete upload(document).with!['retention-days'] }],
+    ['upload with unbounded retention', document => { upload(document).with!['retention-days'] = 90 }],
+    ['upload with dynamic retention', document => { upload(document).with!['retention-days'] = '${{ inputs.days }}' }],
+    ['upload with a secret', document => { upload(document).with!.name = '${{ secrets.ARTIFACT_NAME }}' }],
+    ['upload with credential env', document => { upload(document).env = { TOKEN: 'credential' } }],
+    ['upload with the existing check secret', document => { upload(document).env = { WORKBASE_PRIVATE_TERMS: '${{ secrets.WORKBASE_PRIVATE_TERMS }}' } }],
+    ['upload with extra permissions', document => { Object.assign(upload(document), { permissions: { contents: 'write' } }) }],
+    ['upload without always', document => { delete upload(document).if }],
+    ['upload with a different condition', document => { upload(document).if = 'failure()' }],
+    ['upload with extra inputs', document => { upload(document).with!['include-hidden-files'] = true }],
+    ['download artifact', document => { document.jobs.check.steps.push({ uses: 'actions/download-artifact@' + 'a'.repeat(40) }) }],
+    ['self-hosted runner', document => { document.jobs.check['runs-on'] = 'self-hosted' }],
+    ['CI OIDC permission', document => { document.permissions['id-token'] = 'write' }],
+    ['extra CI permission', document => { document.permissions.actions = 'write' }],
+    ['extra job permission', document => { document.jobs.check.permissions = { contents: 'write' } }],
+    ['workflow credential env', document => { document.env = { TOKEN: 'credential' } }],
+    ['job credential env', document => { document.jobs.check.env = { TOKEN: 'credential' } }],
+    ['check step credential env', document => { document.jobs.check.steps[0].env = { TOKEN: 'credential' } }],
+    ['other action using the existing check secret', document => { document.jobs.check.steps[0].with!.token = '${{ secrets.WORKBASE_PRIVATE_TERMS }}' }],
+    ['extra command using the existing check secret', document => { document.jobs.check.steps.push({ run: 'echo ${{ secrets.WORKBASE_PRIVATE_TERMS }}' }) }],
+    ['required check condition', document => { required(document).if = 'always()' }],
+    ['other step condition', document => { document.jobs.check.steps[0].if = 'always()' }],
+    ['job condition', document => { document.jobs.check.if = 'always()' }],
+  ]
+  it('accepts the exact diagnostic step in otherwise unconditional read-only CI', () => {
+    expect(workflow('ci').parsed.jobs.check.steps.filter(step => step.name === diagnosticUploadName)).toHaveLength(1)
+    assertCiWorkflowPolicy(workflow('ci'))
+  })
+  it.each(cases)('rejects %s', (_name, mutate) => {
+    const parsed = structuredClone(workflow('ci').parsed)
+    mutate(parsed)
+    expect(() => assertCiWorkflowPolicy({ parsed, source: JSON.stringify(parsed) })).toThrow()
+  })
+  it('rejects the diagnostic upload in the release workflow', () => {
+    const parsed = structuredClone(workflow('release').parsed)
+    parsed.jobs.release.steps.push(structuredClone(upload(workflow('ci').parsed)))
+    expect(() => assertCommonWorkflowPolicy({ parsed, source: JSON.stringify(parsed) })).toThrow()
+  })
 })

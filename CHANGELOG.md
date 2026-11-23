@@ -25,6 +25,12 @@ Publication is pending green release-PR CI and review.
 - Polish List v2 density, typography and surfaces, responsive control/footer
   grouping and scroll hints, and localized loading, empty and error states.
   Extend responsive and held-state acceptance coverage. (#257)
+- Align List v2 filter controls and toolbar labels, preserve pagination focus-ring
+  scroll room, keep narrow page-size controls visible, and reveal focused or
+  selected view tabs. (#260, #264, #268, #267)
+- Bound MCP CI worker resources, require acceptance stylesheet readiness while
+  retaining preview 500 failures, budget 90 minutes for the full SDK pipeline,
+  and use real piped stdio in the runtime startup probe. (#270, #272, #274, #276)
 - Add typed composite/partial unique, cross-relation equality and referenced-relation
   immutability constraints; MCP editing and console unique-conflict feedback.
   (#214, #218, #245, #247, #249)
@@ -40,7 +46,8 @@ Publication is pending green release-PR CI and review.
 Included integration PRs (first-parent history since the 0.3.1 main release):
 #203, #197, #213, #195, #215, #214, #223, #227, #226, #228, #229,
 #237, #239, #238, #240, #242, #243, #241, #218, #244, #246, #245,
-#247, #248, #252, #251, #253, #249, #254, #257.
+#247, #248, #252, #251, #253, #249, #254, #257, #260, #264, #268,
+#270, #272, #274, #276, #267.
 
 ## 0.3.1 — 2026-11-18
 

@@ -8,7 +8,7 @@ separate published packages. See the [0.4.0 changelog](../../CHANGELOG.md),
 [runnable Workers configuration](../../packages/core/examples/README.md).
 
 The refreshed candidate starts at accepted integration revision
-`7209d5d0ccc774827040ab616a0398a12b6c0b28` ([PR #257](https://github.com/jakubknejzlik/workbase-sdk/pull/257))
+`84331325f9d60b2f4f6c301e1a0145b6c056ad2d` ([PR #267](https://github.com/jakubknejzlik/workbase-sdk/pull/267))
 and retains the merge of main `cfef8a865331bb65f3a8f41adb2a1ecd7be9a03a`, following
 the `release/sdk-v0.3.1` → main pattern. Review
 [release PR #256](https://github.com/jakubknejzlik/workbase-sdk/pull/256) and
@@ -18,13 +18,18 @@ The #233 ACCEPT and its acceptance bundle apply to integration revision
 follow-up (G4–G6), reviewed MERGE at `e28bdc23`. The earlier acceptance bundle
 and rubric score a51c635e; release-head screenshots carry their own source commit
 and console asset-tree identity and do not establish rebuilt-archive acceptance.
+The refresh merges eight integration commits after release head `8927882c`:
+#260, #264, #268, #270, #272, #274, #276 and #267. The hosted #265 acceptance
+completed 187/187 in CI run `45150426227`; the refreshed release PR still requires
+its own full hosted CI on the new release head. Local preparation runs only the
+scoped gates below and does not dispatch the release workflow.
 Publication pending: tag + provenance after green CI and review.
 
 ## Preparation checks
 
 Run the scoped local checks recorded in the release handoff; full SDK and MCP
 suites run in the release PR's CI. Run `git diff --check`, typecheck, lint,
-version/validator unit tests, the example test and a redacted gitleaks branch scan.
+version/validator unit tests, `check:ci-invariants` and a redacted gitleaks branch scan.
 Use only the existing maintainer vocabulary file for private-term guards; never
 print or commit its contents. See [CONTRIBUTING.md](../../CONTRIBUTING.md).
 
