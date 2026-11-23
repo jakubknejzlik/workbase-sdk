@@ -1,5 +1,49 @@
 # #271 preview HTTP 500 investigation
 
+## #234 transport correction (2026-11-23)
+
+The root, MCP package and consumer-facing standalone template now pin the exact
+published Wrangler **4.129.1**, with its declared Miniflare
+**5.20260907.0-alpha** and workerd **1.20260907.1**. This is the first release
+containing upstream [#15252](https://github.com/cloudflare/workers-sdk/pull/15252).
+There is no local Wrangler vendor patch or SDK handler retry.
+
+The installed `wrangler-dist/ProxyWorker.js` uses `attemptUserWorkerFetch` to
+retry only rejected GET/HEAD fetches against the same UserWorker origin, for at
+most three attempts. It reports successful recovery with the official
+`ProxyWorker: ... recovered on attempt ... after a dropped connection to the UserWorker`
+warning. Received HTTP 500 responses and response-processing exceptions are not
+retried. The installed CLI's DevEnv handles `Error inside ProxyWorker` by logging
+`the affected request failed; the dev server continues` without a fatal error
+event. This replaces the old exact-message ProxyController short-circuit.
+
+The six contracts in `scripts/test/wrangler-proxy.test.ts` evaluate the actual
+installed ProxyWorker with controlled fetch rejection, forward its reports to a
+running installed ProxyController/DevEnv, and fetch the same live session after
+exhaustion, POST rejection and a received-response stream-read throw. All six
+pass on unpatched 4.129.1; four fail on base 4.126.0 plus its patch (GET recovery,
+HEAD recovery, three-attempt exhaustion and non-fatal response-processing report).
+The SDK 500 control throws from a test-only extension of the real SDK app and
+checks one SDK entry, unchanged status/body/correlation header, and no retry.
+The fixture does not edit installed packages or production handlers.
+
+Triage8 remains diagnostic: A0 had 87 internal HTTP 500s; A1's scratch hunk A
+recovered 123 upstream rejections with zero internal HTTP 500s. Its separate
+outer client `ECONNRESET` counts remain A0 10 / A1 13, with no ProxyWorker attempt,
+SDK entry or HTTP status. Their cause is unproven and outside this correction.
+The hypothesis of a keep-alive reuse race near Node's five-second timeout is
+not established by those counts.
+
+Local acceptance retains the original assertions, retries, timeouts and HTTP 500
+observer. Official transport recovery warnings are counted and published; they
+do not independently make acceptance red. Real HTTP 500s and unrecovered errors
+remain failures. Local results do not clear the technical hold on #234 / PR #256:
+the fix still needs review, acceptance, merge into the release head and a new
+full mandatory CI green on the final #256 head. CI 45165798417 attempt 1 remains
+authoritative red until then.
+
+## Historical observations (Wrangler 4.126.0)
+
 Goal B is separate from the native-popup/readiness change. The underlying
 connection-loss cause remains **unproven**. No causal runtime fix is claimed.
 
