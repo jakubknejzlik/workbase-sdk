@@ -154,8 +154,7 @@
         "@tanstack/router-generator",
         "es-module-lexer",
         "i18next",
-        "react",
-        "react-dom",
+        "react", "react-dom",
         "typescript",
         "vite"
       ]
