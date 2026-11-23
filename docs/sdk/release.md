@@ -8,7 +8,7 @@ separate published packages. See the [0.4.0 changelog](../../CHANGELOG.md),
 [runnable Workers configuration](../../packages/core/examples/README.md).
 
 The refreshed candidate starts at accepted integration revision
-`84331325f9d60b2f4f6c301e1a0145b6c056ad2d` ([PR #267](https://github.com/jakubknejzlik/workbase-sdk/pull/267))
+`ffce5cb3c2387bf2ebf1197829ae371168af42ed` ([PR #280](https://github.com/jakubknejzlik/workbase-sdk/pull/280))
 and retains the merge of main `cfef8a865331bb65f3a8f41adb2a1ecd7be9a03a`, following
 the `release/sdk-v0.3.1` → main pattern. Review
 [release PR #256](https://github.com/jakubknejzlik/workbase-sdk/pull/256) and
@@ -18,11 +18,15 @@ The #233 ACCEPT and its acceptance bundle apply to integration revision
 follow-up (G4–G6), reviewed MERGE at `e28bdc23`. The earlier acceptance bundle
 and rubric score a51c635e; release-head screenshots carry their own source commit
 and console asset-tree identity and do not establish rebuilt-archive acceptance.
-The refresh merges eight integration commits after release head `8927882c`:
-#260, #264, #268, #270, #272, #274, #276 and #267. The hosted #265 acceptance
-completed 187/187 in CI run `45150426227`; the refreshed release PR still requires
-its own full hosted CI on the new release head. Local preparation runs only the
-scoped gates below and does not dispatch the release workflow.
+This refresh merges two integration commits after release head
+`e940d8fc7858ab69c0210a5bc03c061cf6c95985`: #279 (caller temp paths) and #280
+(Wrangler proxy recovery). Wrangler is pinned exactly to **4.129.1**; the older
+Wrangler patch is removed. The preceding release-head CI run `45165798417`
+attempt 1 was red (182 passed / 5 failed with HTTP 500); #280 addresses that
+proxy failure. The hosted #265 acceptance completed 187/187 in CI run
+`45150426227`; the refreshed release PR still requires its own full hosted CI
+on the new release head. Local preparation runs only the scoped gates below
+and does not dispatch the release workflow.
 Publication pending: tag + provenance after green CI and review.
 
 ## Preparation checks

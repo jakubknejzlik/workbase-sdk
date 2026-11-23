@@ -69,7 +69,7 @@ Sources: [provenance hashing](../../scripts/sdk-provenance.ts),
 | --- | --- | --- |
 | Bun | `1.4.3` | Root and standalone `packageManager`. |
 | Node | `25.8.0` | CI and release `actions/setup-node`. |
-| Wrangler | `4.126.0` | Root and standalone devDependencies. Root has a patch; the installed consumer is unpatched. |
+| Wrangler | `4.129.1` | Exact root devDependency, MCP dependency and consumer-facing standalone devDependency; published upstream code, no local Wrangler patch. Declares Miniflare `5.20260907.0-alpha` / workerd `1.20260907.1`. |
 | SST | `4.17.1` | Root and standalone devDependencies. |
 | TypeScript | Standalone `6.0.3`; root `^6.0.0`, frozen lock resolves `6.0.3` | Standalone/root manifests and `bun.lock`. |
 | Playwright / test | `1.58.2` | Root devDependencies; root Playwright drives the consumer browser phase. |

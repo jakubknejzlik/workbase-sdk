@@ -31,6 +31,9 @@ Publication is pending green release-PR CI and review.
 - Bound MCP CI worker resources, require acceptance stylesheet readiness while
   retaining preview 500 failures, budget 90 minutes for the full SDK pipeline,
   and use real piped stdio in the runtime startup probe. (#270, #272, #274, #276)
+- Honor caller temp paths in the List v2 acceptance harness. (#279)
+- Pin Wrangler exactly to 4.129.1 for List v2 proxy recovery and remove the
+  older Wrangler patch. (#280)
 - Add typed composite/partial unique, cross-relation equality and referenced-relation
   immutability constraints; MCP editing and console unique-conflict feedback.
   (#214, #218, #245, #247, #249)
@@ -47,7 +50,7 @@ Included integration PRs (first-parent history since the 0.3.1 main release):
 #203, #197, #213, #195, #215, #214, #223, #227, #226, #228, #229,
 #237, #239, #238, #240, #242, #243, #241, #218, #244, #246, #245,
 #247, #248, #252, #251, #253, #249, #254, #257, #260, #264, #268,
-#270, #272, #274, #276, #267.
+#270, #272, #274, #276, #267, #279, #280.
 
 ## 0.3.1 — 2026-11-18
 
