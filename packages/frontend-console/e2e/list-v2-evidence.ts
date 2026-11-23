@@ -1,9 +1,10 @@
 import { createHash } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
 import { mkdirSync, readFileSync, writeFileSync, readdirSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { resolve, join, relative } from 'node:path'
 import type { Page, TestInfo } from '@playwright/test'
-export const scratchRoot = '/tmp/codex-scratch/codex-wr-github-jakubknejzlik-workbase-sdk-233-s2-impl-wr-59eaa076'
+export const scratchRoot = tmpdir()
 export const output = resolve(process.env.LIST_V2_OUTPUT ?? join(scratchRoot, 'list-v2-acceptance'))
 const repository = resolve(import.meta.dirname, '../../..')
 if (!relative(repository, output).startsWith('..')) throw new Error('LIST_V2_OUTPUT must be outside the repository')
