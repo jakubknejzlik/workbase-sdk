@@ -2,6 +2,10 @@ name: SDK release
 on:
   workflow_dispatch:
     inputs:
+      expected_version:
+        description: Exact stable version to publish, e.g. 0.4.0
+        required: true
+        type: string
       dry_run:
         description: Check and rehearse without publishing packages
         type: boolean
@@ -20,7 +24,9 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    timeout-minutes: 90
+    # Green run 45249397779 took 77.8 min; cancelled runs 45268109310/45268054669
+    # were ×1.42–1.61 slower with no test failures. 150 min covers ~×1.9.
+    timeout-minutes: 150
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -73,15 +79,20 @@ jobs:
           RELEASE_EVENT: ${{ github.event_name }}
           RELEASE_REF: ${{ github.ref }}
           RELEASE_DRY_RUN: ${{ inputs.dry_run }}
+          RELEASE_EXPECTED_VERSION: ${{ inputs.expected_version }}
         run: |
           args=(--directory dist-sdk)
           if [[ "$RELEASE_EVENT" == push ]]; then
             version="${RELEASE_REF#refs/tags/sdk-v}"
             [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo 'Invalid SDK release tag' >&2; exit 1; }
             args+=(--expect-version "$version" --provenance)
-          elif [[ "$RELEASE_DRY_RUN" != false ]]; then
-            args+=(--dry-run)
           else
-            args+=(--provenance)
+            v="${RELEASE_EXPECTED_VERSION:-}"
+            [[ "$v" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo 'Invalid expected SDK release version' >&2; exit 1; }
+            if [[ "$RELEASE_DRY_RUN" != false ]]; then
+              args+=(--dry-run --expect-version "$v")
+            else
+              args+=(--expect-version "$v" --provenance)
+            fi
           fi
           bun scripts/sdk-publish.ts "${args[@]}"

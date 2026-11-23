@@ -1,7 +1,7 @@
 import { registerTempDir, cleanupTempDir } from './lib/test-temp-dir.mjs'
 import { customerTerms, reviewDigest } from './lib/public-vocabulary'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { execFileSync } from 'node:child_process'
+import { execFileSync, spawnSync } from 'node:child_process'
 import { existsSync, mkdtempSync, readFileSync, readdirSync, mkdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -159,6 +159,7 @@ describe('exported public bootstrap workflow policy', () => {
     expect(Object.keys(parsed.on).sort()).toEqual(['push', 'workflow_dispatch'])
     expect(parsed.on.push).toEqual({ tags: ['sdk-v*'] })
     expect(parsed.on.workflow_dispatch.inputs.dry_run).toMatchObject({ type: 'boolean', default: true })
+    expect(parsed.on.workflow_dispatch.inputs.expected_version).toEqual({ required: true, type: 'string', description: 'Exact stable version to publish, e.g. 0.4.0' })
     expect(Object.keys(parsed.jobs)).toEqual(['release'])
     const job = parsed.jobs.release
     expect(job.if).toBe("github.event_name != 'pull_request' && github.event_name != 'pull_request_target'")
@@ -173,7 +174,8 @@ describe('exported public bootstrap workflow policy', () => {
     expect(commands[publish]).toContain('--directory dist-sdk')
     expect(commands[publish]).toContain('--dry-run')
     expect(commands[publish]).toContain('--expect-version')
-    expect(job.steps[publish].env).toEqual({ RELEASE_EVENT: '${{ github.event_name }}', RELEASE_REF: '${{ github.ref }}', RELEASE_DRY_RUN: '${{ inputs.dry_run }}' })
+    expect(job.steps[publish].env).toEqual({ RELEASE_EVENT: '${{ github.event_name }}', RELEASE_REF: '${{ github.ref }}', RELEASE_DRY_RUN: '${{ inputs.dry_run }}', RELEASE_EXPECTED_VERSION: '${{ inputs.expected_version }}' })
+    expect(commands[publish]).not.toContain('${{')
     expect(source.replaceAll('${{ secrets.WORKBASE_PRIVATE_TERMS }}', '')).not.toMatch(/PR 6|secrets\s*[.\[]|(?:NPM|NODE_AUTH)_TOKEN/)
   })
   it('pins an OIDC-capable npm CLI before publishing', () => {
@@ -187,10 +189,10 @@ describe('exported public bootstrap workflow policy', () => {
     expect(install).toBeLessThan(steps.findIndex(step => step.run?.includes('bun scripts/sdk-publish.ts')))
   })
   it.each([
-    ['tag push', 'push', 'refs/tags/sdk-v0.2.11', '', ['--directory', 'dist-sdk', '--expect-version', '0.2.11', '--provenance']],
-    ['default dispatch', 'workflow_dispatch', 'refs/heads/main', '', ['--directory', 'dist-sdk', '--dry-run']],
-    ['dry-run dispatch', 'workflow_dispatch', 'refs/heads/main', 'true', ['--directory', 'dist-sdk', '--dry-run']],
-    ['real dispatch', 'workflow_dispatch', 'refs/heads/main', 'false', ['--directory', 'dist-sdk', '--provenance']],
+    ['tag push', 'push', 'refs/tags/sdk-v0.4.0', '', ['--directory', 'dist-sdk', '--expect-version', '0.4.0', '--provenance']],
+    ['default dispatch', 'workflow_dispatch', 'refs/heads/main', '', ['--directory', 'dist-sdk', '--dry-run', '--expect-version', '0.4.0']],
+    ['dry-run dispatch', 'workflow_dispatch', 'refs/heads/main', 'true', ['--directory', 'dist-sdk', '--dry-run', '--expect-version', '0.4.0']],
+    ['real dispatch', 'workflow_dispatch', 'refs/heads/main', 'false', ['--directory', 'dist-sdk', '--expect-version', '0.4.0', '--provenance']],
   ])('passes the correct publisher arguments for %s', (_label, event, ref, dryRun, expected) => {
     const command = workflow('release').parsed.jobs.release.steps.find(step => step.run?.includes('bun scripts/sdk-publish.ts'))!.run!
     const directory = registerTempDir(mkdtempSync(join(tmpdir(), 'sdk-release-step-')))
@@ -198,9 +200,25 @@ describe('exported public bootstrap workflow policy', () => {
       const capture = join(directory, 'args')
       writeFileSync(join(directory, 'bun'), '#!/bin/sh\nprintf \'%s\\n\' "$@" > "$SDK_PUBLISH_CAPTURE"\n', { mode: 0o755 })
       execFileSync('bash', ['-euo', 'pipefail', '-c', command], { env: { ...process.env, PATH: `${directory}:${process.env.PATH}`,
-        SDK_PUBLISH_CAPTURE: capture, RELEASE_EVENT: event as string, RELEASE_REF: ref as string, RELEASE_DRY_RUN: dryRun as string } })
+        SDK_PUBLISH_CAPTURE: capture, RELEASE_EVENT: event as string, RELEASE_REF: ref as string, RELEASE_DRY_RUN: dryRun as string,
+        RELEASE_EXPECTED_VERSION: event === 'push' ? 'invalid-and-ignored' : '0.4.0' } })
       expect(readFileSync(capture, 'utf8').trim().split('\n')).toEqual(['scripts/sdk-publish.ts', ...expected])
     } finally { cleanupTempDir(directory) }
+  })
+  it.each([
+    ['push', 'refs/tags/sdk-v0.4.0-rc.1', '0.4.0'],
+    ...[undefined, '', 'v0.4.0', '0.4.0-rc.1', '0.4.0; echo unsafe'].map(version => ['workflow_dispatch', 'refs/heads/main', version]),
+  ])('rejects invalid release versions before publishing (%s, %s, %s)', (event, ref, version) => {
+    const command = workflow('release').parsed.jobs.release.steps.find(step => step.run?.includes('bun scripts/sdk-publish.ts'))!.run!
+    for (const dryRun of ['', 'true', 'false']) {
+      const env = { ...process.env, RELEASE_EVENT: event, RELEASE_REF: ref, RELEASE_DRY_RUN: dryRun, RELEASE_EXPECTED_VERSION: version }
+      if (version === undefined) delete env.RELEASE_EXPECTED_VERSION
+      // A shell stub records any publisher invocation without touching npm or the registry.
+      const result = spawnSync('bash', ['-euo', 'pipefail', '-c', 'bun() { echo PUBLISH_CALLED; };\n' + command], { env, encoding: 'utf8' })
+      expect(result.status).toBe(1)
+      expect(result.stdout).toBe('')
+      expect(result.stderr).toContain(event === 'push' ? 'Invalid SDK release tag' : 'Invalid expected SDK release version')
+    }
   })
   it.skipIf(!existsSync(join(process.cwd(), 'scripts/export-sdk.ts')))('keeps the private SDK release workflow absent', () => {
     expect(existsSync(join(process.cwd(), '.github/workflows/release.yml'))).toBe(false)
