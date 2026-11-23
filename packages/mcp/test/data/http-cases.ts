@@ -122,6 +122,45 @@ export const cases: [string, (f: Fixture) => Promise<void>][] = [
     assert.deepEqual(await f.snapshot(), revoked)
     assert.equal((await f.tool(await f.connect(), 'delete_record', { entity: 'clients', id: created.data.id })).ok, true)
   }],
+  ['declared uniqueness returns HTTP/MCP 409 and rolls back CRUD/atomic writes with retry', async f => {
+    const client = await f.connect()
+    const first = await f.tool(client, 'create_record', { entity: 'clients', data: { name: 'Unique identity', email: 'unique@example.test' } })
+    const second = await f.tool(client, 'create_record', { entity: 'clients', data: { name: 'Other identity', email: 'unique@example.test' } })
+    assert.equal(first.ok, true); assert.equal(second.ok, true)
+    const before = await f.snapshot()
+    const duplicate = { entity: 'clients', data: { name: 'Unique identity', email: 'unique@example.test' }, idempotencyKey: 'unique-duplicate' }
+    const http = await f.call('/api/clients', 'POST', duplicate.data, f.dispatcher.token)
+    assert.equal(http.status, 409)
+    assert.deepEqual(await http.json(), { error: 'unique_conflict', detail: { constraintId: 'clients.client_identity_unique' } })
+    assert.deepEqual(await f.tool(client, 'create_record', duplicate), { ok: false, code: 'unique_conflict', status: 409 })
+    assert.deepEqual(await f.tool(client, 'update_record', { entity: 'clients', id: second.data.id, data: { name: 'Unique identity' }, version: 1 }), { ok: false, code: 'unique_conflict', status: 409 })
+    const command = { name: 'clients/rename', input: { id: second.data.id, value: 'Unique identity' }, idempotencyKey: 'unique-command' }
+    assert.deepEqual(await f.tool(client, 'run_command', command), { ok: false, code: 'unique_conflict', status: 409 })
+    assert.deepEqual(await f.snapshot(), before)
+    assert.equal((await f.tool(client, 'run_command', { ...command, input: { ...command.input, value: 'Retry identity' } })).ok, true)
+    assert.equal((await f.tool(client, 'create_record', { ...duplicate, data: { ...duplicate.data, name: 'Retry create' } })).ok, true)
+    for (const id of [first.data.id, second.data.id]) assert.equal((await f.tool(client, 'delete_record', { entity: 'clients', id })).ok, true)
+  }],
+  ['partial uniqueness returns HTTP/MCP 409 and rolls back CRUD/atomic writes with retry', async f => {
+    const client = await f.connect()
+    const first = await f.tool(client, 'create_record', { entity: 'clients', data: { name: 'Partial identity', status: 'confirmed' } })
+    const second = await f.tool(client, 'create_record', { entity: 'clients', data: { name: 'Partial other', status: 'confirmed' } })
+    const cancelled = await f.tool(client, 'create_record', { entity: 'clients', data: { name: 'Partial identity', status: 'cancelled' } })
+    assert.equal(first.ok, true); assert.equal(second.ok, true); assert.equal(cancelled.ok, true)
+    const before = await f.snapshot()
+    const duplicate = { entity: 'clients', data: { name: 'Partial identity', status: 'confirmed' }, idempotencyKey: 'partial-duplicate' }
+    const http = await f.call('/api/clients', 'POST', duplicate.data, f.dispatcher.token)
+    assert.equal(http.status, 409)
+    assert.deepEqual(await http.json(), { error: 'unique_conflict', detail: { constraintId: 'clients.client_confirmed_name_unique' } })
+    assert.deepEqual(await f.tool(client, 'create_record', duplicate), { ok: false, code: 'unique_conflict', status: 409 })
+    assert.deepEqual(await f.tool(client, 'update_record', { entity: 'clients', id: cancelled.data.id, data: { status: 'confirmed' }, version: 1 }), { ok: false, code: 'unique_conflict', status: 409 })
+    const command = { name: 'clients/rename', input: { id: second.data.id, value: 'Partial identity' }, idempotencyKey: 'partial-command' }
+    assert.deepEqual(await f.tool(client, 'run_command', command), { ok: false, code: 'unique_conflict', status: 409 })
+    assert.deepEqual(await f.snapshot(), before)
+    assert.equal((await f.tool(client, 'run_command', { ...command, input: { ...command.input, value: 'Partial retry' } })).ok, true)
+    assert.equal((await f.tool(client, 'create_record', { ...duplicate, data: { ...duplicate.data, name: 'Partial create retry' } })).ok, true)
+    for (const id of [first.data.id, second.data.id, cancelled.data.id]) assert.equal((await f.tool(client, 'delete_record', { entity: 'clients', id })).ok, true)
+  }],
   ['D7 keyed create audit failure rolls back record and replay receipt', async f => {
     const client = await f.connect(), before = await f.snapshot()
     await f.db.prepare("CREATE TRIGGER data_mcp_fail_audit BEFORE INSERT ON audit_outbox WHEN json_extract(NEW.payload,'$.changes.name.after')='Audit rollback client' BEGIN SELECT RAISE(ABORT,'data_mcp_test_failure'); END").run()

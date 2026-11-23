@@ -13,7 +13,8 @@ permissions:
 jobs:
   check:
     runs-on: ubuntu-24.04
-    timeout-minutes: 75
+    # Whole-pipeline budget: run 44738044182 took 72m51s (test:mcp 47m03s); not a hang/OOM workaround.
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -42,6 +43,27 @@ jobs:
       - run: bun run test
         env:
           WORKBASE_PRIVATE_TERMS: ${{ secrets.WORKBASE_PRIVATE_TERMS }}
+      - name: List v2 runtime diagnostics
+        run: |
+          fc-list | sort
+          node --input-type=module -e 'import { chromium } from "playwright"; const browser = await chromium.launch(); console.log("Chromium " + browser.version()); await browser.close()'
+      - name: List v2 acceptance (including #233 regressions)
+        run: bun run console:build && bun run test:list-v2-acceptance
+        env:
+          LIST_V2_OUTPUT: ${{ runner.temp }}/list-v2-acceptance
+          WORKBASE_PRIVATE_TERMS: ${{ secrets.WORKBASE_PRIVATE_TERMS }}
+      - name: Upload List v2 acceptance evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: list-v2-acceptance-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/list-v2-acceptance/test-results/
+            ${{ runner.temp }}/list-v2-acceptance/playwright-report/
+            ${{ runner.temp }}/list-v2-acceptance/results.json
+            ${{ runner.temp }}/list-v2-acceptance/manifest.json
+          retention-days: 14
+          if-no-files-found: warn
       - run: bun run test:mcp
       - run: bash scripts/sdk-pack.sh
         env:

@@ -18,10 +18,16 @@ const rawScratch = registerTempDir(mkdtempSync(join(tmpdir(), 'workbase-mcp-pack
 const consumer = join(scratch, 'instance'), id = 'packed_template_smoke'
 const env: NodeJS.ProcessEnv = { ...process.env, NODE_PATH: '', NODE_OPTIONS: '', npm_config_cache: join(scratch, 'npm-cache'), npm_config_userconfig: join(scratch, 'npmrc'),
   CLOUDFLARE_API_TOKEN: '', CLOUDFLARE_DEFAULT_ACCOUNT_ID: '0'.repeat(32),
-  WORKBASE_RESOURCE_PREFIX: 'neutral-smoke', AUTH_BASE_URL: 'https://neutral.example.test',
+  WORKBASE_RESOURCE_PREFIX: 'neutral-smoke', WORKBASE_PUBLIC_HOSTNAME: 'neutral.example.test',
+  AUTH_BASE_URL: 'https://neutral.example.test',
   EMAIL_FROM: 'login@example.test', BETTER_AUTH_SECRET: 'synthetic-access-secret-at-least-32',
-  WORKBASE_DOMAIN: 'neutral.example.test', SST_TELEMETRY_DISABLED: '1',
+  WORKBASE_OPS_TOKEN: 'example-ops', SST_TELEMETRY_DISABLED: '1',
 }
+// Runtime probes still need AUTH_BASE_URL; the deployment-only case must not
+// inherit that fallback or the removed hostname variable.
+delete env.WORKBASE_DOMAIN
+const hostnameEnv = { ...env }
+delete hostnameEnv.AUTH_BASE_URL
 const timings = {} as BuildTimings
 const timed = (key: keyof BuildTimings, action: () => string) => {
   const started = performance.now(), output = action()
@@ -201,14 +207,52 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 const globals = resolve('.smoke/globals.mjs')
 await build({ entryPoints: ['sst.config.ts'], outfile: '.sst/platform/sst.config.smoke.mjs', platform: 'node', format: 'esm', bundle: true, external: ['@pulumi/*'], banner: { js: "import { createRequire as topLevelCreateRequire } from 'node:module'; const require = topLevelCreateRequire(import.meta.url);" }, plugins: [{ name: 'SstInjectGlobals', setup(builder) {
-  builder.onLoad({ filter: /\\.(js|ts|jsx|tsx)$/ }, args => ({ contents: 'import { sst, cloudflare, $util } from ' + JSON.stringify(globals) + ';\\n' + readFileSync(args.path, 'utf8'), loader: args.path.endsWith('.ts') ? 'ts' : 'js' }))
+  builder.onResolve({ filter: /^\\.\\/sst-runtime$/ }, () => ({ path: resolve('.smoke/runtime.mjs') }))
+  builder.onResolve({ filter: /globals\\.mjs$/ }, () => ({ path: globals, external: true }))
+  builder.onLoad({ filter: /\\.(js|ts|jsx|tsx)$/ }, args => ({ contents: 'import { sst, cloudflare, $util, $cli } from ' + JSON.stringify(globals) + ';\\n' + readFileSync(args.path, 'utf8'), loader: args.path.endsWith('.ts') ? 'ts' : 'js' }))
 } }] })
 console.log('Generated SST config bundled with installed provisioner')
 `)
-  writeFileSync(join(consumer, '.smoke/globals.mjs'), 'export const sst = {}; export const cloudflare = {}; export const $util = {};\n')
+  writeFileSync(join(consumer, '.smoke/globals.mjs'), `const output = value => ({ apply: fn => output(fn(value)) })
+const secret = output
+export const records = []
+const record = (type, args) => records.push({ type, args })
+class D1 {
+  databaseId = 'test-db'; nodes = { database: {} }
+  constructor(_name, args) { args.transform.database({}, {}); record('database', args) }
+}
+class Kv {
+  namespaceId = 'test-kv'
+  constructor(_name, args) { args.transform.namespace({}, {}); record('kv', args) }
+}
+class Queue {
+  id = 'test-queue'; nodes
+  constructor(_name, args) {
+    const native = {}; args.transform.queue(native, {})
+    this.nodes = { queue: { queueName: native.queueName } }; record('queue', args)
+  }
+}
+class Worker {
+  url = 'https://worker.example.test'; nodes
+  constructor(_name, args) {
+    const native = { bindings: [] }; args.transform.worker(native, {})
+    this.nodes = { worker: { scriptName: native.scriptName } }; record('worker', args)
+  }
+}
+class Dependent { constructor(_name, args) { record('dependent', args) } }
+export const sst = { cloudflare: { D1, Kv, Queue, Worker } }
+export const cloudflare = { QueueConsumer: Dependent, WorkersCronTrigger: Dependent }
+export const $util = { output, secret }
+export const $cli = { paths: { platform: '/unused-recording-stub' } }
+`)
+  writeFileSync(join(consumer, '.smoke/runtime.mjs'), `import { records } from './globals.mjs'
+export const sstCommand = () => ({ local: { Command: class {
+  constructor(_name, args) { records.push({ type: 'migration', args }) }
+} } })
+`)
   console.log(run('node', ['.smoke/bundle.mjs']).trim())
-  // Import the actual bundled config. run() is never invoked (it registers resources).
-  // Dry plan verifies installed tools/assets/schema without contacting Cloudflare.
+  // Verify the dry plan, then invoke the actual bundled config run() with
+  // recording constructors. No provider is loaded and no cloud resources exist.
   writeFileSync(join(consumer, '.smoke/plan.ts'), `import assert from 'node:assert/strict'
 import { createProvisionPlan } from '@workbasehq/core/infra/provision'
 import { resolve } from 'node:path'
@@ -217,9 +261,13 @@ const { default: config } = await import('../.sst/platform/sst.config.smoke.mjs'
 assert.equal(config['app']({ stage: 'production' }).protect, true)
 assert.equal(config['app']({ stage: 'trial' }).removal, 'remove')
 const assets = resolve('dist/console')
-const plan = await createProvisionPlan({ configPath: './runtime.ts', handler: './src/index.ts', migrationsDir: './migrations', resourcePrefix: process.env.WORKBASE_RESOURCE_PREFIX, stage: 'trial', authSecret: process.env.BETTER_AUTH_SECRET, authBaseUrl: process.env.AUTH_BASE_URL, domain: process.env.WORKBASE_DOMAIN, email: { from: process.env.EMAIL_FROM }, assetsDir: assets })
+const plan = await createProvisionPlan({ configPath: './runtime.ts', handler: './src/index.ts', migrationsDir: './migrations', resourcePrefix: process.env.WORKBASE_RESOURCE_PREFIX, stage: 'trial', authSecret: process.env.BETTER_AUTH_SECRET, publicHostname: process.env.WORKBASE_PUBLIC_HOSTNAME, authBaseUrl: process.env.AUTH_BASE_URL, email: { from: process.env.EMAIL_FROM }, assetsDir: assets })
 for (const binding of ['DB', 'AUDIT_KV', 'EVENTS_QUEUE', 'ASSETS', 'EMAIL', 'EMAIL_FROM', 'SCHEMA_EXPECTED']) assert(plan.bindingNames.includes(binding))
 assert.equal(plan.assetsDir, assets)
+assert.equal(plan.publicOrigin, 'https://neutral.example.test')
+assert.equal(plan.publicHostname, 'neutral.example.test')
+assert.equal(plan.environment.AUTH_BASE_URL, plan.publicOrigin)
+assert.deepEqual(plan.warnings, [])
 assert(plan.migration.bin.startsWith(process.cwd() + '/node_modules/@workbasehq/core/'))
 assert(plan.schema.pluginMigrations)
 assert.equal(plan.schema.coreVersion, ${JSON.stringify(versions.core)})
@@ -227,8 +275,31 @@ assert((await import('node:fs')).existsSync(assets + '/index.html'))
 assert.equal(plan.schema.revision, 1)
 console.log('Bundled SST config imported; packaged assets/migration tool and bindings verified offline')
 `)
-  console.log(run('node', ['--import', './node_modules/tsx/dist/esm/index.mjs', '.smoke/plan.ts']).trim())
-  console.log('Step 6: SST bundle imported and createProvisionPlan verified offline; no resources registered')
+  console.log(run('node', ['--import', './node_modules/tsx/dist/esm/index.mjs', '.smoke/plan.ts'], consumer, hostnameEnv).trim())
+  writeFileSync(join(consumer, '.smoke/provision.ts'), `import assert from 'node:assert/strict'
+import { records } from './globals.mjs'
+globalThis.$config = value => value
+globalThis.$app = { stage: 'prefix-pr-123' }
+const { default: config } = await import('../.sst/platform/sst.config.smoke.mjs')
+const hostnameOnly = process.env.WORKBASE_PUBLIC_HOSTNAME !== undefined
+assert.equal(process.env.WORKBASE_DOMAIN, undefined)
+if (hostnameOnly) assert.equal(process.env.AUTH_BASE_URL, undefined)
+const result = await config.run()
+const workers = records.filter(record => record.type === 'worker')
+assert.equal(workers.length, 1)
+assert.equal(records.length, 8)
+const expected = hostnameOnly ? 'https://neutral.example.test' : 'https://worker-prefix-pr-123.example.test'
+assert.equal(workers[0].args.environment.AUTH_BASE_URL, expected)
+assert.equal(workers[0].args.domain, hostnameOnly ? 'neutral.example.test' : undefined)
+assert.equal(result.url, 'https://worker.example.test')
+assert.equal(result.databaseId, 'test-db')
+console.log(hostnameOnly ? 'Packed hostname-only config run: auth binding and Custom Domain verified' : 'Packed auth-only preview config run: {stage} expanded, no Custom Domain')
+`)
+  console.log(run('node', ['--import', './node_modules/tsx/dist/esm/index.mjs', '.smoke/provision.ts'], consumer, hostnameEnv).trim())
+  const previewEnv: NodeJS.ProcessEnv = { ...hostnameEnv, AUTH_BASE_URL: 'https://worker-{stage}.example.test' }
+  delete previewEnv.WORKBASE_PUBLIC_HOSTNAME
+  console.log(run('node', ['--import', './node_modules/tsx/dist/esm/index.mjs', '.smoke/provision.ts'], consumer, previewEnv).trim())
+  console.log('Step 6: installed dry plan plus hostname-only and auth-only preview config run() passed with recording resources')
   const edited = join(consumer, 'schema/worker.ts')
   writeFileSync(edited, readFileSync(edited, 'utf8') + '\n// Authored Instance bytes must survive init.\n')
   const preserved = Object.fromEntries(['package.json', ...fixtureEdits, ...generated, 'package-lock.json'].map(path => [path, readFileSync(join(consumer, path))]))

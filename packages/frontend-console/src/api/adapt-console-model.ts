@@ -24,7 +24,7 @@ function fallbackRegistry({ model, capabilities }: ConsoleModelContract): Consol
 
 /** Consume only the authenticated, sanitized projection. Never supplement it from /schema. */
 export function adaptConsoleModel(document: ConsoleModelContract): RuntimeConsole {
-  if (document.contractVersion !== 1) throw new Error('Unsupported console contract')
+  if (document.contractVersion !== 2) throw new Error('Unsupported console contract')
   const { model } = document
   // A console provider is optional. The packaged console still owns its built-in
   // overview and authorized Members page when the server has no contributed registry.

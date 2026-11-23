@@ -33,7 +33,7 @@ test.each([
 })
 test('canonical cache keys and scoped client instances', async () => {
   expect(cacheKey('list', 'test', { b: 1, a: 2 })).toBe(cacheKey('list', 'test', { a: 2, b: 1 }))
-  const fetch = vi.fn(async (_url: string, _init: ClientRequestInit) => response({ id: 'x', version: 1 }))
+  const fetch = vi.fn(async (_url: string, _init: ClientRequestInit) => response({ id: 'x', version: 1, actions: {} }))
   const a = createClient({ baseURL: '', actorId: 'a', orgId: 'one', fetch })
   await a.one('test', { id: 'x' }, signal()); await a.one('test', { id: 'x' }, signal())
   const b = createClient({ baseURL: '', actorId: 'a', orgId: 'two', fetch })
@@ -62,46 +62,33 @@ test('aborted late response cannot overwrite a newer response or mutation', asyn
   const a = new AbortController(), first = client.one('test', { id: 'x' }, a.signal).catch(e => e)
   a.abort()
   const second = client.one('test', { id: 'x' }, signal())
-  pending[1](response({ id: 'x', name: 'B', version: 2 })); await second
+  pending[1](response({ id: 'x', name: 'B', version: 2, actions: {} })); await second
   pending[0](response({ id: 'x', name: 'A', version: 1 })); expect((await first).name).toBe('AbortError')
   expect(await client.one('test', { id: 'x' }, signal())).toMatchObject({ name: 'B' })
 })
-test('mutation uses draft idempotency and quoted If-Match; conflicts preserve detail cache', async () => {
-  const fetch = vi.fn(async (_url: string, init: ClientRequestInit) => init.method === 'PATCH' ? response({ error: 'version_conflict' }, 409) : response({ id: 'x', name: 'A', version: 1 }))
+test('mutation uses draft idempotency and quoted If-Match; conflicts refresh the owner', async () => {
+  const fetch = vi.fn(async (_url: string, init: ClientRequestInit) => init.method === 'PATCH' ? response({ error: 'version_conflict' }, 409) : response({ id: 'x', name: 'A', version: 1, actions: {} }))
   const client = createClient({ baseURL: '', actorId: 'a', orgId: 'one', fetch })
   await client.create('test', { name: 'A' }, 'draft-key', signal())
   expect(new Headers(fetch.mock.calls[0][1].headers).get('Idempotency-Key')).toBe('draft-key')
   await expect(client.update('test', 'x', 1, { name: 'B' }, signal())).rejects.toMatchObject({ status: 409, code: 'version_conflict' })
   expect(new Headers(fetch.mock.calls[1][1].headers).get('If-Match')).toBe('"1"')
+  expect(fetch.mock.calls.map(([, init]) => init.method)).toEqual(['POST', 'PATCH', 'GET'])
   expect(await client.one('test', { id: 'x' }, signal())).toMatchObject({ name: 'A' })
 })
-test('successful mutation seeds detail, invalidates other entries and supersedes in-flight reads', async () => {
+test('successful mutation returns its bare row, invalidates other entries and supersedes in-flight reads', async () => {
   let delayed: (value: Response) => void = () => {}
-  const fetch = vi.fn(async (url: string, init: ClientRequestInit) => init.method === 'PATCH' ? response({ id: 'x', name: 'saved', version: 2 }) : url.endsWith('/slow') ? new Promise<Response>(resolve => { delayed = resolve }) : response({ id: 'y', name: 'old', version: 1 }))
+  const fetch = vi.fn(async (url: string, init: ClientRequestInit) => init.method === 'PATCH' ? response({ id: 'x', name: 'saved', version: 2 }) : url.endsWith('/slow') ? new Promise<Response>(resolve => { delayed = resolve }) : response({ id: url.endsWith('/x') ? 'x' : 'y', name: 'fresh GET', version: 2, actions: {} }))
   const client = createClient({ baseURL: '', orgId: 'o', actorId: 'a', fetch })
   await client.one('test', { id: 'y' }, signal())
   const pending = client.one('test', { id: 'slow' }, signal()).catch(e => e)
-  await client.update('test', 'x', 1, { name: 'saved' }, signal())
+  expect(await client.update('test', 'x', 1, { name: 'saved' }, signal())).toEqual({ id: 'x', name: 'saved', version: 2 })
   delayed(response({ id: 'slow', version: 1 })); expect((await pending).name).toBe('AbortError')
-  expect(await client.one('test', { id: 'x' }, signal())).toMatchObject({ name: 'saved' })
+  expect(await client.one('test', { id: 'x' }, signal())).toMatchObject({ name: 'fresh GET', actions: {} })
   await client.one('test', { id: 'y' }, signal())
-  expect(fetch).toHaveBeenCalledTimes(4)
+  expect(fetch).toHaveBeenCalledTimes(5)
 })
 
-test('act writes a returned detail into cache and failure surfaces reason without overwriting detail', async () => {
-  const initial = { id: 'x', version: 1, actions: { close: { enabled: true } } }
-  const updated = { id: 'x', version: 2, actions: { close: { enabled: false, reason: 'record.closed' } } }
-  const fetch = vi.fn().mockResolvedValueOnce(response(initial)).mockResolvedValueOnce(response(updated)).mockResolvedValueOnce(response({ error: 'action_unavailable', reason: 'record.closed' }, 409))
-  const client = createClient({ baseURL: '', actorId: 'a', orgId: 'one', fetch })
-  await client.one('record', { id: 'x' }, signal())
-  expect(await client.act('record', 'x', 'close', signal())).toEqual(updated)
-  expect(await client.one('record', { id: 'x' }, signal())).toEqual(updated)
-  await expect(client.act('record', 'x', 'close', signal())).rejects.toMatchObject({ status: 409, code: 'action_unavailable', reason: 'record.closed' })
-  expect(await client.one('record', { id: 'x' }, signal())).toEqual(updated)
-  expect(fetch).toHaveBeenCalledTimes(3)
-  expect(fetch.mock.calls[1][0]).toBe('/api/record/x/actions/close')
-  expect(fetch.mock.calls[1][1]).toMatchObject({ method: 'POST', credentials: 'same-origin', body: '{}' })
-})
 test('act refetches detail after a command response without a returned row', async () => {
   const fetch = vi.fn().mockResolvedValueOnce(response({ ok: true })).mockResolvedValueOnce(response({ id: 'x', version: 2, actions: {} }))
   const client = createClient({ baseURL: '', actorId: 'a', orgId: 'one', fetch })
@@ -147,11 +134,81 @@ test('native-style transport receives no client-options receiver', async () => {
   const client = createClient({ baseURL: '', orgId: 'one', actorId: 'a', fetch })
   await client.one('test', { id: 'x' }, signal())
 })
-test('renderer detail mode refetches a bare mutation response while ordinary one() keeps its cache contract', async () => {
-  const fetch = vi.fn(async (_url: string, init: ClientRequestInit) => response({ id: 'x', version: 1, ...(init.method === 'GET' ? { actions: {}, access: { state: 'no_account' } } : {}) }))
+test.each(['create', 'update'] as const)('bare %s remains a result but never establishes detail freshness', async kind => {
+  const bare = { id: 'x', version: 1 }, detail = { ...bare, actions: {} }
+  const fetch = vi.fn(async (_url: string, init: ClientRequestInit) => response(init.method === 'GET' ? detail : bare))
   const client = createClient({ baseURL: '', orgId: 'one', actorId: 'a', fetch })
-  await client.create('test', { name: 'New' }, 'draft', signal())
-  expect(await client.one('test', { id: 'x' }, signal())).not.toHaveProperty('actions'); expect(fetch).toHaveBeenCalledTimes(1)
-  expect(await client.one('test', { id: 'x' }, signal(), true)).toHaveProperty('actions')
-  await client.one('test', { id: 'x' }, signal(), true); expect(fetch).toHaveBeenCalledTimes(2)
+  const result = kind === 'create' ? await client.create('test', {}, 'draft', signal()) : await client.update('test', 'x', 1, {}, signal())
+  expect(result).toEqual(bare)
+  expect(await client.one('test', { id: 'x' }, signal())).toEqual(detail)
+  await client.one('test', { id: 'x' }, signal(), true)
+  expect(fetch.mock.calls.map(([, init]) => init.method)).toEqual([kind === 'create' ? 'POST' : 'PATCH', 'GET'])
+})
+test.each([undefined, null, [], 'invalid', { close: {} }, { close: { enabled: 'yes' } }])('invalid/missing metadata %j is never a loaded-empty detail', async actions => {
+  const fetch = vi.fn(async () => response({ id: 'x', version: 1, ...(actions === undefined ? {} : { actions }) }))
+  const client = createClient({ baseURL: '', orgId: 'one', actorId: 'a', fetch })
+  await client.one('test', { id: 'x' }, signal(), true)
+  await client.one('test', { id: 'x' }, signal(), true)
+  expect(fetch).toHaveBeenCalledTimes(2)
+})
+test.each([
+  { id: 'other', version: 8 }, {},
+  { id: 'x', version: 1, actions: { close: { enabled: true } } },
+])('action result %j always refreshes explicit owner and never caches credentials', async shape => {
+  const result = { ...shape, accept_url: 'https://example.test/synthetic' }, record = { id: 'x', version: 2, actions: {} }
+  const fetch = vi.fn(async (url: string, init: ClientRequestInit) => response(url === '/query' ? { data: [record], next_cursor: null } : init.method === 'GET' ? record : result))
+  const client = createClient({ baseURL: '', orgId: 'one', actorId: 'a', fetch })
+  expect(await client.actWith('test', 'x', 'invite', {}, signal())).toEqual({ result, record })
+  expect(await client.one('test', { id: 'x' }, signal(), true)).toEqual(record)
+  expect(fetch.mock.calls.map(([url]) => url)).toEqual(['/api/test/x/actions/invite', '/api/test/x'])
+  const list = client.list('test', meta)
+  expect(await list.load({}, signal())).toEqual({ data: [record], next_cursor: null })
+  expect(await list.load({}, signal())).toEqual({ data: [record], next_cursor: null })
+  expect(fetch.mock.calls.at(-1)![0]).toBe('/query')
+  expect(fetch).toHaveBeenCalledTimes(3)
+})
+test.each(['update', 'act'].flatMap(kind => [409, 403, 404, 0].map(status => [kind, status] as const)))('%s refusal/uncertain outcome (%s) revokes availability, notifies and preserves the error if refresh fails', async (kind, status) => {
+  const original = { id: 'x', version: 1, actions: { close: { enabled: true } } }
+  const fetch = vi.fn().mockResolvedValueOnce(response(original))
+  if (status) fetch.mockResolvedValueOnce(response({ error: 'original', reason: 'record.closed' }, status))
+  else fetch.mockRejectedValueOnce(new TypeError('offline'))
+  fetch.mockResolvedValueOnce(response({ error: 'refresh_failure' }, 503)).mockResolvedValueOnce(response({ ...original, version: 2, actions: {} }))
+  const client = createClient({ baseURL: '', orgId: 'one', actorId: 'a', fetch }), listener = vi.fn()
+  await client.one('test', { id: 'x' }, signal(), true)
+  client.subscribe(listener)
+  await expect(kind === 'update' ? client.update('test', 'x', 1, {}, signal()) : client.act('test', 'x', 'close', signal())).rejects.toMatchObject({ status, code: status ? 'original' : 'network', ...(status ? { reason: 'record.closed' } : {}) })
+  expect(listener).toHaveBeenCalled()
+  expect(fetch).toHaveBeenCalledTimes(3)
+  expect(await client.one('test', { id: 'x' }, signal(), true)).toMatchObject({ version: 2, actions: {} })
+  expect(fetch).toHaveBeenCalledTimes(4)
+})
+test('late action refresh and older un-aborted reads cannot replace newer mutation/detail state', async () => {
+  const pending: ((value: Response) => void)[] = []
+  let version = 1
+  const fetch = vi.fn(async (_url: string, init: ClientRequestInit) => {
+    if (init.method === 'POST') return response({ ok: true })
+    if (init.method === 'PATCH') { version = 3; return response({ id: 'x', version }) }
+    if (version === 1) return new Promise<Response>(resolve => pending.push(resolve))
+    return response({ id: 'x', version, actions: {} })
+  })
+  const client = createClient({ baseURL: '', orgId: 'one', actorId: 'a', fetch })
+  const older = client.one('test', { id: 'x' }, signal(), true).catch(e => e)
+  const action = client.act('test', 'x', 'close', signal()).catch(e => e)
+  await vi.waitFor(() => expect(pending).toHaveLength(2))
+  await client.update('test', 'x', 2, {}, signal())
+  const fresh = await client.one('test', { id: 'x' }, signal(), true)
+  pending[1](response({ id: 'x', version: 2, actions: { close: { enabled: true } } }))
+  pending[0](response({ id: 'x', version: 1, actions: { close: { enabled: true } } }))
+  expect((await action).name).toBe('AbortError'); expect((await older).name).toBe('AbortError')
+  expect(await client.one('test', { id: 'x' }, signal(), true)).toEqual(fresh)
+  expect(fresh.version).toBe(3)
+})
+test('local version validation does not request or invalidate cached detail', async () => {
+  const fetch = vi.fn(async () => response({ id: 'x', version: 1, actions: { close: { enabled: true } } }))
+  const client = createClient({ baseURL: '', orgId: 'one', actorId: 'a', fetch }), listener = vi.fn()
+  const initial = await client.one('test', { id: 'x' }, signal(), true)
+  client.subscribe(listener)
+  expect(() => client.update('test', 'x', 0, {}, signal())).toThrow('version_required')
+  expect(await client.one('test', { id: 'x' }, signal(), true)).toEqual(initial)
+  expect(fetch).toHaveBeenCalledTimes(1); expect(listener).not.toHaveBeenCalled()
 })

@@ -1,5 +1,6 @@
 node_modules/
 dist-sdk/
 **/dist/
+/packages/plugins/console/assets/
 **/.wrangler/
 test-results/

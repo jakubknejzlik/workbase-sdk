@@ -1,13 +1,16 @@
 // Workbase CSP: static backdrops and explicit focus layers avoid scroll-lock styles.
 import * as Radix from '@radix-ui/react-dialog'
-import { createContext, useContext, type ComponentProps } from 'react'
+import { createContext, useContext, useState, type ComponentProps } from 'react'
 import { useFocusContainment } from '../focus-containment'
 const Backdrop = createContext(true)
-export function Root({ modal = true, ...props }: ComponentProps<typeof Radix.Root>) {
-  return <Backdrop.Provider value={modal}><Radix.Root {...props} modal={false} /></Backdrop.Provider>
+export function Root({ modal = true, open: controlledOpen, defaultOpen = false, onOpenChange, ...props }: ComponentProps<typeof Radix.Root>) {
+  const [uncontrolledOpen, setOpen] = useState(defaultOpen)
+  const open = controlledOpen ?? uncontrolledOpen
+  return <Backdrop.Provider value={modal && open}><Radix.Root {...props} open={open} onOpenChange={next => { setOpen(next); onOpenChange?.(next) }} modal={false} /></Backdrop.Provider>
 }
 export function Overlay(props: ComponentProps<typeof Radix.Overlay>) {
-  return useContext(Backdrop) ? <div {...props} aria-hidden="true" /> : null
+  // Portal presence can outlive Content during an exit animation; its backdrop must not.
+  return useContext(Backdrop) ? <div {...props} data-state="open" aria-hidden="true" /> : null
 }
 export function Content({ ref, onKeyDown, onInteractOutside, ...props }: ComponentProps<typeof Radix.Content>) {
   const focus = useFocusContainment(ref)
@@ -18,4 +21,9 @@ export function Content({ ref, onKeyDown, onInteractOutside, ...props }: Compone
     onInteractOutside?.(event)
   }} />
 }
-export { Trigger, Close, Portal, Title, Description } from '@radix-ui/react-dialog'
+export function Portal({ children, ...props }: ComponentProps<typeof Radix.Portal>) {
+  // One portal lifetime keeps the backdrop before retained Content on rapid reopen.
+  // Separate portals can append a new backdrop after Content's exit was cancelled.
+  return <Radix.Portal {...props}><div className="contents">{children}</div></Radix.Portal>
+}
+export { Trigger, Close, Title, Description } from '@radix-ui/react-dialog'

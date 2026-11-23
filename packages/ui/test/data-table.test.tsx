@@ -132,6 +132,35 @@ it('initial loading never flashes empty and stale cell clicks cannot navigate', 
   expect(screen.queryByText('No results')).toBeNull()
 })
 
+it('empty feedback and its clear action are outside the horizontal table scroller', () => {
+  const clear = vi.fn()
+  render(<DataTable rows={[]} columns={[{ id: 'id', label: 'ID', cell: row => row.id }]} state={{ search: 'missing', sort: null, limit: 10 }} onStateChange={vi.fn()} page={0} onPage={vi.fn()} isFetching={false} label="Records" labels={labels} onRowClick={vi.fn()} onClearFilters={clear} clearFilters="Clear filters" />)
+  expect(screen.getByText(labels.noResults).closest('[data-slot="table-container"]')).toBeNull()
+  const button = screen.getByRole('button', { name: 'Clear filters' })
+  expect(button.closest('table')).toBeNull()
+  fireEvent.click(button); expect(clear).toHaveBeenCalledTimes(1)
+})
+
+it('error recovery explains preserved settings once and retries without changing table state or page', () => {
+  const retry = vi.fn(); const change = vi.fn(); const page = vi.fn()
+  const state = { search: 'kept', sort: { key: 'id', direction: 'desc' as const }, limit: 10 }
+  const props = { columns: [{ id: 'id', label: 'ID', cell: (row: { id: string }) => row.id }], state, onStateChange: change, page: 2, onPage: page, label: 'Records', labels: { ...labels, error: 'Cannot load records', errorDescription: 'Your settings are preserved.', retry: 'Try again' }, onRetry: retry, onRowClick: vi.fn() }
+  const error = new Error('Cannot load records')
+  const view = render(<DataTable {...props} rows={[]} isFetching={false} error={error} />)
+  const alert = screen.getByRole('alert')
+  expect(alert.closest('[data-slot="table-container"]')).toBeNull()
+  expect(screen.getAllByText('Cannot load records')).toHaveLength(1)
+  expect(alert.textContent).toContain('Your settings are preserved.')
+  fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
+  expect(retry).toHaveBeenCalledTimes(1); expect(change).not.toHaveBeenCalled(); expect(page).not.toHaveBeenCalled()
+  view.rerender(<DataTable {...props} rows={[]} isFetching error={error} />)
+  expect(screen.queryByRole('alert')).toBeNull(); expect(screen.queryByRole('button', { name: 'Try again' })).toBeNull(); expect(screen.queryByText(labels.noResults)).toBeNull()
+  view.rerender(<DataTable {...props} rows={[{ id: 'recovered' }]} isFetching={false} />)
+  expect(screen.queryByRole('alert')).toBeNull(); expect(screen.getByRole('cell').textContent).toBe('recovered')
+  expect(screen.getByRole('searchbox').getAttribute('value')).toBe('kept')
+  expect(screen.getByRole('columnheader').getAttribute('aria-sort')).toBe('descending')
+})
+
 it('complete collection bridge uses actual page count while server cursor tables never invent a last page', async () => {
   const { CompleteDataTable } = await import('../src')
   const user = userEvent.setup()
@@ -177,7 +206,7 @@ it('mobile hidden columns retain keyboard sort, three accessible states and filt
       { id: '_actions', label: 'Actions', cell: () => <button>Row actions</button> },
     ]} state={{ search: '', sort, limit: 30 }} onStateChange={change} page={0} onPage={vi.fn()} isFetching={fetching} label="Records" labels={labels} onRowClick={vi.fn()} />
     const view = render(content(null))
-    const disclosure = screen.getByRole('button', { name: 'Sort and filter' })
+    const disclosure = screen.getByRole('button', { name: 'Filters' })
     expect(disclosure.getAttribute('aria-expanded')).toBe('false')
     disclosure.focus(); await user.keyboard('{Enter}')
     expect(disclosure.getAttribute('aria-expanded')).toBe('true')
@@ -202,7 +231,7 @@ it('mobile hidden columns retain keyboard sort, three accessible states and filt
     await user.click(disclosure); expect(screen.queryByRole('button', { name: 'Sort Date' })).toBeNull()
     vi.mocked(window.matchMedia).mockReturnValue({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() } as any)
     view.rerender(content({ key: 'date', direction: 'desc' }))
-    expect(screen.queryByRole('button', { name: 'Sort and filter' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Filters' })).toBeNull()
     expect(screen.getByRole('columnheader', { name: 'Date' }).getAttribute('aria-sort')).toBe('descending')
     expect(screen.getAllByRole('cell').map(cell => cell.textContent)).toEqual(['John Doe', '2026-11-05', 'Row actions'])
   } finally { vi.restoreAllMocks() }

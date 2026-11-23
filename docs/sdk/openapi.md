@@ -67,3 +67,50 @@ semantic check (authorization, cursor verification, query cost and uniqueness).
 
 The document reserves its own public path. Swagger UI, YAML, client generation
 and per-role documents are outside this contract.
+
+`POST /query` supports SDK-owned limit/offset paging. Send `offset: 0` for the
+first page and `(page - 1) * limit` for later pages. `limit` remains required
+(1–100); `offset` must be an integer from 0 through `QUERY_LIMITS.maxOffset`
+(default 10,000, inclusive). This SDK-wide cap bounds skipped root rows per
+request. Larger offsets return HTTP 400 `query_invalid` at path `["offset"]`
+before any rows or totals SQL. Use cursor paging for deeper traversal; cursor
+paging is unaffected by this cap. Offset responses include
+`data`, `offset`, `limit` and `next_cursor: null`. Add `includeTotal: true` to
+receive `total`, an exact `COUNT(id)` over the complete authorized, filtered
+list source before sorting or paging. It includes organization/actor policies,
+search, `labelWhere`, confirmed user `where` filters, query `rowAccess`, and the
+selected configured view predicate/access state. Empty and out-of-range
+pages still report the complete matching total. No instance-authored count
+query or configuration is needed. Count statements use the normal query budgets
+and are not executed for unreadable scopes.
+
+Cursor migration: existing callers may continue to omit `offset` and follow
+`next_cursor` unchanged. They may also request `includeTotal`; the total covers
+all matching rows, independent of cursor position. Do not combine `cursor` and
+`offset`. New numbered-page callers use offset paging. Ordering includes an ID
+tiebreaker; concurrent writes can still move offset page boundaries. Rows and
+total use the same source but separate statements, so concurrent writes between
+those statements can also change the total.
+
+Send `view: "<id>"` to select a view from the resolved list configuration (plugin
+list contributions take precedence over model UI hints). Omission and `"all"`
+mean no view predicate; the configured default is a UI preference. The view's
+`where` and `rowAccess` are ANDed with the confirmed user conditions, including
+manual query `rowAccess`. Conflicting access states therefore match no rows.
+`list.rowAccess` configures the access control's presentation; its selected state
+is sent as query `rowAccess`, using the existing invitation-read authorization.
+
+Add `includeViewTotals: true` to receive `viewTotals`, a map of exact counts for
+each readable view. A missing `all` view is synthesized when views are configured.
+Each count replaces only the selected view and keeps org/actor policies, search,
+`labelWhere`, user `where`, and manual access conditions. It uses the same wrapped
+`COUNT(id)` source as the main total; pagination and sorting do not affect it.
+Views removed by console projection are omitted entirely, including their IDs;
+they do not receive a zero count. Selecting an unknown or unreadable view fails
+before SQL. A scope denied all rows executes no counts and returns an empty map.
+
+View counts are opt-in independently of `includeTotal`. Every count is charged
+against existing request/statement budgets; expensive combinations can be
+rejected before SQL. No instance-authored count configuration is accepted. Keep
+view/count flags unchanged when following a signed cursor. UI wiring for tab
+counts, numbered pages, and draft-versus-confirmed filters belongs to #232.

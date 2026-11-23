@@ -2,23 +2,26 @@ import type { ConsoleCalendarView } from '../../plugins/console/src/contract'
 import type { Capabilities, Model, ReadQuery } from './read'
 import { recordLabel, formatFieldValue } from './labels'
 import { detailReadableField } from './detail-plan'
+import { civilDate, civilInstant, shiftCivilDay } from './time-zone'
 export type CalendarMode = 'month' | 'week'
-export function dayKey(date: Date): string {
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
-}
-export function localDay(value: string): Date { const [year, month, day] = value.split('-').map(Number); return new Date(year, month - 1, day) }
+export const dayKey = civilDate
+/** UTC Date carriers are for civil arithmetic/formatting only, never query instants. */
+export function localDay(value: string): Date { return new Date(`${value}T00:00:00Z`) }
 export function validDay(value: unknown): value is string {
-  return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value) && Number(value.slice(0, 4)) >= 1000 && dayKey(localDay(value)) === value
+  return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value) && Number(value.slice(0, 4)) >= 1000 && Number.isFinite(+localDay(value)) && dayKey(localDay(value)) === value
 }
-export function addDays(value: Date, count: number): Date { const date = new Date(value); date.setDate(date.getDate() + count); return date }
-/** Local Monday boundaries, converted to instants only at the query boundary (DST safe). */
-export function calendarRange(value: string, mode: CalendarMode) {
+export function addDays(value: Date, count: number): Date { return localDay(shiftCivilDay(dayKey(value), count)) }
+export function calendarCivilRange(value: string, mode: CalendarMode) {
   const anchor = localDay(value)
-  const start = mode === 'month' ? new Date(anchor.getFullYear(), anchor.getMonth(), 1) : anchor
-  start.setDate(start.getDate() - (start.getDay() + 6) % 7)
-  const end = mode === 'week' ? addDays(start, 7) : new Date(anchor.getFullYear(), anchor.getMonth() + 1, 1)
-  if (mode === 'month' && end.getDay() !== 1) end.setDate(end.getDate() + (8 - end.getDay()) % 7)
-  return { start, end }
+  const start = mode === 'month' ? new Date(Date.UTC(anchor.getUTCFullYear(), anchor.getUTCMonth(), 1)) : anchor
+  start.setUTCDate(start.getUTCDate() - (start.getUTCDay() + 6) % 7)
+  const end = mode === 'week' ? addDays(start, 7) : new Date(Date.UTC(anchor.getUTCFullYear(), anchor.getUTCMonth() + 1, 1))
+  if (mode === 'month' && end.getUTCDay() !== 1) end.setUTCDate(end.getUTCDate() + (8 - end.getUTCDay()) % 7)
+  return { start: dayKey(start), end: dayKey(end) }
+}
+export function calendarRange(value: string, mode: CalendarMode, zone?: string) {
+  const { start, end } = calendarCivilRange(value, mode)
+  return { start: civilInstant(start, zone), end: civilInstant(end, zone) }
 }
 export function availableCalendar(model: Model, entity: string, caps: Capabilities): ConsoleCalendarView | undefined {
   const grant = caps.entities[entity]
@@ -27,7 +30,7 @@ export function availableCalendar(model: Model, entity: string, caps: Capabiliti
 }
 /** One ordinary ts-query, retaining search, presets, filters and server policy enforcement. */
 export function calendarQuery(query: ReadQuery, view: ConsoleCalendarView, date: string, mode: CalendarMode, model: Model): ReadQuery {
-  const { start, end } = calendarRange(date, mode)
+  const { start, end } = calendarRange(date, mode, model.timeZone)
   const startsInRange = { [view.startField]: { gte: start.toISOString(), lt: end.toISOString() } }
   const range = view.endField ? { and: [
     { [view.startField]: { lt: end.toISOString() } },
@@ -39,9 +42,13 @@ export function calendarCreateField(model: Model, entity: string, caps: Capabili
   const definition = model.entities[entity]; const field = view.startField
   return !!caps.entities[entity]?.operations.includes('create') && caps.entities[entity].writable.includes(field) && !definition.fields[field]?.readOnly && !definition.fields[field]?.ui?.hidden && !!definition.writeSchema?.properties?.[field] && (!definition.form?.create || definition.form.create.fields.includes(field))
 }
-export function eventOnDay(row: Record<string, any>, view: ConsoleCalendarView, date: Date): boolean {
+// Convert both civil boundaries independently, once per displayed day, before checking rows.
+export function calendarDayBounds(day: string, zone?: string) {
+  return { from: +civilInstant(day, zone), to: +civilInstant(shiftCivilDay(day, 1), zone) }
+}
+export function eventOnDay(row: Record<string, any>, view: ConsoleCalendarView, { from, to }: ReturnType<typeof calendarDayBounds>): boolean {
   const start = Date.parse(row[view.startField]); const end = view.endField ? Date.parse(row[view.endField]) : NaN
-  return Number.isFinite(start) && start < addDays(date, 1).getTime() && (Number.isFinite(end) && end > start ? end > date.getTime() : start >= date.getTime())
+  return Number.isFinite(start) && start < to && (Number.isFinite(end) && end > start ? end > from : start >= from)
 }
 
 /** Ref operands are SR-61 labels already computed by the range SELECT (SR-50).
@@ -53,7 +60,7 @@ export function calendarTitle(model: Model, entity: string, caps: Capabilities, 
   if (!fields.length || fields.some(field => !detailReadableField(model, entity, caps, field))) return fallback()
   const parts = fields.map(field => {
     const spec = model.entities[entity].fields[field]
-    if (spec.type !== 'ref') return row[field] == null || !String(row[field]).trim() ? undefined : formatFieldValue(row[field], spec, locale, t)
+    if (spec.type !== 'ref') return row[field] == null || !String(row[field]).trim() ? undefined : formatFieldValue(row[field], spec, locale, t, model.timeZone)
     const label = row.__labels?.[field]
     const target = spec.entity!
     const display = caps.entities[target]?.displayField ?? model.entities[target].displayField

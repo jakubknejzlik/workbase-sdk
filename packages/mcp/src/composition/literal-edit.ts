@@ -6,7 +6,7 @@ function unwrap(node: ts.Expression): ts.Expression {
 }
 /** The loader validates the module first. Edit only an initializer's token span;
  * trivia, declarations, imports and all other authored bytes remain untouched. */
-export function replaceLiteral(text: string, path: readonly string[], value: unknown, file: string, options: { config?: boolean } = {}): string {
+export function replaceLiteral(text: string, path: readonly string[], value: unknown, file: string, options: { config?: boolean; insert?: boolean } = {}): string {
   const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS)
   const error = (node: ts.Node, message: string): never => {
     const pos = source.getLineAndCharacterOfPosition(node.getStart(source))
@@ -34,7 +34,7 @@ export function replaceLiteral(text: string, path: readonly string[], value: unk
     if (!ts.isObjectLiteralExpression(node)) error(node, 'Expected a literal object')
     const property = (node as ts.ObjectLiteralExpression).properties.find(property => property.name
       && (ts.isIdentifier(property.name) || ts.isStringLiteral(property.name) || ts.isNumericLiteral(property.name)) && property.name.text === name)
-    if (!property && options.config && position === path.length - 1) {
+    if (!property && (options.config || options.insert) && position === path.length - 1) {
       const object = node as ts.ObjectLiteralExpression
       const end = object.getEnd() - 1
       const separator = object.properties.length && !object.properties.hasTrailingComma ? ',' : ''

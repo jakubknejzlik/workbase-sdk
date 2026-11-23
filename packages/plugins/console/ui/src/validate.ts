@@ -12,7 +12,7 @@ import { checkDictionaries, type Catalogs } from './dictionaries'
 import { sdkCatalogs } from './catalogs'
 export type Location = { file: string; line: number; col: number }
 export type Finding = Location & { code: string; key?: string; lang?: string; message?: string }
-export type KeySource = Location & { plural?: boolean }
+export type KeySource = Location & { plural?: boolean; optional?: boolean }
 export type Scan = { keys: Map<string, KeySource[]>; families: Set<string>; findings: Finding[] }
 export const breakpoints = ['xs', 'sm', 'md', 'lg', 'xl'] as const
 export function effectiveSpans(span: Span): number[] {
@@ -36,6 +36,9 @@ export function requiredKeys(config: { entities: Schema }, manifest: Manifest, s
     // defineConfig injects the SDK-owned users projection; it is not an authored domain entity.
     if (entity === 'users') continue
     add(`domain:entity.${entity}`, { ...schemaAt(`entities.${entity}`), plural: true })
+    // These renderer forms are optional until authored in any enabled language;
+    // then every enabled language must supply the same named form.
+    for (const form of ['singular', 'object']) add(`domain:entity.${entity}.${form}`, { ...schemaAt(`entities.${entity}`), optional: true })
     for (const [field, f] of Object.entries(spec.fields)) {
       const location = schemaAt(`entities.${entity}.fields.${field}`)
       add(`domain:field.${entity}.${field}`, location)
@@ -103,7 +106,7 @@ export function checkStructure(manifest: Manifest, root: string): Finding[] {
   }
   return findings
 }
-export async function validateInstance(root: string): Promise<Finding[]> {
+export async function validateInstance(root: string, options: { sdkResolutionRoot?: string } = {}): Promise<Finding[]> {
   root = resolve(root)
   const findings: Finding[] = []
   const caught = (error: unknown) => {
@@ -111,9 +114,9 @@ export async function validateInstance(root: string): Promise<Finding[]> {
     findings.push({ code: 'source', file: loc.file, line: loc.line, col: loc.column, message: String(error) })
   }
   let loaded: Awaited<ReturnType<typeof loadConfig>>, sources: Sources, manifest: Manifest
-  try { loaded = await loadConfig(resolve(root, 'config.ts')); sources = checkSources(root) }
+  try { loaded = await loadConfig(resolve(root, 'config.ts'), options); sources = checkSources(root) }
   catch (error) { caught(error); return findings }
-  try { manifest = await (await import('./vite')).extractManifest(root) }
+  try { manifest = await (await import('./vite')).extractManifest(root, options) }
   catch (error) { caught(error); return findings }
   const scan = scanTSX(sources.modules, manifest.keys)
   for (const family of actionFamilies(actionReasonKeys(loaded.config), manifest.keys)) scan.families.add(family)
@@ -128,7 +131,7 @@ export async function validateInstance(root: string): Promise<Finding[]> {
       if (ns === 'sdk' && !existsSync(file)) continue
       try {
         const text = readFileSync(file, 'utf8'), value = JSON.parse(text)
-        if (!value || Array.isArray(value) || typeof value !== 'object' || Object.values(value).some(v => typeof v !== 'string')) throw new Error('Expected flat string catalog')
+        if (!value || Array.isArray(value) || typeof value !== 'object' || Object.values(value).some(v => typeof v !== 'string' || !v.trim())) throw new Error('Expected flat string catalog')
         catalogs[lang][ns] = value
       } catch (error) { findings.push({ code: 'catalog', file, line: 1, col: 1, lang, message: String(error) }) }
     }
@@ -136,4 +139,36 @@ export async function validateInstance(root: string): Promise<Finding[]> {
   for (const family of Object.keys(manifest.keys)) if (!scan.families.has(family)) findings.push({ code: 'unused-family', ...sourceAt(resolve(root, 'ui/keys.ts'), sources.modules.get(resolve(root, 'ui/keys.ts')) ?? '', family), key: family })
   findings.push(...checkDictionaries(root, requiredKeys(loaded.config, manifest, scan, sdkCatalogs.en, sources, loaded.sources), catalogs, sdkCatalogs))
   return findings.sort((a, b) => a.file.localeCompare(b.file, 'en') || a.line - b.line || a.col - b.col || a.code.localeCompare(b.code, 'en') || (a.key ?? '').localeCompare(b.key ?? '', 'en'))
+}
+
+/** The same inventory used by validation, with locations for explicit authoring. */
+export async function inspectDictionaries(root: string, options: { sdkResolutionRoot?: string } = {}) {
+  root = resolve(root)
+  const loaded = await loadConfig(resolve(root, 'config.ts'), options)
+  const sources = checkSources(root)
+  const manifest = await (await import('./vite')).extractManifest(root, options)
+  const scan = scanTSX(sources.modules, manifest.keys)
+  for (const family of actionFamilies(actionReasonKeys(loaded.config), manifest.keys)) scan.families.add(family)
+  const required = requiredKeys(loaded.config, manifest, scan, sdkCatalogs.en, sources, loaded.sources)
+  const catalogs: Catalogs = {}, errors: Finding[] = []
+  const pluralCategories = Object.fromEntries(['en', 'cs'].map(language => [language, new Intl.PluralRules(language).resolvedOptions().pluralCategories]))
+  for (const language of ['en', 'cs']) {
+    catalogs[language] = {}
+    for (const ns of ['domain', 'ui', 'sdk']) {
+      const file = resolve(root, 'locales', language, ns + '.json')
+      if (!existsSync(file)) continue
+      try {
+        const value = JSON.parse(readFileSync(file, 'utf8'))
+        if (!value || Array.isArray(value) || typeof value !== 'object' || Object.values(value).some(v => typeof v !== 'string' || !v.trim())) throw new Error('Expected nonempty flat string catalog')
+        catalogs[language][ns] = value
+      } catch (error) { errors.push({ code: 'catalog', file, line: 1, col: 1, lang: language, message: String(error) }) }
+    }
+  }
+  return { languages: loaded.config.languages, catalogs, pluralCategories,
+    requiredKeys: [...required].map(([key, sources]) => {
+      const [ns, name] = key.split(':')
+      const named = sources.every(source => source.optional)
+      const authored = (loaded.config.languages ?? []).some(language => Object.hasOwn(catalogs[language]?.[ns] ?? {}, name))
+      return { key, plural: sources.some(source => source.plural), ...(named ? { optional: !authored } : {}), sources }
+    }), errors }
 }

@@ -148,7 +148,7 @@ it('legacy fixture DDL byte snapshot captured before the projection refactor', a
 // New nonphysical keys automatically become probes, including absent optional keys.
 it('zod-enumerated nonphysical config keys cannot leak into lock or SQL', () => {
   const physical = new Set(['entities', 'account', 'baseline', 'revision'])
-  const physicalEntity = new Set(['fields', 'checks', 'renameFrom'])
+  const physicalEntity = new Set(['fields', 'checks', 'constraints', 'renameFrom'])
   const physicalField = new Set(['type', 'required', 'values', 'entity', 'default', 'min', 'computed', 'renameFrom', 'backfillFrom'])
   const base = schemaLock(fixture), bytes = lockBytes(base), sql = diffSpecs([], base.tables)
   const assert = (config: InstanceConfig, key: string) => {

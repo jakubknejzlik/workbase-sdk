@@ -1,3 +1,5 @@
+import type { ListConfig, ListInput } from './list-contract'
+export type * from './list-contract'
 export type ConsoleGrant = string | { entity: string; operation?: 'read' | 'create' | 'update' | 'delete' }
 export interface ConsoleGroup { id: string; label: string; order?: number; icon?: string }
 export interface ConsoleNavigation {
@@ -62,14 +64,7 @@ export interface ConsoleCalendarView { kind: 'calendar'; startField: string; end
 export interface ConsoleEntityDisplay {
   views?: ConsoleCalendarView[]
   lookup?: boolean
-  list?: {
-    columns?: string[]; search?: string[]; pageSize?: 10 | 20 | 30 | 50 | 100; compact?: boolean; mobileCards?: boolean
-    relatedColumns?: Record<string, { via: string; field: string }>
-    defaultSort?: { key: string; direction: 'asc' | 'desc' }
-    filter?: Record<string, false | 'text' | 'enum' | 'relation' | 'number' | 'date' | 'boolean'>
-    sort?: Record<string, false | { fields: string[] }>
-    views?: { id: string; label: string; where: Record<string, unknown>; default?: boolean }[]
-  }
+  list?: ListConfig
   detail?: {
     /** Explicit field saves; eligibility still follows the edit form and live grants. */
     inlineEdit?: boolean
@@ -96,7 +91,7 @@ export interface ConsoleModelUI {
 export interface ConsoleContribution {
   navigation?: readonly ConsoleNavigation[]
   pages?: readonly ConsolePage[]
-  entities?: Readonly<Record<string, ConsoleEntityDisplay>>
+  entities?: Readonly<Record<string, Omit<ConsoleEntityDisplay, 'list'> & { list?: ListInput }>>
 }
 export interface ConsoleRegistry {
   navigation: ConsoleNavigation[]
@@ -176,7 +171,7 @@ export interface ConsoleModelCapabilities {
 }
 /** Authenticated, organization-scoped wire contract. Check version before adapting. */
 export interface ConsoleModelContract {
-  contractVersion: 1
+  contractVersion: 2
   model: ConsoleRuntimeModel
   capabilities: ConsoleModelCapabilities
   console: ConsoleRegistry | null

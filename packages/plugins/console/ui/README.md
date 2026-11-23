@@ -136,6 +136,15 @@ Namespaces are `domain`, `ui` (the default), and `sdk`, with flat dotted keys.
 `fallbackLng: false` prevents language fallback; missing keys render `⟦ns:key⟧`
 and log an error. Interpolation values are escaped by React. Entity labels take
 `{ count }`; plural forms must match each language's `Intl.PluralRules` categories.
+Optional `domain:entity.<entity>.singular` names entity forms accessibly, and
+`domain:entity.<entity>.object` supplies the object in `sdk:createEntity`
+(“Create {{object}}” / “Vytvořit {{object}}”). Without an object form the renderer
+uses `sdk:create`. These named forms appear in the inventory as optional;
+once authored in one enabled language, each enabled language must supply them.
+Page and navigation titles remain independent `ui:` keys.
+MCP V3 `set_label` writes these keys and counted forms in the existing presentation
+batch. Entity captions require explicit `pluralForms` (`one/other` for English;
+`one/few/many/other` for Czech); field captions use `field` and `label` instead.
 SDK cs/en catalogs ship in `src/locales`; optional partial
 `locales/<lang>/sdk.json` overrides merge into the generated resources. Unknown
 SDK keys, extra interpolation variables and `$t(` nesting fail validation.
@@ -165,6 +174,21 @@ visibility, and replaces the client, query cache and drafts whenever canonical
 `[actorId, orgId, caps]` changes. No capability data persists outside that scope.
 Slots receive only declared authorized props and `t`. Action nodes consume only
 the owning detail's `actions` entries, and use `ui:actions.<name>` labels.
+
+The D3 A detail contract uses exact entity-scoped action names: `(entity, name)`
+selects the declaration's full registered `command` identity (for example,
+`record` / `close` maps to `record/close`). The wire key is `close`; names can
+repeat on other entities. Keep the owning entity and record ID for dispatch and
+refresh. SDK detail GET includes this top-level map with
+`Cache-Control: private, no-store`; list/query responses omit availability.
+`baseline: 'workbase-sdk'` reserves `actions` as both a field and relation name
+to prevent metadata collisions. Legacy configurations intentionally allow those
+names and retain their existing detail payloads without injected availability.
+See the [SDK record-action contract](../../../core/src/schema/README.md).
+Disabled generic actions retain native disabled-button semantics and describe
+their translated reason through `aria-describedby`, as the access card does.
+Authored reasons use `ui:`; core's `sdk.action_unavailable` fallback and `access.*`
+reasons use the bundled `sdk:` catalog, including English and Czech fallbacks.
 
 Register the SDK access card in `ui/-slots.ts` with an explicit dependency on the
 account-link field. The extractor stubs this exact SDK component import; it does

@@ -36,7 +36,7 @@ beforeEach(async () => {
   options = { projectRoot: root, configPath: 'application inputs/config.ts', handler: 'worker.ts', migrationsDir: 'sql',
     resourcePrefix: 'neutral-app', stage: 'preview', authSecret, authBaseUrl: 'https://neutral.example.test', accountId: '0'.repeat(32) }
 })
-afterEach(async () => { records.length = 0; vi.unstubAllGlobals(); vi.unstubAllEnvs(); cleanupTempDir(root) })
+afterEach(async () => { records.length = 0; vi.unstubAllGlobals(); vi.unstubAllEnvs(); vi.restoreAllMocks(); cleanupTempDir(root) })
 
 function mockSst() {
   class D1 {
@@ -91,6 +91,73 @@ function mockSst() {
   })
 }
 
+it.each([
+  { name: 'hostname only', publicHostname: 'neutral.example.test', authBaseUrl: undefined, warning: undefined },
+  { name: 'auth only', publicHostname: undefined, authBaseUrl: 'https://neutral.example.test/', warning: undefined },
+  { name: 'equal parsed origins', publicHostname: 'neutral.example.test', authBaseUrl: 'https://NEUTRAL.example.test:443/', warning: undefined },
+  { name: 'different origins', publicHostname: 'neutral.example.test', authBaseUrl: 'https://stale.example.test', warning: 'provision_auth_origin_overridden' },
+  { name: 'malformed unused fallback', publicHostname: 'neutral.example.test', authBaseUrl: 'https://user:private@example.test/path', warning: 'provision_auth_fallback_ignored' },
+  { name: 'punycode TLD', publicHostname: 'app.xn--p1ai', authBaseUrl: undefined, warning: undefined },
+])('resolves $name identically for dry planning, auth binding and Custom Domain', async ({ name: _name, warning, ...inputs }) => {
+  const warn = vi.spyOn(console, 'warn').mockImplementation(() => { expect(records).toEqual([]) })
+  const resolved = validateProvisionOptions({ ...options, ...inputs })
+  const plan = await createProvisionPlan({ ...options, ...inputs })
+  expect(plan).toEqual(await createProvisionPlan({ ...options, ...inputs }))
+  expect(plan).toMatchObject(resolved)
+  expect(plan.publicOrigin).toBe(inputs.publicHostname?.includes('xn--') ? 'https://app.xn--p1ai' : 'https://neutral.example.test')
+  expect(plan.environment.AUTH_BASE_URL).toBe(plan.publicOrigin)
+  expect(plan.warnings.map(item => item.code)).toEqual(warning ? [warning] : [])
+  expect(warn).not.toHaveBeenCalled()
+  mockSst()
+  const result = await provision({ ...options, ...inputs })
+  const worker = records.find(record => record.type === 'worker')!
+  expect(worker.args.domain).toBe(plan.publicHostname)
+  expect(worker.args.environment.AUTH_BASE_URL).toBe(plan.publicOrigin)
+  const bindings = await worker.child.args.bindings.promise()
+  expect(bindings.find((binding: any) => binding.name === 'AUTH_BASE_URL').text).toBe(plan.publicOrigin)
+  expect(warn).toHaveBeenCalledTimes(warning ? 1 : 0)
+  if (warning) expect(warn).toHaveBeenCalledWith(`${plan.warnings[0].code}: ${plan.warnings[0].message}`)
+  expect(JSON.stringify(plan.warnings)).not.toContain('private')
+  expect(await outputValue(result.url)).toBe('https://neutral.example.test')
+})
+
+it.each([
+  'App.Example.test', '\u212A.example.test', 'caf\u00e9.example.test', '\uff4b.example.test',
+  ' app.example.test ',
+  '', '   ', 'https://app.example.test', 'app.example.test:443', 'app.example.test/path',
+  'app.example.test.', 'app .example.test', 'app\n.example.test', 'user@app.example.test',
+  'app.example.test?query', 'app.example.test#fragment', '*.example.test', 'app-{stage}.example.test',
+  '${hostname}.example.test', '127.0.0.1', '127.1', '0x7f.0.0.1', '[::1]', '::1',
+  '.example.test', 'app..test', '-app.example.test', 'app-.example.test', 'localhost',
+  `${'a'.repeat(64)}.example.test`, Array(4).fill('a'.repeat(63)).join('.'),
+])('rejects invalid hostname #%# without falling back or registering resources', async publicHostname => {
+  mockSst()
+  for (const action of [() => validateProvisionOptions({ ...options, publicHostname }), () => createProvisionPlan({ ...options, publicHostname }), () => provision({ ...options, publicHostname })]) {
+    try { await action(); throw Error('expected_failure') }
+    catch (error) {
+      expect(error).toBeInstanceOf(ProvisionDiagnostic)
+      expect(provisionErrorMessage(error)).toBe('provision_invalid_public_hostname: publicHostname must be a lowercase ASCII bare hostname')
+    }
+  }
+  expect(records).toEqual([])
+})
+
+it('requires a public origin with a typed diagnostic before registering resources', async () => {
+  mockSst()
+  await expect(provision({ ...options, authBaseUrl: undefined })).rejects.toMatchObject({
+    code: 'provision_missing_public_origin', message: expect.stringContaining('publicHostname or authBaseUrl'),
+  })
+  expect(records).toEqual([])
+})
+
+it.each(['neutral.example.test', '', undefined])('rejects a removed domain option without registering resources (#%#)', async domain => {
+  mockSst()
+  await expect(provision({ ...options, domain } as ProvisionOptions)).rejects.toMatchObject({
+    code: 'provision_legacy_domain', message: 'provision_legacy_domain: domain was removed; use publicHostname instead',
+  })
+  expect(records).toEqual([])
+})
+
 it.each(['missing-file', 'missing-sha', 'invalid-json', 'invalid-sha', 'missing-builtAt'])('rejects %s console metadata before resource registration/upload', async kind => {
   mockSst()
   const file = join(root, 'console assets/build-meta.json')
@@ -129,7 +196,7 @@ it.each([
   ['authSecret', 'short-secret', 'provision_invalid_auth_secret'], ['authBaseUrl', 'https://user:secret@example.test/path', 'provision_invalid_auth_base_url'],
   ['authBaseUrl', 'http://example.test', 'provision_invalid_auth_base_url'], ['configPath', '', 'provision_invalid_config_path'],
   ['migrationsDir', '', 'provision_invalid_migrations_dir'], ['assetsDir', '', 'provision_invalid_assets_dir'],
-  ['domain', 'other.example.test', 'provision_invalid_domain'], ['accountId', 'secret', 'provision_invalid_account_id'],
+  ['accountId', 'secret', 'provision_invalid_account_id'],
 ] as const)('input validation: %s rejects invalid input before resources and never echoes values', async (key, value, code) => {
   mockSst()
   try { await provision({ ...options, [key]: value } as ProvisionOptions); throw Error('expected_failure') }
@@ -277,7 +344,7 @@ it.each([false, true])('builds D1/KV/queue/DLQ/consumer/cron with migration-befo
 
 it('wires explicit email/domain/webhook inputs and protects production resource children', async () => {
   mockSst()
-  await provision({ ...options, stage: 'production', authSecret: secret(authSecret), domain: 'neutral.example.test',
+  await provision({ ...options, stage: 'production', authSecret: secret(authSecret), publicHostname: 'neutral.example.test',
     email: { from: 'auth@example.test' }, internalToken: secret('synthetic-internal-token'),
     webhook: { url: secret('https://hooks.example.test'), allowedHosts: 'hooks.example.test', service: output('consumer-owned-receiver'), events: 'records.created' } })
   const worker = records.find(record => record.type === 'worker')!

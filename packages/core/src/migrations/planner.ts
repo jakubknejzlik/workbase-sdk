@@ -1,7 +1,8 @@
+import { uniqueIndexName } from '../entity-constraints'
 import { defineInstance, inspectInstance, type InstanceConfig } from '../config'
-import { column, createEntity, initialSchema, literal, quote, revisionSQL } from './schema'
+import { renderUniqueConstraint, physicalTables, column, createEntity, initialSchema, literal, quote, revisionSQL } from './schema'
 import { rebuildWithNullableRefs, type SupplementalIndex } from './rebuild'
-import { schemaLock } from './schema-lock'
+import { diffSpecs, schemaLock } from './schema-lock'
 import { assertNoRenameSQL } from './schema-plan'
 export interface MigrationPlan { sql: string; destructive: string[]; blocked: string[]; warnings: string[] }
 export function plan(fromConfig: InstanceConfig | null, toConfig: InstanceConfig, options: { allowDestructive?: boolean; indexes?: SupplementalIndex[] } = {}): MigrationPlan {
@@ -21,6 +22,15 @@ export function plan(fromConfig: InstanceConfig | null, toConfig: InstanceConfig
   const from = inspectInstance(fromConfig).config
   if (from.id !== to.id) throw new Error('Cannot migrate between different instance IDs')
   if (to.revision <= from.revision) throw new Error('Target revision must increase')
+  if ([from, to].some(config => Object.values(config.entities).some(e => e.constraints?.some(c => c.kind !== 'unique')))) {
+    try {
+      if (Object.values(to.entities).some(e => e.renameFrom || Object.values(e.fields).some(f => f.renameFrom))) throw new Error('Renaming a trigger-constrained graph (ref equality / ref immutability) requires a manually reviewed migration')
+      return { sql: diffSpecs(physicalTables(from), physicalTables(to)) + (to.baseline !== 'workbase-sdk' ? revisionSQL(to.revision) + '\n' : ''), destructive: [], blocked: [], warnings: [] }
+    } catch (error) {
+      const reason = `Rebuilding a constrained table requires a manually reviewed migration: ${error instanceof Error ? error.message : String(error)}`
+      return { sql: `-- BLOCKED: ${reason}\n`, destructive: [], blocked: [reason], warnings: [] }
+    }
+  }
   const sql: string[] = []; const destructive: string[] = []; const blocked: string[] = []; const warnings: string[] = []
   const rebuilds = new Map<string, string[]>()
   const referenceBackfills: string[] = []
@@ -43,6 +53,15 @@ export function plan(fromConfig: InstanceConfig | null, toConfig: InstanceConfig
       continue
     }
     const next = to.entities[name]
+    const constrained = !!(previous.constraints?.length || next.constraints?.length)
+    if (constrained && Object.values(next.fields).some(f => f.renameFrom)) blocked.push(`Renaming fields on a constrained table requires a manually reviewed migration: ${name}`)
+    for (const old of previous.constraints ?? []) {
+      if (old.kind !== 'unique') continue
+      const current = next.constraints?.find(c => c.name === old.name)
+      if (current && JSON.stringify(current.kind === 'unique' ? current.fields : undefined) !== JSON.stringify(old.fields)) blocked.push(`Changing constraint ${name}.${old.name} requires a new name`)
+      if (!current || JSON.stringify(current) !== JSON.stringify(old)) sql.push(`DROP INDEX ${quote(uniqueIndexName(name, old.name))};`)
+    }
+    const constraintSQL = (next.constraints ?? []).filter(c => c.kind === 'unique' && !previous.constraints?.some(old => JSON.stringify(old) === JSON.stringify(c))).flatMap(c => c.kind === 'unique' ? [renderUniqueConstraint(name, c)] : [])
     const renamed = new Set<string>()
     for (const [key, field] of Object.entries(next.fields)) {
       if (field.computed) {
@@ -98,6 +117,8 @@ export function plan(fromConfig: InstanceConfig | null, toConfig: InstanceConfig
       if (field.type === 'ref' || previous.checks.some(c => c.left === key || c.right === key)) blocked.push(`Constraint-bearing column removal requires a manually reviewed migration: ${name}.${key}`)
       else if (options.allowDestructive) sql.push(`ALTER TABLE ${quote(name)} DROP COLUMN ${quote(key)};`)
     }
+    if (constrained && rebuilds.has(name)) blocked.push(`Rebuilding a constrained table requires a manually reviewed migration: ${name}`)
+    sql.push(...constraintSQL)
     const normalizedChecks = previous.checks.map(c => ({ ...c, left: Object.entries(next.fields).find(([, f]) => f.renameFrom === c.left)?.[0] ?? c.left, right: Object.entries(next.fields).find(([, f]) => f.renameFrom === c.right)?.[0] ?? c.right }))
     if (JSON.stringify(normalizedChecks) !== JSON.stringify(next.checks)) blocked.push(`Changing table checks requires a manually reviewed migration: ${name}`)
   }

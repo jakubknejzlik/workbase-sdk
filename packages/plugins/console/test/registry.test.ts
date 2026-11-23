@@ -60,7 +60,7 @@ it('filters pages, entity placements and role-specific navigation on the server'
 })
 it('carries existing model and field UI hints unchanged and merges display contributions', async () => {
   const fieldUi = { hidden: false, section: 'private' }
-  const ui = { ...sample.ui, entities: { ...sample.ui?.entities, clients: { list: { columns: ['name'], search: ['name'] }, detail: { fields: ['name'] } } } }
+  const ui = { ...sample.ui, entities: { ...sample.ui?.entities, clients: { list: { columns: [{ field: 'name' }], search: ['name'] }, detail: { fields: ['name'] } } } }
   const config = { ...sample, ui, entities: { ...sample.entities, clients: { ...sample.entities.clients, fields: { ...sample.entities.clients.fields, name: { ...sample.entities.clients.fields.name, ui: fieldUi } } } }, plugins: [...sample.plugins!, {
     name: 'display-demo', version: '1', requires: { console: '^1' as const }, contributes: { console: {
       entities: { clients: { form: { create: { fields: ['name'] }, edit: { fields: ['name'] } }, sections: [{ id: 'main', label: 'Main', fields: ['name'] }] } },

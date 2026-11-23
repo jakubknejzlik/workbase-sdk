@@ -1,4 +1,4 @@
-# Authoring V3 composition, access and presentation through MCP
+# Authoring V3 composition, access, presentation and constraints through MCP
 
 The standalone `.mcp.json` registers `workbase_config` alongside `workbase_data`
 and `workbase_ops`. After provisioning dependencies, launch it from the Instance
@@ -13,7 +13,8 @@ For a fresh root, call `bootstrap_instance`, then `initialize_instance` with
 artifacts (schema lock, initial migration, OpenAPI and both access locks), their
 exact bytes, hashes, conflicts and `planHash`. Apply with
 `{ "instance": "my-instance", "mode": "apply", "planHash": "<preview planHash>" }`.
-Then continue with `inspect_schema` in the same stdio session or after restart.
+Then explicitly create the independent local target as described below and continue
+with `inspect_schema` in the same stdio session or after restart.
 Initialization holds the instance lock and publishes all files through guarded
 recovery. A matching completed initialization is unchanged; partial or differing
 artifacts return `initialization_conflict` and are preserved. Source or dependency
@@ -24,6 +25,91 @@ Bootstrap accepts optional `displayName` (trimmed, nonblank, at most 1000
 characters), defaulting to `id`. The CLI forwards it as
 `init --id fieldops --target cloudflare-github --display-name "Field Ops"`. Bootstrap remains create-only;
 renaming an initialized instance uses the proposal flow below.
+
+Bootstrap also accepts optional `initialComposition` to select the complete role/access
+graph **before** any target is provisioned. It reuses `set_roles` and the access
+operations below; there is no separate runtime or account-role list. For example:
+
+```json
+{
+  "id": "fieldops",
+  "target": "cloudflare-github",
+  "initialComposition": {
+    "roles": ["owner", "dispatcher", "viewer", "member"],
+    "organizationOwnerRole": "owner",
+    "access": [
+      { "kind": "set_system_access", "role": "owner", "grants": {
+        "organizations.create": "deny", "organizations.update": "allow",
+        "members.leave": "allow", "members.read": "allow",
+        "members.update": "allow", "members.remove": "allow",
+        "invitations.accept": "allow", "invitations.create": "allow", "invitations.read": "allow",
+        "invitations.revoke": "allow", "tokens.create": "allow",
+        "tokens.read": "allow", "tokens.revoke": "allow",
+        "audit.read": "allow", "workflows.read": "allow",
+        "workflows.resume": "allow", "workflows.cancel": "allow"
+      } },
+      { "kind": "set_entity_access", "entity": "worker", "role": "owner",
+        "access": { "read": "allow", "create": "allow", "update": "allow", "delete": "allow" } },
+      { "kind": "set_entity_access", "entity": "worker", "role": "member",
+        "access": { "read": { "where": { "user": { "eq": "$actor.id" } }, "fields": ["name"] },
+          "create": "deny", "update": "deny", "delete": "deny" } },
+      { "kind": "set_account_link", "entity": "worker", "invitationRole": "member" }
+    ]
+  }
+}
+```
+
+Grants are explicit: new identifiers start denied, including the owner; an unchanged
+identifier retains its scaffold grants under the shared `set_roles` rules. Add
+`set_entity_access` for any SDK entities the owner should access. Each
+`set_system_access` replaces the whole system matrix and must explicitly include
+every supported action as `allow` or `deny`. The worker invitation mapping must
+reference a final non-owner role. The complete graph and built-in runtime are compiled in private staging
+before any scaffold file is published. Invalid graphs publish nothing. The generated
+`config.ts`, `access.ts`, `schema/worker.ts` and `runtime.ts` share that graph;
+the SDK derives the account-role enum from it. Omitting `initialComposition`
+preserves every default scaffold byte (`admin,staff`, owner `admin`).
+
+Initial composition is create-only: the destination must be empty apart from
+pre-provisioned `node_modules`. Existing source, artifacts or target files cause
+conflicts, preserving all existing bytes and leaving missing scaffold files absent.
+Select the graph in the first bootstrap call; use proposals for later role changes.
+The physical schema lock, initial domain migration bytes and revision remain equal
+to the default scaffold. Initialization preview/hash/publication guards include all
+four graph sources and generated OpenAPI/access projections; runtime permissions
+must agree with config roles and owner. Existing generated artifacts still conflict
+if their bytes differ.
+
+Bootstrap and initialization author source. Target creation is a separate explicit
+operation. Call `create_local_target` with `{ "instance": "fieldops", "mode": "preview" }`,
+then apply with `{ "instance": "fieldops", "mode": "apply", "planHash": "<preview planHash>" }`.
+It requires initialized V3 sources and available dependencies, runs the supported
+SDK/plugin/domain migration chain for the selected graph, and returns durable
+`instanceId`, `targetId` and `creationPlanHash` attestation. No host-side SQLite
+setup, manual environment mapping, network or deployment credentials are needed.
+The server chooses `.local/mcp-target/` inside the instance root; back up this
+directory with the instance. It is independent of disposable verification state
+and survives disposable cleanup and server restart. Do not move or substitute its
+receipt, root or database: the association binds root and database file identities.
+It does not configure Wrangler deployment or a running app's database binding.
+
+Completed creation is idempotent and reports `unchanged`, including when the target
+has since gained records. The receipt records creation provenance, never current
+emptiness. Normal migrations seed the `instance` organization, so a subsequent
+owner replacement is rejected. Select initial roles during bootstrap, rather than
+using a later owner-replacement proposal. Other composition proposals continue
+through `validate` → `preview_migration` → `apply_to_disposable` → `promote`.
+Target creation does not promote source or apply subsequent proposals to that target.
+
+Apply requires the exact preview plan; source or dependency changes return
+`stale_plan`. Creation records intent before migration, stages each attempt in a
+new exclusive file, and publishes without replacement only after a durable ready
+receipt. Retry interrupted creation using its original source/dependency inputs.
+Interrupted attempts remain preserved in `.local/mcp-target/`; no retry overwrites
+or deletes a database. A substituted/changed pending target returns
+`local_target_conflict` and needs operator review. Pending creation cannot attest
+role safety. Keep receipts and associated files together; do not use the disposable
+as a target or supply paths, SQL or `fresh: true` in tool arguments.
 
 Normal config calls on an incomplete scaffold return `initialization_required`
 with this next step. Bootstrap retains its file-copy and conflict contract.
@@ -78,14 +164,18 @@ Supported kinds, as defined in [schemas.ts](../../packages/mcp/src/schemas.ts):
   with domain, runtime or access changes is rejected. Continue through validation,
   preview, disposable verification and promotion as below.
 - `set_locale` takes `locale`, `defaultLanguage` and/or `languages` (`en`/`cs`).
-  V3 presentation changes require a separate proposal and preserve the domain revision
-  and schema lock. See the language example below.
+  V3 presentation changes share a batch with `set_label`, `set_catalog_entries` and `set_instance_display_name`, separate from
+  runtime/access/schema changes, and preserve the domain revision and schema lock. See the language example below.
+- `set_label` takes `entity`, `language` and explicit `pluralForms` for entity
+  captions, plus optional `singular` and `object`. A field caption instead takes
+  `entity`, `field`, `language`, `label`. V3 captions write domain catalog keys.
 
 The access compiler checks roles, actions and entity matrices. Composition and
 access kinds can share a proposal; `propose_change` also accepts these V3 kinds.
 Mixing them with legacy kinds is rejected with `mixed_change_kinds`.
 
-For example, replace a fresh scaffold's roles with
+For an initial graph, use bootstrap's `initialComposition` above. For a later
+role proposal, use
 `{ "kind": "set_roles", "roles": ["owner", "dispatcher", "viewer", "member"],
 "organizationOwnerRole": "owner" }`, together with explicit owner and restricted
 role grants and `set_account_link` for each affected invitation mapping. Unresolved
@@ -97,8 +187,13 @@ At disposable verification and again immediately before promotion, removed roles
 (old set minus final set) must be unused in the **target** database's memberships,
 invitations and access tokens, including revoked, expired and historical rows.
 An owner-role change additionally requires no target organizations or memberships.
-The operator supplies `WORKBASE_MCP_ROLE_DATABASES`, a JSON object mapping the
-instance selector to the absolute local target SQLite path. Missing/inaccessible
+A completed `create_local_target` association supplies this evidence automatically.
+Existing operator mappings remain supported: `WORKBASE_MCP_ROLE_DATABASES` is a JSON
+object mapping the instance selector to the absolute local target SQLite path; an
+explicit mapping takes precedence. An invalid explicit mapping never falls back
+to the server-managed target. Verification binds target file identity and contents,
+and promotion rechecks them; target substitution or changes require verification
+again. Missing/inaccessible
 or incomplete evidence fails closed with `role_usage_unverified`; a populated
 owner transition returns `owner_change_requires_fresh_target`. Neither the empty
 verification disposable nor a caller's freshness assertion establishes target
@@ -107,13 +202,37 @@ Every organization counts, including a generated `instance` placeholder. Configu
 roles before organization provisioning; this operation never deletes target rows.
 
 For enabled console languages, call `propose_change` (or `propose_composition`)
-with a separate proposal, for example:
+with a presentation-only proposal. First inspect `dictionaries` from `inspect_schema`: it
+contains enabled languages, existing catalogs, required keys with source references,
+and plural categories for each supported language. For a fresh worker scaffold:
 
 ```json
 {
   "instance": "my-instance",
   "baseRevision": 1,
-  "changes": [{ "kind": "set_locale", "languages": ["en", "cs"] }]
+  "changes": [
+    { "kind": "set_locale", "languages": ["en", "cs"] },
+    { "kind": "set_label", "entity": "worker", "language": "en",
+      "singular": "Worker", "object": "worker", "pluralForms": {
+        "one": "{{count}} worker", "other": "{{count}} workers"
+    } },
+    { "kind": "set_label", "entity": "worker", "language": "cs",
+      "singular": "Pracovník", "object": "pracovníka", "pluralForms": {
+        "one": "{{count}} pracovník", "few": "{{count}} pracovníci",
+        "many": "{{count}} pracovníka", "other": "{{count}} pracovníků"
+    } },
+    { "kind": "set_label", "entity": "worker", "field": "name", "language": "cs", "label": "Jméno" },
+    { "kind": "set_catalog_entries", "language": "cs", "namespace": "domain", "entries": {
+      "field.worker.user": "Přístup do aplikace"
+    } },
+    { "kind": "set_catalog_entries", "language": "cs", "namespace": "ui", "entries": {
+      "workers.list.title": "Pracovníci",
+      "workers.create.title": "Nový pracovník",
+      "workers.detail.title": "Pracovník",
+      "workers.edit.title": "Upravit pracovníka",
+      "workers.nav.title": "Pracovníci"
+    } }
+  ]
 }
 ```
 
@@ -121,14 +240,41 @@ with a separate proposal, for example:
 (`en`/`cs`); the first entry is the V3 default. `locale` and `defaultLanguage`
 remain optional independent settings; `defaultLanguage` updates
 `ui.defaultLanguage`. Language proposals edit literal values in `config.ts`,
-retaining its imports, schema-lock binding and other options. Provide the
-consumer's `locales/<language>/ui.json` and `domain.json` dictionaries separately.
-Recreate older locale proposals as new proposals to use this V3 publication path.
+retaining its imports, schema-lock binding and other options. `set_catalog_entries`
+upserts flat, nonempty strings into derived `locales/en|cs/domain|ui.json` paths;
+other entries are preserved. Arbitrary paths and SDK overrides are not writable.
+Translations must be authored explicitly; English is never copied to Czech.
+The complete staged config/schema/UI/catalog graph runs through the console UI
+validator. Every enabled language must be complete: Czech requires all four
+counted forms (`one`, `few`, `many`, `other`), consistent interpolation, and no
+orphan keys. Errors include locations and the missing keys. Dictionary-only
+batches preserve config and access/OpenAPI artifacts, including their absence.
+
+V3 `set_label` writes counted `entity.<entity>_<category>` keys and the optional
+named keys `entity.<entity>.singular` and `entity.<entity>.object`. Entity captions
+require every plural category for the language in `pluralForms`; a legacy `plural`
+string is refused with an actionable diagnostic. No forms are inferred.
+The required-key inventory exposes named forms as optional until authored in an
+enabled language, then validation requires them in every enabled language.
+The renderer uses the singular form as the accessible name of entity forms and
+the object form in the Create label (for example, “Vytvořit pracovníka”);
+without an object form it uses generic `sdk:create`. Page/nav titles stay
+independent `ui:` keys. Legacy-instance captions retain their existing behavior.
+Previously saved legacy caption proposals cannot publish V3 sources; recreate
+them with V3 caption/catalog operations. The V3 legacy-write guard remains.
+
+Proofs persist across restarts and bind config/schema/runtime, UI declarations
+and checked modules, catalog bytes/path inventories (including absent catalogs),
+and prior presentation publication receipts. Edits, deletions, new inputs, and
+competing same-revision publications invalidate proofs. Publication rechecks inputs
+under the instance lock and journals owned locale-directory creation along with
+catalogs, config/artifacts, and proposal metadata for recoverable rollback.
 
 Continue through these tools in order:
 
 1. `validate` with `{proposalId}` checks the target kernel, access declarations,
-   committed history and deployment requirements. Resolve blocking requirements
+   committed history and deployment requirements. Presentation batches also validate
+   the full staged UI and dictionaries. Resolve blocking requirements
    through reviewed source or infrastructure changes before proceeding.
 2. `preview_migration` with `{proposalId}` returns exact proposed file bytes,
    regenerated access locks, plugin migration statuses and plugin SQL. Domain
@@ -159,8 +305,105 @@ Promotion returns `appliesToDatabase: false`; plugin migrations run through the
 normal SDK migration engine at deploy. Promotion does not install dependencies,
 configure infrastructure, send mail or apply a live database migration.
 
-V3 domain-change promotion is unsupported and returns `v3_promote_unsupported`.
-Physical schema changes require reviewed source edits and migration generation.
+Legacy V3 domain-change promotion is unsupported and returns `v3_promote_unsupported`.
+The constraint-only flow below supports named unique, `ref_equality` and
+`ref_immutable` constraints through authored schema files and the bundle/lock planner. Other physical schema changes require
+reviewed source edits and migration generation.
 Custom plugins/commands and plugin removal require reviewed
 source changes. Runtime authoring accepts only the canonical built-in composition
 shape; noncanonical sources fail closed with `runtime_not_canonical`.
+
+### V3 entity constraints
+
+Use `propose_change` with a constraint-only `set_constraints` proposal to replace an entity's complete
+constraint list. This uses the typed constraint contract (`unique`, `ref_equality`,
+`ref_immutable`) and the shared
+bundle/lock planner; it preserves the authored module, imports and unrelated
+literal properties.
+
+```json
+{
+  "instance": "example",
+  "baseRevision": 1,
+  "changes": [{
+    "kind": "set_constraints",
+    "entity": "assignment",
+    "constraints": [{
+      "kind": "unique",
+      "name": "slot_worker_unique",
+      "fields": ["slot", "worker"]
+    }]
+  }]
+}
+```
+
+Follow `validate` → `preview_migration` → `apply_to_disposable` → `promote`.
+Preview includes exact schema source, migration bundle and lock/artifact bytes.
+Promotion publishes those reviewed files and advances the schema revision; it does
+not apply to a live database. Validation replays committed data before adding the
+constraint and compares the resulting schema with a fresh schema. Existing duplicate
+data rejects the migration with a located, bounded diagnostic; no data is cleaned.
+Changed source, lock, migration or dependency bytes invalidate saved evidence.
+
+Fields must be distinct stored authored keys, and names must be distinct per entity.
+Organization scoping and NULL-distinct behavior are supplied by the SDK. A constraint's
+fields cannot change under the same stable name; use a new name. An empty list removes
+all constraints. Propose constraint edits separately from runtime, access, presentation
+and legacy changes.
+
+Unique constraints also accept a single typed equality predicate, for example:
+
+```json
+{ "kind": "unique", "name": "confirmed_slot_unique", "fields": ["slot"],
+  "where": { "field": "status", "op": "eq", "value": "confirmed" } }
+```
+
+The predicate field must be stored and authored. Its literal must match the field type
+(and a declared enum value); `eq` accepts string, finite number or boolean literals,
+with safe integers for `int`. NULL literals, arbitrary SQL, extra predicate properties
+and other operators are rejected. Rows with NULL or nonmatching predicate values do
+not participate; NULL entries in the unique tuple remain distinct. The SDK supplies
+identifier quoting, literal escaping and organization scope. Adding, removing or
+changing only `where` under the same name produces a reviewed drop/create index
+migration. Existing matching duplicates reject validation without data cleanup.
+Constrained rebuilds and rename publication still require a manually reviewed
+migration. Violations use the existing `409 unique_conflict` API/MCP and console path.
+
+Raw predicates and expressions are not supported. The existing legacy `add_index` operation still creates an ordinary
+non-unique index and accepts neither `unique` nor `where`.
+
+#### One-hop reference equality (`ref_equality`)
+
+```json
+{ "kind": "ref_equality", "name": "booking_location_client",
+  "field": "client", "through": "location", "targetField": "client" }
+```
+
+Declares `booking.client == booking.location.client` on the entity that owns `field` and
+`through`. All three are identifiers (no paths, SQL or multiple hops); `field` and `through`
+are stored authored refs and `targetField` is a stored ref on the `through` target with the
+same target entity as `field`. Null equals null; missing and foreign-organization references
+never pass. The SDK generates insert/update triggers plus reverse guards on the target.
+Adding it over mismatching rows fails validation through a read-only preflight, with no data
+cleanup. Violations return `422 ref_equality_mismatch` (`detail.constraintId`) over HTTP and the
+data MCP, with a localized console message and retained draft.
+
+#### Referenced-field immutability (`ref_immutable`)
+
+```json
+{ "kind": "ref_immutable", "name": "location_client_locked", "field": "client",
+  "referencedBy": { "entity": "booking", "field": "location" } }
+```
+
+Declared on the referenced entity (`location`): its stored ref `field` cannot change while at
+least one same-organization row of `referencedBy.entity` points at the row through the stored
+ref `referencedBy.field` (which must target the constrained entity). One hop only; status is
+never filtered, so cancelled rows still count. A change is any `IS NOT` difference: NULL to a
+value and value to NULL are rejected, same-value and NULL-to-NULL updates are allowed, and
+unrelated fields stay editable. Unreferenced rows and rows referenced only from another
+organization may change; deleting or reparenting the last reference releases the field.
+INSERT OR REPLACE and upsert paths are guarded too. Violations return `409 ref_immutable`
+(`detail.constraintId`, for example `location.location_client_locked`) over HTTP and the data MCP,
+with a localized console message and retained draft. When `ref_equality` also exists, both
+may be declared; the immutability trigger fires first, so the stricter `ref_immutable` error is
+reported. Constrained rebuilds and renames still require a manually reviewed migration.

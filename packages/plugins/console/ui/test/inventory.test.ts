@@ -20,6 +20,8 @@ const extracted = spawnSync('bun', ['-e', `import { extractManifest } from './pa
 if (extracted.status !== 0) throw new Error(extracted.stderr)
 const { manifest, required } = JSON.parse(extracted.stdout) as { manifest: Manifest; required: string[] }
 const catalogs: Catalogs = Object.fromEntries(['cs', 'en'].map(lang => [lang, Object.fromEntries(['ui', 'domain'].map(ns => [ns, JSON.parse(readFileSync(resolve(root, 'locales', lang, ns + '.json'), 'utf8'))]))]))
+Object.assign(catalogs.en.domain, { 'entity.worker.singular': 'Worker', 'entity.worker.object': 'worker' })
+Object.assign(catalogs.cs.domain, { 'entity.worker.singular': 'Pracovník', 'entity.worker.object': 'pracovníka' })
 const identity = { actorId: 'a', orgId: 'o' }, row = { id: 'x', version: 1, name: 'Eva', status: 'active', locked: 'fixed', user: null }
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status })
 afterEach(() => { cleanup(); vi.restoreAllMocks() })
@@ -30,6 +32,7 @@ test.each(['cs', 'en'])('inventory drift: every fixture route and renderer state
     const text = runtime.t(key, variables); if (text.startsWith('⟦')) throw new Error('Missing: ' + key)
     return text
   }
+  translate.exists = runtime.t.exists
   const slots = { fieldValue: { contexts: ['record' as const], props: { value: { kind: 'field' as const, type: 'userLink' } }, component: () => null } }
   function mount(mode: 'list' | 'detail' | 'create' | 'edit', fetch: (url: string, init: ClientRequestInit) => Promise<Response>) {
     cleanup()

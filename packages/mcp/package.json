@@ -1,6 +1,6 @@
 {
   "name": "@workbasehq/mcp",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "type": "module",
   "scripts": {
     "start": "bun src/stdio.ts",
@@ -11,7 +11,7 @@
     "@workbasehq/core": "workspace:*",
     "zod": "4.6.7",
     "@workbasehq/plugins": "workspace:*",
-    "wrangler": "4.126.0",
+    "wrangler": "4.129.1",
     "tsx": "4.23.15",
     "typescript": "^6.0.0"
   },

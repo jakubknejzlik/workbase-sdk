@@ -75,6 +75,14 @@ import lock from './schema.lock.json';
 export default bindSchemaLock(defineConfig({ id: 'replay_fixture', interactive: false, languages: ['en'], roles: ['owner'], organizationOwnerRole: 'owner', entities: {}, access }), lock);`)
     await writeFile(join(dir, 'schema.lock.json'), JSON.stringify(schemaLock(current)))
     await writeFile(join(dir, 'runtime.ts'), `import config from './config.ts'; import { consoleUI } from '@workbasehq/plugins/console'; export default { ...config, plugins: [consoleUI()] };`)
+    // Presentation validation requires a valid UI/catalog graph even for this
+    // schema-empty fixture. The deploy hook remains the intended rejection.
+    await mkdir(join(dir, 'ui'), { recursive: true })
+    await mkdir(join(dir, 'locales/en'), { recursive: true })
+    await writeFile(join(dir, 'ui/nav.ts'), "import { defineNav } from '@workbasehq/plugins/console/ui'; export default defineNav([])")
+    await writeFile(join(dir, 'ui/keys.ts'), "import { defineKeys } from '@workbasehq/plugins/console/ui'; export default defineKeys({})")
+    await writeFile(join(dir, 'locales/en/domain.json'), '{}')
+    await writeFile(join(dir, 'locales/en/ui.json'), '{}')
     // V3 locale uses canonical composition. Inject the deploy hook at built-in
     // hydration rather than authoring a custom plugin outside that source boundary.
     vi.spyOn(pluginRegistry.console, 'hydrate').mockReturnValue(targetCheck)

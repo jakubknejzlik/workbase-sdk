@@ -1441,9 +1441,21 @@
             "properties": {},
             "type": "object"
           },
+          "includeTotal": {
+            "type": "boolean"
+          },
+          "includeViewTotals": {
+            "type": "boolean"
+          },
           "limit": {
             "maximum": 100,
             "minimum": 1,
+            "type": "integer"
+          },
+          "offset": {
+            "description": "Nonnegative offset bounded by QUERY_LIMITS.maxOffset (10,000 by default); larger offsets are rejected before rows or totals SQL.",
+            "maximum": 10000,
+            "minimum": 0,
             "type": "integer"
           },
           "orderBy": {
@@ -1546,6 +1558,11 @@
             "maxItems": 7,
             "minItems": 1,
             "type": "array"
+          },
+          "view": {
+            "maxLength": 100,
+            "minLength": 1,
+            "type": "string"
           },
           "where": {
             "$ref": "#/components/schemas/Query_users/$defs/__schema0"
@@ -2634,6 +2651,12 @@
             },
             "type": "object"
           },
+          "includeTotal": {
+            "type": "boolean"
+          },
+          "includeViewTotals": {
+            "type": "boolean"
+          },
           "labelWhere": {
             "additionalProperties": {
               "additionalProperties": false,
@@ -2677,6 +2700,12 @@
           "limit": {
             "maximum": 100,
             "minimum": 1,
+            "type": "integer"
+          },
+          "offset": {
+            "description": "Nonnegative offset bounded by QUERY_LIMITS.maxOffset (10,000 by default); larger offsets are rejected before rows or totals SQL.",
+            "maximum": 10000,
+            "minimum": 0,
             "type": "integer"
           },
           "orderBy": {
@@ -2780,6 +2809,11 @@
             "minItems": 1,
             "type": "array"
           },
+          "view": {
+            "maxLength": 100,
+            "minLength": 1,
+            "type": "string"
+          },
           "where": {
             "$ref": "#/components/schemas/Query_worker/$defs/__schema0"
           }
@@ -2799,12 +2833,36 @@
             },
             "type": "array"
           },
+          "limit": {
+            "description": "Page size, present for offset paging.",
+            "maximum": 100,
+            "minimum": 1,
+            "type": "integer"
+          },
           "next_cursor": {
-            "description": "Opaque signed query cursor, or null. Pass unchanged to POST /query; it is not a row id.",
+            "description": "Opaque signed query cursor, or null. Pass unchanged to POST /query; it is not a row id. Offset paging returns null.",
             "type": [
               "string",
               "null"
             ]
+          },
+          "offset": {
+            "description": "Requested offset, present for offset paging.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "total": {
+            "description": "Exact authorized, filtered total when includeTotal is true; independent of paging.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "viewTotals": {
+            "additionalProperties": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "description": "Exact totals keyed by readable configured view ID when includeViewTotals is true. Unreadable views are omitted.",
+            "type": "object"
           }
         },
         "required": [
@@ -2822,12 +2880,36 @@
             },
             "type": "array"
           },
+          "limit": {
+            "description": "Page size, present for offset paging.",
+            "maximum": 100,
+            "minimum": 1,
+            "type": "integer"
+          },
           "next_cursor": {
-            "description": "Opaque signed query cursor, or null. Pass unchanged to POST /query; it is not a row id.",
+            "description": "Opaque signed query cursor, or null. Pass unchanged to POST /query; it is not a row id. Offset paging returns null.",
             "type": [
               "string",
               "null"
             ]
+          },
+          "offset": {
+            "description": "Requested offset, present for offset paging.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "total": {
+            "description": "Exact authorized, filtered total when includeTotal is true; independent of paging.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "viewTotals": {
+            "additionalProperties": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "description": "Exact totals keyed by readable configured view ID when includeViewTotals is true. Unreadable views are omitted.",
+            "type": "object"
           }
         },
         "required": [
@@ -7818,6 +7900,7 @@
       "filterDepth": 8,
       "inputBytes": 64000,
       "levelRows": 2000,
+      "maxOffset": 10000,
       "nodes": 400,
       "parents": 100,
       "relationDepth": 2,

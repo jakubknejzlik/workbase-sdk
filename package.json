@@ -31,7 +31,8 @@
     "sdk:pack": "bash scripts/sdk-pack.sh",
     "check:ui": "bun packages/plugins/console/ui/src/cli.ts",
     "check:openapi": "bun scripts/check-openapi.ts",
-    "openapi:write": "bun scripts/check-openapi.ts --write"
+    "openapi:write": "bun scripts/check-openapi.ts --write",
+    "test:list-v2-acceptance": "bun x --no-install playwright test --config packages/frontend-console/playwright.list-v2.config.ts"
   },
   "devDependencies": {
     "@apidevtools/swagger-parser": "13.1.0",
@@ -47,12 +48,11 @@
     "tsx": "4.23.15",
     "typescript": "^6.0.0",
     "vitest": "^4.1.0",
-    "wrangler": "4.126.0"
+    "wrangler": "4.129.1"
   },
   "patchedDependencies": {
     "sonner@2.0.7": "patches/sonner@2.0.7.patch",
     "@radix-ui/react-select@2.2.6": "patches/@radix-ui%2Freact-select@2.2.6.patch",
-    "wrangler@4.126.0": "patches/wrangler@4.126.0.patch",
     "tsx@4.23.15": "patches/tsx-4.23.15.patch"
   }
 }

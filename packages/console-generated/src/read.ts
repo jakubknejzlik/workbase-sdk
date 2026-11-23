@@ -7,24 +7,24 @@ export interface Field { type: string; operators?: string[]; values?: string[]; 
 export interface Relation { entity: string; field: string; cardinality: string; quantifiers?: string[]; through?: { entity: string; field: string; createCommand: string; deleteCommand: string } }
 export type DetailHints = NonNullable<ConsoleEntityDisplay['detail']>
 export interface Entity { accountLink?: { field: string; entity: string }; rowAccess?: boolean; rowInvitations?: boolean; views?: ConsoleEntityDisplay['views']; labelDependencies?: { entity: string; field: string }[]; form?: ConsoleEntityDisplay['form']; sections?: ConsoleEntityDisplay['sections']; detail?: DetailHints; lookup?: boolean; list?: ListHints; listLimit?: number; writeSchema?: Record<string, any>; updateSchema?: Record<string, any>; fields: Record<string, Field>; columns: string[]; listColumns?: string[]; relations: Record<string, Relation>; displayField?: string; routes: { list: string; detail: string } }
-export interface Model { instance: string; revision: number; limits: { root: number; children: number; relations: number; exists: number; [key: string]: number }; entities: Record<string, Entity>; commands?: Command[]; pickerHints?: Record<string, Record<string, { wizard?: boolean; labelTemplate?: string }>> }
+export interface Model { instance: string; revision: number; locale?: string; timeZone?: string; limits: { root: number; children: number; relations: number; exists: number; [key: string]: number }; entities: Record<string, Entity>; commands?: Command[]; pickerHints?: Record<string, Record<string, { wizard?: boolean; labelTemplate?: string }>> }
 export interface Command { name: string; ui?: { placement?: { entity: string; action: 'create' }; labelKey?: string; label?: string | { en: string; cs: string }; replacesCrud?: string }; permission: { entity: string; operation: string }; additionalPermissions?: { entity: string; operation: string }[]; inputSchema: Record<string, any> }
 export interface Capabilities { resources?: Record<string, boolean>; commands?: string[]; revision: number; organization?: { role: string }; entities: Record<string, { readable: string[]; writable: string[]; operations: string[]; displayField?: string }> }
 export interface Selection { labels?: string[]; select: string[]; limit?: number; include?: Record<string, Selection> }
 export type RowAccessState = 'no_account' | 'invited' | 'expired' | 'signed_in'
-export interface ReadQuery extends Selection { rowAccess?: RowAccessState; contextList?: { entity: string; list: string; id: string }; search?: { text: string; fields: string[]; locale?: 'en' | 'cs' }; labelWhere?: Record<string, { contains: string; locale?: 'en' | 'cs' }>; entity: string; limit: number; where?: Record<string, unknown>; orderBy?: { field: string; dir: 'asc' | 'desc'; label?: boolean }[]; cursor?: string }
+export interface ReadQuery extends Selection { offset?: number; includeTotal?: boolean; includeViewTotals?: boolean; view?: string; rowAccess?: RowAccessState; contextList?: { entity: string; list: string; id: string }; search?: { text: string; fields: string[]; locale?: 'en' | 'cs' }; labelWhere?: Record<string, { contains: string; locale?: 'en' | 'cs' }>; entity: string; limit: number; where?: Record<string, unknown>; orderBy?: { field: string; dir: 'asc' | 'desc'; label?: boolean }[]; cursor?: string }
 export interface ReadOptions { id?: string; purpose?: 'edit'; search?: string; filters?: Record<string, string>; sort?: string; descending?: boolean; cursor?: string }
-export interface Result { data: Record<string, any>[]; next_cursor: string | null }
+export interface Result { total?: number; offset?: number; limit?: number; viewTotals?: Record<string, number>; data: Record<string, any>[]; next_cursor: string | null }
 export function visibleEntities(model: Model, caps: Capabilities) { return Object.keys(model.entities).filter(name => caps.entities[name]?.operations.includes('read') && caps.entities[name].readable.includes('id')) }
 export function projection(model: Model, entity: string, caps: Capabilities) { return Object.keys(model.entities[entity]?.fields ?? {}).filter(field => caps.entities[entity]?.readable.includes(field)) }
-/** Search covers rendered columns and calendar operands; hints only add fields. */
-export function listSearchableFields(model: Model, entity: string, caps: Capabilities, presentation?: 'table' | 'calendar') {
+/** Explicit table search sources are independent of visible columns; calendar and embedded lists keep the all-columns derivation. */
+export function listSearchableFields(model: Model, entity: string, caps: Capabilities, presentation?: 'table' | 'calendar' | 'embedded') {
   const definition = model.entities[entity]; const readable = projection(model, entity, caps)
   const display = caps.entities[entity]?.displayField ?? definition.displayField
-  const columns = definition.list?.columns ?? definition.listColumns ?? [...(display ? [display] : []), ...definition.columns]
+  const columns = definition.list?.columns?.map(column => column.field) ?? definition.listColumns ?? [...(display ? [display] : []), ...definition.columns]
   const calendar = presentation === 'calendar' ? availableCalendar(model, entity, caps) : undefined
   const calendarFields = calendar ? [calendar.startField, calendar.endField, calendar.titleField, ...(calendar.titleFields ?? []), calendar.secondaryField, caps.entities[entity]?.displayField ?? definition.displayField].filter((field): field is string => !!field) : []
-  return [...new Set([...columns, ...(definition.list?.search ?? []), ...calendarFields])].filter(key => {
+  return [...new Set(definition.list?.search && presentation !== 'calendar' && presentation !== 'embedded' ? definition.list.search : [...columns, ...(definition.list?.search ?? []), ...calendarFields])].filter(key => {
     const related = definition.list?.relatedColumns?.[key]
     return related ? readable.includes(related.via) : readable.includes(key) && definition.fields[key]?.type !== 'json'
   })

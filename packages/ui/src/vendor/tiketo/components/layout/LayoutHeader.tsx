@@ -4,7 +4,7 @@ import { type PropsWithChildren, type ReactNode, type Ref } from 'react'
 
 export const LayoutHeader = ({ children, breadcrumbs, triggerRef, triggerLabel }: PropsWithChildren<{ breadcrumbs: ReactNode; triggerRef?: Ref<HTMLButtonElement>; triggerLabel?: string }>) => (
   <header className="bg-background sticky top-0 z-40 flex w-full items-center border-b">
-    <div className="flex h-(--header-height) w-full min-w-0 items-center gap-2 px-4">
+    <div className="flex min-h-(--header-height) w-full min-w-0 items-center gap-2 px-4 py-2">
       <SidebarTrigger ref={triggerRef} aria-label={triggerLabel} />
       <Separator orientation="vertical" className="mr-2 h-4" />
       <div className="min-w-0 overflow-hidden">{breadcrumbs}</div>

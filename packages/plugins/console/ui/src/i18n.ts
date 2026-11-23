@@ -4,7 +4,7 @@ import { TranslationContext } from './i18n-context'
 import { mergeCatalogs, type Catalogs } from './catalogs'
 export { mergeCatalogs, sdkCatalogs } from './catalogs'
 export type { Catalogs } from './catalogs'
-export type Translate = (key: string, variables?: Record<string, string | number>) => string
+export type Translate = ((key: string, variables?: Record<string, string | number>) => string) & { exists?: (key: string) => boolean }
 export function resolveLanguage(profile: { language?: string | null } | null | undefined, languages: readonly string[]): string {
   if (!languages.length) throw new Error('At least one language is required')
   return profile?.language && languages.includes(profile.language) ? profile.language : languages[0]
@@ -22,6 +22,7 @@ export function createI18n(options: { languages: readonly string[]; profile?: { 
     if (!instance.exists(id, { count })) { console.error('Missing translation: ' + id); return '⟦' + id + '⟧' }
     return String(instance.t(id, { replace: variables, count }))
   }
+  translate.exists = key => instance.exists(key.includes(':') ? key : 'ui:' + key)
   instance.on('languageChanged', () => listeners.forEach(listener => listener()))
   return { t: translate, languages, language: () => instance.language,
     changeLanguage: async (language: string) => { if (!languages.includes(language)) throw new Error('Unconfigured language: ' + language); await instance.changeLanguage(language) },
