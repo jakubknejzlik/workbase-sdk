@@ -16,9 +16,10 @@ const check = defineCommand({ name: 'specimens/check', permission: { entity: 'sp
 const dashboard: WorkbasePlugin = { name: 'neutral-dashboard', version: '1.0.0', requires: { console: '^1' }, commands: [check], contributes: { console: {
   pages: [{ id: 'neutral.summary', path: '/summary', label: 'Summary', widgets: [
     { id: 'count', label: 'dashboard_specimen_count', kind: 'stat', query: { entity: 'specimens' }, aggregate: { fn: 'count' } },
+    { id: 'recent', label: 'dashboard_recent_specimens', kind: 'table', query: { entity: 'specimens', select: ['id', 'name', 'quantity'], limit: 5 }, columns: ['name', 'quantity'] },
     { id: 'names', label: 'dashboard_specimen_names', kind: 'list', query: { entity: 'specimens', select: ['id', 'name'], limit: 5 }, field: 'name' },
     { id: 'fallback', label: 'entity_specimens', kind: 'stat', query: { entity: 'specimens' }, aggregate: { fn: 'count' } },
-    { id: 'recent', label: 'dashboard_recent_specimens', kind: 'table', query: { entity: 'specimens', select: ['id', 'name', 'quantity'], limit: 5 }, columns: ['name', 'quantity'] },
+    { id: 'names-without-id', label: 'Names without identity', kind: 'list', query: { entity: 'specimens', select: ['name'], limit: 5 }, field: 'name' },
   ] }], navigation: [{ id: 'neutral.summary', placement: 'sidebar', page: 'neutral.summary', label: 'Summary' }],
 } } }
 export function neutralConfig(second = false) {

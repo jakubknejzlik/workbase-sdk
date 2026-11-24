@@ -570,6 +570,54 @@ for (const width of [1110, 1231, 1233]) for (const language of ['en', 'cs'] as c
   await page.unrouteAll({ behavior: 'wait' })
 })
 
+for (const density of ['comfortable', 'compact'] as const) test(`#291: applied table typography in ${density} density`, async ({ page }) => {
+  await gotoSDK(page, route); await settled(page); await rows(page)
+  const table = list(page).locator('[data-slot="data-table"]')
+  const accessButtons = table.getByRole('button', { name: new RegExp(en.rowAccessActions) })
+  await expect(accessButtons).toHaveCount(10)
+  if (density === 'compact') {
+    await page.getByRole('button', { name: en.listDisplay, exact: true }).click()
+    await page.getByRole('dialog', { name: en.listDisplayHeading }).getByRole('checkbox', { name: en.listDisplayCompact }).click()
+    await page.keyboard.press('Escape')
+  }
+  await expect(table).toHaveAttribute('data-list-density', density)
+  const groups = [
+    { name: 'ordinary cells', locator: table.locator('tbody [data-row-id] > td:nth-child(-n+4)'), count: 40 },
+    { name: 'application access content', locator: table.locator('tbody [data-row-id] > td:nth-child(5)'), count: 10 },
+    { name: 'application access buttons', locator: accessButtons, count: 10 },
+    { name: 'sortable header buttons', locator: table.locator('thead th button'), count: 3 },
+    { name: 'plain headers', locator: table.locator('thead th:not(:has(button))'), count: 3 },
+  ]
+  // Measure both the cell/control and the actual text parents: nested spans or
+  // links can override inheritance even when the shared token selector matches.
+  for (const group of groups) {
+    await expect(group.locator, `${density}: ${group.name}`).toHaveCount(group.count)
+    const measurements = await group.locator.evaluateAll(elements => elements.map(element => {
+      const measure = (node: Element) => {
+        const style = getComputedStyle(node)
+        return { tag: node.tagName, text: node.textContent?.trim(), fontSize: style.fontSize, lineHeight: style.lineHeight }
+      }
+      const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT)
+      const text = []
+      let node
+      while ((node = walker.nextNode())) {
+        const parent = node.parentElement!
+        if (node.textContent?.trim() && !parent.closest('svg, .sr-only, [aria-hidden="true"]')) text.push(measure(parent))
+      }
+      return { root: measure(element), text }
+    }))
+    observations.push({ kind: 'applied-table-typography', density, group: group.name, measurements })
+    for (const [index, measurement] of measurements.entries()) {
+      const label = `${density}: ${group.name} ${index}: ${measurement.root.text}`
+      // Icon-only access controls still need the same applied button metrics.
+      if (group.name !== 'application access buttons') expect(measurement.text.length, label).toBeGreaterThan(0)
+      for (const node of [measurement.root, ...measurement.text]) {
+        expect.soft({ fontSize: node.fontSize, lineHeight: node.lineHeight }, `${label} (${node.tag})`).toEqual({ fontSize: '14px', lineHeight: '20px' })
+      }
+    }
+  }
+})
+
 for (const width of [1440, 390, 360]) for (const actor of ['admin', 'staff'] as const) for (const language of ['en', 'cs'] as const) test(`G4–G6 polish ${width} ${actor} ${language}`, async ({ page, context }, testInfo) => {
   const copy = language === 'cs' ? cs : en
   await page.setViewportSize({ width, height: 1000 })
@@ -580,7 +628,7 @@ for (const width of [1440, 390, 360]) for (const actor of ['admin', 'staff'] as 
   const table = list(page).locator('[data-slot="data-table"]')
   const row = table.locator('tbody [data-row-id]').first()
   await expect(table).toHaveAttribute('data-list-density', 'comfortable')
-  expect(await row.locator('td').first().evaluate(element => getComputedStyle(element).fontSize)).toBe('11px')
+  expect(await row.locator('td').first().evaluate(element => [getComputedStyle(element).fontSize, getComputedStyle(element).lineHeight])).toEqual(['14px', '20px'])
   expect(Math.round((await row.boundingBox())!.height)).toBe(actor === 'admin' ? 53 : 61)
   if (width === 1440) {
     expect(await page.locator('h1').evaluate(element => [getComputedStyle(element).fontSize, getComputedStyle(element).fontWeight])).toEqual(['29px', '400'])

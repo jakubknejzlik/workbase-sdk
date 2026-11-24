@@ -118,7 +118,8 @@ main:has([data-slot="list-page"]) h1 { font-weight: 400; }
 [data-list-density] { --list-row-height: 61px; }
 [data-list-density="compact"] { --list-row-height: 45px; }
 [data-list-density][data-list-access="true"] { --list-row-height: 53px; }
-[data-list-density] table, [data-list-density] td, [data-list-density] th { font-size: .6875rem; }
+/* Use the shared text-sm tokens for values and sortable/plain headers alike. */
+[data-list-density] :is(table, td, th, th button, td button) { font-size: var(--text-sm); line-height: var(--text-sm--line-height); }
 [data-list-density] td { height: var(--list-row-height); padding: .5rem .6875rem; }
 [data-list-density] th { font-weight: 400; background-color: #f7f9fd; }
 [data-list-density] td [data-slot="badge"] { font-size: inherit; }
