@@ -26,6 +26,15 @@ witness implementation hashes; it is excluded from the reviewed plugin dependenc
 Rebinding requires reviewing dependency/configuration effects and repeating the offline witness;
 there is no automatic name/prefix/helper-based approval or production summary generator.
 Caller spreads/overrides remain subject to ordinary composition rules.
+On-disk fingerprints use a strict `sha256:` tag; decoded digests retain the same exact-byte
+binding. Analyzer `snapshot-2` and summaries `sdk-leaves-2` include the fix1 semantics.
+
+Factory alternatives are called separately before comparing dependency projections. Lexical
+bindings take precedence over intrinsic `undefined`; both omitted and proven undefined arguments
+apply parameter defaults. Falling continuations remain gaps. Captured aliases returned through
+functions, arrows or getters inherit their owner's consumer stability; untracked or escaping
+owners remain gaps. Immutable factory-local returns are supported. The transitive captured runtime resolution closure is
+validated even for modules with no demanded exports, including side-effect imports.
 
 `removal()` reports every matching definite/possible dependency, relevant coverage gap and
 source/validation failure. Entity-only references block the entity, without inventing field

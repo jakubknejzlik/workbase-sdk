@@ -59,11 +59,15 @@ export function analyze(input: Snapshot, options: AnalyzeOptions = {}): Graph {
       locate(file)
       diagnostics.push(diagnostic(token, 'source', 'invalid-source', ts.flattenDiagnosticMessageText(error.messageText, '\n')))
     }
-    for(const statement of file.statements) if(ts.isImportDeclaration(statement) && ts.isStringLiteral(statement.moduleSpecifier)) {
-      const specifier=statement.moduleSpecifier.text
-      if((specifier.startsWith('.') || !statement.importClause) && !input.resolutions.some(edge=>edge.from===name && edge.specifier===specifier && edge.target))
-        diagnostics.push(diagnostic(statement.moduleSpecifier,'source','invalid-resolution','Missing expected source/dependency resolution'))
+    const validateResolution = (node: ts.Node): void => {
+      const specifier = (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) && node.moduleSpecifier && ts.isStringLiteral(node.moduleSpecifier)
+        ? node.moduleSpecifier : ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword && node.arguments[0] && ts.isStringLiteral(node.arguments[0]) ? node.arguments[0] : undefined
+      if (specifier && (specifier.text.startsWith('.') || ts.isImportDeclaration(node) && !node.importClause)
+        && !input.resolutions.some(edge=>edge.from===name && edge.specifier===specifier.text && edge.target))
+        diagnostics.push(diagnostic(specifier,'source','invalid-resolution','Missing expected source/dependency resolution'))
+      ts.forEachChild(node, validateResolution)
     }
+    validateResolution(file)
     return file
   }
   const edge = (file: ts.SourceFile, specifier: string) => input.resolutions.find(item => item.from === file.fileName && item.specifier === specifier)?.target
@@ -75,6 +79,7 @@ export function analyze(input: Snapshot, options: AnalyzeOptions = {}): Graph {
     if (value.kind === 'choice') return choice(value.node, value.items.map(item => prop(item, name)))
     return value.kind === 'unknown' ? unknown(value.node, value.reason, value.possible.map(item => prop(item, name))) : unknown(value.node, 'Expected an object projection')
   }
+  const functionEnvs = new Map<Env, number>()
   // Compare only dependency-bearing properties; configuration calculations never execute.
   const signature = (value: Value, level = 0): string => {
     value = force(value)
@@ -85,7 +90,13 @@ export function analyze(input: Snapshot, options: AnalyzeOptions = {}): Graph {
       case 'unknown': return `unknown:${value.reason}:${value.node.getSourceFile().fileName}:${value.node.pos}`
       case 'object': return JSON.stringify([value.errors.map(item => item.code), keys.map(name => [name, signature(value.props.get(name) ?? scalar(value.node), level + 1)])])
       case 'array': case 'choice': return JSON.stringify([value.kind, value.items.map(item => signature(item, level + 1))])
-      default: return 'unknown:function'
+      // Function identity cannot prove equal return projections (including captured environments).
+      // Keep alternatives until the call has projected every branch with its actual arguments.
+      case 'function': {
+        if (!functionEnvs.has(value.env)) functionEnvs.set(value.env, functionEnvs.size)
+        return `function:${value.node.getSourceFile().fileName}:${value.node.pos}:${value.node.end}:${functionEnvs.get(value.env)}`
+      }
+      default: return 'unknown:projection'
     }
   }
   const choice = (node: ts.Node, items: Value[]): Value => {
@@ -96,7 +107,7 @@ export function analyze(input: Snapshot, options: AnalyzeOptions = {}): Graph {
       return { kind:'object', node, props:new Map([...names].map(name => [name, choice(node, flattened.map(item => item.props.get(name) ?? scalar(item.node)))])),
         errors:flattened.flatMap(item=>item.errors), chain:flattened.map(item=>span(item.node)) }
     }
-    if (flattened.length && flattened.every(item => signature(item) === signature(flattened[0]))) return { ...flattened[0],
+    if (flattened.length && !flattened.some(item => item.kind === 'function') && flattened.every(item => signature(item) === signature(flattened[0]))) return { ...flattened[0],
       chain: flattened.flatMap(item => [...(item.chain ?? []), span(item.node), ...(item.kind === 'metadata' ? item.refs.map(ref => span(ref.node)) : [])]) }
     return { kind: 'choice', node, items: flattened }
   }
@@ -164,9 +175,43 @@ export function analyze(input: Snapshot, options: AnalyzeOptions = {}): Graph {
     }
     for(const exportedName of exportedNames) if(!consumers(file,exportedName,seen)) valid=false
     const rootName = (node: ts.Node): string | undefined => {
+      if (ts.isParenthesizedExpression(node) || ts.isAsExpression(node) || ts.isSatisfiesExpression(node) || ts.isTypeAssertionExpression(node)) return rootName(node.expression)
       if (ts.isIdentifier(node)) return node.text
-      if (ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node)) return rootName(node.expression)
+      if (ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node) || ts.isCallExpression(node)) return rootName(node.expression)
       return undefined
+    }
+    // Returned aliases inherit their function/getter owner's consumer stability.
+    // Untracked owners remain gaps. Factory-local declarations returned from their
+    // own scope remain supported: each invocation creates its own value.
+    const localTo = (scope: ts.Node): boolean => {
+      let found = false, local = true
+      const visitDeclaration = (node: ts.Node): void => {
+        if (++stabilityWork > limits.maxNodes * 10) { local = false; return }
+        if ((ts.isVariableDeclaration(node) || ts.isParameter(node) || ts.isFunctionDeclaration(node))
+          && node.name && ts.isIdentifier(node.name) && node.name.text === name) {
+          found = true
+          let ancestor: ts.Node | undefined = node.parent
+          while (ancestor && ancestor !== scope) ancestor = ancestor.parent
+          if (!ancestor) local = false
+        }
+        ts.forEachChild(node, visitDeclaration)
+      }
+      visitDeclaration(file)
+      return found && local
+    }
+    const returnedAliasStable = (scope: ts.Node): boolean => {
+      if (localTo(scope)) return true
+      if (ts.isFunctionDeclaration(scope) && scope.name) return stable(file, scope.name.text, seen)
+      // Arrows/function expressions and getters inherit their owning container's
+      // consumers. Calls in rootName connect result mutations back to that owner.
+      let ancestor = scope
+      while (ancestor.parent && !ts.isStatement(ancestor.parent)) {
+        const parent = ancestor.parent
+        if (ts.isVariableDeclaration(parent) && parent.initializer === ancestor)
+          return ts.isIdentifier(parent.name) && stable(file, parent.name.text, seen)
+        ancestor = parent
+      }
+      return false
     }
     const visit = (node: ts.Node) => {
       if(++stabilityWork > (options.maxNodes ?? 20000)*10) { valid=false; return }
@@ -177,12 +222,22 @@ export function analyze(input: Snapshot, options: AnalyzeOptions = {}): Graph {
         let ancestor: ts.Node=node
         while(ancestor.parent && !ts.isStatement(ancestor.parent)) {
           const parent=ancestor.parent
+          if (ts.isArrowFunction(parent) && parent.body === ancestor && !returnedAliasStable(parent)) valid = false
+          if (ts.isCallExpression(parent) && parent.expression === ancestor && rootName(ancestor) !== name) valid = false
+          if (ts.isBinaryExpression(parent) && parent.left === ancestor && parent.operatorToken.kind >= ts.SyntaxKind.FirstAssignment && parent.operatorToken.kind <= ts.SyntaxKind.LastAssignment) valid = false
+          if ((ts.isPostfixUnaryExpression(parent) || ts.isPrefixUnaryExpression(parent)) && parent.operand === ancestor) valid = false
+          if (ts.isDeleteExpression(parent) && parent.expression === ancestor) valid = false
           if(ts.isCallExpression(parent) && parent.arguments.some(arg=>arg===ancestor)) valid=false
           if(ts.isVariableDeclaration(parent) && parent.initializer===ancestor) {
             if(!ts.isIdentifier(parent.name) || parent.name.text!==name && !stable(file,parent.name.text,seen)) valid=false
             break
           }
           ancestor=parent
+        }
+        if (ancestor.parent && ts.isReturnStatement(ancestor.parent)) {
+          let scope: ts.Node | undefined = ancestor.parent.parent
+          while (scope && !ts.isFunctionLike(scope)) scope = scope.parent
+          if (!scope || !returnedAliasStable(scope)) valid = false
         }
       }
       if (ts.isVariableDeclaration(node) && node.initializer && rootName(unwrap(node.initializer)) === name && (!ts.isIdentifier(node.name) || !stable(file, node.name.text, seen))) valid = false
@@ -235,7 +290,8 @@ export function analyze(input: Snapshot, options: AnalyzeOptions = {}): Graph {
           return statement.declarationList.flags & ts.NodeFlags.Const && item.initializer ? evaluate(item.initializer, env) : unknown(item, 'Binding is not an initialized const')
         }
       }
-      return unknown(file, `Unresolved binding ${name}`)
+      // Intrinsics are only available after lexical declarations/imports have been checked.
+      return name === 'undefined' ? scalar(file) : unknown(file, `Unresolved binding ${name}`)
     } finally { active.delete(id) }
   }
   function applySpread(base: Extract<Value, { kind: 'object' }>, spread: Value): Value {
@@ -302,14 +358,33 @@ export function analyze(input: Snapshot, options: AnalyzeOptions = {}): Graph {
     const node = fn.node
     if (!node.body || node.modifiers?.some(item => item.kind === ts.SyntaxKind.AsyncKeyword) || node.asteriskToken) return unknown(node, 'Unsupported factory body')
     const env = new Map(fn.env)
+    // Parameter bindings exist before initializers run; forward/self references must
+    // not accidentally resolve to a global intrinsic.
+    for (const parameter of node.parameters) if (ts.isIdentifier(parameter.name))
+      env.set(parameter.name.text, unknown(parameter, 'Uninitialized factory parameter'))
     for (let i = 0; i < node.parameters.length; i++) {
       const parameter = node.parameters[i]
       if (!ts.isIdentifier(parameter.name) || parameter.dotDotDotToken) return unknown(parameter, 'Unsupported factory parameter')
-      env.set(parameter.name.text, args[i] ? lazy(args[i], callerEnv) : parameter.initializer ? lazy(parameter.initializer, env) : scalar(parameter))
+      const argument = args[i] ? force(evaluate(args[i], callerEnv)) : scalar(parameter)
+      // Defaults apply to both omitted and explicit undefined arguments. An unresolved
+      // argument may be undefined, so retain the default as another possible value.
+      const initialized = parameter.initializer
+        ? argument.kind === 'scalar'
+          ? argument.value === undefined ? evaluate(parameter.initializer, env) : argument
+          : choice(parameter, [argument, evaluate(parameter.initializer, env)])
+        : argument
+      env.set(parameter.name.text, initialized)
     }
     if (!ts.isBlock(node.body)) return evaluate(node.body, env)
     const block = (statements: readonly ts.Statement[], current: Env): { returns: Value[]; falls: boolean } => {
       const returns: Value[] = []
+      // Preserve lexical shadowing even before a declaration is reached. Nested
+      // functions remain unsupported when demanded, rather than becoming globals.
+      for (const statement of statements) {
+        if (ts.isFunctionDeclaration(statement) && statement.name) current.set(statement.name.text, unknown(statement, 'Local factory declaration'))
+        if (ts.isVariableStatement(statement)) for (const declaration of statement.declarationList.declarations)
+          if (ts.isIdentifier(declaration.name)) current.set(declaration.name.text, unknown(declaration, 'Uninitialized factory binding'))
+      }
       for (let i = 0; i < statements.length; i++) {
         const statement = statements[i]
         if(++work > limits.maxNodes) return {returns:[...returns,unknown(statement,'Factory node budget exhausted')],falls:false}
@@ -324,11 +399,16 @@ export function analyze(input: Snapshot, options: AnalyzeOptions = {}): Graph {
           const condition = force(evaluate(statement.expression, current))
           const run = (branch: ts.Statement | undefined) => branch ? block(ts.isBlock(branch) ? branch.statements : [branch], new Map(current)) : { returns: [] as Value[], falls: true }
           const branches = condition.kind === 'scalar' ? [run(condition.value ? statement.thenStatement : statement.elseStatement)] : [run(statement.thenStatement), run(statement.elseStatement)]
+          let falls = false
           for (const branch of branches) {
             returns.push(...branch.returns)
-            if (branch.falls) returns.push(...block(statements.slice(i + 1), new Map(current)).returns)
+            if (branch.falls) {
+              const continuation = block(statements.slice(i + 1), new Map(current))
+              returns.push(...continuation.returns)
+              falls ||= continuation.falls
+            }
           }
-          return { returns, falls: branches.some(branch => branch.falls) && statements.slice(i + 1).length === 0 }
+          return { returns, falls }
         } else if (ts.isEmptyStatement(statement)) { /* inert */ }
         else return { returns: [...returns, unknown(statement, 'Unsupported factory effects/control flow')], falls: false }
       }
@@ -349,7 +429,10 @@ export function analyze(input: Snapshot, options: AnalyzeOptions = {}): Graph {
       if (ts.isNumericLiteral(node)) return scalar(node, Number(node.text))
       if (node.kind === ts.SyntaxKind.TrueKeyword || node.kind === ts.SyntaxKind.FalseKeyword) return scalar(node, node.kind === ts.SyntaxKind.TrueKeyword)
       if (node.kind === ts.SyntaxKind.NullKeyword) return scalar(node, null)
-      if (ts.isIdentifier(node)) return node.text === 'undefined' ? scalar(node) : binding(node.getSourceFile(), node.text, env)
+      if (ts.isIdentifier(node)) {
+        if (env.has(node.text)) return force(env.get(node.text)!)
+        return binding(node.getSourceFile(), node.text, env)
+      }
       if (ts.isObjectLiteralExpression(node)) return object(node, env)
       if (ts.isArrayLiteralExpression(node)) {
         const items: Value[] = []
@@ -376,7 +459,14 @@ export function analyze(input: Snapshot, options: AnalyzeOptions = {}): Graph {
           if(left.kind==='scalar'&&right.kind==='scalar') return scalar(node,operator===ts.SyntaxKind.EqualsEqualsEqualsToken ? left.value===right.value : left.value!==right.value)
         }
       }
-      if (ts.isCallExpression(node)) { const fn = force(evaluate(node.expression, env)); return fn.kind === 'function' ? projectFactory(fn, node.arguments, env) : unknown(node, 'Unresolved factory call') }
+      if (ts.isCallExpression(node)) {
+        const call = (value: Value): Value => {
+          const fn = force(value)
+          if (fn.kind === 'choice') return choice(node, fn.items.map(call))
+          return fn.kind === 'function' ? projectFactory(fn, node.arguments, env) : unknown(node, 'Unresolved factory call')
+        }
+        return call(evaluate(node.expression, env))
+      }
       return unknown(node, 'Unsupported dynamic expression')
     } finally { depth-- }
   }
@@ -423,6 +513,17 @@ export function analyze(input: Snapshot, options: AnalyzeOptions = {}): Graph {
     }
   }
   const entry = source(input.entry)
+  // Validate the captured resolution closure even when a module has no demanded exports.
+  // Side-effect imports execute independently of which bindings the projection needs.
+  const pending = [input.entry], validated = new Set<string>()
+  while (pending.length) {
+    const name = pending.pop()!
+    if (validated.has(name)) continue
+    validated.add(name)
+    source(name)
+    if (validated.size > limits.maxModules) break // source() already records the budget gap
+    for (const resolution of input.resolutions) if (resolution.from === name && resolution.target) pending.push(resolution.target)
+  }
   for (const failure of input.failures) diagnostics.push(diagnostic(source(failure.file), 'source', 'invalid-capture', failure.message))
   const runtime = exported(entry, 'default'), plugins = prop(runtime, 'plugins')
   const runtimeErrors = (item: Value): void => {

@@ -1,0 +1,48 @@
+[
+  {
+    "name": "returned-function-alias",
+    "text": "const p={name:'custom',version:'1',schemaReferences:[]}; function get(){return p}; get().schemaReferences.push({entity:'worker',field:'note'}); export default {plugins:[p]}"
+  },
+  {
+    "name": "returned-arrow-alias",
+    "text": "const p={name:'custom',version:'1',schemaReferences:[]}; const get=()=>p; get().schemaReferences.push({entity:'worker',field:'note'}); export default {plugins:[p]}"
+  },
+  {
+    "name": "getter-alias",
+    "text": "const p={name:'custom',version:'1',schemaReferences:[]}; const holder={get plugin(){return p}}; holder.plugin.schemaReferences.push({entity:'worker',field:'note'}); export default {plugins:[p]}"
+  },
+  {
+    "name": "shadowed-undefined",
+    "text": "function make(undefined){return {name:'custom',version:'1',schemaReferences:[],...(undefined ? {schemaReferences:[{entity:'worker',field:'note'}]} : {})}}; export default {plugins:[make(true)]}"
+  },
+  {
+    "name": "unloaded-invalid-side-effect",
+    "text": "import './side'; export default {plugins:[]}",
+    "side": "export const broken = ;"
+  },
+  {
+    "name": "unloaded-missing-side-effect",
+    "text": "import './side'; export default {plugins:[]}",
+    "side": "import './missing';"
+  },
+  {
+    "name": "direct-mutation-negative-control",
+    "text": "const p={name:'custom',version:'1',schemaReferences:[]}; p.schemaReferences.push({entity:'worker',field:'note'}); export default {plugins:[p]}"
+  },
+  {
+    "name": "ordinary-safe-control",
+    "text": "export default {plugins:[{name:'custom',version:'1',schemaReferences:[]}]}"
+  },
+  {
+    "name": "explicit-undefined-default",
+    "text": "function make(flag=true){return flag ? ({name:'custom',version:'1',schemaReferences:[{entity:'worker',field:'note'}]}) : ({name:'custom',version:'1',schemaReferences:[]})}; export default {plugins:[make(undefined)]}"
+  },
+  {
+    "name": "different-function-branches",
+    "text": "const make=Boolean(0) ? ()=>({name:'custom',version:'1',schemaReferences:[]}) : ()=>({name:'custom',version:'1',schemaReferences:[{entity:'worker',field:'note'}]}); export default {plugins:[make()]}"
+  },
+  {
+    "name": "fallthrough-valid-runtime",
+    "text": "const flag=Boolean(0); function make(){if(flag) return {name:'custom',version:'1',schemaReferences:[]}; const x=1}; export default {plugins:[make()]}"
+  }
+]

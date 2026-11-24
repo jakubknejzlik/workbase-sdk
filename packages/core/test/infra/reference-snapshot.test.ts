@@ -260,9 +260,10 @@ describe('source-bound shipped leaves (A07–A09,A18)', () => {
     blocked(graph(plugin("['schemaReferences']:refs, schemaReferences:[]")))
     blocked(graph(plugin("__proto__:unknown, schemaReferences:[], provides:{}, requires:{}, optionalRequires:{}")))
   })
-  it('reports unresolved reexports and module exhaustion', () => {
+  it('reports missing reexport sources and module exhaustion', () => {
     const input=snapshot({entry:'runtime.ts',sources:{'runtime.ts':`export {default} from './missing'`}})
-    expect(analyze(input).coverage.registration).toBe('unresolved')
+    expect(analyze(input).coverage.registration).toBe('invalid')
+    expect(analyze(input).diagnostics.some(item=>item.domain==='source'&&item.code==='invalid-resolution')).toBe(true)
     expect(analyze(input,{maxModules:0}).coverage.registration).toBe('invalid')
   })
   it('missing entry is a source failure, never empty complete plugins', () => {
