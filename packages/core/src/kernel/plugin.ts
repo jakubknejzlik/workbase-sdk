@@ -59,6 +59,8 @@ export interface PluginContext { readonly config: InstanceConfig }
 export interface WorkbasePlugin {
   name: string
   version: string
+  /** Literal logical schema dependency inventory; [] explicitly declares no dependencies. */
+  schemaReferences?: readonly { readonly entity: string; readonly field?: string }[]
   /** Public contract majors, independent of the package version. */
   provides?: Readonly<Record<string, `${number}.x`>>
   requires?: Readonly<Record<string, `^${number}`>>
