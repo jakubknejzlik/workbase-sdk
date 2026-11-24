@@ -17,6 +17,8 @@ const dashboard: WorkbasePlugin = { name: 'neutral-dashboard', version: '1.0.0',
   pages: [{ id: 'neutral.summary', path: '/summary', label: 'Summary', widgets: [
     { id: 'count', label: 'Specimen count', kind: 'stat', query: { entity: 'specimens' }, aggregate: { fn: 'count' } },
     { id: 'recent', label: 'Recent specimens', kind: 'table', query: { entity: 'specimens', select: ['id', 'name', 'quantity'], limit: 5 }, columns: ['name', 'quantity'] },
+    { id: 'names', label: 'Specimen names', kind: 'list', query: { entity: 'specimens', select: ['id', 'name'], limit: 5 }, field: 'name' },
+    { id: 'names-without-id', label: 'Names without identity', kind: 'list', query: { entity: 'specimens', select: ['name'], limit: 5 }, field: 'name' },
   ] }], navigation: [{ id: 'neutral.summary', placement: 'sidebar', page: 'neutral.summary', label: 'Summary' }],
 } } }
 export function neutralConfig(second = false) {
