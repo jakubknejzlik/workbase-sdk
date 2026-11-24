@@ -18,7 +18,7 @@ import type { ReactNode } from 'react'
 
 /** Widget responses are bounded server results: render every returned row without local paging. */
 function WidgetRecords({ widget, caption, entity, model, value }: {
-  widget: Exclude<ConsoleWidgetResult, { kind: 'stat' }>; caption: string; entity?: string; model?: Model
+  widget: Extract<ConsoleWidgetResult, { kind: 'table' | 'list' }>; caption: string; entity?: string; model?: Model
   value: (row: Record<string, any>, field: string) => ReactNode
 }) {
   const { t } = useTranslation()
@@ -79,6 +79,7 @@ export function WidgetCards({ orgId, page, result, pending, error, model, caps, 
     return canOpen ? <Link data-row-name="" title={row.id} to="/o/$orgId/e/$entity/$id" params={{ orgId, entity, id: row.id }}>{content}</Link> : content
   }
   const content = (widget: ConsoleWidgetResult) => {
+    if (widget.kind === 'error') return <div role="alert" data-error-code={widget.code} className="space-y-1 text-sm"><p>{t('dashboardWidgetFailed')}</p><p className="break-words text-xs text-muted-foreground">{t(widget.code === 'query_too_expensive' ? 'dashboardWidgetTooComplex' : 'dashboardWidgetRetry')}</p></div>
     if (widget.kind === 'stat') {
       // Missing data shares the value line's height; zero is a normal value.
       return widget.value == null

@@ -3,6 +3,7 @@ import type { InstanceConfig } from '@workbasehq/core/config'
 import type { KernelRegistry } from '@workbasehq/core/kernel/registry'
 import type { Scope } from '../../../core/src/types'
 import { ApiError } from '../../../core/src/errors'
+import { QueryError } from '../../../core/src/query/errors'
 import { querySchema, validateQuery, type QueryInput } from '@workbasehq/core/query/schema'
 import { compileAggregate, compileRoot } from '@workbasehq/core/query/compiler'
 import { projectRootRow, type Row } from '../../../core/src/query/executor'
@@ -58,30 +59,56 @@ export function visibleWidgets(kernel: KernelRegistry, scope: Scope, widgets: re
   return widgets.filter(widget => {
     if (!kernel.can(scope, widget.query.entity, 'read')) return false
     try { validateQuery(kernel, scope, widgetQuery(widget)); return true }
-    catch (error) { if (error instanceof ApiError && error.status === 403) return false; throw error }
+    catch (error) {
+      if (error instanceof ApiError && error.status === 403) return false
+      if (error instanceof QueryError && error.code === 'query_too_expensive') {
+        // The final shape budget check follows all dependency authorization.
+        // Early preflight/depth refusals cannot prove that: omit them fail-closed.
+        return error.path.length === 0 && (error.cost?.statements ?? 0) > 0
+      }
+      // The query API intentionally conflates unknown and projected-out views.
+      // Keep both omitted rather than exposing a forbidden configured view.
+      if (error instanceof QueryError && error.code === 'query_invalid' && error.path[0] === 'view') return false
+      if (error instanceof QueryError && error.code === 'query_invalid') {
+        // These options can fail before field authorization. Check the remaining
+        // dependencies for visibility only; execution still validates the original.
+        const key = error.path[0]
+        if (key !== 'contextList' && key !== 'rowAccess') return false
+        const query = { ...widgetQuery(widget) }
+        delete query[key]
+        try { validateQuery(kernel, scope, query); return true }
+        catch { return false }
+      }
+      // Other validation refusals belong to the widget's stable error contract.
+      if (error instanceof QueryError) return true
+      throw error
+    }
   })
 }
 export async function executeWidgets(kernel: KernelRegistry, scope: Scope, db: D1Database, page: ConsolePage): Promise<ConsolePageResult> {
-  const jobs = visibleWidgets(kernel, scope, page.widgets ?? []).map(widget => {
-    const { query, cost } = validateQuery(kernel, scope, widgetQuery(widget))
-    const statement = widget.kind === 'stat' ? compileAggregate(kernel, scope, query, widget.aggregate, cost) : compileRoot(kernel, scope, query, undefined, cost)
-    return { widget, query, statement }
-  })
-  // Compile and authorize everything before executing; exactly one statement per widget.
-  const results = jobs.length ? await db.batch<Row>(jobs.map(({ statement }) => db.prepare(statement.sql).bind(...statement.bindings))) : []
-  const widgets: ConsolePageResult['widgets'] = []
-  jobs.forEach(({ widget, query }, index) => {
-    const rows = results[index].results
-    const policy = kernel.tableFilter(query.entity, scope)
-    const empty = widget.kind === 'stat' ? rows[0]?.__count === 0 : !rows.length
-    if ('deny' in policy && policy.deny === 'forbidden' && empty) return
+  // Each bounded widget owns its validation, compilation and single statement.
+  // A refused query or a driver failure must not abort another widget's batch.
+  const results = await Promise.all(visibleWidgets(kernel, scope, page.widgets ?? []).map(async (widget): Promise<ConsolePageResult['widgets']> => {
     const common = { id: widget.id, label: widget.label }
-    if (widget.kind === 'stat') widgets.push({ ...common, kind: 'stat', value: rows[0]?.value ?? null })
-    else {
+    try {
+      const { query, cost } = validateQuery(kernel, scope, widgetQuery(widget))
+      const statement = widget.kind === 'stat' ? compileAggregate(kernel, scope, query, widget.aggregate, cost) : compileRoot(kernel, scope, query, undefined, cost)
+      const [result] = await db.batch<Row>([db.prepare(statement.sql).bind(...statement.bindings)])
+      if (!result.success) throw new Error('Widget statement failed')
+      const rows = result.results
+      const policy = kernel.tableFilter(query.entity, scope)
+      const empty = widget.kind === 'stat' ? rows[0]?.__count === 0 : !rows.length
+      if ('deny' in policy && policy.deny === 'forbidden' && empty) return []
+      if (widget.kind === 'stat') return [{ ...common, kind: 'stat', value: rows[0]?.value ?? null }]
       const data = rows.slice(0, query.limit).map(row => projectRootRow(kernel, scope, query, row))
-      widgets.push(widget.kind === 'table' ? { ...common, kind: 'table', columns: widget.columns, data } : { ...common, kind: 'list', field: widget.field, data })
+      return [widget.kind === 'table' ? { ...common, kind: 'table', columns: widget.columns, data } : { ...common, kind: 'list', field: widget.field, data }]
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 403) return []
+      // Never serialize paths, costs, SQL, bindings or arbitrary driver messages.
+      return [{ ...common, kind: 'error', code: error instanceof QueryError && error.code === 'query_too_expensive' ? 'query_too_expensive' : 'widget_failed' }]
     }
-  })
+  }))
+  const widgets = results.flat()
   const allowed = new Set(widgets.map(widget => widget.id))
   const sections = page.sections?.map(section => ({ row: section.row.filter(id => allowed.has(id)) })).filter(section => section.row.length)
   return { id: page.id, label: page.label, sections, widgets }
