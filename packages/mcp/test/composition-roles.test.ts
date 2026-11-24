@@ -78,7 +78,9 @@ async function accepted(call: Call, name: string, args: Record<string, unknown>)
 }
 async function fixture(runtime?: string) {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'composition-roles-')))
-  cleanups.push(() => rm(root, { recursive: true, force: true }))
+  // Vite can finish writing its optimizer cache while the local SDK tree is
+  // being removed. Retry transient cleanup races without hiding persistent errors.
+  cleanups.push(() => rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }))
   // The target is independently provisioned from the initialized base, never
   // inferred from the disposable used to verify a proposal.
   const targetPath = join(root, 'target.sqlite')
