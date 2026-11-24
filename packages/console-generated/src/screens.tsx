@@ -150,6 +150,7 @@ function ListPageBody({ discard, onDiscarded, savedViewsScope, model, caps, orgI
   const [filterOpen, setFilterOpen] = useState(false)
   // Session-local display preference: separate from the query, counts, URL and personal views.
   const [visibility, setVisibility] = useState<Record<string, boolean>>({})
+  const [columnOrder, setColumnOrder] = useState<string[]>([])
   const [compactPreference, setCompactPreference] = useState<boolean>()
   const list = useGeneratedList({ model, caps, orgId, entity, request, contextList, discard, onDiscarded })
   const readable = projection(model, entity, caps)
@@ -207,7 +208,17 @@ function ListPageBody({ discard, onDiscarded, savedViewsScope, model, caps, orgI
   const shown = (id: string) => visibility[id] ?? (columnConfig.get(id)?.defaultVisible !== false)
   // The first column is the record link and stays; hiding only drops presentation, never a selected field, filter, sort or count.
   const displayable = list.offsetPaging ? tableColumns.filter(column => column.id !== primary && column.id !== '_actions') : []
-  const columns = list.offsetPaging ? tableColumns.filter(column => column.id === primary || column.id === '_actions' || shown(column.id)) : tableColumns
+  // Reconcile the session preference with currently available columns; primary and Actions stay anchored.
+  const ordered = [...new Set([...columnOrder, ...displayable.map(column => column.id)])].flatMap(id => displayable.find(column => column.id === id) ?? [])
+  const moveColumn = (id: string, direction: -1 | 1) => {
+    const visible = ordered.filter(column => shown(column.id))
+    const index = visible.findIndex(column => column.id === id), target = visible[index + direction]
+    if (index < 0 || !target) return
+    const order = ordered.map(column => column.id), from = order.indexOf(id), to = order.indexOf(target.id)
+    order[from] = target.id; order[to] = id
+    setColumnOrder(order)
+  }
+  const columns = list.offsetPaging ? [...tableColumns.filter(column => column.id === primary), ...ordered.filter(column => shown(column.id)), ...tableColumns.filter(column => column.id === '_actions')] : tableColumns
   const content = list.state.presentation === 'calendar' ? <>
       <EntityCalendar model={model} entity={entity} caps={caps} orgId={orgId} state={list.state} data={list.data} pending={list.result.isFetching} error={error ? t(queryCodes.includes(error.code as any) ? `query_${error.code}` : 'requestFailed') : undefined} onChange={state => list.onStateChange(state, 'view')} onCreate={calendarCreate} onPage={list.onPage} previous={list.page > 0} />
     </> : <div className="caption-bottom"><DataTable fixedDensity={tableColumns.some(column => column.id === '_access')} listV2={list.offsetPaging} hideFooter={list.offsetPaging} scrollOnNarrow={list.offsetPaging} compact={compactPreference ?? definition.list?.compact} mobileCards={definition.list?.mobileCards} rows={rows} columns={columns} state={list.state} onStateChange={list.onStateChange} page={list.page} range={list.range} onPage={list.onPage} nextCursor={error ? null : list.data?.next_cursor} isFetching={list.result.isFetching} onRetry={() => { void list.result.refetch() }} error={error ? new Error(t(queryCodes.includes(error.code as any) ? `query_${error.code}` : 'requestFailed')) : null}
@@ -223,7 +234,7 @@ function ListPageBody({ discard, onDiscarded, savedViewsScope, model, caps, orgI
     {error?.code === 'query_too_expensive' && list.undo && <PrimitiveButton variant="outline" onClick={list.undo}>{t('undoLastChange')}</PrimitiveButton>}
     {list.offsetPaging ? <ListPageComposition tabs={tabs} toolbar={<>
       {search && <div className="list-v2-search">{search}</div>}{(immediateFilters.length > 0 || access || hasPanel) && <div className="list-v2-lookup-panel">{immediateFilters}{access}{hasPanel && <PrimitiveButton variant="outline" title={t('sortAndFilter')} aria-expanded={filterOpen} onClick={() => setFilterOpen(value => !value)}>{t('sortAndFilter')}</PrimitiveButton>}</div>}
-      <div className="ml-auto flex min-w-0 max-w-full flex-wrap items-center justify-end gap-2">{savedViews}{displayable.length > 0 && list.state.presentation !== 'calendar' && <DisplayMenu columns={displayable.map(column => ({ id: column.id, label: column.label, visible: shown(column.id) }))} compact={compactPreference ?? !!definition.list?.compact} labels={{ trigger: t('listDisplay'), heading: t('listDisplayHeading'), hint: t('listDisplayHint'), compact: t('listDisplayCompact'), reset: t('listDisplayReset') }} onToggle={(id, visible) => setVisibility(old => ({ ...old, [id]: visible }))} onCompact={setCompactPreference} onReset={() => { setVisibility({}); setCompactPreference(undefined) }} />}{presentation}</div>
+      <div className="ml-auto flex min-w-0 max-w-full flex-wrap items-center justify-end gap-2">{savedViews}{displayable.length > 0 && list.state.presentation !== 'calendar' && <DisplayMenu columns={ordered.map(column => ({ id: column.id, label: column.label, visible: shown(column.id) }))} compact={compactPreference ?? !!definition.list?.compact} labels={{ trigger: t('listDisplay'), heading: t('listDisplayHeading'), hint: t('listDisplayHint'), compact: t('listDisplayCompact'), reset: t('listDisplayReset'), moveUp: column => t('listDisplayMoveUp', { column }), moveDown: column => t('listDisplayMoveDown', { column }) }} onMove={moveColumn} onToggle={(id, visible) => setVisibility(old => ({ ...old, [id]: visible }))} onCompact={setCompactPreference} onReset={() => { setVisibility({}); setColumnOrder([]); setCompactPreference(undefined) }} />}{presentation}</div>
     </>} panel={filterOpen && hasPanel ? panel : undefined} chips={activeChips} footer={<ListPageFooter total={list.data?.total} page={list.page} limit={list.document.limit} pageSize={list.state.limit} maxOffset={model.limits.maxOffset ?? 10_000} busy={list.result.isFetching || searchPending} onPage={list.onPage} onPageSize={limit => list.onStateChange({ ...list.state, limit }, 'limit')} labels={{ loading: t('loading'), previous: t('previousPage'), next: t('nextPage'), pageSize: t('rowsPerPage'), pageSizeOption: size => t('paginationSize', { count: size }), range: (start, end, total) => t('listRangeTotal', { start: new Intl.NumberFormat(i18n.language).format(start), end: new Intl.NumberFormat(i18n.language).format(end), total: new Intl.NumberFormat(i18n.language).format(total) }) }} />}>{content}</ListPageComposition> : <>{savedViews}{tabs}{presentation}{immediateFilters}{panel}{activeChips}{content}</>}
 
   </Page>
