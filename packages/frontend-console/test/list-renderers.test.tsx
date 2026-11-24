@@ -14,9 +14,9 @@ import cs from '../src/locales/cs.json'
 let client: QueryClient
 beforeEach(() => { vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} }); vi.spyOn(window, 'scrollTo').mockImplementation(() => {}) })
 afterEach(() => { client?.clear(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
-async function mount(columns: ListColumn[], options: { language?: 'en' | 'cs'; denied?: string[]; embedded?: boolean; contextSurface?: boolean; row?: Record<string, any> } = {}) {
-  const fields = { id: { type: 'string' }, name: { type: 'string' }, status: { type: 'enum', values: ['active', 'unknown'] }, amount: { type: 'int' }, enabled: { type: 'bool' }, created: { type: 'datetime' }, owner: { type: 'ref', entity: 'people' } }
-  const model: Model = { instance: 'cells', revision: 1, timeZone: 'Europe/Prague', limits: { root: 100, children: 20, relations: 4, exists: 4 }, entities: {
+async function mount(columns: ListColumn[], options: { language?: 'en' | 'cs'; denied?: string[]; embedded?: boolean; contextSurface?: boolean; listV2?: boolean; row?: Record<string, any> } = {}) {
+  const fields = { id: { type: 'string' }, name: { type: 'string' }, status: { type: 'enum', values: ['active', 'unknown'] }, amount: { type: 'int' }, enabled: { type: 'bool' }, inactive: { type: 'bool' }, due: { type: 'date' }, created: { type: 'datetime' }, owner: { type: 'ref', entity: 'people' } }
+  const model: Model = { instance: 'cells', revision: 1, timeZone: 'Europe/Prague', limits: { root: 100, ...(options.listV2 ? { maxOffset: 100 } : {}), children: 20, relations: 4, exists: 4 }, entities: {
     entries: { displayField: 'name', fields, columns: ['name'], relations: { owner: { entity: 'people', field: 'owner', cardinality: 'n:1' } }, routes: { list: '', detail: '' }, list: { mobileCards: true, columns, relatedColumns: { owner_name: { via: 'owner', field: 'place' } } } },
     places: { displayField: 'name', fields: { id: { type: 'string' }, name: { type: 'string' } }, columns: ['name'], relations: {}, routes: { list: '', detail: '' } },
     people: { detail: { lists: { entries: { entity: 'entries', label: 'Entries', bind: { field: 'owner', record: 'id' }, columns: ['name'] } } }, displayField: 'name', fields: { id: { type: 'string' }, name: { type: 'string' }, place: { type: 'ref', entity: 'places' } }, columns: ['name'], relations: {}, routes: { list: '', detail: '' } },
@@ -99,4 +99,31 @@ it.each([null, 'unknown'])('keeps badge null placeholders and neutral fallback f
 it('omits identifier content and copy for denied cached primary values', async () => {
   const { container } = await mount([{ field: 'name' }, { field: 'amount', cell: { kind: 'identifier', copy: true } }], { denied: ['amount'] })
   expect(screen.queryByRole('button', { name: en.listIdentifierCopy })).toBeNull()
+})
+
+it.each([false, true])('aligns synthetic field cells and headers, retaining sort controls (list v2: %s)', async listV2 => {
+  const { container, user, request } = await mount([
+    { field: 'name' }, { field: 'amount' }, { field: 'due' }, { field: 'inactive' },
+    // A text renderer does not turn a relation into a left-aligned text field.
+    { field: 'owner', cell: { kind: 'text' } },
+  ], { listV2, row: { name: 'Alex Example', amount: 12, due: '2026-11-24', inactive: false,
+    __labels: { owner: { status: 'ok', entity: 'people', row: { id: 'clinic', name: 'Example Clinic' } } } } })
+  const cells = within(container.querySelector('tbody tr')!).getAllByRole('cell')
+  const headers = within(container.querySelector('thead')!).getAllByRole('columnheader')
+  const expected = [
+    ['Alex Example', 'left', 'start'], ['12', 'right', 'end'], ['Nov 24, 2026', 'center', 'center'],
+    ['No', 'center', 'center'], ['Example Clinic', 'center', 'center'],
+  ]
+  expected.forEach(([text, align, justify], index) => {
+    expect(cells[index].textContent).toBe(text)
+    expect(cells[index].classList.contains(`text-${align}`)).toBe(true)
+    expect(headers[index].classList.contains(`text-${align}`)).toBe(true)
+    expect(headers[index].firstElementChild?.classList.contains(`justify-${justify}`)).toBe(true)
+    const card = container.querySelectorAll('dl dd')[index]
+    expect(card?.parentElement?.classList.contains(`text-${align}`)).toBe(true)
+  })
+  const sort = within(headers[1]).getByRole('button', { name: /^Sort / })
+  await user.click(sort)
+  await waitFor(() => expect(request.mock.calls.at(-1)![0].orderBy).toContainEqual({ field: 'amount', dir: 'asc' }))
+  expect(headers[1].getAttribute('aria-sort')).toBe('ascending')
 })

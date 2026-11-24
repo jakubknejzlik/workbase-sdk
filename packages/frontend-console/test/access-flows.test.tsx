@@ -113,17 +113,29 @@ for (const language of ['en', 'cs'] as const) {
     await mount('create', { language, labels: { entityObject_entries: name, entitySingular_entries: 'Worker' } })
     expect(screen.getByRole('dialog', { name: language === 'cs' ? 'Přidat pracovníka' : 'Add person' })).toBeTruthy()
   })
-  for (const v3 of [true, false]) it(`${language} ${v3 ? 'V3' : 'legacy'} link explains immediate access and keeps invitation copy in invite`, async () => {
+  for (const v3 of [true, false]) it(`${language} ${v3 ? 'V3' : 'legacy'} new invitation explains acceptance without cancellation guidance`, async () => {
     const locale = language === 'cs' ? cs : en
     const { user } = await mount('detail', { language, v3 })
     await user.click(await screen.findByRole('button', { name: locale.rowFindMember }))
-    let dialog = screen.getByRole('dialog')
+    const dialog = screen.getByRole('dialog')
     expect(within(dialog).getByText(locale.rowFindDescription)).toBeTruthy()
     expect(within(dialog).getByText(locale.rowFindRequired)).toBeTruthy()
     expect(within(dialog).queryByText(locale.rowInviteDescription)).toBeNull()
     await user.type(within(dialog).getByRole('combobox', { name: locale.rowFindQuery }), 'new@example.test')
     expect(await within(dialog).findByRole('button', { name: locale.rowFindSend })).toBeTruthy()
+    await within(dialog).findByText(locale.rowInviteNewDescription)
+    expect(dialog.textContent).not.toContain(language === 'cs' ? 'Po zrušení můžete pozvat jiný e-mail.' : 'Cancel to invite another email.')
+  })
+  for (const v3 of [true, false]) it.each(['invited', 'expired'])(`${language} ${v3 ? 'V3' : 'legacy'} %s invitation keeps cancellation guidance when changing email`, async state => {
+    const locale = language === 'cs' ? cs : en
+    const { user } = await mount('detail', { language, v3, state, noMembers: true })
+    await user.click(await screen.findByRole('button', { name: locale.rowFindMember }))
+    const dialog = screen.getByRole('dialog')
+    const input = within(dialog).getByRole('combobox', { name: locale.rowFindQuery })
+    await user.clear(input)
+    await user.type(input, 'replacement@example.test')
     await within(dialog).findByText(locale.rowInviteDescription)
+    expect(within(dialog).getByRole('button', { name: locale.rowInvite_change })).toHaveProperty('disabled', false)
   })
 }
 it('review5 edit embeds invitation controls', async () => { await mount('edit'); expect(await screen.findByRole('button', { name: 'Find member or invite' })).toBeTruthy() })
@@ -138,6 +150,8 @@ it.each([true, false])('91 edit search preserves the live contact email until ex
   const input = within(dialog).getByRole('combobox', { name: en.rowFindQuery })
   expect(input).toHaveProperty('value', 'live@example.test')
   const confirm = await within(dialog).findByRole('button', { name: en.rowFindSend }); await waitFor(() => expect(confirm).toHaveProperty('disabled', false))
+  expect(within(dialog).getByText(en.rowInviteNewDescription)).toBeTruthy()
+  expect(dialog.textContent).not.toContain('Cancel to invite another email.')
   await user.tab()
   await user.click(input)
   expect(input).toHaveProperty('value', 'live@example.test')

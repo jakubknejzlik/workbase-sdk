@@ -1,3 +1,4 @@
+import { listColumnAlignment } from './list-presentation'
 import { GeneratedListCell } from './list-cell'
 import { accountLinkField, accountLinkRelation } from './account-link'
 import { EntityCalendar } from './calendar'
@@ -149,6 +150,8 @@ function ListPageBody({ discard, onDiscarded, savedViewsScope, model, caps, orgI
   const definition = model.entities[entity]
   const [searchPending, setSearchPending] = useState(false)
   const [filterOpen, setFilterOpen] = useState(false)
+  // Session-local column order: separate from the persisted visibility and density.
+  const [columnOrder, setColumnOrder] = useState<string[]>([])
   const list = useGeneratedList({ model, caps, orgId, entity, request, contextList, discard, onDiscarded })
   const readable = projection(model, entity, caps)
   const display = caps.entities[entity]?.displayField ?? definition.displayField
@@ -203,14 +206,24 @@ function ListPageBody({ discard, onDiscarded, savedViewsScope, model, caps, orgI
   const activeChips = <DataTableActiveFilters filters={chips} label={t('activeFilters')} clearLabel={t('clearAllFilters')} onClear={() => list.onStateChange({ ...list.state, userFilters: [], rowAccess: undefined }, 'filter')} />
   const presentation = availableCalendar(model, entity, caps) && <div role="group" aria-label={t('listPresentation')} className="flex flex-wrap gap-2 py-2">{(['table', 'calendar'] as const).map(presentation => <PrimitiveButton key={presentation} variant={list.state.presentation === presentation ? 'secondary' : 'ghost'} aria-pressed={list.state.presentation === presentation} onClick={() => list.onStateChange({ ...list.state, presentation }, 'view')}>{t(`${presentation}View`)}</PrimitiveButton>)}</div>
   const tableColumns = [
-      ...listFields.map((field, index) => ({ id: field, label: field === 'id' || field === primary ? t(`field_${field}`) : t(`listField_${field}`, { defaultValue: t(`field_${field}`) }), sortable: sortable.includes(field), filter: !list.offsetPaging && list.filters.some(filter => filter.field === field) ? <HeaderFilter model={model} caps={caps} orgId={orgId} entity={entity} descriptor={list.filters.find(filter => filter.field === field)!} request={request} predicate={list.state.userFilters.find(filter => filter.field === field)?.predicate} onChange={predicate => setFilter(field, predicate)} /> : undefined, cell: (row: Record<string, any>) => <GeneratedListCell model={model} entity={entity} caps={caps} row={row} column={definition.list?.columns?.find(column => column.field === field) ?? { field }} orgId={orgId} primary={index === 0} signed={signedValue} /> })),
+      ...listFields.map((field, index) => ({ id: field, align: listColumnAlignment(model, entity, field), label: field === 'id' || field === primary ? t(`field_${field}`) : t(`listField_${field}`, { defaultValue: t(`field_${field}`) }), sortable: sortable.includes(field), filter: !list.offsetPaging && list.filters.some(filter => filter.field === field) ? <HeaderFilter model={model} caps={caps} orgId={orgId} entity={entity} descriptor={list.filters.find(filter => filter.field === field)!} request={request} predicate={list.state.userFilters.find(filter => filter.field === field)?.predicate} onChange={predicate => setFilter(field, predicate)} /> : undefined, cell: (row: Record<string, any>) => <GeneratedListCell model={model} entity={entity} caps={caps} row={row} column={definition.list?.columns?.find(column => column.field === field) ?? { field }} orgId={orgId} primary={index === 0} signed={signedValue} /> })),
       ...(accessColumn ? [{ id: '_access', keepOnNarrow: true, wrap: true, label: t('rowAccess'), cell: (row: Record<string, any>) => <GeneratedRowInvitation model={model} caps={caps} orgId={orgId} entity={entity} request={request} write={write} onDenied={onDenied} row={row} disabled={list.stale || list.result.isFetching || searchPending} /> }] : []),
       ...(rowActions && hasRowActions(model, entity, caps) ? [{ id: '_actions', label: t('actions'), cell: (row: Record<string, any>) => <>{rowActions!(row, list.stale || list.result.isFetching || searchPending)}</> }] : []),
     ]
   const shown = displayPrefs.visible
   // The first column is the record link and stays; hiding only drops presentation, never a selected field, filter, sort or count.
   const displayable = list.offsetPaging ? tableColumns.filter(column => column.id !== primary && column.id !== '_actions') : []
-  const columns = list.offsetPaging ? tableColumns.filter(column => column.id === primary || column.id === '_actions' || shown(column.id)) : tableColumns
+  // Reconcile the session preference with currently available columns; primary and Actions stay anchored.
+  const ordered = [...new Set([...columnOrder, ...displayable.map(column => column.id)])].flatMap(id => displayable.find(column => column.id === id) ?? [])
+  const moveColumn = (id: string, direction: -1 | 1) => {
+    const visible = ordered.filter(column => shown(column.id))
+    const index = visible.findIndex(column => column.id === id), target = visible[index + direction]
+    if (index < 0 || !target) return
+    const order = ordered.map(column => column.id), from = order.indexOf(id), to = order.indexOf(target.id)
+    order[from] = target.id; order[to] = id
+    setColumnOrder(order)
+  }
+  const columns = list.offsetPaging ? [...tableColumns.filter(column => column.id === primary), ...ordered.filter(column => shown(column.id)), ...tableColumns.filter(column => column.id === '_actions')] : tableColumns
   const content = list.state.presentation === 'calendar' ? <>
       <EntityCalendar model={model} entity={entity} caps={caps} orgId={orgId} state={list.state} data={list.data} pending={list.result.isFetching} error={error ? t(queryCodes.includes(error.code as any) ? `query_${error.code}` : 'requestFailed') : undefined} onChange={state => list.onStateChange(state, 'view')} onCreate={calendarCreate} onPage={list.onPage} previous={list.page > 0} />
     </> : <div className="caption-bottom"><DataTable fixedDensity={tableColumns.some(column => column.id === '_access')} listV2={list.offsetPaging} hideFooter={list.offsetPaging} scrollOnNarrow={list.offsetPaging} compact={displayPrefs.compact} mobileCards={definition.list?.mobileCards} rows={rows} columns={columns} state={list.state} onStateChange={list.onStateChange} page={list.page} range={list.range} onPage={list.onPage} nextCursor={error ? null : list.data?.next_cursor} isFetching={list.result.isFetching} onRetry={() => { void list.result.refetch() }} error={error ? new Error(t(queryCodes.includes(error.code as any) ? `query_${error.code}` : 'requestFailed')) : null}
@@ -226,7 +239,7 @@ function ListPageBody({ discard, onDiscarded, savedViewsScope, model, caps, orgI
     {error?.code === 'query_too_expensive' && list.undo && <PrimitiveButton variant="outline" onClick={list.undo}>{t('undoLastChange')}</PrimitiveButton>}
     {list.offsetPaging ? <ListPageComposition tabs={tabs} toolbar={<>
       {search && <div className="list-v2-search">{search}</div>}{(immediateFilters.length > 0 || access || hasPanel) && <div className="list-v2-lookup-panel">{immediateFilters}{access}{hasPanel && <PrimitiveButton variant="outline" title={t('sortAndFilter')} aria-expanded={filterOpen} onClick={() => setFilterOpen(value => !value)}>{t('sortAndFilter')}</PrimitiveButton>}</div>}
-      <div className="ml-auto flex min-w-0 max-w-full flex-wrap items-center justify-end gap-2">{savedViews}{displayable.length > 0 && list.state.presentation !== 'calendar' && <DisplayMenu columns={displayable.map(column => ({ id: column.id, label: column.label, visible: shown(column.id) }))} compact={displayPrefs.compact} labels={{ trigger: t('listDisplay'), heading: t('listDisplayHeading'), hint: t('listDisplayHint'), compact: t('listDisplayCompact'), reset: t('listDisplayReset') }} onToggle={displayPrefs.toggle} onCompact={displayPrefs.setCompact} onReset={displayPrefs.reset} />}{presentation}</div>
+      <div className="ml-auto flex min-w-0 max-w-full flex-wrap items-center justify-end gap-2">{savedViews}{displayable.length > 0 && list.state.presentation !== 'calendar' && <DisplayMenu columns={ordered.map(column => ({ id: column.id, label: column.label, visible: shown(column.id) }))} compact={displayPrefs.compact} labels={{ trigger: t('listDisplay'), heading: t('listDisplayHeading'), hint: t('listDisplayHint'), compact: t('listDisplayCompact'), reset: t('listDisplayReset'), moveUp: column => t('listDisplayMoveUp', { column }), moveDown: column => t('listDisplayMoveDown', { column }) }} onMove={moveColumn} onToggle={displayPrefs.toggle} onCompact={displayPrefs.setCompact} onReset={() => { displayPrefs.reset(); setColumnOrder([]) }} />}{presentation}</div>
     </>} panel={filterOpen && hasPanel ? panel : undefined} chips={activeChips} footer={<ListPageFooter total={list.data?.total} page={list.page} limit={list.document.limit} pageSize={list.state.limit} maxOffset={model.limits.maxOffset ?? 10_000} busy={list.result.isFetching || searchPending} onPage={list.onPage} onPageSize={limit => list.onStateChange({ ...list.state, limit }, 'limit')} labels={{ loading: t('loading'), previous: t('previousPage'), next: t('nextPage'), pageSize: t('rowsPerPage'), pageSizeOption: size => t('paginationSize', { count: size }), range: (start, end, total) => t('listRangeTotal', { start: new Intl.NumberFormat(i18n.language).format(start), end: new Intl.NumberFormat(i18n.language).format(end), total: new Intl.NumberFormat(i18n.language).format(total) }) }} />}>{content}</ListPageComposition> : <>{savedViews}{tabs}{presentation}{immediateFilters}{panel}{activeChips}{content}</>}
 
   </Page>
