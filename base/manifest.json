@@ -1,0 +1,35 @@
+{
+  "revision": "base",
+  "sourceSHA": "c31fe5e1914c5daff4cca83427b6caa0aca9d41a",
+  "build": {
+    "version": "0.4.0",
+    "sha": "115f0fd055472617197385de93bc7dcb9cb36506",
+    "sourceCommit": "c31fe5e1914c5daff4cca83427b6caa0aca9d41a",
+    "builtAt": "2026-11-24T10:21:01.205Z"
+  },
+  "browser": "145.0.7632.6",
+  "captures": [
+    {
+      "path": "/tmp/codex-scratch/codex-wr-github-jakubknejzlik-workbase-sdk-292-s1-impl-wr-c8a777aa/base/base-72ecf1562d80ed690f3ed7369f2732ae55f63bdc-en-1440-columns.png",
+      "width": 1440,
+      "height": 900,
+      "locale": "en",
+      "state": "Columns menu open"
+    },
+    {
+      "path": "/tmp/codex-scratch/codex-wr-github-jakubknejzlik-workbase-sdk-292-s1-impl-wr-c8a777aa/base/base-72ecf1562d80ed690f3ed7369f2732ae55f63bdc-en-900-columns.png",
+      "width": 900,
+      "height": 900,
+      "locale": "en",
+      "state": "Columns menu open"
+    },
+    {
+      "path": "/tmp/codex-scratch/codex-wr-github-jakubknejzlik-workbase-sdk-292-s1-impl-wr-c8a777aa/base/base-72ecf1562d80ed690f3ed7369f2732ae55f63bdc-en-390-columns.png",
+      "width": 390,
+      "height": 900,
+      "locale": "en",
+      "state": "Columns menu open"
+    }
+  ],
+  "candidateSHA": "72ecf1562d80ed690f3ed7369f2732ae55f63bdc"
+}
