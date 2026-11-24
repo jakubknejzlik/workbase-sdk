@@ -27,8 +27,8 @@ for (const width of [1440, 390]) test(`dashboard table/list keyboard drilldown a
   const withoutId = page.locator('[data-widget="names-without-id"]')
   await expect(table.getByText('Alex Example', { exact: true }).filter({ visible: true })).toBeVisible()
   await expect(list.getByText('Alex Example', { exact: true })).toBeVisible()
-  await expect(table.locator(width === 390 ? '.generated-relation-cards' : '.generated-relation-table')).toBeVisible()
-  await expect(table.locator(width === 390 ? '.generated-relation-table' : '.generated-relation-cards')).toBeHidden()
+  await expect(table.locator('[data-list-density="comfortable"] table')).toBeVisible()
+  await expect(table.getByRole('table')).toHaveCount(1)
   await page.evaluate(async () => { await document.fonts.ready })
   await expect(withoutId.getByRole('link')).toHaveCount(0)
   if (process.env.WIDGET_DRILLDOWN_OUTPUT) {
