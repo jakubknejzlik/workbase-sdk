@@ -169,6 +169,8 @@ export function analyze(input: Snapshot, options: AnalyzeOptions = {}): Graph {
           for(const local of locals) if(!stable(other,local,seen)) valid=false
         } else if(statement.exportClause && ts.isNamedExports(statement.exportClause)) {
           for(const item of statement.exportClause.elements) if((item.propertyName??item.name).text===exportedName && !consumers(other,item.name.text,seen)) valid=false
+        } else if(statement.exportClause && ts.isNamespaceExport(statement.exportClause)) {
+          if(!consumers(other,statement.exportClause.name.text,seen)) valid=false
         } else if(!statement.exportClause && exportedName!=='default' && !consumers(other,exportedName,seen)) valid=false
       }
     }
@@ -229,8 +231,11 @@ export function analyze(input: Snapshot, options: AnalyzeOptions = {}): Graph {
       }
       return false
     }
-    const visit = (node: ts.Node) => {
+    const visit = (node: ts.Node, inNamespace = false) => {
       if(++stabilityWork > (options.maxNodes ?? 20000)*10) { valid=false; return }
+      // Namespace initialization can publish aliases through nested exports. Until
+      // those scopes are projected, references inside them cannot prove stability.
+      if(inNamespace && ts.isIdentifier(node) && node.text===name) valid=false
       if (ts.isBinaryExpression(node) && node.operatorToken.kind >= ts.SyntaxKind.FirstAssignment && node.operatorToken.kind <= ts.SyntaxKind.LastAssignment && rootName(node.left) === name) valid = false
       if ((ts.isPostfixUnaryExpression(node) || ts.isPrefixUnaryExpression(node) || ts.isDeleteExpression(node)) && rootName(ts.isDeleteExpression(node) ? node.expression : node.operand) === name) valid = false
       if (ts.isCallExpression(node) && (node.arguments.some(arg => rootName(arg) === name) || rootName(node.expression) === name && !ts.isIdentifier(node.expression))) valid = false
@@ -260,7 +265,7 @@ export function analyze(input: Snapshot, options: AnalyzeOptions = {}): Graph {
         }
       }
       if (ts.isVariableDeclaration(node) && node.initializer && rootName(unwrap(node.initializer)) === name && (!ts.isIdentifier(node.name) || !stable(file, node.name.text, seen))) valid = false
-      ts.forEachChild(node, visit)
+      ts.forEachChild(node, child=>visit(child,inNamespace || ts.isModuleDeclaration(node)))
     }
     visit(file)
     return valid

@@ -23,6 +23,10 @@ const extra = [
     side:`${descriptor} export enum Owner {value=p as any}; export const descriptor=p` },
   { name:'F1-named-function-default-import', text:`import get,{descriptor} from './side'; ${mutate}`,
     side:`${descriptor} export function get(){return p}; export {get as default}; export const descriptor=p` },
+  { name:'F1-namespace-reexport-function-alias', text:`import {owner} from './barrel'; import {descriptor} from './side'; owner.get().schemaReferences.push({entity:'worker',field:'note'}); export default {plugins:[descriptor]}`,
+    barrel:`export * as owner from './side'`, side:`${descriptor} export function get(){return p}; export const descriptor=p` },
+  { name:'F1-exported-namespace-member-alias', text:`import {Owner,descriptor} from './side'; Owner.value.schemaReferences.push({entity:'worker',field:'note'}); export default {plugins:[descriptor]}`,
+    side:`${descriptor} export namespace Owner {export const value=p}; export const descriptor=p` },
   ...[
     ['class','class undefined {}'],
     ['enum','enum undefined {flag=1}'],
@@ -47,6 +51,7 @@ describe('review wr-1d986040 regressions (R2-F1/R2-F3)', () => {
     try {
       writeFileSync(join(root, 'runtime.ts'), fixture.text)
       if (fixture.side !== undefined) writeFileSync(join(root, 'side.ts'), fixture.side)
+      if ('barrel' in fixture && typeof fixture.barrel === 'string') writeFileSync(join(root, 'barrel.ts'), fixture.barrel)
       const graph = analyze(capture({ root, entry: 'runtime.ts' }))
       expect(removal(graph, { entity:'worker', field:'note' }).safe).toBe(false)
       expect(removal(graph, { entity:'worker' }).safe).toBe(false)

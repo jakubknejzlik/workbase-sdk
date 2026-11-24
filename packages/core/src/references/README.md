@@ -39,6 +39,8 @@ Named and default declaration exports participate in owner/consumer stability. B
 intrinsic `undefined` is allowed, a bounded scan checks every value-binding form, including
 nested destructuring, namespace/import-equals bindings, classes/enums/namespaces, catch
 parameters and loop heads. Unsupported bindings or an incomplete scan remain unresolved.
+Namespace re-exports propagate consumer stability; aliases published by unprojected
+class fields, enum members or namespace initialization remain gaps.
 
 `removal()` reports every matching definite/possible dependency, relevant coverage gap and
 source/validation failure. Entity-only references block the entity, without inventing field
