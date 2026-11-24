@@ -1,0 +1,419 @@
+{
+  "geometry": [
+    {
+      "id": "bookings",
+      "tables": [
+        {
+          "visible": true,
+          "headers": [
+            {
+              "x": 41,
+              "width": 93,
+              "padding": [
+                "8px",
+                "12px",
+                "8px",
+                "12px"
+              ],
+              "align": "left",
+              "fontSize": "14px",
+              "lineHeight": "21px",
+              "text": "Client"
+            },
+            {
+              "x": 134,
+              "width": 93,
+              "padding": [
+                "8px",
+                "12px",
+                "8px",
+                "12px"
+              ],
+              "align": "left",
+              "fontSize": "14px",
+              "lineHeight": "21px",
+              "text": "Location"
+            },
+            {
+              "x": 227,
+              "width": 93,
+              "padding": [
+                "8px",
+                "12px",
+                "8px",
+                "12px"
+              ],
+              "align": "left",
+              "fontSize": "14px",
+              "lineHeight": "21px",
+              "text": "Status"
+            },
+            {
+              "x": 320,
+              "width": 93,
+              "padding": [
+                "8px",
+                "12px",
+                "8px",
+                "12px"
+              ],
+              "align": "left",
+              "fontSize": "14px",
+              "lineHeight": "21px",
+              "text": "Updated"
+            }
+          ],
+          "rows": [
+            [
+              {
+                "x": 41,
+                "width": 93,
+                "padding": [
+                  "8px",
+                  "12px",
+                  "8px",
+                  "12px"
+                ],
+                "align": "left",
+                "fontSize": "14px",
+                "lineHeight": "21px",
+                "text": "Alex Example"
+              },
+              {
+                "x": 134,
+                "width": 93,
+                "padding": [
+                  "8px",
+                  "12px",
+                  "8px",
+                  "12px"
+                ],
+                "align": "left",
+                "fontSize": "14px",
+                "lineHeight": "21px",
+                "text": "Example location with a longer reference label"
+              },
+              {
+                "x": 227,
+                "width": 93,
+                "padding": [
+                  "8px",
+                  "12px",
+                  "8px",
+                  "12px"
+                ],
+                "align": "left",
+                "fontSize": "14px",
+                "lineHeight": "21px",
+                "text": "Confirmed"
+              },
+              {
+                "x": 320,
+                "width": 93,
+                "padding": [
+                  "8px",
+                  "12px",
+                  "8px",
+                  "12px"
+                ],
+                "align": "left",
+                "fontSize": "14px",
+                "lineHeight": "21px",
+                "text": "Nov 24, 2026, 10:00 AM"
+              }
+            ],
+            [
+              {
+                "x": 41,
+                "width": 93,
+                "padding": [
+                  "8px",
+                  "12px",
+                  "8px",
+                  "12px"
+                ],
+                "align": "left",
+                "fontSize": "14px",
+                "lineHeight": "21px",
+                "text": "Alex Example"
+              },
+              {
+                "x": 134,
+                "width": 93,
+                "padding": [
+                  "8px",
+                  "12px",
+                  "8px",
+                  "12px"
+                ],
+                "align": "left",
+                "fontSize": "14px",
+                "lineHeight": "21px",
+                "text": "Example location with a longer reference label"
+              },
+              {
+                "x": 227,
+                "width": 93,
+                "padding": [
+                  "8px",
+                  "12px",
+                  "8px",
+                  "12px"
+                ],
+                "align": "left",
+                "fontSize": "14px",
+                "lineHeight": "21px",
+                "text": "Pending confirmation"
+              },
+              {
+                "x": 320,
+                "width": 93,
+                "padding": [
+                  "8px",
+                  "12px",
+                  "8px",
+                  "12px"
+                ],
+                "align": "left",
+                "fontSize": "14px",
+                "lineHeight": "21px",
+                "text": "Nov 24, 2026, 10:00 AM"
+              }
+            ],
+            [
+              {
+                "x": 41,
+                "width": 93,
+                "padding": [
+                  "8px",
+                  "12px",
+                  "8px",
+                  "12px"
+                ],
+                "align": "left",
+                "fontSize": "14px",
+                "lineHeight": "21px",
+                "text": "Alex Example"
+              },
+              {
+                "x": 134,
+                "width": 93,
+                "padding": [
+                  "8px",
+                  "12px",
+                  "8px",
+                  "12px"
+                ],
+                "align": "left",
+                "fontSize": "14px",
+                "lineHeight": "21px",
+                "text": "Example location with a longer reference label"
+              },
+              {
+                "x": 227,
+                "width": 93,
+                "padding": [
+                  "8px",
+                  "12px",
+                  "8px",
+                  "12px"
+                ],
+                "align": "left",
+                "fontSize": "14px",
+                "lineHeight": "21px",
+                "text": "Confirmed"
+              },
+              {
+                "x": 320,
+                "width": 93,
+                "padding": [
+                  "8px",
+                  "12px",
+                  "8px",
+                  "12px"
+                ],
+                "align": "left",
+                "fontSize": "14px",
+                "lineHeight": "21px",
+                "text": "Nov 24, 2026, 10:00 AM"
+              }
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "id": "clients",
+      "tables": []
+    }
+  ],
+  "result": {
+    "id": "neutral.summary",
+    "label": "Synthetic bookings",
+    "sections": [
+      {
+        "row": [
+          "bookings",
+          "clients"
+        ]
+      }
+    ],
+    "widgets": [
+      {
+        "id": "bookings",
+        "label": "Bookings",
+        "kind": "table",
+        "columns": [
+          "client",
+          "location",
+          "status",
+          "updated_at"
+        ],
+        "data": [
+          {
+            "id": "booking-0",
+            "client": "example",
+            "location": "example",
+            "status": "Confirmed",
+            "updated_at": "2026-11-24T10:00:00.000Z",
+            "__labels": {
+              "client": {
+                "status": "ok",
+                "entity": "clients",
+                "display": "name",
+                "row": {
+                  "id": "example",
+                  "name": "Alex Example"
+                }
+              },
+              "location": {
+                "status": "ok",
+                "entity": "locations",
+                "display": "name",
+                "row": {
+                  "id": "example",
+                  "name": "Example location with a longer reference label"
+                }
+              }
+            }
+          },
+          {
+            "id": "booking-1",
+            "client": "example",
+            "location": "example",
+            "status": "Pending confirmation",
+            "updated_at": "2026-11-24T10:00:00.000Z",
+            "__labels": {
+              "client": {
+                "status": "ok",
+                "entity": "clients",
+                "display": "name",
+                "row": {
+                  "id": "example",
+                  "name": "Alex Example"
+                }
+              },
+              "location": {
+                "status": "ok",
+                "entity": "locations",
+                "display": "name",
+                "row": {
+                  "id": "example",
+                  "name": "Example location with a longer reference label"
+                }
+              }
+            }
+          },
+          {
+            "id": "booking-2",
+            "client": "example",
+            "location": "example",
+            "status": "Confirmed",
+            "updated_at": "2026-11-24T10:00:00.000Z",
+            "__labels": {
+              "client": {
+                "status": "ok",
+                "entity": "clients",
+                "display": "name",
+                "row": {
+                  "id": "example",
+                  "name": "Alex Example"
+                }
+              },
+              "location": {
+                "status": "ok",
+                "entity": "locations",
+                "display": "name",
+                "row": {
+                  "id": "example",
+                  "name": "Example location with a longer reference label"
+                }
+              }
+            }
+          }
+        ]
+      },
+      {
+        "id": "clients",
+        "label": "Clients",
+        "kind": "list",
+        "field": "client",
+        "data": [
+          {
+            "id": "booking-0",
+            "client": "example",
+            "__labels": {
+              "client": {
+                "status": "ok",
+                "entity": "clients",
+                "display": "name",
+                "row": {
+                  "id": "example",
+                  "name": "Alex Example"
+                }
+              }
+            }
+          },
+          {
+            "id": "booking-1",
+            "client": "example",
+            "__labels": {
+              "client": {
+                "status": "ok",
+                "entity": "clients",
+                "display": "name",
+                "row": {
+                  "id": "example",
+                  "name": "Alex Example"
+                }
+              }
+            }
+          },
+          {
+            "id": "booking-2",
+            "client": "example",
+            "__labels": {
+              "client": {
+                "status": "ok",
+                "entity": "clients",
+                "display": "name",
+                "row": {
+                  "id": "example",
+                  "name": "Alex Example"
+                }
+              }
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "browser": "145.0.7632.6",
+  "build": {
+    "version": "0.4.0",
+    "sha": "9e980d88a6a5c31b434c8f86730fc43654a8f845",
+    "sourceCommit": "af8c282b5375721ba805222d7e511c1c095cfbbe",
+    "builtAt": "2026-11-24T13:26:31.969Z"
+  },
+  "errors": []
+}
