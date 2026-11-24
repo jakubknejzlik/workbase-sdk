@@ -701,3 +701,34 @@ for (const language of ['en', 'cs'] as const) for (const v3 of [true, false]) {
       expect(write.mock.calls.every(([, method]) => method === 'GET')).toBe(true)
     })
 }
+
+for (const language of ['en', 'cs'] as const) for (const v3 of [true, false]) {
+  const t = language === 'cs' ? cs : en
+  for (const surface of ['detail', 'row'] as const) for (const state of ['signed_in', 'invited'] as const) {
+    it.each([403, 404, 500])(`290 ${language} ${v3 ? 'V3' : 'legacy'} ${surface} suppresses cached ${state} identity after refresh error %s`, async error => {
+      const identity = state === 'signed_in' ? 'Alex Example' : 'invited@example.test'
+      const { write, client } = await mount(surface, { language, v3, state,
+        accounts: state === 'signed_in' ? [{ id: 'alex', label: identity }] : [],
+      })
+      const trigger = await screen.findByRole('button', { name: `${identity} – ${t[`rowAccess_${state}`]}, ${t.rowAccessActions}` })
+      await waitFor(() => expect(trigger).toHaveProperty('disabled', false))
+      expect(screen.getByText(identity)).toBeTruthy()
+      const cached = client.getQueriesData({ queryKey: ['row-access'] })
+      expect(cached).toHaveLength(1)
+      const read = write.getMockImplementation()!
+      write.mockImplementation((path, method, ...args) => method === 'GET' && !path.endsWith('/delivery')
+        ? Promise.reject({ status: error }) : read(path, method, ...args))
+      await act(async () => { await client.invalidateQueries({ queryKey: ['row-access'] }) })
+      expect((await screen.findByRole('alert')).textContent).toBe(error === 403 ? t.rowAccessDenied : error === 404 ? t.rowAccessUnavailable : t.requestFailed)
+      // Prove this is a failed background read with retained data, not an initial error.
+      expect(client.getQueriesData({ queryKey: ['row-access'] })).toEqual(cached)
+      expect(screen.queryByText(identity)).toBeNull()
+      expect(screen.queryByRole('button', { name: new RegExp(t.rowAccessActions) })).toBeNull()
+      const reload = screen.getByRole('button', { name: t.reloadRetry })
+      expect(reload).toHaveProperty('disabled', false)
+      expect(screen.queryByRole('menuitem')).toBeNull()
+      expect(screen.queryByRole('dialog')).toBeNull()
+      expect(write.mock.calls.every(([, method]) => method === 'GET')).toBe(true)
+    })
+  }
+}

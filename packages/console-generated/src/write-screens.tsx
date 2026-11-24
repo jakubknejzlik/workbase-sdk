@@ -467,7 +467,7 @@ function ApplicationAccessBody(props: AccessContext & { rowMenu?: boolean }) {
   // A policy-hidden identity never falls back to a raw account field.
   const identity = data?.linked_accounts?.[0]?.label ?? data?.linked_accounts?.[0]?.id ?? data?.invitation?.email
   const triggerText = data?.state === 'no_account' ? '–' : identity ?? '–'
-  const rowControl = props.rowMenu && (!message || !!overflow.length || !!data && !valid && !explicitOnly)
+  const rowControl = props.rowMenu && (!message || !!overflow.length || !!data && !status.error && !valid && !explicitOnly)
   const dotClass = data?.state === 'signed_in' ? 'bg-green-600' : data?.state === 'invited' ? 'bg-amber-500' : data?.state === 'expired' ? 'bg-red-600' : 'bg-slate-400'
   return <div className="flex flex-wrap items-center gap-2" aria-label={t('rowAccess')}>
     {message ? (!rowControl || !overflow.length) && <span role={status.error || data ? 'alert' : 'status'}>{t(message)}</span> : !props.rowMenu && <>
