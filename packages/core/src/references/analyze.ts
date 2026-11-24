@@ -109,13 +109,15 @@ export function analyze(input: Snapshot, options: AnalyzeOptions = {}): Graph {
       if (!ts.isObjectLiteralExpression(item)) { invalid(item, 'Reference item must be a literal object'); continue }
       const seen = new Set<string>(), values: Record<string, ts.StringLiteral> = {}
       const before = errors.length
+      let exhausted=false
       for (const member of item.properties) {
-        if(++work > limits.maxNodes) { errors.push(diagnostic(member,'schema','unresolved-metadata','Metadata node budget exhausted')); break }
+        if(++work > limits.maxNodes) { errors.push(diagnostic(member,'schema','unresolved-metadata','Metadata node budget exhausted')); exhausted=true; break }
         const name = key(member.name)
         if (!ts.isPropertyAssignment(member) || !name || !['entity', 'field'].includes(name)
           || seen.has(name) || !ts.isStringLiteral(member.initializer)) { invalid(member, 'Reference item allows only one literal entity and at most one literal field'); continue }
         seen.add(name); values[name] = member.initializer
       }
+      if(exhausted) break
       if (!values.entity) invalid(item, 'Reference item requires a literal entity')
       if (errors.length === before) refs.push({ entity: values.entity.text, ...(values.field ? { field: values.field.text } : {}), node: values.field ?? values.entity })
     }

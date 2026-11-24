@@ -153,6 +153,7 @@ describe('ordered immutable resolution (A01,A02,A06,A13,A16,A17,A19)', () => {
     const items=Array.from({length:100},()=>"{entity:'unrelated'}").join(',')
     const result=graph(plugin(`schemaReferences:[${items}]`),'',{maxNodes:20})
     expect(result.diagnostics.some(item=>item.message.includes('budget'))).toBe(true)
+    expect(result.diagnostics.some(item=>item.code.startsWith('invalid'))).toBe(false)
     expect(removal(result,{entity:'worker'}).safe).toBe(false)
   })
   it('aggregates independent invalid source, dependency and gaps', () => {
@@ -186,8 +187,9 @@ describe('ordered immutable resolution (A01,A02,A06,A13,A16,A17,A19)', () => {
 
 describe('source-bound shipped leaves (A07–A09,A18)', () => {
   const root=process.cwd()
-  let template:ReturnType<typeof templatePluginSnapshot>|undefined
-  const captured = () => template ??= templatePluginSnapshot(root)
+  // Capture the immutable 255-file fixture during collection, outside individual assertion timers.
+  const template=templatePluginSnapshot(root)
+  const captured = () => template
   it('accounts for nine template registrations and seven historical composition sites', () => {
     const input=captured(), result=analyze(input,{summaries:shippedSummaries})
     expect(input.failures).toEqual([])
