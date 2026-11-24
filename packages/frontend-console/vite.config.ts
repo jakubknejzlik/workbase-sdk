@@ -55,4 +55,7 @@ export default defineConfig({ json: { namedExports: false, stringify: false }, b
   generateBundle() {
     for (const id of [...this.getModuleIds(), ...this.getWatchFiles(), ...resolvedAssets]) assertPublicPath(id)
   },
-}], build: { outDir: 'dist', assetsInlineLimit(path) { resolvedAssets.add(path); assertPublicPath(path); return undefined } } })
+}], build: { outDir: 'dist',
+  rollupOptions: { output: { assetFileNames: asset => asset.names.includes('Alata-Regular.ttf') ? 'assets/Alata-Regular.ttf' : 'assets/[name]-[hash][extname]' } },
+  assetsInlineLimit(path) { resolvedAssets.add(path); assertPublicPath(path); return path.endsWith('/Alata-Regular.ttf') ? false : undefined },
+} })
