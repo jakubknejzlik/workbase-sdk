@@ -1,0 +1,220 @@
+{
+  "build": {
+    "version": "0.4.0",
+    "sha": "115f0fd055472617197385de93bc7dcb9cb36506",
+    "sourceCommit": "c31fe5e1914c5daff4cca83427b6caa0aca9d41a",
+    "builtAt": "2026-11-24T10:45:44.745Z"
+  },
+  "measurements": [
+    {
+      "phase": "base",
+      "width": 1440,
+      "browser": "145.0.7632.6",
+      "toolbar": {
+        "x": 223,
+        "y": 179,
+        "width": 1200,
+        "height": 69,
+        "clientWidth": 1200,
+        "scrollWidth": 1200
+      },
+      "groups": [
+        {
+          "class": "list-v2-search",
+          "x": 239,
+          "y": 195,
+          "width": 352,
+          "height": 36
+        },
+        {
+          "class": "list-v2-lookup-panel",
+          "x": 603,
+          "y": 195,
+          "width": 560.703125,
+          "height": 36
+        },
+        {
+          "class": "ml-auto flex min-w-0 max-w-full flex-wrap items-center justify-end gap-2",
+          "x": 1175.703125,
+          "y": 195,
+          "width": 231.296875,
+          "height": 36
+        }
+      ],
+      "search": {
+        "x": 239,
+        "y": 195,
+        "width": 352,
+        "height": 36
+      },
+      "buttons": [
+        {
+          "text": "Filters",
+          "x": 931,
+          "y": 195,
+          "width": 74.796875,
+          "height": 36
+        },
+        {
+          "text": "Saved views",
+          "x": 1175.703125,
+          "y": 195,
+          "width": 115.3125,
+          "height": 36
+        },
+        {
+          "text": "Columns",
+          "x": 1299.015625,
+          "y": 195,
+          "width": 107.984375,
+          "height": 36
+        }
+      ],
+      "rowCount": 1,
+      "document": {
+        "clientWidth": 1440,
+        "scrollWidth": 1440
+      }
+    },
+    {
+      "phase": "base",
+      "width": 900,
+      "browser": "145.0.7632.6",
+      "toolbar": {
+        "x": 17,
+        "y": 179,
+        "width": 866,
+        "height": 165,
+        "clientWidth": 866,
+        "scrollWidth": 866
+      },
+      "groups": [
+        {
+          "class": "list-v2-search",
+          "x": 33,
+          "y": 195,
+          "width": 834,
+          "height": 36
+        },
+        {
+          "class": "list-v2-lookup-panel",
+          "x": 33,
+          "y": 243,
+          "width": 834,
+          "height": 36
+        },
+        {
+          "class": "ml-auto flex min-w-0 max-w-full flex-wrap items-center justify-end gap-2",
+          "x": 635.703125,
+          "y": 291,
+          "width": 231.296875,
+          "height": 36
+        }
+      ],
+      "search": {
+        "x": 33,
+        "y": 195,
+        "width": 834,
+        "height": 36
+      },
+      "buttons": [
+        {
+          "text": "Filters",
+          "x": 361,
+          "y": 243,
+          "width": 74.796875,
+          "height": 36
+        },
+        {
+          "text": "Saved views",
+          "x": 635.703125,
+          "y": 291,
+          "width": 115.3125,
+          "height": 36
+        },
+        {
+          "text": "Columns",
+          "x": 759.015625,
+          "y": 291,
+          "width": 107.984375,
+          "height": 36
+        }
+      ],
+      "rowCount": 3,
+      "document": {
+        "clientWidth": 900,
+        "scrollWidth": 900
+      }
+    },
+    {
+      "phase": "base",
+      "width": 390,
+      "browser": "145.0.7632.6",
+      "toolbar": {
+        "x": 17,
+        "y": 179,
+        "width": 356,
+        "height": 157,
+        "clientWidth": 356,
+        "scrollWidth": 356
+      },
+      "groups": [
+        {
+          "class": "list-v2-search",
+          "x": 29,
+          "y": 191,
+          "width": 332,
+          "height": 36
+        },
+        {
+          "class": "list-v2-lookup-panel",
+          "x": 29,
+          "y": 239,
+          "width": 332,
+          "height": 36
+        },
+        {
+          "class": "ml-auto flex min-w-0 max-w-full flex-wrap items-center justify-end gap-2",
+          "x": 129.703125,
+          "y": 287,
+          "width": 231.296875,
+          "height": 36
+        }
+      ],
+      "search": {
+        "x": 29,
+        "y": 191,
+        "width": 332,
+        "height": 36
+      },
+      "buttons": [
+        {
+          "text": "Filters",
+          "x": 286.203125,
+          "y": 239,
+          "width": 74.796875,
+          "height": 36
+        },
+        {
+          "text": "Saved views",
+          "x": 129.703125,
+          "y": 287,
+          "width": 115.3125,
+          "height": 36
+        },
+        {
+          "text": "Columns",
+          "x": 253.015625,
+          "y": 287,
+          "width": 107.984375,
+          "height": 36
+        }
+      ],
+      "rowCount": 3,
+      "document": {
+        "clientWidth": 390,
+        "scrollWidth": 390
+      }
+    }
+  ]
+}
