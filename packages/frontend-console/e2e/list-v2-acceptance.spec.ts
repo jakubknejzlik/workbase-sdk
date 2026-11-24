@@ -68,7 +68,10 @@ async function save(page: Page, name: string) {
   await savedTrigger(page).click(); await savedMenu(page).getByRole('button', { name: en.savedViewsSaveNew, exact: true }).click()
   await page.getByRole('textbox', { name: en.savedViewsName, exact: true }).fill(name)
   await page.getByRole('dialog').filter({ has: page.getByRole('textbox', { name: en.savedViewsName, exact: true }) }).getByRole('button', { name: en.savedViewsConfirm, exact: true }).click()
-  await expect(savedTrigger(page)).toHaveText(name)
+  await expect(savedTrigger(page)).toHaveAccessibleName(en.savedViewsMenu)
+  await savedTrigger(page).click()
+  await expect(savedMenu(page).getByRole('button', { name, exact: true })).toHaveAttribute('aria-pressed', 'true')
+  await page.keyboard.press('Escape')
 }
 const scenarios = ['populated-admin', 'populated-restricted-staff', 'expanded-filters', 'view-menu', 'access-menu', 'personal-views', 'empty', 'error', 'loading'] as const
 for (const language of ['en', 'cs'] as const) {
@@ -317,7 +320,12 @@ test('URL: invalid and forbidden parameters and relation IDs are sanitized', asy
 
 test('personal views: save, apply, rename, delete and reload; settings only', async ({ page }) => {
   await gotoSDK(page, route); await settled(page); await tab(page, 'inactive'); await rows(page, { view: 'inactive' }); await save(page, 'My inactive')
-  await reloadSDK(page); await settled(page); await expect(savedTrigger(page)).toHaveText(en.savedViewsMenu)
+  await reloadSDK(page); await settled(page); await savedTrigger(page).click()
+  await expect(savedMenu(page).getByRole('button', { name: 'My inactive', exact: true })).toBeVisible()
+  await expect(savedMenu(page).locator('button[aria-current="true"]')).toHaveCount(0)
+  await expect(savedMenu(page).getByRole('button', { name: en.savedViewsRenameThis, exact: true })).toHaveCount(0)
+  await expect(savedMenu(page).getByRole('button', { name: en.savedViewsDeleteThis, exact: true })).toHaveCount(0)
+  await page.keyboard.press('Escape')
   await tab(page, 'active'); await rows(page, { view: 'active' }); await savedTrigger(page).click()
   await savedMenu(page).getByRole('button', { name: 'My inactive', exact: true }).click(); await rows(page, { view: 'active' })
   await savedMenu(page).getByRole('button', { name: en.savedViewsApplyView, exact: true }).click(); await rows(page, { view: 'inactive' })
@@ -769,10 +777,22 @@ for (const width of [1440, 390]) for (const language of ['en', 'cs'] as const) {
     const copy = language === 'cs' ? cs : en
     for (const [current, label] of [[copy.savedViewsMenu, expected.saved], [copy.listDisplay, expected.columns], [copy.sortAndFilter, expected.filters]]) {
       const trigger = page.getByRole('button', { name: current, exact: true })
-      await expect.soft(trigger).toHaveText(label, { timeout: 500 })
+      if (current !== copy.savedViewsMenu) await expect.soft(trigger).toHaveText(label, { timeout: 500 })
+      else { await expect(trigger).toHaveText(''); await expect(trigger.locator('svg')).toHaveAttribute('aria-hidden', 'true') }
       await expect.soft(trigger).toHaveAccessibleName(label, { timeout: 500 })
       await expect(trigger).toHaveAttribute('title', label)
       await expect(trigger).toHaveAccessibleDescription(label)
+    }
+    const saved = page.getByRole('button', { name: copy.savedViewsMenu, exact: true })
+    for (const key of ['Enter', 'Space']) {
+      await saved.focus()
+      await page.keyboard.press(key)
+      const menu = page.getByRole('dialog', { name: copy.savedViews, exact: true })
+      await expect(menu).toBeVisible()
+      await expect(menu.getByRole('button')).toHaveText([copy.savedViewsSaveNew, copy.savedViewsClose, copy.savedViewsApplyView])
+      await page.keyboard.press('Escape')
+      await expect(menu).toBeHidden()
+      await expect(saved).toBeFocused()
     }
     await page.getByRole('button', { name: copy.sortAndFilter, exact: true }).click()
     await expect.soft(page.getByRole('group', { name: copy.sortAndFilter, exact: true })).toHaveAccessibleName(expected.filters, { timeout: 500 })

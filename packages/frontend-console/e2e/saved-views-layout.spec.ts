@@ -86,7 +86,7 @@ for (const language of ['en', 'cs'] as const) for (const width of [390, 1440]) {
       // The review-trigger probe: close only after the open menu has taken focus.
       await open()
       await expect(menu.getByRole('button', { name: t.savedViewsSaveNew, exact: true })).toBeFocused()
-      await trigger.locator('span').first().click()
+      await trigger.locator('svg').click()
       await expect(menu).toBeHidden()
       await expect(trigger).toBeFocused()
 
@@ -95,7 +95,7 @@ for (const language of ['en', 'cs'] as const) for (const width of [390, 1440]) {
       await expect(input).toBeFocused()
       await input.fill(longName)
       await confirm.click()
-      await expect(trigger).toContainText(longName)
+      await expect(trigger).toHaveAccessibleName(t.savedViewsMenu)
       await expect(trigger).toBeFocused()
       await shot('selected')
       await open()
@@ -123,7 +123,9 @@ for (const language of ['en', 'cs'] as const) for (const width of [390, 1440]) {
       await shot('rename')
       await reachable(page, input)
       await confirm.click()
-      await expect(trigger).toContainText(`${longName} renamed`)
+      await open()
+      await expect(menu.getByRole('button', { name: `${longName} renamed`, exact: true })).toHaveAttribute('aria-pressed', 'true')
+      await page.keyboard.press('Escape')
 
       // Distinguish intentional sticky-header overlay after scrolling from scroll-zero layout.
       await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight))
@@ -132,7 +134,7 @@ for (const language of ['en', 'cs'] as const) for (const width of [390, 1440]) {
       await shot('renamed')
       await item(t.savedViewsDeleteThis)
       await page.getByRole('dialog').getByRole('button', { name: t.savedViewsDelete, exact: true }).click()
-      await expect(trigger).toHaveText(t.savedViewsMenu)
+      await expect(trigger).toHaveAccessibleName(t.savedViewsMenu)
       await expect(trigger).toBeFocused()
     } finally {
       await page.screenshot({ path: testInfo.outputPath('final-state.png'), fullPage: true, timeout: 5000 }).catch(() => {})
