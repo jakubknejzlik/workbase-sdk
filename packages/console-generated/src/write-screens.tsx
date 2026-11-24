@@ -412,7 +412,7 @@ export function GeneratedRowInvitation(props: Context & { row: Record<string, an
 export function ApplicationAccessCard(props: AccessContext) {
   const { t } = useTranslation()
   if (!canReadApplicationAccess(props.caps)) return null
-  return <Card data-application-access=""><CardHeader><CardTitle>{t('rowAccess')}</CardTitle></CardHeader><CardContent><ApplicationAccess {...props} /></CardContent></Card>
+  return <Card data-application-access=""><CardHeader><CardTitle>{t('rowAccess')}</CardTitle></CardHeader><CardContent><ApplicationAccess {...props} rowMenu /></CardContent></Card>
 }
 function ApplicationAccess(props: AccessContext & { rowMenu?: boolean }) {
   const authority = useReferenceAuthority()
@@ -467,10 +467,10 @@ function ApplicationAccessBody(props: AccessContext & { rowMenu?: boolean }) {
   // A policy-hidden identity never falls back to a raw account field.
   const identity = data?.linked_accounts?.[0]?.label ?? data?.linked_accounts?.[0]?.id ?? data?.invitation?.email
   const triggerText = data?.state === 'no_account' ? '–' : identity ?? '–'
-  const rowControl = props.rowMenu && (!message || !!overflow.length)
+  const rowControl = props.rowMenu && (!message || !!overflow.length || !!data && !status.error && !valid && !explicitOnly)
   const dotClass = data?.state === 'signed_in' ? 'bg-green-600' : data?.state === 'invited' ? 'bg-amber-500' : data?.state === 'expired' ? 'bg-red-600' : 'bg-slate-400'
   return <div className="flex flex-wrap items-center gap-2" aria-label={t('rowAccess')}>
-    {message ? !rowControl && <span role={status.error || data ? 'alert' : 'status'}>{t(message)}</span> : !props.rowMenu && <>
+    {message ? (!rowControl || !overflow.length) && <span role={status.error || data ? 'alert' : 'status'}>{t(message)}</span> : !props.rowMenu && <>
       <Badge role="status" variant="secondary" className={data!.state === 'expired' ? 'bg-red-100 text-red-800' : data!.state === 'invited' ? 'bg-amber-100 text-amber-800' : data!.state === 'signed_in' ? 'bg-green-100 text-green-800' : undefined}>{t(`rowAccess_${data!.state}`)}</Badge>
       {data!.linked_accounts?.[0] && <span className="min-w-0 max-w-full whitespace-normal text-sm [overflow-wrap:anywhere]">{data!.linked_accounts[0].label ?? data!.linked_accounts[0].id}</span>}
       {data!.invitation && <span className="min-w-0 max-w-full whitespace-normal text-sm [overflow-wrap:anywhere]">{data!.invitation.email}</span>}
@@ -497,7 +497,7 @@ function ApplicationAccessBody(props: AccessContext & { rowMenu?: boolean }) {
     </DropdownMenu>}
     {selected && <ResourceFormDialog entity={props.entity} key={selected} open onOpenChange={open => { if (!open) setSelected(undefined) }}
       onCloseAutoFocus={event => { event.preventDefault(); trigger.current?.focus() }} schema={actionSchema(selected)}
-      title={label(selected)} description={t(selected === 'find' ? 'rowFindDescription' : selected === 'link' ? 'rowLinkDescription' : selected === 'remove' || selected === 'change' && data?.state === 'signed_in' ? 'rowInviteRemoveDescription' : 'rowInviteDescription')} cancelLabel={t('cancel')}>
+      title={label(selected)} description={t(selected === 'find' ? 'rowFindDescription' : selected === 'link' ? 'rowLinkDescription' : selected === 'remove' || selected === 'change' && data?.state === 'signed_in' ? 'rowInviteRemoveDescription' : selected === 'invite' ? 'rowInviteNewDescription' : 'rowInviteDescription')} cancelLabel={t('cancel')}>
       {controls => selected === 'find' ? <FindMemberOrInvite {...props} email={data?.invitation?.email ?? props.email} write={props.write!} controls={controls} /> : <RowInvitationMutation {...props} write={props.write!} action={selected} controls={controls} />}
     </ResourceFormDialog>}
   </div>
@@ -612,7 +612,7 @@ function FindMemberOrInvite(props: Omit<InvitationMutationProps, 'action'>) {
       onChange={id => { setSelected(choices.find(member => member.user_id === id)); mutation.reset() }} />
     <WriteError error={!conflict ? mutation.error ?? (canSearch ? members.error : null) : null} />
     {selected && selected.linkable !== false && canSearch && <div aria-live="polite"><p className="break-all">{memberLabel(selected)}</p><p>{t('rowLinkDescription')}</p>{access.status.data?.state === 'invited' && access.status.data.invitation && <p>{t('rowLinkSupersedes', { email: access.status.data.invitation.email })}</p>}</div>}
-    {invite && <p>{t('rowInviteDescription')}</p>}
+    {invite && <p>{t(['invited', 'expired'].includes(access.status.data?.state ?? '') ? 'rowInviteDescription' : 'rowInviteNewDescription')}</p>}
     <RegistryForm schema={emptyRowSchema} label={name => name} submitLabel={t(selected ? 'rowInvite_link' : access.actions.includes('change') ? 'rowInvite_change' : 'rowFindSend')} invalidLabel={t('invalidField')} pending={mutation.isPending} disabled={disabled}
       onSubmit={() => {
         if (disabled || (selected ? !choices.some(member => member.user_id === selected.user_id) : !invite)) return Promise.reject({ code: 'action_unavailable' })

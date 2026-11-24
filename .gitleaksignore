@@ -15,3 +15,29 @@ f4aa0ce5a1506941af6da0f58476cc183c667445:packages/plugins/members/test/mail-fina
 # Exact historical review for #194: synthetic rotated invitation identity key.
 # The superseded #176 branch was deleted after verifying the #177 squash tree.
 fd6b017be1c252b87d491d7c47e526ca21b6652b:packages/core/test/invitation-privacy.test.ts:generic-api-key:90
+
+# Exact FP review for #307 / PR #319, CI 45437619150: 19 sha256 digests keyed
+# by public source file paths in the #140 reference snapshot at aa53f5c.
+# Reachable only via the PR #288 branch, outside release ancestry.
+# JARVIS + Codex coordinator verified 19/19 source-file sha256 digests.
+# Codex coordinator technical decision within the authorized 0.4.1 release:
+# workbase-sdk#307 status, 2026-11-24 17:47Z; only these immutable fingerprints.
+aa53f5c9fab01b1197c86e0f235f09f28bbda8ee:packages/core/src/references/sdk-leaves.json:generic-api-key:7
+aa53f5c9fab01b1197c86e0f235f09f28bbda8ee:packages/core/src/references/sdk-leaves.json:generic-api-key:8
+aa53f5c9fab01b1197c86e0f235f09f28bbda8ee:packages/core/src/references/sdk-leaves.json:generic-api-key:9
+aa53f5c9fab01b1197c86e0f235f09f28bbda8ee:packages/core/src/references/sdk-leaves.json:generic-api-key:10
+aa53f5c9fab01b1197c86e0f235f09f28bbda8ee:packages/core/src/references/sdk-leaves.json:generic-api-key:12
+aa53f5c9fab01b1197c86e0f235f09f28bbda8ee:packages/core/src/references/sdk-leaves.json:generic-api-key:112
+aa53f5c9fab01b1197c86e0f235f09f28bbda8ee:packages/core/src/references/sdk-leaves.json:generic-api-key:161
+aa53f5c9fab01b1197c86e0f235f09f28bbda8ee:packages/core/src/references/sdk-leaves.json:generic-api-key:170
+aa53f5c9fab01b1197c86e0f235f09f28bbda8ee:packages/core/src/references/sdk-leaves.json:generic-api-key:187
+aa53f5c9fab01b1197c86e0f235f09f28bbda8ee:packages/core/src/references/sdk-leaves.json:generic-api-key:188
+aa53f5c9fab01b1197c86e0f235f09f28bbda8ee:packages/core/src/references/sdk-leaves.json:generic-api-key:195
+aa53f5c9fab01b1197c86e0f235f09f28bbda8ee:packages/core/src/references/sdk-leaves.json:generic-api-key:218
+aa53f5c9fab01b1197c86e0f235f09f28bbda8ee:packages/core/src/references/sdk-leaves.json:generic-api-key:219
+aa53f5c9fab01b1197c86e0f235f09f28bbda8ee:packages/core/src/references/sdk-leaves.json:generic-api-key:220
+aa53f5c9fab01b1197c86e0f235f09f28bbda8ee:packages/core/src/references/sdk-leaves.json:generic-api-key:221
+aa53f5c9fab01b1197c86e0f235f09f28bbda8ee:packages/core/src/references/sdk-leaves.json:generic-api-key:225
+aa53f5c9fab01b1197c86e0f235f09f28bbda8ee:packages/core/src/references/sdk-leaves.json:generic-api-key:227
+aa53f5c9fab01b1197c86e0f235f09f28bbda8ee:packages/core/src/references/sdk-leaves.json:generic-api-key:238
+aa53f5c9fab01b1197c86e0f235f09f28bbda8ee:packages/core/src/references/sdk-leaves.json:generic-api-key:245

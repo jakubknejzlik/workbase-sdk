@@ -3,10 +3,10 @@ import type userEvent from '@testing-library/user-event'
 import en from '../src/locales/en.json'
 
 type User = ReturnType<typeof userEvent.setup>
-type Copy = Pick<typeof en, 'savedViews' | 'savedViewsApplyView' | 'savedViewsSaveNew' | 'savedViewsRenameThis' | 'savedViewsDeleteThis' | 'savedViewsConfirm' | 'savedViewsName' | 'savedViewsDelete'>
+type Copy = Pick<typeof en, 'savedViews' | 'savedViewsMenu' | 'savedViewsApplyView' | 'savedViewsSaveNew' | 'savedViewsRenameThis' | 'savedViewsDeleteThis' | 'savedViewsConfirm' | 'savedViewsName' | 'savedViewsDelete'>
 /** The personal-views menu: a trigger inside the labelled region, content in a dialog popover. */
 export const viewsRegion = (copy: Copy = en) => screen.getByRole('region', { name: copy.savedViews })
-export const viewsTrigger = (copy: Copy = en) => within(viewsRegion(copy)).getAllByRole('button').find(button => button.getAttribute('aria-haspopup') === 'dialog')!
+export const viewsTrigger = (copy: Copy = en) => within(viewsRegion(copy)).getByRole('button', { name: copy.savedViewsMenu })
 export async function openViewsMenu(user: User, copy: Copy = en) {
   if (!screen.queryByRole('dialog', { name: copy.savedViews })) await user.click(viewsTrigger(copy))
   return screen.findByRole('dialog', { name: copy.savedViews })

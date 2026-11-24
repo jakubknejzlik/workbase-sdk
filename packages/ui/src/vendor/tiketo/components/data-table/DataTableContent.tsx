@@ -53,7 +53,7 @@ export const DataTableContent = <RecordType,>() => {
 
   return (
     <div className="relative">
-      <Table containerProps={presentation.listV2 ? { ref: overflow.ref, role: 'region', tabIndex: 0, 'aria-label': presentation.scrollRegion, 'aria-describedby': overflow.edge ? overflow.hintId : undefined, 'data-overflow-edge': overflow.edge, onScroll: overflow.update, onKeyDown: overflow.onKeyDown } : undefined} className={`table-fixed ${presentation.tableClass ?? 'min-w-[600px]'}`} aria-label={presentation.label}>
+      <Table containerProps={presentation.listV2 ? { ref: overflow.ref, role: 'region', tabIndex: presentation.scrollTabStop === 'overflow' && !overflow.edge ? -1 : 0, 'aria-label': presentation.scrollRegion, 'aria-describedby': overflow.edge ? overflow.hintId : undefined, 'data-overflow-edge': overflow.edge, onScroll: overflow.update, onKeyDown: overflow.onKeyDown } : undefined} className={`table-fixed ${presentation.tableClass ?? 'min-w-[600px]'}`} aria-label={presentation.label}>
         <colgroup>
           {visibleColumns.map((column) => {
             return <col key={column.id} className={columnClass(column)} />

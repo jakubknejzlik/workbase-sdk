@@ -109,17 +109,19 @@ main:has([data-slot="list-page"]) h1 { font-weight: 400; }
   [data-slot="sidebar-wrapper"]:has([data-slot="list-page"]) [data-slot="sidebar-menu-button"] { min-height: 2.5rem; height: auto; padding: .625rem .75rem; font-size: .75rem; }
 }
 [data-slot="list-page"] [data-list-slot="toolbar"] { gap: .75rem; }
-.list-v2-search { flex: 1 1 14rem; min-width: min(100%, 12rem); max-width: 22rem; }
+.list-v2-search { flex: 1 1 100%; min-width: 0; }
 .list-v2-search > * { width: 100%; max-width: 100%; }
-.list-v2-lookup-panel { display: flex; flex: 1 1 22rem; flex-wrap: wrap; gap: .5rem; align-items: center; min-width: 0; }
+.list-v2-lookup-panel { display: flex; flex: 1 1 max-content; flex-wrap: wrap; gap: .5rem; align-items: center; min-width: 0; max-width: 100%; }
 .list-v2-lookup-panel > button { flex: 0 0 auto; }
 .list-v2-lookup-panel .list-toolbar-filter { flex: 1 1 9rem; min-width: min(100%, 8rem); max-width: 20rem; }
 .list-v2-lookup-panel .wb-picker { min-width: 0; }
 [data-list-density] { --list-row-height: 61px; }
 [data-list-density="compact"] { --list-row-height: 45px; }
 [data-list-density][data-list-access="true"] { --list-row-height: 53px; }
-[data-list-density] table, [data-list-density] td, [data-list-density] th { font-size: .6875rem; }
-[data-list-density] td { height: var(--list-row-height); padding: .5rem .6875rem; }
+/* Use the shared text-sm tokens for values and sortable/plain headers alike. */
+[data-list-density] :is(table, td, th, th button, td button) { font-size: var(--text-sm); line-height: var(--text-sm--line-height); }
+[data-list-density] :is(th, td) { padding: .5rem .6875rem; }
+[data-list-density] td { height: var(--list-row-height); }
 [data-list-density] th { font-weight: 400; background-color: #f7f9fd; }
 [data-list-density] td [data-slot="badge"] { font-size: inherit; }
 [data-list-density] [data-slot="table-container"]:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
@@ -129,9 +131,6 @@ main:has([data-slot="list-page"]) h1 { font-weight: 400; }
 .list-v2-skeleton { display: block; width: 80%; height: .625rem; border-radius: .25rem; background: #edf1f7; }
 [data-list-display] { gap: .25rem; padding: .5rem; }
 [data-list-display] > label { min-height: 2.0625rem; padding: .5rem .625rem; font-size: .75rem; }
-@media (max-width: 1023px) {
-  .list-v2-search, .list-v2-lookup-panel { flex-basis: 100%; max-width: none; }
-}
 @media (max-width: 767px) {
   [data-list-paging] [data-page-distance]:not([data-page-distance="0"]):not([data-page-distance="1"]) { display: none; }
 }

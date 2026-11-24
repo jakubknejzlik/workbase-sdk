@@ -3,6 +3,8 @@ import type { Column } from '@tanstack/react-table'
 /** Locale, CSP and server-cursor slots; contains no data fetching. */
 export interface TablePresentation {
   tableClass?: string; label?: string; listV2?: boolean; scrollRegion?: string; scrollHint?: string;
+  // Bounded widget tables keep the first Tab on the record unless scrolling is needed.
+  scrollTabStop?: 'overflow'
   emptyContent: ReactNode; errorLabel: string; stale?: boolean; busy?: boolean
   errorDescription?: string; retryLabel?: string; onRetry?: () => void
   headerId?: (id: string) => string; pagination?: ReactNode
@@ -16,5 +18,7 @@ export function columnClass(column: Column<any>, cell = false) {
   const configuredWidth = (column.columnDef.meta as { widthClass?: string } | undefined)?.widthClass
   const width = configuredWidth ?? (column.id === 'select' ? 'w-10 min-w-10 max-w-10' : fixed ? 'w-18 min-w-18 max-w-18' : '')
   const pinned = cell && column.getIsPinned() === 'right' ? 'sticky right-0 z-10 border-l bg-background group-hover:bg-muted' : ''
-  return `${width} ${pinned} ${column.id === 'select' ? 'px-0' : ''}`
+  const align = (column.columnDef.meta as { align?: 'left' | 'right' | 'center' } | undefined)?.align
+  const alignment = align === 'right' ? 'text-right' : align === 'center' ? 'text-center' : align === 'left' ? 'text-left' : ''
+  return `${alignment} ${width} ${pinned} ${column.id === 'select' ? 'px-0' : ''}`
 }

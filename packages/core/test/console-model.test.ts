@@ -354,7 +354,7 @@ it.each([false, true])('whole response excludes private canaries with console pr
           list: { views: [{ id: 'private_overlay', label: canary, where: { state: { eq: canary } } }] },
         } } } },
     }] : plugins,
-    enumLabels: { cs: { [`value_${canary}`]: canary } },
+    enumLabels: { en: { [canary]: canary }, cs: { [canary]: canary, [`value_${canary}`]: canary } },
     entities: {
       specimens: { ...base.entities.specimens, relations: { parent: { entity: 'vaults', field: 'parent_id' } }, displayField: 'state', fields: {
         ...base.entities.specimens.fields,

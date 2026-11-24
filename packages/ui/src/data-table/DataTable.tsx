@@ -9,14 +9,14 @@ import { DataTableSearch } from './DataTableSearch'
 import { CursorPagination, type PaginationLabels } from './cursor-pagination'
 import { Button } from '../components/ui/button'
 export interface DataTableState { search: string; sort: { key: string; direction: 'asc' | 'desc' } | null; limit: number }
-export interface ServerColumn<T> { id: string; label: string; keepOnNarrow?: boolean; wrap?: boolean; sortable?: boolean; filter?: ReactNode; cell: (row: T) => ReactNode }
+export interface ServerColumn<T> { id: string; label: string; align?: 'left' | 'right' | 'center'; keepOnNarrow?: boolean; wrap?: boolean; sortable?: boolean; filter?: ReactNode; cell: (row: T) => ReactNode }
 interface ServerMeta<T> { compact?: boolean; widthClass?: string; serverColumn: ServerColumn<T>; labelId: string; sortLabel: string }
 /** Stable React render types retain focused headers and open mutation sessions across query updates. */
 function ServerFilter({ column }: { column: { filterOptions?: { renderFilter?: () => ReactNode } } }) { return column.filterOptions?.renderFilter?.() }
 function ServerHeader<T>(context: HeaderContext<T, unknown>) {
   const meta = context.column.columnDef.meta as ServerMeta<T>
   const column = meta.serverColumn
-  const definition = mapColumn({ id: column.id, title: column.wrap ? <span className="whitespace-normal break-words">{column.label}</span> : column.label, type: column.id === '_actions' ? 'actions' : 'string', filterable: !!column.filter, filterOptions: { renderFilter: () => column.filter } }, {
+  const definition = mapColumn({ id: column.id, title: column.wrap ? <span className="whitespace-normal break-words">{column.label}</span> : column.label, type: column.id === '_actions' ? 'actions' : column.align === 'right' ? 'number' : column.align === 'center' ? 'date' : 'string', filterable: !!column.filter, filterOptions: { renderFilter: () => column.filter } }, {
     labelId: meta.labelId, sortLabel: () => meta.sortLabel, enableFilters: true, FilterDropdown: ServerFilter,
   })
   return (definition.header as (context: HeaderContext<T, unknown>) => ReactNode)(context)
@@ -48,7 +48,7 @@ export function DataTable<T extends { id?: unknown }>({ rows, columns, state, on
       ...(actions ? { size: 72 } : {}),
       // Explicit col widths let the browser derive the scrolling minimum from
       // the configured, visible columns instead of a column-count breakpoint.
-      meta: { compact, fixedWidth: actions, widthClass: scrollOnNarrow ? actions ? 'w-18' : column.id === '_access' ? 'w-48' : index === 0 ? 'w-56' : 'w-40' : undefined, serverColumn: column, labelId: `${labelPrefix}-${column.id}`, sortLabel: labels.sort(column.label) },
+      meta: { align: column.align, compact, fixedWidth: actions, widthClass: scrollOnNarrow ? actions ? 'w-18' : column.id === '_access' ? 'w-48' : index === 0 ? 'w-56' : 'w-40' : undefined, serverColumn: column, labelId: `${labelPrefix}-${column.id}`, sortLabel: labels.sort(column.label) },
       header: ServerHeader, cell: ServerCell,
     }
   })
@@ -97,7 +97,7 @@ export function DataTable<T extends { id?: unknown }>({ rows, columns, state, on
         {!rows.length && <p className="p-4">{labels.noResults}</p>}
         <ul className="grid gap-3">{rows.map((row, index) => <li key={String(row.id ?? index)} className="rounded-md border p-4"><dl className="grid grid-cols-2 gap-3">{table.getVisibleLeafColumns().map(column => {
           const config = (column.columnDef.meta as ServerMeta<T>).serverColumn
-          return <div key={column.id} className={`min-w-0 ${column.id === columns[0]?.id || column.id === columns.at(-1)?.id ? 'col-span-2' : ''}`}><dt className="text-xs text-muted-foreground">{column.getCanSort() ? <button type="button" className="inline-flex min-h-8 items-center gap-1" aria-label={labels.sort(config.label)} onClick={() => column.toggleSorting(column.getIsSorted() === 'asc')}>{config.label}{column.getIsSorted() === 'asc' ? ' ↑' : column.getIsSorted() === 'desc' ? ' ↓' : ' ↕'}</button> : config.label}</dt><dd className="whitespace-normal break-words">{config.cell(row)}</dd></div>
+          return <div key={column.id} className={`min-w-0 ${config.align === 'right' ? 'text-right' : config.align === 'center' ? 'text-center' : 'text-left'} ${column.id === columns[0]?.id || column.id === columns.at(-1)?.id ? 'col-span-2' : ''}`}><dt className="text-xs text-muted-foreground">{column.getCanSort() ? <button type="button" className="inline-flex min-h-8 items-center gap-1" aria-label={labels.sort(config.label)} onClick={() => column.toggleSorting(column.getIsSorted() === 'asc')}>{config.label}{column.getIsSorted() === 'asc' ? ' ↑' : column.getIsSorted() === 'desc' ? ' ↓' : ' ↕'}</button> : config.label}</dt><dd className="whitespace-normal break-words">{config.cell(row)}</dd></div>
         })}</dl></li>)}</ul>
       </div>}
       {!hideFooter && <DataTableFooter />}

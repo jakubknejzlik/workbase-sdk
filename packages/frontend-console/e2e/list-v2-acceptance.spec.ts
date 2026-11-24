@@ -68,11 +68,50 @@ async function save(page: Page, name: string) {
   await savedTrigger(page).click(); await savedMenu(page).getByRole('button', { name: en.savedViewsSaveNew, exact: true }).click()
   await page.getByRole('textbox', { name: en.savedViewsName, exact: true }).fill(name)
   await page.getByRole('dialog').filter({ has: page.getByRole('textbox', { name: en.savedViewsName, exact: true }) }).getByRole('button', { name: en.savedViewsConfirm, exact: true }).click()
-  await expect(savedTrigger(page)).toHaveText(name)
+  await expect(savedTrigger(page)).toHaveAccessibleName(en.savedViewsMenu)
+  await savedTrigger(page).click()
+  await expect(savedMenu(page).getByRole('button', { name, exact: true })).toHaveAttribute('aria-pressed', 'true')
+  await page.keyboard.press('Escape')
 }
 const scenarios = ['populated-admin', 'populated-restricted-staff', 'expanded-filters', 'view-menu', 'access-menu', 'personal-views', 'empty', 'error', 'loading'] as const
 for (const language of ['en', 'cs'] as const) {
   const copy = language === 'cs' ? cs : en
+  for (const width of [1440, 900, 390]) test(`R294: ${language} toolbar wraps by available space at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 })
+    await page.addInitScript(language => localStorage.setItem('console-language', language), language)
+    await gotoSDK(page, route); await settled(page)
+    const toolbar = list(page).locator('[data-list-slot="toolbar"]')
+    const search = toolbar.getByRole('searchbox', { name: copy.search, exact: true })
+    const filters = toolbar.getByRole('button', { name: copy.sortAndFilter, exact: true })
+    // Locate the existing trigger by semantics, independent of its text/icon presentation.
+    const saved = toolbar.getByRole('region', { name: copy.savedViews, exact: true }).locator('button[aria-haspopup="dialog"]')
+    const columns = toolbar.getByRole('button', { name: copy.listDisplay, exact: true })
+    const searchBox = (await search.boundingBox())!
+    const filterBox = (await filters.boundingBox())!
+    const savedBox = (await saved.boundingBox())!
+    const columnsBox = (await columns.boundingBox())!
+    expect(searchBox.y + searchBox.height, 'search has its own top row').toBeLessThanOrEqual(Math.min(filterBox.y, savedBox.y, columnsBox.y))
+    if (width >= 900) {
+      expect(filterBox.y, 'Filters and Saved views share the second row').toBe(savedBox.y)
+      expect(filterBox.y, 'Filters and Columns share the second row').toBe(columnsBox.y)
+      expect(filterBox.x + filterBox.width, 'filter and view actions do not overlap').toBeLessThanOrEqual(savedBox.x)
+    }
+    expect(await toolbar.evaluate(node => node.scrollWidth <= node.clientWidth), 'toolbar has no horizontal overflow').toBe(true)
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth), 'page has no horizontal overflow').toBe(true)
+    const controls = await toolbar.locator('input, select, button').evaluateAll(nodes => nodes.map(node => {
+      const { x, y, width, height } = node.getBoundingClientRect()
+      return { x, y, width, height }
+    }).filter(bounds => bounds.width > 0 && bounds.height > 0))
+    const toolbarBox = (await toolbar.boundingBox())!
+    for (const [index, control] of controls.entries()) {
+      expect(control.x, 'control stays inside toolbar left edge').toBeGreaterThanOrEqual(toolbarBox.x)
+      expect(control.x + control.width, 'control stays inside toolbar right edge').toBeLessThanOrEqual(toolbarBox.x + toolbarBox.width)
+      for (const other of controls.slice(index + 1)) {
+        expect(control.x + control.width <= other.x || other.x + other.width <= control.x || control.y + control.height <= other.y || other.y + other.height <= control.y, 'toolbar controls do not overlap').toBe(true)
+      }
+    }
+    observations.push({ kind: 'toolbar-layout', language, width, searchBox, filterBox, savedBox, columnsBox, controls })
+  })
   test(`R4: ${language} toolbar relation filter visibly identifies its configured label`, async ({ page }) => {
     await page.addInitScript(language => localStorage.setItem('console-language', language), language)
     await gotoSDK(page, route); await settled(page)
@@ -281,7 +320,12 @@ test('URL: invalid and forbidden parameters and relation IDs are sanitized', asy
 
 test('personal views: save, apply, rename, delete and reload; settings only', async ({ page }) => {
   await gotoSDK(page, route); await settled(page); await tab(page, 'inactive'); await rows(page, { view: 'inactive' }); await save(page, 'My inactive')
-  await reloadSDK(page); await settled(page); await expect(savedTrigger(page)).toHaveText(en.savedViewsMenu)
+  await reloadSDK(page); await settled(page); await savedTrigger(page).click()
+  await expect(savedMenu(page).getByRole('button', { name: 'My inactive', exact: true })).toBeVisible()
+  await expect(savedMenu(page).locator('button[aria-current="true"]')).toHaveCount(0)
+  await expect(savedMenu(page).getByRole('button', { name: en.savedViewsRenameThis, exact: true })).toHaveCount(0)
+  await expect(savedMenu(page).getByRole('button', { name: en.savedViewsDeleteThis, exact: true })).toHaveCount(0)
+  await page.keyboard.press('Escape')
   await tab(page, 'active'); await rows(page, { view: 'active' }); await savedTrigger(page).click()
   await savedMenu(page).getByRole('button', { name: 'My inactive', exact: true }).click(); await rows(page, { view: 'active' })
   await savedMenu(page).getByRole('button', { name: en.savedViewsApplyView, exact: true }).click(); await rows(page, { view: 'inactive' })
@@ -526,6 +570,54 @@ for (const width of [1110, 1231, 1233]) for (const language of ['en', 'cs'] as c
   await page.unrouteAll({ behavior: 'wait' })
 })
 
+for (const density of ['comfortable', 'compact'] as const) test(`#291: applied table typography in ${density} density`, async ({ page }) => {
+  await gotoSDK(page, route); await settled(page); await rows(page)
+  const table = list(page).locator('[data-slot="data-table"]')
+  const accessButtons = table.getByRole('button', { name: new RegExp(en.rowAccessActions) })
+  await expect(accessButtons).toHaveCount(10)
+  if (density === 'compact') {
+    await page.getByRole('button', { name: en.listDisplay, exact: true }).click()
+    await page.getByRole('dialog', { name: en.listDisplayHeading }).getByRole('checkbox', { name: en.listDisplayCompact }).click()
+    await page.keyboard.press('Escape')
+  }
+  await expect(table).toHaveAttribute('data-list-density', density)
+  const groups = [
+    { name: 'ordinary cells', locator: table.locator('tbody [data-row-id] > td:nth-child(-n+4)'), count: 40 },
+    { name: 'application access content', locator: table.locator('tbody [data-row-id] > td:nth-child(5)'), count: 10 },
+    { name: 'application access buttons', locator: accessButtons, count: 10 },
+    { name: 'sortable header buttons', locator: table.locator('thead th button'), count: 3 },
+    { name: 'plain headers', locator: table.locator('thead th:not(:has(button))'), count: 3 },
+  ]
+  // Measure both the cell/control and the actual text parents: nested spans or
+  // links can override inheritance even when the shared token selector matches.
+  for (const group of groups) {
+    await expect(group.locator, `${density}: ${group.name}`).toHaveCount(group.count)
+    const measurements = await group.locator.evaluateAll(elements => elements.map(element => {
+      const measure = (node: Element) => {
+        const style = getComputedStyle(node)
+        return { tag: node.tagName, text: node.textContent?.trim(), fontSize: style.fontSize, lineHeight: style.lineHeight }
+      }
+      const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT)
+      const text = []
+      let node
+      while ((node = walker.nextNode())) {
+        const parent = node.parentElement!
+        if (node.textContent?.trim() && !parent.closest('svg, .sr-only, [aria-hidden="true"]')) text.push(measure(parent))
+      }
+      return { root: measure(element), text }
+    }))
+    observations.push({ kind: 'applied-table-typography', density, group: group.name, measurements })
+    for (const [index, measurement] of measurements.entries()) {
+      const label = `${density}: ${group.name} ${index}: ${measurement.root.text}`
+      // Icon-only access controls still need the same applied button metrics.
+      if (group.name !== 'application access buttons') expect(measurement.text.length, label).toBeGreaterThan(0)
+      for (const node of [measurement.root, ...measurement.text]) {
+        expect.soft({ fontSize: node.fontSize, lineHeight: node.lineHeight }, `${label} (${node.tag})`).toEqual({ fontSize: '14px', lineHeight: '20px' })
+      }
+    }
+  }
+})
+
 for (const width of [1440, 390, 360]) for (const actor of ['admin', 'staff'] as const) for (const language of ['en', 'cs'] as const) test(`G4–G6 polish ${width} ${actor} ${language}`, async ({ page, context }, testInfo) => {
   const copy = language === 'cs' ? cs : en
   await page.setViewportSize({ width, height: 1000 })
@@ -536,7 +628,7 @@ for (const width of [1440, 390, 360]) for (const actor of ['admin', 'staff'] as 
   const table = list(page).locator('[data-slot="data-table"]')
   const row = table.locator('tbody [data-row-id]').first()
   await expect(table).toHaveAttribute('data-list-density', 'comfortable')
-  expect(await row.locator('td').first().evaluate(element => getComputedStyle(element).fontSize)).toBe('11px')
+  expect(await row.locator('td').first().evaluate(element => [getComputedStyle(element).fontSize, getComputedStyle(element).lineHeight])).toEqual(['14px', '20px'])
   expect(Math.round((await row.boundingBox())!.height)).toBe(actor === 'admin' ? 53 : 61)
   if (width === 1440) {
     expect(await page.locator('h1').evaluate(element => [getComputedStyle(element).fontSize, getComputedStyle(element).fontWeight])).toEqual(['29px', '400'])
@@ -733,10 +825,22 @@ for (const width of [1440, 390]) for (const language of ['en', 'cs'] as const) {
     const copy = language === 'cs' ? cs : en
     for (const [current, label] of [[copy.savedViewsMenu, expected.saved], [copy.listDisplay, expected.columns], [copy.sortAndFilter, expected.filters]]) {
       const trigger = page.getByRole('button', { name: current, exact: true })
-      await expect.soft(trigger).toHaveText(label, { timeout: 500 })
+      if (current !== copy.savedViewsMenu) await expect.soft(trigger).toHaveText(label, { timeout: 500 })
+      else { await expect(trigger).toHaveText(''); await expect(trigger.locator('svg')).toHaveAttribute('aria-hidden', 'true') }
       await expect.soft(trigger).toHaveAccessibleName(label, { timeout: 500 })
       await expect(trigger).toHaveAttribute('title', label)
       await expect(trigger).toHaveAccessibleDescription(label)
+    }
+    const saved = page.getByRole('button', { name: copy.savedViewsMenu, exact: true })
+    for (const key of ['Enter', 'Space']) {
+      await saved.focus()
+      await page.keyboard.press(key)
+      const menu = page.getByRole('dialog', { name: copy.savedViews, exact: true })
+      await expect(menu).toBeVisible()
+      await expect(menu.getByRole('button')).toHaveText([copy.savedViewsSaveNew, copy.savedViewsClose, copy.savedViewsApplyView])
+      await page.keyboard.press('Escape')
+      await expect(menu).toBeHidden()
+      await expect(saved).toBeFocused()
     }
     await page.getByRole('button', { name: copy.sortAndFilter, exact: true }).click()
     await expect.soft(page.getByRole('group', { name: copy.sortAndFilter, exact: true })).toHaveAccessibleName(expected.filters, { timeout: 500 })
@@ -1186,3 +1290,47 @@ for (const language of ['en', 'cs'] as const) for (const font of [16, 32]) {
     } finally { release(); await page.unrouteAll({ behavior: 'wait' }) }
   })
 }
+
+for (const width of [1440, 900, 390]) for (const language of ['en', 'cs'] as const) test(`#292 column order ${width} ${language}`, async ({ page, context }) => {
+  const copy = language === 'cs' ? cs : en
+  await page.setViewportSize({ width, height: 900 })
+  await context.addInitScript(language => localStorage.setItem('console-language', language), language)
+  await gotoSDK(page, route); await settled(page)
+  const expectedIds = expectedRows({}).slice(0, 10).map(row => row.id)
+  await expect.poll(() => ids(page)).toEqual(expectedIds)
+  const headers = list(page).getByRole('columnheader')
+  const initial = await headers.allTextContents()
+  const initialCells = await list(page).locator('tbody tr').first().getByRole('cell').allTextContents()
+  const trigger = page.getByRole('button', { name: copy.listDisplay, exact: true })
+  await trigger.focus(); await page.keyboard.press('Enter')
+  const menu = page.getByRole('dialog', { name: copy.listDisplayHeading, exact: true })
+  const checks = menu.locator('[data-list-display-columns]').getByRole('checkbox')
+  const first = checks.first()
+  await expect(first).toBeFocused()
+  const column = (await first.locator('..').textContent())!.trim()
+  const up = menu.getByRole('button', { name: copy.listDisplayMoveUp.replace('{{column}}', column), exact: true })
+  const down = menu.getByRole('button', { name: copy.listDisplayMoveDown.replace('{{column}}', column), exact: true })
+  await expect(up).toBeDisabled()
+  await expect(menu.getByRole('button', { name: copy.listDisplayMoveDown.replace('{{column}}', copy.rowAccess), exact: true })).toBeDisabled()
+  // Use the same Tab/Enter/Space path available to users, including a real DOM move.
+  await page.keyboard.press('Tab'); await expect(down).toBeFocused()
+  await page.keyboard.press('Enter'); await expect(down).toBeFocused()
+  const reordered = [...initial]; [reordered[1], reordered[2]] = [reordered[2], reordered[1]]
+  await expect(headers).toHaveText(reordered)
+  const reorderedCells = [...initialCells]; [reorderedCells[1], reorderedCells[2]] = [reorderedCells[2], reorderedCells[1]]
+  await expect(list(page).locator('tbody tr').first().getByRole('cell')).toHaveText(reorderedCells)
+  await page.keyboard.press('Shift+Tab'); await expect(up).toBeFocused()
+  await page.keyboard.press('Space'); await expect(up).toBeDisabled(); await expect(down).toBeFocused()
+  await expect(headers).toHaveText(initial)
+  await down.click()
+  const hidden = menu.locator('[data-list-display-columns]').getByRole('checkbox', { checked: false })
+  await expect(hidden).toHaveCount(1)
+  await hidden.click()
+  await menu.getByRole('button', { name: copy.listDisplayReset, exact: true }).click()
+  await expect(headers).toHaveText(initial)
+  await expect(list(page).locator('tbody tr').first().getByRole('cell')).toHaveText(initialCells)
+  // Primary record links and the trailing Actions column survive every move and reset.
+  await expect.poll(() => ids(page)).toEqual(expectedIds)
+  await insideViewport(menu)
+  await page.keyboard.press('Escape'); await expect(trigger).toBeFocused()
+})
