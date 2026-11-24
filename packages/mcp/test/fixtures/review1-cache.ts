@@ -1,6 +1,7 @@
+import { provisionLocalSdk } from './local-sdk.ts'
 import assert from 'node:assert/strict'
 import { writeFile, rm, symlink, realpath } from 'node:fs/promises'
-import { join, resolve } from 'node:path'
+import { join } from 'node:path'
 import { accessEntities, accessSystemActions } from '@workbasehq/core/schema'
 import { Store } from '../../src/storage'
 import { Workflow } from '../../src/workflow'
@@ -14,7 +15,7 @@ import lock from './schema.lock.json';
 export default bindSchemaLock(defineConfig({id:'probe',displayName:'first${extra}',interactive:false,languages:['en'],roles:['admin','staff'],organizationOwnerRole:'admin',entities:{record:model},access}),lock);`
 const model = (value: string) => `import {defineEntity} from ${core}; export default defineEntity({fields:{name:{type:'string'},${value}:{type:'text'}},access:{admin:'deny',staff:'deny'},displayField:'name'});`
 await writeFile(join(root, 'package.json'), '{"type":"module"}')
-await symlink(resolve('node_modules'), join(root, 'node_modules'))
+await provisionLocalSdk(dir)
 await bootstrapInstance(dir, { id: 'probe', target: 'cloudflare-github' })
 await writeFile(join(dir, 'access.ts'), `import {defineAccess} from ${core}; export default defineAccess(${JSON.stringify({
   predicates: {}, entities: Object.fromEntries(accessEntities.map(entity => [entity, { admin: 'deny', staff: 'deny' }])),
