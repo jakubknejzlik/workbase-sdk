@@ -70,6 +70,40 @@ async function save(page: Page, name: string) {
   await page.getByRole('dialog').filter({ has: page.getByRole('textbox', { name: en.savedViewsName, exact: true }) }).getByRole('button', { name: en.savedViewsConfirm, exact: true }).click()
   await expect(savedTrigger(page)).toHaveText(name)
 }
+test('Q2: display preferences survive reload without changing queries, counts, URL or personal views', async ({ page }) => {
+  const requests: unknown[] = []
+  page.on('request', request => { if (new URL(request.url()).pathname === '/query') requests.push(request.postDataJSON()) })
+  await gotoSDK(page, route); await settled(page)
+  await rows(page); await counts(page)
+  const url = page.url(), before = structuredClone(requests), summary = await footer(page).textContent(), tabs = await list(page).locator('[data-list-slot="tabs"]').textContent()
+  const table = list(page).locator('[data-slot="data-table"]')
+  await page.getByRole('button', { name: en.listDisplay, exact: true }).click()
+  const display = page.getByRole('dialog', { name: en.listDisplayHeading })
+  await expect(display.getByRole('checkbox', { name: 'Name', exact: true })).toHaveCount(0)
+  await display.getByRole('checkbox', { name: 'Code', exact: true }).click()
+  await display.getByRole('checkbox', { name: en.listDisplayCompact, exact: true }).click()
+  await expect(table).toHaveAttribute('data-list-density', 'compact')
+  await page.keyboard.press('Escape')
+  await expect(table.getByRole('columnheader', { name: /Code/ })).toHaveCount(0)
+  await expect(table.getByRole('columnheader', { name: /Name/ })).toHaveCount(1)
+  expect(requests).toEqual(before); expect(page.url()).toBe(url)
+  expect(await footer(page).textContent()).toBe(summary)
+  expect(await list(page).locator('[data-list-slot="tabs"]').textContent()).toBe(tabs)
+  expect(await page.evaluate(() => Object.keys(localStorage).filter(key => key.startsWith('workbase:saved-views:')))).toEqual([])
+  await reloadSDK(page); await settled(page); await rows(page); await counts(page)
+  await expect(table).toHaveAttribute('data-list-density', 'compact')
+  await expect(table.getByRole('columnheader', { name: /Code/ })).toHaveCount(0)
+  expect(page.url()).toBe(url)
+  expect(await footer(page).textContent()).toBe(summary)
+  expect(await list(page).locator('[data-list-slot="tabs"]').textContent()).toBe(tabs)
+  await page.getByRole('button', { name: en.listDisplay, exact: true }).click()
+  await display.getByRole('button', { name: en.listDisplayReset, exact: true }).click()
+  await page.keyboard.press('Escape')
+  await expect(table).toHaveAttribute('data-list-density', 'comfortable')
+  await expect(table.getByRole('columnheader', { name: /Code/ })).toHaveCount(1)
+  expect(await page.evaluate(() => Object.keys(localStorage).filter(key => key.startsWith('workbase:list-prefs:')))).toEqual([])
+})
+
 const scenarios = ['populated-admin', 'populated-restricted-staff', 'expanded-filters', 'view-menu', 'access-menu', 'personal-views', 'empty', 'error', 'loading'] as const
 for (const language of ['en', 'cs'] as const) {
   const copy = language === 'cs' ? cs : en

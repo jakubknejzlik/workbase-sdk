@@ -5,7 +5,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@workbasehq/ui/componen
 
 export interface DisplayColumn { id: string; label: string; visible: boolean }
 export interface DisplayLabels { trigger: string; heading: string; hint: string; compact: string; reset: string }
-/** Controlled, session-local display preference. It is not a permission and never reaches the query or saved views. */
+/** Controlled display preference. It is not a permission and never reaches the query or saved views. */
 export function DisplayMenu({ columns, compact, labels, onToggle, onCompact, onReset }: { columns: DisplayColumn[]; compact: boolean; labels: DisplayLabels; onToggle: (id: string, visible: boolean) => void; onCompact: (compact: boolean) => void; onReset: () => void }) {
   return <Popover>
     <PopoverTrigger asChild><Button type="button" title={labels.trigger} variant="outline"><ColumnsIcon aria-hidden="true" className="size-4" />{labels.trigger}</Button></PopoverTrigger>

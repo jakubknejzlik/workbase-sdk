@@ -1,3 +1,4 @@
+import { clearListPreferences } from '@workbasehq/console-generated/list-preferences'
 import { clearSavedViews } from '@workbasehq/console-generated/saved-views'
 import type { Me } from './queries'
 import type { QueryClient } from '@tanstack/react-query'
@@ -35,6 +36,7 @@ export async function logoutSession(client: QueryClient): Promise<void> {
       if (!(error instanceof ApiError && error.status === 401)) throw error
     }
     clearSavedViews(userId && instance ? { instance, userId } : undefined)
+    clearListPreferences(userId && instance ? { instance, userId } : undefined)
     window.location.assign('/sign-in')
     client.clear()
   } catch (error) {
