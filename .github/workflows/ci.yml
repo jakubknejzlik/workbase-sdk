@@ -13,8 +13,9 @@ permissions:
 jobs:
   check:
     runs-on: ubuntu-24.04
-    # Whole-pipeline budget: run 44738044182 took 72m51s (test:mcp 47m03s); not a hang/OOM workaround.
-    timeout-minutes: 90
+    # Green run 45249397779 took 77.8 min; cancelled runs 45268109310/45268054669
+    # were ×1.42–1.61 slower with no test failures. 150 min covers ~×1.9.
+    timeout-minutes: 150
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
