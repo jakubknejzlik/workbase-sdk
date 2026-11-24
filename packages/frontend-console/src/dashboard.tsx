@@ -10,15 +10,15 @@ import { signedValue } from '@workbasehq/console-generated/screens'
 import { DetailCards } from '../../console-generated/src/detail-layout'
 import { shortRecordId } from '../../console-generated/src/labels'
 import { listColumnAlignment } from '../../console-generated/src/list-presentation'
-import type { ConsolePage, ConsolePageResult, ConsoleWidgetResult } from '../../plugins/console/src/contract'
+import type { ConsoleModelContract, ConsolePage, ConsolePageResult, ConsoleWidgetResult } from '../../plugins/console/src/contract'
 import { api } from './api/client'
 import { useRuntimeModel } from './api/runtime-model'
 import { Page } from './screens'
 import type { ReactNode } from 'react'
 
 /** Widget responses are bounded server results: render every returned row without local paging. */
-function WidgetRecords({ widget, entity, model, value }: {
-  widget: Exclude<ConsoleWidgetResult, { kind: 'stat' }>; entity?: string; model?: Model
+function WidgetRecords({ widget, caption, entity, model, value }: {
+  widget: Exclude<ConsoleWidgetResult, { kind: 'stat' }>; caption: string; entity?: string; model?: Model
   value: (row: Record<string, any>, field: string) => ReactNode
 }) {
   const { t } = useTranslation()
@@ -31,7 +31,7 @@ function WidgetRecords({ widget, entity, model, value }: {
     cell: ({ row }: { row: { original: Record<string, any> } }) => <div className="whitespace-normal break-words">{value(row.original, field)}</div>,
   }))
   return <TablePresentationContext.Provider value={{ ...presentation, tableClass: 'w-full', listV2: true, scrollTabStop: 'overflow', scrollRegion: t('listScrollRegion'), scrollHint: t('listScrollHint') }}>
-    <div data-list-density="comfortable" className="min-w-0 max-w-full"><StaticDataTable data={widget.data} columns={columns} label={t(widget.label)} /></div>
+    <div data-list-density="comfortable" className="min-w-0 max-w-full"><StaticDataTable data={widget.data} columns={columns} label={caption} /></div>
   </TablePresentationContext.Provider>
 }
 
@@ -42,14 +42,22 @@ export function WidgetPage({ orgId, page }: { orgId: string; page: ConsolePage }
   const caps = runtime.error ? undefined : runtime.data?.capabilities
   const result = useQuery({ queryKey: ['console-page', orgId, page.id, caps],
     queryFn: () => api<ConsolePageResult>(`/o/${encodeURIComponent(orgId)}/console-pages/${encodeURIComponent(page.id)}`), enabled: !!model && !!caps, refetchOnWindowFocus: true })
-  return <Page title={t(page.label)}><div className="space-y-6"><WidgetCards orgId={orgId} page={page} result={result.data} pending={result.isPending} error={result.error ?? runtime.error} model={model} caps={caps} /></div></Page>
+  return <Page title={t(page.label)}><div className="space-y-6"><WidgetCards orgId={orgId} page={page} result={result.data} pending={result.isPending} error={result.error ?? runtime.error} enumLabels={model?.enumLabels} model={model} caps={caps} /></div></Page>
 }
 
 /** All values, including reference labels, arrive in the single page response. */
-export function WidgetCards({ orgId, page, result, pending, error, model, caps }: {
-  orgId: string; page: ConsolePage; result?: ConsolePageResult; pending: boolean; error: Error | null; model?: Model; caps?: Capabilities
+export function WidgetCards({ orgId, page, result, pending, error, model, caps, enumLabels }: {
+  orgId: string; page: ConsolePage; result?: ConsolePageResult; pending: boolean; error: Error | null; model?: Model; caps?: Capabilities; enumLabels?: ConsoleModelContract['model']['enumLabels']
 }) {
   const { t, i18n } = useTranslation()
+  const caption = (label: string) => {
+    const entry = (language: string) => Object.hasOwn(enumLabels?.[language] ?? {}, label) ? enumLabels?.[language]?.[label]?.trim() : undefined
+    if (['en', 'cs'].some(language => Object.hasOwn(enumLabels?.[language] ?? {}, label))) {
+      const language = i18n.language.split('-')[0]
+      return entry(language) || entry(language === 'cs' ? 'en' : 'cs') || label
+    }
+    return label.startsWith('entity_') && Object.hasOwn(model?.entities ?? {}, label.slice('entity_'.length)) ? t(label) : label
+  }
   const value = (widget: ConsoleWidgetResult, row: Record<string, any>, field: string, primary = false) => {
     const configured = page.widgets?.find(item => item.id === widget.id)
     const entity = configured?.query.entity
@@ -82,12 +90,12 @@ export function WidgetCards({ orgId, page, result, pending, error, model, caps }
     // Reference-label cells keep their target links, including in column one.
     const configured = page.widgets?.find(item => item.id === widget.id)
     const primary = widget.kind === 'list' ? widget.field : widget.columns.find(field => model?.entities[entity ?? '']?.fields[field]?.type !== 'ref' && !(configured?.kind !== 'stat' && configured?.query.labels?.includes(field)))
-    return <WidgetRecords widget={widget} entity={entity} model={model} value={(row, field) => value(widget, row, field, field === primary)} />
+    return <WidgetRecords widget={widget} caption={caption(widget.label)} entity={entity} model={model} value={(row, field) => value(widget, row, field, field === primary)} />
   }
   // Successful responses contain only server-authorized widgets; denied cards never mount.
   const widgets = result ? result.widgets : page.widgets ?? []
   if (!widgets.length) return <p className="text-sm text-muted-foreground">{t('dashboardEmpty')}</p>
   return <DetailCards sections={result ? result.sections : page.sections} cards={widgets.map(widget => ({ key: widget.id, content: <Card className="min-w-0" data-widget={widget.id}>
-    <CardHeader><CardTitle><h2>{t(widget.label)}</h2></CardTitle></CardHeader><CardContent className="space-y-3">{error ? <p role="alert">{t('requestFailed')}</p> : pending ? <Skeleton role="status" aria-label={t('loading')} className="h-16 w-full" /> : content(widget as ConsoleWidgetResult)}</CardContent>
+    <CardHeader><CardTitle><h2>{caption(widget.label)}</h2></CardTitle></CardHeader><CardContent className="space-y-3">{error ? <p role="alert">{t('requestFailed')}</p> : pending ? <Skeleton role="status" aria-label={t('loading')} className="h-16 w-full" /> : content(widget as ConsoleWidgetResult)}</CardContent>
   </Card> }))} />
 }
