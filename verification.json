@@ -1,0 +1,72 @@
+{
+  "pr": "https://github.com/jakubknejzlik/workbase-sdk/pull/296",
+  "headSHA": "72ecf1562d80ed690f3ed7369f2732ae55f63bdc",
+  "baseSHA": "c31fe5e1914c5daff4cca83427b6caa0aca9d41a",
+  "typecheck": {
+    "exitCode": 0,
+    "errors": 0
+  },
+  "lint": {
+    "exitCode": 0
+  },
+  "frontendUnit": {
+    "command": "bun run --cwd packages/frontend-console test --maxWorkers=2 --testTimeout=15000",
+    "exitCode": 0,
+    "files": 31,
+    "passed": 1161,
+    "expectedFail": 1
+  },
+  "generatedUnit": {
+    "command": "bun run --cwd packages/console-generated test",
+    "exitCode": 0,
+    "files": 4,
+    "passed": 56
+  },
+  "accessE2E": {
+    "exitCode": 0,
+    "passed": 4
+  },
+  "listE2EFull": {
+    "exitCode": 1,
+    "startTime": "2026-11-24T10:26:55.624Z",
+    "duration": 868047.304,
+    "expected": 192,
+    "skipped": 0,
+    "unexpected": 1,
+    "flaky": 0,
+    "failure": "paging: 200% text boundary 1110 cs page 1000; test timeout 45000ms"
+  },
+  "listE2ERerun": {
+    "exitCode": 0,
+    "startTime": "2026-11-24T10:41:59.829Z",
+    "duration": 8212.367,
+    "expected": 1,
+    "skipped": 0,
+    "unexpected": 0,
+    "flaky": 0
+  },
+  "newColumnOrderCases": {
+    "passed": 6,
+    "locales": [
+      "en",
+      "cs"
+    ],
+    "widths": [
+      1440,
+      900,
+      390
+    ]
+  },
+  "locale": {
+    "canonicalKeys": 625,
+    "enKeys": 641,
+    "csKeys": 661,
+    "interpolationSets": 641,
+    "newKeysPerLocale": 2,
+    "passed": true
+  },
+  "diffCheck": {
+    "exitCode": 0
+  },
+  "independentVisualReview": "pending; no author visual verdict"
+}
