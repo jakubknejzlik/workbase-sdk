@@ -66,6 +66,21 @@ export function visibleWidgets(kernel: KernelRegistry, scope: Scope, widgets: re
         // Early preflight/depth refusals cannot prove that: omit them fail-closed.
         return error.path.length === 0 && (error.cost?.statements ?? 0) > 0
       }
+      // The query API intentionally conflates unknown and projected-out views.
+      // Keep both omitted rather than exposing a forbidden configured view.
+      if (error instanceof QueryError && error.code === 'query_invalid' && error.path[0] === 'view') return false
+      if (error instanceof QueryError && error.code === 'query_invalid') {
+        // These options can fail before field authorization. Check the remaining
+        // dependencies for visibility only; execution still validates the original.
+        const key = error.path[0]
+        if (key !== 'contextList' && key !== 'rowAccess') return false
+        const query = { ...widgetQuery(widget) }
+        delete query[key]
+        try { validateQuery(kernel, scope, query); return true }
+        catch { return false }
+      }
+      // Other validation refusals belong to the widget's stable error contract.
+      if (error instanceof QueryError) return true
       throw error
     }
   })

@@ -10,10 +10,10 @@ import { requireScope } from '../../../core/src/authorization'
 import { validateQuery } from '../../../core/src/query/schema'
 import { compileRoot } from '../../../core/src/query/compiler'
 import { executeWidgets } from '../src/widgets'
-import type { ConsolePageResult } from '../../../core/src/console-contract'
+import type { ConsoleModelContract, ConsolePageResult } from '../../../core/src/console-contract'
 
-async function fixture(repeatedPolicy = 1) {
-  const config = widgetDashboard(repeatedPolicy)
+async function fixture(repeatedPolicy = 1, restrictedView = false) {
+  const config = widgetDashboard(repeatedPolicy, restrictedView)
   await reset()
   await bootstrap(env.DB, config)
   await seedWidgetDashboard(env.DB)
@@ -39,7 +39,7 @@ it('uses identical cost, SQL, bindings and authorized data for list and referenc
   expect(listed.status).toBe(200)
   const list = await listed.json() as { data: unknown[] }
   expect(widgets.find(widget => widget.id === 'references')).toMatchObject({ kind: 'table', data: list.data })
-  expect(list.data).toMatchObject([{ id: 'own', __labels: { patient_id: { status: 'ok', row: { name: 'Alex Example' } } } }])
+  expect(list.data).toMatchObject([{ id: 'own', __labels: { account_id: { status: 'ok', row: { name: 'Alex Example' } } } }])
   expect(list.data).toHaveLength(1)
 })
 
@@ -63,7 +63,7 @@ it('returns 200 with a real compiler refusal and keeps the other staff-scoped wi
   ])
   expect(body.sections).toEqual([{ row: ['count', 'references'] }, { row: ['plain'] }])
   expect(JSON.stringify(body)).not.toMatch(/sql|bindings|scope_row|fieldRows|Other job|Foreign job/)
-  await env.DB.prepare("UPDATE patients SET user=NULL WHERE id='own'").run()
+  await env.DB.prepare("UPDATE accounts SET user=NULL WHERE id='own'").run()
   const unlinked = await request(app, '/o/org-a/console-pages/summary', 'GET', undefined, 'viewer-a')
   expect(unlinked.status).toBe(200)
   expect(await unlinked.text()).not.toContain('Example job')
@@ -73,7 +73,7 @@ it('returns 200 with a real compiler refusal and keeps the other staff-scoped wi
 it('isolates a driver failure and serializes only the generic stable code', async () => {
   const { kernel, scope, page } = await fixture()
   const prepare = vi.fn((sql: string) => {
-    if (sql.includes('__label_patient_id')) throw new Error('private SQL / bindings / database detail')
+    if (sql.includes('__label_account_id')) throw new Error('private SQL / bindings / database detail')
     return env.DB.prepare(sql)
   })
   const db = { prepare, batch: env.DB.batch.bind(env.DB) } as unknown as D1Database
@@ -85,7 +85,7 @@ it('isolates a driver failure and serializes only the generic stable code', asyn
 
 it('isolates final validation-budget refusals before preparing SQL', async () => {
   const { kernel, scope, page } = await fixture()
-  const refused = { ...referenceQuery, where: { or: Array.from({ length: 9 }, () => ({ patient: { name: { eq: 'Alex Example' } } })) } }
+  const refused = { ...referenceQuery, where: { or: Array.from({ length: 9 }, () => ({ account: { name: { eq: 'Alex Example' } } })) } }
   const widgets = page.widgets!.map(widget => widget.id === 'references' && widget.kind === 'table' ? { ...widget, query: refused } : widget)
   const prepare = vi.fn((sql: string) => env.DB.prepare(sql))
   const result = await executeWidgets(kernel, scope, { prepare, batch: env.DB.batch.bind(env.DB) } as unknown as D1Database, { ...page, widgets })
@@ -98,7 +98,37 @@ it('keeps field-denied widgets omitted even when their query would exceed the bu
   const { kernel, scope, page } = await fixture()
   const original = kernel.fieldMask.bind(kernel)
   vi.spyOn(kernel, 'fieldMask').mockImplementation((entity, live) => original(entity, live).filter(field => entity !== 'jobs' || field !== 'title'))
-  const refused = { ...referenceQuery, where: { or: Array.from({ length: 9 }, () => ({ patient: { name: { eq: 'Alex Example' } } })) } }
+  const refused = { ...referenceQuery, where: { or: Array.from({ length: 9 }, () => ({ account: { name: { eq: 'Alex Example' } } })) } }
   const widgets = page.widgets!.map(widget => widget.id === 'references' && widget.kind === 'table' ? { ...widget, query: refused } : widget)
   expect((await executeWidgets(kernel, scope, env.DB, { ...page, widgets })).widgets).toEqual([{ id: 'count', label: 'Job count', kind: 'stat', value: 1 }])
+})
+
+it('isolates validation refusals over HTTP while omitting views and widgets projected out by declared field grants', async () => {
+  const { app, kernel, scope, page } = await fixture(1, true)
+  expect(kernel.fieldMask('jobs', scope)).toContain('id')
+  expect(kernel.fieldMask('jobs', scope)).not.toContain('title')
+  const named = page.widgets!.find(widget => widget.id === 'named')!
+  expect(() => validateQuery(kernel, scope, named.query)).toThrow(expect.objectContaining({ code: 'query_invalid', path: ['view'] }))
+  const invalid = page.widgets!.find(widget => widget.id === 'invalid')!
+  expect(() => validateQuery(kernel, scope, invalid.query)).toThrow(expect.objectContaining({ code: 'query_invalid', path: ['contextList'] }))
+  // The query API remains fail-closed and keeps its existing 400 contract.
+  expect((await request(app, '/query', 'POST', named.query, 'viewer-a')).status).toBe(400)
+  expect((await request(app, '/query', 'POST', invalid.query, 'viewer-a')).status).toBe(400)
+  const metadata = await request(app, '/o/org-a/console-model', 'GET', undefined, 'viewer-a')
+  expect(metadata.status).toBe(200)
+  const model = await metadata.json() as ConsoleModelContract
+  expect(model.console!.pages.find(page => page.id === 'summary')!.widgets!.map(widget => widget.id)).toEqual(['count'])
+  expect(model.model.entities.jobs.list?.views?.map(view => view.id)).not.toContain('named')
+  const response = await request(app, '/o/org-a/console-pages/summary', 'GET', undefined, 'viewer-a')
+  expect(response.status).toBe(200)
+  const body = await response.json() as ConsolePageResult
+  expect(body.widgets).toEqual([
+    { id: 'count', label: 'Job count', kind: 'stat', value: 1 },
+    { id: 'invalid', label: 'Unavailable records', kind: 'error', code: 'widget_failed' },
+  ])
+  expect(body.sections).toEqual([{ row: ['count'] }])
+  expect(JSON.stringify(body)).not.toMatch(/sql|bindings|path|contextList|missing|title|account|staff|named|Other job|Foreign job/i)
+  for (const route of ['console-pages/summary', 'console-model']) {
+    expect((await request(app, `/o/org-b/${route}`, 'GET', undefined, 'viewer-a')).status).toBe(403)
+  }
 })
