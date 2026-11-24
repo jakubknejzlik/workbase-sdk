@@ -1,3 +1,4 @@
+import { provisionLocalSdk } from './fixtures/local-sdk.ts'
 import { spawnSync } from 'node:child_process'
 import { DatabaseSync } from 'node:sqlite'
 import { randomUUID } from 'node:crypto'
@@ -7,7 +8,7 @@ import { KernelRegistry } from '@workbasehq/core/kernel/registry'
 import { migrateInstance, readMigrationFiles } from '@workbasehq/core/infra'
 import { splitStatements } from '@workbasehq/core/kernel/migrations'
 import { sha256 } from '@workbasehq/core/crypto'
-import { mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
@@ -77,7 +78,9 @@ async function accepted(call: Call, name: string, args: Record<string, unknown>)
 }
 async function fixture(runtime?: string) {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'composition-roles-')))
-  cleanups.push(() => rm(root, { recursive: true, force: true }))
+  // Vite can finish writing its optimizer cache while the local SDK tree is
+  // being removed. Retry transient cleanup races without hiding persistent errors.
+  cleanups.push(() => rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }))
   // The target is independently provisioned from the initialized base, never
   // inferred from the disposable used to verify a proposal.
   const targetPath = join(root, 'target.sqlite')
@@ -85,7 +88,7 @@ async function fixture(runtime?: string) {
   vi.stubEnv('WORKBASE_MCP_ROLE_DATABASES', environment.WORKBASE_MCP_ROLE_DATABASES)
   const connection = await session(root, runtime, environment)
   await accepted(connection.call, 'bootstrap_instance', { id: 'roles_fixture', target: 'cloudflare-github' })
-  await symlink(resolve('node_modules'), join(root, 'node_modules'))
+  await provisionLocalSdk(root)
   for (const path of ['config.ts', 'access.ts', 'schema/worker.ts', 'runtime.ts']) {
     await writeFile(join(root, path), '// authored header: žluťoučký\r\n' + await readFile(join(root, path), 'utf8') + '\n// authored footer\n')
   }

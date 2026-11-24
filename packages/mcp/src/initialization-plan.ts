@@ -1,8 +1,8 @@
 import { constants } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import { createRequire } from 'node:module'
-import { readFile, readdir } from 'node:fs/promises'
-import { isAbsolute, join } from 'node:path'
+import { readFile, readdir, realpath } from 'node:fs/promises'
+import { isAbsolute, join, relative, sep } from 'node:path'
 import { execute } from './sdk-process.ts'
 import { bindSchemaLock } from '@workbasehq/core/schema'
 import { decodeSource, isLiteralConfig, loadConfig } from '@workbasehq/core/schema/load'
@@ -42,41 +42,63 @@ export async function initializationDependencies(root: string, model: RuntimeMod
   const script = `import { createRequire } from 'node:module';
   import { createHash } from 'node:crypto';
   import { constants } from 'node:fs';
-  import { lstat, readFile } from 'node:fs/promises';
-  import { dirname, join } from 'node:path';
+  import { readFile, realpath } from 'node:fs/promises';
+  import { dirname, isAbsolute, join, relative, sep } from 'node:path';
   import { pathToFileURL } from 'node:url';
   const write = process.stdout.write.bind(process.stdout);
   const emit = result => write(JSON.stringify({ nonce: ${JSON.stringify(nonce)}, ...result }));
   const require = createRequire(join(process.cwd(), 'package.json'));
   const hash = data => createHash('sha256').update(data.toString('base64')).digest('hex');
+  const root = await realpath(process.cwd());
+  const inside = path => {
+    const part = relative(root, path);
+    return !isAbsolute(part) && part !== '..' && !part.startsWith('..' + sep);
+  };
   const resolved = [];
   for (const [packageName, entries] of ${JSON.stringify(packages)}) {
     try {
       for (const entry of [...new Set(entries)].sort()) {
         const entrypoint = packageName + '/' + entry;
-        const path = require.resolve(entrypoint);
-        let directory = dirname(path), manifest;
+        const selectedPath = require.resolve(entrypoint);
+        const path = await realpath(selectedPath);
+        if (!inside(path)) throw new Error('Outside instance');
+        let directory = dirname(path), manifest, manifestPath, selectedManifest;
         while (true) {
           const candidate = join(directory, 'package.json');
           try {
-            if ((await lstat(candidate)).isSymbolicLink()) throw new Error('Unsafe package metadata');
-            const data = await readFile(candidate, { flag: constants.O_RDONLY | constants.O_NOFOLLOW });
-            if (JSON.parse(data.toString()).name === packageName) { manifest = data; break }
+            const canonical = await realpath(candidate);
+            if (!inside(canonical)) throw new Error('Outside instance');
+            const data = await readFile(canonical, { flag: constants.O_RDONLY | constants.O_NOFOLLOW });
+            if (JSON.parse(data.toString()).name === packageName) { manifest = data; manifestPath = canonical; selectedManifest = candidate; break }
           } catch (error) { if (error.code !== 'ENOENT') throw error }
           const parent = dirname(directory);
           if (parent === directory) throw new Error('Package metadata missing');
           directory = parent;
         }
         if (JSON.parse(manifest.toString()).version !== ${JSON.stringify(metadata.version)}) throw new Error('Incompatible package version');
-        resolved.push({ entrypoint, path, manifestHash: hash(manifest), hash: hash(await readFile(path)) });
+        resolved.push({ entrypoint, path, manifestPath, selectedPath, selectedManifest, manifestHash: hash(manifest), hash: hash(await readFile(path)) });
       }
     } catch {
       emit({ status: 'resolution_failed', package: packageName });
       process.exit(1);
     }
   }
+  // Verify every selected origin before any import, then again at each execution.
+  const verifyOrigin = async entry => {
+    try {
+      if (await realpath(process.cwd()) !== root || await realpath(require.resolve(entry.entrypoint)) !== entry.path ||
+        await realpath(entry.path) !== entry.path || await realpath(entry.selectedPath) !== entry.path ||
+        await realpath(entry.manifestPath) !== entry.manifestPath || await realpath(entry.selectedManifest) !== entry.manifestPath) throw new Error('Origin changed');
+    } catch {
+      emit({ status: 'resolution_failed', package: entry.entrypoint.split('/').slice(0, 2).join('/') });
+      process.exit(1);
+    }
+  };
+  for (const entry of resolved) await verifyOrigin(entry);
   const names = ${JSON.stringify(dependencyNames)};
-  for (const { entrypoint, path } of resolved) {
+  for (const entry of resolved) {
+    await verifyOrigin(entry);
+    const { entrypoint, path } = entry;
     try { await import(pathToFileURL(path).href) }
     catch (error) {
       let missingDependency;
@@ -89,7 +111,7 @@ export async function initializationDependencies(root: string, model: RuntimeMod
       break;
     }
   }
-  if (!process.exitCode) emit({ status: 'complete', entrypoints: resolved });`
+  if (!process.exitCode) emit({ status: 'complete', entrypoints: resolved.map(({ selectedPath, selectedManifest, ...entry }) => entry) });`
   try {
     const runtime = process.versions.bun ? ['--no-install'] : ['--import', createRequire(import.meta.url).resolve('tsx')]
     const checked = await execute([process.execPath, ...runtime, '--input-type=module', '--eval', script], root,
@@ -102,6 +124,11 @@ export async function initializationDependencies(root: string, model: RuntimeMod
       if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) outcome = parsed as Record<string, unknown>
     } catch { /* missing/malformed result fails closed */ }
     const verified = outcome?.nonce === nonce ? outcome : undefined
+    const canonicalRoot = await realpath(root)
+    const inside = (path: string) => {
+      const part = relative(canonicalRoot, path)
+      return !isAbsolute(part) && part !== '..' && !part.startsWith('..' + sep)
+    }
     const result: Record<string, string> = {}
     const completed = verified?.status === 'complete' &&
       Object.keys(verified).sort().join(',') === 'entrypoints,nonce,status' &&
@@ -109,8 +136,9 @@ export async function initializationDependencies(root: string, model: RuntimeMod
       verified.entrypoints.every((entry: unknown, index: number) => {
         if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return false
         const resolved = entry as Record<string, unknown>
-        if (Object.keys(resolved).sort().join(',') !== 'entrypoint,hash,manifestHash,path' ||
-          resolved.entrypoint !== entrypoints[index] || typeof resolved.path !== 'string' || !isAbsolute(resolved.path) ||
+        if (Object.keys(resolved).sort().join(',') !== 'entrypoint,hash,manifestHash,manifestPath,path' ||
+          resolved.entrypoint !== entrypoints[index] || typeof resolved.path !== 'string' || !isAbsolute(resolved.path) || !inside(resolved.path) ||
+          typeof resolved.manifestPath !== 'string' || !isAbsolute(resolved.manifestPath) || !inside(resolved.manifestPath) ||
           typeof resolved.hash !== 'string' || !/^[a-f0-9]{64}$/.test(resolved.hash) ||
           typeof resolved.manifestHash !== 'string' || !/^[a-f0-9]{64}$/.test(resolved.manifestHash)) return false
         const packageName = packages.find(([name]) => entrypoints[index].startsWith(name + '/'))![0]
@@ -118,12 +146,14 @@ export async function initializationDependencies(root: string, model: RuntimeMod
         if (result[manifestKey] !== undefined && result[manifestKey] !== resolved.manifestHash) return false
         result[manifestKey] = resolved.manifestHash
         result[entrypoints[index]] = resolved.hash
+        // Keep origin identity as a digest, so public plans never expose filesystem paths.
+        result[`${entrypoints[index]}:origin`] = hash({ root: canonicalRoot, path: resolved.path, manifest: resolved.manifestPath })
         return true
       })
     if (checked.rc !== 0 || !completed) {
       const packageName = verified?.status === 'resolution_failed' ? packages.find(([name]) => name === verified.package)?.[0] : undefined
-      if (packageName) throw new WorkflowError('dependencies_missing', `${packageName}@${metadata.version} must be available from the instance root`, 422,
-        { package: packageName, supportedVersion: metadata.version, remedy: `Provision ${packageName}@${metadata.version} in this instance's node_modules, then retry initialize_instance preview. No packages were installed.` })
+      if (packageName) throw new WorkflowError('dependencies_missing', `${packageName}@${metadata.version} must be installed locally inside the instance root`, 422,
+        { package: packageName, supportedVersion: metadata.version, remedy: `Install ${packageName}@${metadata.version} locally in this instance's node_modules. SDK entrypoints and matching manifests must resolve inside the instance root; outside-root hoisting is unsupported. Then retry initialize_instance preview. No packages were installed.` })
       const entrypoint = verified?.status === 'import_failed' ? entrypoints.find(name => name === verified.entrypoint) : undefined
       const missingDependency = entrypoint ? dependencyNames.find(name => name === verified?.missingDependency) : undefined
       throw new WorkflowError('dependencies_missing', 'The installed SDK runtime dependency graph cannot be imported', 422,

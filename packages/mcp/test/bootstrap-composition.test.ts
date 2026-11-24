@@ -1,4 +1,5 @@
-import { mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises'
+import { provisionLocalSdk } from './fixtures/local-sdk.ts'
+import { mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterEach, expect, it } from 'vitest'
@@ -37,7 +38,7 @@ const input = { id: 'initial_roles', target: 'cloudflare-github' }
 async function fixture(composition?: unknown) {
   const root = await empty()
   await bootstrapInstance(root, { ...input, ...(composition === undefined ? {} : { initialComposition: composition }) })
-  await symlink(resolve('node_modules'), join(root, 'node_modules'))
+  await provisionLocalSdk(root)
   const app = await createServer({ root })
   const call = (mode = 'preview', planHash?: string) => app.workflow.call('initialize_instance', { instance: 'initial-roles', mode, ...(planHash ? { planHash } : {}) }) as Promise<any>
   return { root, app, call }
@@ -228,7 +229,7 @@ it.each(['bun', 'node'])('discovers, bootstraps and reloads the initial graph th
     const tools = (await first.client.listTools()).tools
     expect(tools.find(tool => tool.name === 'bootstrap_instance')?.inputSchema.properties).toHaveProperty('initialComposition')
     expect(await first.call('bootstrap_instance', { ...input, initialComposition })).toMatchObject({ ok: true })
-    await symlink(resolve('node_modules'), join(root, 'node_modules'))
+    await provisionLocalSdk(root)
     const preview = await first.call('initialize_instance', { instance: 'initial-roles' })
     expect(preview, JSON.stringify(preview)).toMatchObject({ ok: true, conflicts: [] })
     expect(await first.call('initialize_instance', { instance: 'initial-roles', mode: 'apply', planHash: preview.planHash }))

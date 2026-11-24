@@ -1,12 +1,13 @@
 import { createHash } from 'node:crypto'
 import { cp, lstat, mkdir, mkdtemp, readFile, readdir, readlink, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { dirname, join, resolve } from 'node:path'
+import { join } from 'node:path'
 import { afterEach, expect, it } from 'vitest'
 import { bootstrapInstance } from '../src/bootstrap.ts'
 import { planInitialComposition } from '../src/composition/initial-plan.ts'
 import { parseRuntimeSource } from '../src/composition/runtime-source.ts'
 import { byteHash } from '../src/byte-digest.ts'
+import { provisionLocalSdk, provisionProbeSdk } from './fixtures/local-sdk.ts'
 
 const selection = { interactive: false, plugins: [
   { plugin: 'identity' }, { plugin: 'permissions' }, { plugin: 'members' },
@@ -19,7 +20,7 @@ afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, {
 async function fixture(provision = true) {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'initial-composition-'))); roots.push(root)
   await bootstrapInstance(root, { id: 'fresh_instance', target: 'cloudflare-github' })
-  if (provision) await symlink(resolve('node_modules'), join(root, 'node_modules'))
+  if (provision) await provisionLocalSdk(root)
   return { root, plan: (input: unknown = selection) => planInitialComposition(root, 'fresh-instance', input) }
 }
 async function tree(root: string): Promise<unknown> {
@@ -36,7 +37,10 @@ it('plans only the exact selected seven plugins, returning deterministic six-fil
   const before = await tree(a.root), other = await tree(b.root)
   const first = await a.plan(), repeat = await a.plan(), reordered = await b.plan({ ...selection, plugins: [...selection.plugins].reverse() })
   expect(repeat).toEqual(first)
-  expect(reordered).toEqual(first)
+  expect(reordered.files).toEqual(first.files)
+  expect(reordered.model).toEqual(first.model)
+  expect(reordered.planHash).not.toBe(first.planHash)
+  expect(await a.plan({ ...selection, plugins: [...selection.plugins].reverse() })).toEqual(first)
   expect(first.files.map(file => file.path)).toEqual(['runtime.ts', 'schema.lock.json', 'migrations/0001_r1.sql', 'openapi.json', 'access.lock.json', 'access.lock.md'])
   for (const file of first.files) expect(file.hash).toBe(createHash('sha256').update(file.data).digest('hex'))
   const runtime = first.files[0].data
@@ -136,22 +140,9 @@ it.each(['missing', 'incompatible'])('keeps structured initialization refusal fo
   await expect(plan()).rejects.toMatchObject({ code: 'dependencies_missing', status: 422, details: { package: '@workbasehq/core', remedy: expect.any(String) } })
   expect(await tree(root)).toEqual(before)
 })
-it('binds installed SDK entrypoint bytes without depending on the root path', async () => {
+it('binds installed SDK entrypoint bytes in addition to canonical origin', async () => {
   const { root, plan } = await fixture(false)
-  await mkdir(join(root, 'node_modules/@workbasehq'), { recursive: true })
-  for (const name of ['core', 'plugins']) await cp(resolve('packages', name), join(root, 'node_modules/@workbasehq', name), {
-    recursive: true, filter: path => !['node_modules', 'test', 'ui'].includes(path.split('/').at(-1)!),
-  })
-  // Resolve each actual runtime dependency from its producer workspace, as the initializer harness does.
-  for (const owner of ['core', 'plugins']) {
-    const manifest = JSON.parse(await readFile(resolve('packages', owner, 'package.json'), 'utf8'))
-    for (const name of Object.keys(manifest.dependencies)) {
-      const destination = join(root, 'node_modules', name)
-      try { await lstat(destination); continue } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error }
-      await mkdir(dirname(destination), { recursive: true })
-      await symlink(await realpath(resolve('packages', owner, 'node_modules', name)), destination)
-    }
-  }
+  await provisionLocalSdk(root)
   const first = await plan(), path = join(root, 'node_modules/@workbasehq/plugins/members/src/index.ts')
   await writeFile(path, await readFile(path, 'utf8') + '\n// dependency byte guard\n')
   const before = await tree(root), second = await plan()
@@ -170,4 +161,29 @@ it.each(['computed', 'syntax', 'caller revision'])('returns a fresh-state confli
   await expect(plan()).rejects.toMatchObject({ code: 'fresh_state_conflict', status: 409,
     details: { conflicts: ['config.ts'], remedy: expect.any(String) } })
   expect(await tree(root)).toEqual(before)
+})
+
+it.each(['package', 'manifest', 'node_modules'])('rejects escaping %s origins in shared fresh planning before importing any entry', async kind => {
+  const { root, plan } = await fixture(false), outside = await fixture(false)
+  const marker = join(root, 'selected-imports')
+  await provisionProbeSdk(root, marker); await provisionProbeSdk(outside.root, marker)
+  const path = kind === 'node_modules' ? 'node_modules' : 'node_modules/@workbasehq/plugins' + (kind === 'manifest' ? '/package.json' : '')
+  await rm(join(root, path), { recursive: true })
+  await symlink(join(outside.root, path), join(root, path))
+  const before = await tree(root)
+  await expect(plan()).rejects.toMatchObject({ code: 'dependencies_missing', status: 422,
+    details: { remedy: expect.stringContaining('locally') } })
+  await expect(readFile(marker)).rejects.toMatchObject({ code: 'ENOENT' })
+  expect(await tree(root)).toEqual(before)
+})
+it('changes fresh-composition identity when identical SDK bytes move to another internal origin', async () => {
+  const { root, plan } = await fixture(), first = await plan()
+  await cp(join(root, 'node_modules/.sdk/plugins'), join(root, 'node_modules/.sdk/plugins-next'), { recursive: true })
+  await rm(join(root, 'node_modules/@workbasehq/plugins'))
+  await symlink(join(root, 'node_modules/.sdk/plugins-next'), join(root, 'node_modules/@workbasehq/plugins'))
+  const second = await plan()
+  expect(second.files).toEqual(first.files)
+  expect(second.dependencies['@workbasehq/plugins/members']).toBe(first.dependencies['@workbasehq/plugins/members'])
+  expect(second.dependencies['@workbasehq/plugins/members:origin']).not.toBe(first.dependencies['@workbasehq/plugins/members:origin'])
+  expect(second.planHash).not.toBe(first.planHash)
 })
