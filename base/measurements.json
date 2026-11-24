@@ -1,0 +1,2032 @@
+{
+  "phase": "base",
+  "sha": "c31fe5e1914c5daff4cca83427b6caa0aca9d41a",
+  "browser": "145.0.7632.6",
+  "build": {
+    "version": "0.4.0",
+    "sha": "76f42a2108f5fba44dfa26a534619348d578cd0b",
+    "sourceCommit": "c31fe5e1914c5daff4cca83427b6caa0aca9d41a",
+    "builtAt": "2026-11-24T10:29:23.179Z"
+  },
+  "measurements": [
+    {
+      "width": 1440,
+      "comfortable": {
+        "token": {
+          "size": ".875rem",
+          "lineHeight": "calc(1.25 / .875)"
+        },
+        "headers": [
+          {
+            "cell": {
+              "text": "Name",
+              "fontSize": "11px",
+              "lineHeight": "15.7143px",
+              "tag": "TH",
+              "class": "text-foreground h-10 px-3 text-left align-middle font-medium whitespace-nowrap [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px] w-56"
+            },
+            "content": {
+              "text": "Name",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "SPAN",
+              "class": ""
+            }
+          },
+          {
+            "cell": {
+              "text": "Code",
+              "fontSize": "11px",
+              "lineHeight": "15.7143px",
+              "tag": "TH",
+              "class": "text-foreground h-10 px-3 text-left align-middle font-medium whitespace-nowrap [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px] w-40"
+            },
+            "content": {
+              "text": "Code",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "SPAN",
+              "class": ""
+            }
+          },
+          {
+            "cell": {
+              "text": "Team id",
+              "fontSize": "11px",
+              "lineHeight": "15.7143px",
+              "tag": "TH",
+              "class": "text-foreground h-10 px-3 text-left align-middle font-medium whitespace-nowrap [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px] w-40"
+            },
+            "content": {
+              "text": "Team id",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "SPAN",
+              "class": ""
+            }
+          },
+          {
+            "cell": {
+              "text": "Status",
+              "fontSize": "11px",
+              "lineHeight": "15.7143px",
+              "tag": "TH",
+              "class": "text-foreground h-10 px-3 text-left align-middle font-medium whitespace-nowrap [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px] w-40"
+            },
+            "content": {
+              "text": "Status",
+              "fontSize": "11px",
+              "lineHeight": "15.7143px",
+              "tag": "SPAN",
+              "class": "px-2 py-1"
+            }
+          },
+          {
+            "cell": {
+              "text": "Application access",
+              "fontSize": "11px",
+              "lineHeight": "15.7143px",
+              "tag": "TH",
+              "class": "text-foreground h-10 px-3 text-left align-middle font-medium whitespace-nowrap [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px] w-48"
+            },
+            "content": {
+              "text": "Application access",
+              "fontSize": "11px",
+              "lineHeight": "15.7143px",
+              "tag": "SPAN",
+              "class": "px-2 py-1"
+            }
+          },
+          {
+            "cell": {
+              "text": "Actions",
+              "fontSize": "11px",
+              "lineHeight": "15.7143px",
+              "tag": "TH",
+              "class": "text-foreground h-10 px-3 text-left align-middle font-medium whitespace-nowrap [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px] w-18 sticky right-0 z-10 border-l bg-background group-hover:bg-muted"
+            },
+            "content": {
+              "text": "Actions",
+              "fontSize": "11px",
+              "lineHeight": "15.7143px",
+              "tag": "SPAN",
+              "class": "px-2 py-1"
+            }
+          }
+        ],
+        "ordinary": [
+          {
+            "cell": {
+              "text": "Worker 001",
+              "fontSize": "11px",
+              "lineHeight": "15.7143px",
+              "tag": "TD",
+              "class": "px-3 py-2 align-middle whitespace-nowrap overflow-hidden text-ellipsis [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px] w-56"
+            },
+            "content": {
+              "text": "Worker 001",
+              "fontSize": "11px",
+              "lineHeight": "15.7143px",
+              "tag": "SPAN",
+              "class": "inline-grid min-w-0 max-w-full gap-0.5"
+            }
+          },
+          {
+            "cell": {
+              "text": "W1",
+              "fontSize": "11px",
+              "lineHeight": "15.7143px",
+              "tag": "TD",
+              "class": "px-3 py-2 align-middle whitespace-nowrap overflow-hidden text-ellipsis [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px] w-40"
+            },
+            "content": {
+              "text": "W1",
+              "fontSize": "11px",
+              "lineHeight": "15.7143px",
+              "tag": "SPAN",
+              "class": "inline-grid min-w-0 max-w-full gap-0.5"
+            }
+          },
+          {
+            "cell": {
+              "text": "North team",
+              "fontSize": "11px",
+              "lineHeight": "15.7143px",
+              "tag": "TD",
+              "class": "px-3 py-2 align-middle whitespace-nowrap overflow-hidden text-ellipsis [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px] w-40"
+            },
+            "content": {
+              "text": "North team",
+              "fontSize": "11px",
+              "lineHeight": "15.7143px",
+              "tag": "SPAN",
+              "class": "inline-grid min-w-0 max-w-full gap-0.5"
+            }
+          },
+          {
+            "cell": {
+              "text": "active",
+              "fontSize": "11px",
+              "lineHeight": "15.7143px",
+              "tag": "TD",
+              "class": "px-3 py-2 align-middle whitespace-nowrap overflow-hidden text-ellipsis [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px] w-40"
+            },
+            "content": {
+              "text": "active",
+              "fontSize": "11px",
+              "lineHeight": "15.7143px",
+              "tag": "SPAN",
+              "class": "inline-grid min-w-0 max-w-full gap-0.5"
+            }
+          }
+        ],
+        "access": [
+          {
+            "control": {
+              "text": "–",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "BUTTON",
+              "class": "inline-flex items-center justify-center whitespace-nowrap text-sm font-medium transition-all disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 shrink-0 [&_svg]:shrink-0 outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive hover:bg-accent hover:text-accent-foreground dark:hover:bg-accent/50 rounded-md relative h-6 max-w-full gap-1 px-1 py-0 has-[>svg]:px-1 pointer-coarse:after:absolute pointer-coarse:after:-inset-y-2.5 pointer-coarse:after:inset-x-0 pointer-coarse:after:min-w-11"
+            },
+            "content": {
+              "text": "–",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "SPAN",
+              "class": "min-w-0 truncate text-left"
+            }
+          },
+          {
+            "control": {
+              "text": "pending@example.test",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "BUTTON",
+              "class": "inline-flex items-center justify-center whitespace-nowrap text-sm font-medium transition-all disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 shrink-0 [&_svg]:shrink-0 outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive hover:bg-accent hover:text-accent-foreground dark:hover:bg-accent/50 rounded-md relative h-6 max-w-full gap-1 px-1 py-0 has-[>svg]:px-1 pointer-coarse:after:absolute pointer-coarse:after:-inset-y-2.5 pointer-coarse:after:inset-x-0 pointer-coarse:after:min-w-11"
+            },
+            "content": {
+              "text": "pending@example.test",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "SPAN",
+              "class": "min-w-0 truncate text-left"
+            }
+          },
+          {
+            "control": {
+              "text": "Linked Example",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "BUTTON",
+              "class": "inline-flex items-center justify-center whitespace-nowrap text-sm font-medium transition-all disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 shrink-0 [&_svg]:shrink-0 outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive hover:bg-accent hover:text-accent-foreground dark:hover:bg-accent/50 rounded-md relative h-6 max-w-full gap-1 px-1 py-0 has-[>svg]:px-1 pointer-coarse:after:absolute pointer-coarse:after:-inset-y-2.5 pointer-coarse:after:inset-x-0 pointer-coarse:after:min-w-11"
+            },
+            "content": {
+              "text": "Linked Example",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "SPAN",
+              "class": "min-w-0 truncate text-left"
+            }
+          },
+          {
+            "control": {
+              "text": "Staff Example",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "BUTTON",
+              "class": "inline-flex items-center justify-center whitespace-nowrap text-sm font-medium transition-all disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 shrink-0 [&_svg]:shrink-0 outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive hover:bg-accent hover:text-accent-foreground dark:hover:bg-accent/50 rounded-md relative h-6 max-w-full gap-1 px-1 py-0 has-[>svg]:px-1 pointer-coarse:after:absolute pointer-coarse:after:-inset-y-2.5 pointer-coarse:after:inset-x-0 pointer-coarse:after:min-w-11"
+            },
+            "content": {
+              "text": "Staff Example",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "SPAN",
+              "class": "min-w-0 truncate text-left"
+            }
+          },
+          {
+            "control": {
+              "text": "expired@example.test",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "BUTTON",
+              "class": "inline-flex items-center justify-center whitespace-nowrap text-sm font-medium transition-all disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 shrink-0 [&_svg]:shrink-0 outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive hover:bg-accent hover:text-accent-foreground dark:hover:bg-accent/50 rounded-md relative h-6 max-w-full gap-1 px-1 py-0 has-[>svg]:px-1 pointer-coarse:after:absolute pointer-coarse:after:-inset-y-2.5 pointer-coarse:after:inset-x-0 pointer-coarse:after:min-w-11"
+            },
+            "content": {
+              "text": "expired@example.test",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "SPAN",
+              "class": "min-w-0 truncate text-left"
+            }
+          },
+          {
+            "control": {
+              "text": "–",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "BUTTON",
+              "class": "inline-flex items-center justify-center whitespace-nowrap text-sm font-medium transition-all disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 shrink-0 [&_svg]:shrink-0 outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive hover:bg-accent hover:text-accent-foreground dark:hover:bg-accent/50 rounded-md relative h-6 max-w-full gap-1 px-1 py-0 has-[>svg]:px-1 pointer-coarse:after:absolute pointer-coarse:after:-inset-y-2.5 pointer-coarse:after:inset-x-0 pointer-coarse:after:min-w-11"
+            },
+            "content": {
+              "text": "–",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "SPAN",
+              "class": "min-w-0 truncate text-left"
+            }
+          },
+          {
+            "control": {
+              "text": "–",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "BUTTON",
+              "class": "inline-flex items-center justify-center whitespace-nowrap text-sm font-medium transition-all disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 shrink-0 [&_svg]:shrink-0 outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive hover:bg-accent hover:text-accent-foreground dark:hover:bg-accent/50 rounded-md relative h-6 max-w-full gap-1 px-1 py-0 has-[>svg]:px-1 pointer-coarse:after:absolute pointer-coarse:after:-inset-y-2.5 pointer-coarse:after:inset-x-0 pointer-coarse:after:min-w-11"
+            },
+            "content": {
+              "text": "–",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "SPAN",
+              "class": "min-w-0 truncate text-left"
+            }
+          },
+          {
+            "control": {
+              "text": "Staff Example",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "BUTTON",
+              "class": "inline-flex items-center justify-center whitespace-nowrap text-sm font-medium transition-all disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 shrink-0 [&_svg]:shrink-0 outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive hover:bg-accent hover:text-accent-foreground dark:hover:bg-accent/50 rounded-md relative h-6 max-w-full gap-1 px-1 py-0 has-[>svg]:px-1 pointer-coarse:after:absolute pointer-coarse:after:-inset-y-2.5 pointer-coarse:after:inset-x-0 pointer-coarse:after:min-w-11"
+            },
+            "content": {
+              "text": "Staff Example",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "SPAN",
+              "class": "min-w-0 truncate text-left"
+            }
+          },
+          {
+            "control": {
+              "text": "–",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "BUTTON",
+              "class": "inline-flex items-center justify-center whitespace-nowrap text-sm font-medium transition-all disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 shrink-0 [&_svg]:shrink-0 outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive hover:bg-accent hover:text-accent-foreground dark:hover:bg-accent/50 rounded-md relative h-6 max-w-full gap-1 px-1 py-0 has-[>svg]:px-1 pointer-coarse:after:absolute pointer-coarse:after:-inset-y-2.5 pointer-coarse:after:inset-x-0 pointer-coarse:after:min-w-11"
+            },
+            "content": {
+              "text": "–",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "SPAN",
+              "class": "min-w-0 truncate text-left"
+            }
+          },
+          {
+            "control": {
+              "text": "–",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "BUTTON",
+              "class": "inline-flex items-center justify-center whitespace-nowrap text-sm font-medium transition-all disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 shrink-0 [&_svg]:shrink-0 outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive hover:bg-accent hover:text-accent-foreground dark:hover:bg-accent/50 rounded-md relative h-6 max-w-full gap-1 px-1 py-0 has-[>svg]:px-1 pointer-coarse:after:absolute pointer-coarse:after:-inset-y-2.5 pointer-coarse:after:inset-x-0 pointer-coarse:after:min-w-11"
+            },
+            "content": {
+              "text": "–",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "SPAN",
+              "class": "min-w-0 truncate text-left"
+            }
+          }
+        ],
+        "stylesheet": [
+          "http://127.0.0.1:29494/assets/index-DJNViF-t.css"
+        ]
+      },
+      "compact": {
+        "token": {
+          "size": ".875rem",
+          "lineHeight": "calc(1.25 / .875)"
+        },
+        "headers": [
+          {
+            "cell": {
+              "text": "Name",
+              "fontSize": "11px",
+              "lineHeight": "15.7143px",
+              "tag": "TH",
+              "class": "text-foreground h-10 px-3 text-left align-middle font-medium whitespace-nowrap [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px] w-56"
+            },
+            "content": {
+              "text": "Name",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "SPAN",
+              "class": ""
+            }
+          },
+          {
+            "cell": {
+              "text": "Code",
+              "fontSize": "11px",
+              "lineHeight": "15.7143px",
+              "tag": "TH",
+              "class": "text-foreground h-10 px-3 text-left align-middle font-medium whitespace-nowrap [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px] w-40"
+            },
+            "content": {
+              "text": "Code",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "SPAN",
+              "class": ""
+            }
+          },
+          {
+            "cell": {
+              "text": "Team id",
+              "fontSize": "11px",
+              "lineHeight": "15.7143px",
+              "tag": "TH",
+              "class": "text-foreground h-10 px-3 text-left align-middle font-medium whitespace-nowrap [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px] w-40"
+            },
+            "content": {
+              "text": "Team id",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "SPAN",
+              "class": ""
+            }
+          },
+          {
+            "cell": {
+              "text": "Status",
+              "fontSize": "11px",
+              "lineHeight": "15.7143px",
+              "tag": "TH",
+              "class": "text-foreground h-10 px-3 text-left align-middle font-medium whitespace-nowrap [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px] w-40"
+            },
+            "content": {
+              "text": "Status",
+              "fontSize": "11px",
+              "lineHeight": "15.7143px",
+              "tag": "SPAN",
+              "class": "px-2 py-1"
+            }
+          },
+          {
+            "cell": {
+              "text": "Application access",
+              "fontSize": "11px",
+              "lineHeight": "15.7143px",
+              "tag": "TH",
+              "class": "text-foreground h-10 px-3 text-left align-middle font-medium whitespace-nowrap [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px] w-48"
+            },
+            "content": {
+              "text": "Application access",
+              "fontSize": "11px",
+              "lineHeight": "15.7143px",
+              "tag": "SPAN",
+              "class": "px-2 py-1"
+            }
+          },
+          {
+            "cell": {
+              "text": "Actions",
+              "fontSize": "11px",
+              "lineHeight": "15.7143px",
+              "tag": "TH",
+              "class": "text-foreground h-10 px-3 text-left align-middle font-medium whitespace-nowrap [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px] w-18 sticky right-0 z-10 border-l bg-background group-hover:bg-muted"
+            },
+            "content": {
+              "text": "Actions",
+              "fontSize": "11px",
+              "lineHeight": "15.7143px",
+              "tag": "SPAN",
+              "class": "px-2 py-1"
+            }
+          }
+        ],
+        "ordinary": [
+          {
+            "cell": {
+              "text": "Worker 001",
+              "fontSize": "11px",
+              "lineHeight": "15.7143px",
+              "tag": "TD",
+              "class": "px-3 py-2 align-middle whitespace-nowrap overflow-hidden text-ellipsis [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px] w-56"
+            },
+            "content": {
+              "text": "Worker 001",
+              "fontSize": "11px",
+              "lineHeight": "15.7143px",
+              "tag": "SPAN",
+              "class": "inline-grid min-w-0 max-w-full gap-0.5"
+            }
+          },
+          {
+            "cell": {
+              "text": "W1",
+              "fontSize": "11px",
+              "lineHeight": "15.7143px",
+              "tag": "TD",
+              "class": "px-3 py-2 align-middle whitespace-nowrap overflow-hidden text-ellipsis [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px] w-40"
+            },
+            "content": {
+              "text": "W1",
+              "fontSize": "11px",
+              "lineHeight": "15.7143px",
+              "tag": "SPAN",
+              "class": "inline-grid min-w-0 max-w-full gap-0.5"
+            }
+          },
+          {
+            "cell": {
+              "text": "North team",
+              "fontSize": "11px",
+              "lineHeight": "15.7143px",
+              "tag": "TD",
+              "class": "px-3 py-2 align-middle whitespace-nowrap overflow-hidden text-ellipsis [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px] w-40"
+            },
+            "content": {
+              "text": "North team",
+              "fontSize": "11px",
+              "lineHeight": "15.7143px",
+              "tag": "SPAN",
+              "class": "inline-grid min-w-0 max-w-full gap-0.5"
+            }
+          },
+          {
+            "cell": {
+              "text": "active",
+              "fontSize": "11px",
+              "lineHeight": "15.7143px",
+              "tag": "TD",
+              "class": "px-3 py-2 align-middle whitespace-nowrap overflow-hidden text-ellipsis [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px] w-40"
+            },
+            "content": {
+              "text": "active",
+              "fontSize": "11px",
+              "lineHeight": "15.7143px",
+              "tag": "SPAN",
+              "class": "inline-grid min-w-0 max-w-full gap-0.5"
+            }
+          }
+        ],
+        "access": [
+          {
+            "control": {
+              "text": "–",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "BUTTON",
+              "class": "inline-flex items-center justify-center whitespace-nowrap text-sm font-medium transition-all disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 shrink-0 [&_svg]:shrink-0 outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive hover:bg-accent hover:text-accent-foreground dark:hover:bg-accent/50 rounded-md relative h-6 max-w-full gap-1 px-1 py-0 has-[>svg]:px-1 pointer-coarse:after:absolute pointer-coarse:after:-inset-y-2.5 pointer-coarse:after:inset-x-0 pointer-coarse:after:min-w-11"
+            },
+            "content": {
+              "text": "–",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "SPAN",
+              "class": "min-w-0 truncate text-left"
+            }
+          },
+          {
+            "control": {
+              "text": "pending@example.test",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "BUTTON",
+              "class": "inline-flex items-center justify-center whitespace-nowrap text-sm font-medium transition-all disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 shrink-0 [&_svg]:shrink-0 outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive hover:bg-accent hover:text-accent-foreground dark:hover:bg-accent/50 rounded-md relative h-6 max-w-full gap-1 px-1 py-0 has-[>svg]:px-1 pointer-coarse:after:absolute pointer-coarse:after:-inset-y-2.5 pointer-coarse:after:inset-x-0 pointer-coarse:after:min-w-11"
+            },
+            "content": {
+              "text": "pending@example.test",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "SPAN",
+              "class": "min-w-0 truncate text-left"
+            }
+          },
+          {
+            "control": {
+              "text": "Linked Example",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "BUTTON",
+              "class": "inline-flex items-center justify-center whitespace-nowrap text-sm font-medium transition-all disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 shrink-0 [&_svg]:shrink-0 outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive hover:bg-accent hover:text-accent-foreground dark:hover:bg-accent/50 rounded-md relative h-6 max-w-full gap-1 px-1 py-0 has-[>svg]:px-1 pointer-coarse:after:absolute pointer-coarse:after:-inset-y-2.5 pointer-coarse:after:inset-x-0 pointer-coarse:after:min-w-11"
+            },
+            "content": {
+              "text": "Linked Example",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "SPAN",
+              "class": "min-w-0 truncate text-left"
+            }
+          },
+          {
+            "control": {
+              "text": "Staff Example",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "BUTTON",
+              "class": "inline-flex items-center justify-center whitespace-nowrap text-sm font-medium transition-all disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 shrink-0 [&_svg]:shrink-0 outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive hover:bg-accent hover:text-accent-foreground dark:hover:bg-accent/50 rounded-md relative h-6 max-w-full gap-1 px-1 py-0 has-[>svg]:px-1 pointer-coarse:after:absolute pointer-coarse:after:-inset-y-2.5 pointer-coarse:after:inset-x-0 pointer-coarse:after:min-w-11"
+            },
+            "content": {
+              "text": "Staff Example",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "SPAN",
+              "class": "min-w-0 truncate text-left"
+            }
+          },
+          {
+            "control": {
+              "text": "expired@example.test",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "BUTTON",
+              "class": "inline-flex items-center justify-center whitespace-nowrap text-sm font-medium transition-all disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 shrink-0 [&_svg]:shrink-0 outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive hover:bg-accent hover:text-accent-foreground dark:hover:bg-accent/50 rounded-md relative h-6 max-w-full gap-1 px-1 py-0 has-[>svg]:px-1 pointer-coarse:after:absolute pointer-coarse:after:-inset-y-2.5 pointer-coarse:after:inset-x-0 pointer-coarse:after:min-w-11"
+            },
+            "content": {
+              "text": "expired@example.test",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "SPAN",
+              "class": "min-w-0 truncate text-left"
+            }
+          },
+          {
+            "control": {
+              "text": "–",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "BUTTON",
+              "class": "inline-flex items-center justify-center whitespace-nowrap text-sm font-medium transition-all disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 shrink-0 [&_svg]:shrink-0 outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive hover:bg-accent hover:text-accent-foreground dark:hover:bg-accent/50 rounded-md relative h-6 max-w-full gap-1 px-1 py-0 has-[>svg]:px-1 pointer-coarse:after:absolute pointer-coarse:after:-inset-y-2.5 pointer-coarse:after:inset-x-0 pointer-coarse:after:min-w-11"
+            },
+            "content": {
+              "text": "–",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "SPAN",
+              "class": "min-w-0 truncate text-left"
+            }
+          },
+          {
+            "control": {
+              "text": "–",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "BUTTON",
+              "class": "inline-flex items-center justify-center whitespace-nowrap text-sm font-medium transition-all disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 shrink-0 [&_svg]:shrink-0 outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive hover:bg-accent hover:text-accent-foreground dark:hover:bg-accent/50 rounded-md relative h-6 max-w-full gap-1 px-1 py-0 has-[>svg]:px-1 pointer-coarse:after:absolute pointer-coarse:after:-inset-y-2.5 pointer-coarse:after:inset-x-0 pointer-coarse:after:min-w-11"
+            },
+            "content": {
+              "text": "–",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "SPAN",
+              "class": "min-w-0 truncate text-left"
+            }
+          },
+          {
+            "control": {
+              "text": "Staff Example",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "BUTTON",
+              "class": "inline-flex items-center justify-center whitespace-nowrap text-sm font-medium transition-all disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 shrink-0 [&_svg]:shrink-0 outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive hover:bg-accent hover:text-accent-foreground dark:hover:bg-accent/50 rounded-md relative h-6 max-w-full gap-1 px-1 py-0 has-[>svg]:px-1 pointer-coarse:after:absolute pointer-coarse:after:-inset-y-2.5 pointer-coarse:after:inset-x-0 pointer-coarse:after:min-w-11"
+            },
+            "content": {
+              "text": "Staff Example",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "SPAN",
+              "class": "min-w-0 truncate text-left"
+            }
+          },
+          {
+            "control": {
+              "text": "–",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "BUTTON",
+              "class": "inline-flex items-center justify-center whitespace-nowrap text-sm font-medium transition-all disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 shrink-0 [&_svg]:shrink-0 outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive hover:bg-accent hover:text-accent-foreground dark:hover:bg-accent/50 rounded-md relative h-6 max-w-full gap-1 px-1 py-0 has-[>svg]:px-1 pointer-coarse:after:absolute pointer-coarse:after:-inset-y-2.5 pointer-coarse:after:inset-x-0 pointer-coarse:after:min-w-11"
+            },
+            "content": {
+              "text": "–",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "SPAN",
+              "class": "min-w-0 truncate text-left"
+            }
+          },
+          {
+            "control": {
+              "text": "–",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "BUTTON",
+              "class": "inline-flex items-center justify-center whitespace-nowrap text-sm font-medium transition-all disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 shrink-0 [&_svg]:shrink-0 outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive hover:bg-accent hover:text-accent-foreground dark:hover:bg-accent/50 rounded-md relative h-6 max-w-full gap-1 px-1 py-0 has-[>svg]:px-1 pointer-coarse:after:absolute pointer-coarse:after:-inset-y-2.5 pointer-coarse:after:inset-x-0 pointer-coarse:after:min-w-11"
+            },
+            "content": {
+              "text": "–",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "SPAN",
+              "class": "min-w-0 truncate text-left"
+            }
+          }
+        ],
+        "stylesheet": [
+          "http://127.0.0.1:29494/assets/index-DJNViF-t.css"
+        ]
+      }
+    },
+    {
+      "width": 900,
+      "comfortable": {
+        "token": {
+          "size": ".875rem",
+          "lineHeight": "calc(1.25 / .875)"
+        },
+        "headers": [
+          {
+            "cell": {
+              "text": "Name",
+              "fontSize": "11px",
+              "lineHeight": "15.7143px",
+              "tag": "TH",
+              "class": "text-foreground h-10 px-3 text-left align-middle font-medium whitespace-nowrap [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px] w-56"
+            },
+            "content": {
+              "text": "Name",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "SPAN",
+              "class": ""
+            }
+          },
+          {
+            "cell": {
+              "text": "Code",
+              "fontSize": "11px",
+              "lineHeight": "15.7143px",
+              "tag": "TH",
+              "class": "text-foreground h-10 px-3 text-left align-middle font-medium whitespace-nowrap [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px] w-40"
+            },
+            "content": {
+              "text": "Code",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "SPAN",
+              "class": ""
+            }
+          },
+          {
+            "cell": {
+              "text": "Team id",
+              "fontSize": "11px",
+              "lineHeight": "15.7143px",
+              "tag": "TH",
+              "class": "text-foreground h-10 px-3 text-left align-middle font-medium whitespace-nowrap [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px] w-40"
+            },
+            "content": {
+              "text": "Team id",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "SPAN",
+              "class": ""
+            }
+          },
+          {
+            "cell": {
+              "text": "Status",
+              "fontSize": "11px",
+              "lineHeight": "15.7143px",
+              "tag": "TH",
+              "class": "text-foreground h-10 px-3 text-left align-middle font-medium whitespace-nowrap [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px] w-40"
+            },
+            "content": {
+              "text": "Status",
+              "fontSize": "11px",
+              "lineHeight": "15.7143px",
+              "tag": "SPAN",
+              "class": "px-2 py-1"
+            }
+          },
+          {
+            "cell": {
+              "text": "Application access",
+              "fontSize": "11px",
+              "lineHeight": "15.7143px",
+              "tag": "TH",
+              "class": "text-foreground h-10 px-3 text-left align-middle font-medium whitespace-nowrap [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px] w-48"
+            },
+            "content": {
+              "text": "Application access",
+              "fontSize": "11px",
+              "lineHeight": "15.7143px",
+              "tag": "SPAN",
+              "class": "px-2 py-1"
+            }
+          },
+          {
+            "cell": {
+              "text": "Actions",
+              "fontSize": "11px",
+              "lineHeight": "15.7143px",
+              "tag": "TH",
+              "class": "text-foreground h-10 px-3 text-left align-middle font-medium whitespace-nowrap [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px] w-18 sticky right-0 z-10 border-l bg-background group-hover:bg-muted"
+            },
+            "content": {
+              "text": "Actions",
+              "fontSize": "11px",
+              "lineHeight": "15.7143px",
+              "tag": "SPAN",
+              "class": "px-2 py-1"
+            }
+          }
+        ],
+        "ordinary": [
+          {
+            "cell": {
+              "text": "Worker 001",
+              "fontSize": "11px",
+              "lineHeight": "15.7143px",
+              "tag": "TD",
+              "class": "px-3 py-2 align-middle whitespace-nowrap overflow-hidden text-ellipsis [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px] w-56"
+            },
+            "content": {
+              "text": "Worker 001",
+              "fontSize": "11px",
+              "lineHeight": "15.7143px",
+              "tag": "SPAN",
+              "class": "inline-grid min-w-0 max-w-full gap-0.5"
+            }
+          },
+          {
+            "cell": {
+              "text": "W1",
+              "fontSize": "11px",
+              "lineHeight": "15.7143px",
+              "tag": "TD",
+              "class": "px-3 py-2 align-middle whitespace-nowrap overflow-hidden text-ellipsis [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px] w-40"
+            },
+            "content": {
+              "text": "W1",
+              "fontSize": "11px",
+              "lineHeight": "15.7143px",
+              "tag": "SPAN",
+              "class": "inline-grid min-w-0 max-w-full gap-0.5"
+            }
+          },
+          {
+            "cell": {
+              "text": "North team",
+              "fontSize": "11px",
+              "lineHeight": "15.7143px",
+              "tag": "TD",
+              "class": "px-3 py-2 align-middle whitespace-nowrap overflow-hidden text-ellipsis [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px] w-40"
+            },
+            "content": {
+              "text": "North team",
+              "fontSize": "11px",
+              "lineHeight": "15.7143px",
+              "tag": "SPAN",
+              "class": "inline-grid min-w-0 max-w-full gap-0.5"
+            }
+          },
+          {
+            "cell": {
+              "text": "active",
+              "fontSize": "11px",
+              "lineHeight": "15.7143px",
+              "tag": "TD",
+              "class": "px-3 py-2 align-middle whitespace-nowrap overflow-hidden text-ellipsis [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px] w-40"
+            },
+            "content": {
+              "text": "active",
+              "fontSize": "11px",
+              "lineHeight": "15.7143px",
+              "tag": "SPAN",
+              "class": "inline-grid min-w-0 max-w-full gap-0.5"
+            }
+          }
+        ],
+        "access": [
+          {
+            "control": {
+              "text": "–",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "BUTTON",
+              "class": "inline-flex items-center justify-center whitespace-nowrap text-sm font-medium transition-all disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 shrink-0 [&_svg]:shrink-0 outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive hover:bg-accent hover:text-accent-foreground dark:hover:bg-accent/50 rounded-md relative h-6 max-w-full gap-1 px-1 py-0 has-[>svg]:px-1 pointer-coarse:after:absolute pointer-coarse:after:-inset-y-2.5 pointer-coarse:after:inset-x-0 pointer-coarse:after:min-w-11"
+            },
+            "content": {
+              "text": "–",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "SPAN",
+              "class": "min-w-0 truncate text-left"
+            }
+          },
+          {
+            "control": {
+              "text": "pending@example.test",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "BUTTON",
+              "class": "inline-flex items-center justify-center whitespace-nowrap text-sm font-medium transition-all disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 shrink-0 [&_svg]:shrink-0 outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive hover:bg-accent hover:text-accent-foreground dark:hover:bg-accent/50 rounded-md relative h-6 max-w-full gap-1 px-1 py-0 has-[>svg]:px-1 pointer-coarse:after:absolute pointer-coarse:after:-inset-y-2.5 pointer-coarse:after:inset-x-0 pointer-coarse:after:min-w-11"
+            },
+            "content": {
+              "text": "pending@example.test",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "SPAN",
+              "class": "min-w-0 truncate text-left"
+            }
+          },
+          {
+            "control": {
+              "text": "Linked Example",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "BUTTON",
+              "class": "inline-flex items-center justify-center whitespace-nowrap text-sm font-medium transition-all disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 shrink-0 [&_svg]:shrink-0 outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive hover:bg-accent hover:text-accent-foreground dark:hover:bg-accent/50 rounded-md relative h-6 max-w-full gap-1 px-1 py-0 has-[>svg]:px-1 pointer-coarse:after:absolute pointer-coarse:after:-inset-y-2.5 pointer-coarse:after:inset-x-0 pointer-coarse:after:min-w-11"
+            },
+            "content": {
+              "text": "Linked Example",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "SPAN",
+              "class": "min-w-0 truncate text-left"
+            }
+          },
+          {
+            "control": {
+              "text": "Staff Example",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "BUTTON",
+              "class": "inline-flex items-center justify-center whitespace-nowrap text-sm font-medium transition-all disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 shrink-0 [&_svg]:shrink-0 outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive hover:bg-accent hover:text-accent-foreground dark:hover:bg-accent/50 rounded-md relative h-6 max-w-full gap-1 px-1 py-0 has-[>svg]:px-1 pointer-coarse:after:absolute pointer-coarse:after:-inset-y-2.5 pointer-coarse:after:inset-x-0 pointer-coarse:after:min-w-11"
+            },
+            "content": {
+              "text": "Staff Example",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "SPAN",
+              "class": "min-w-0 truncate text-left"
+            }
+          },
+          {
+            "control": {
+              "text": "expired@example.test",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "BUTTON",
+              "class": "inline-flex items-center justify-center whitespace-nowrap text-sm font-medium transition-all disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 shrink-0 [&_svg]:shrink-0 outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive hover:bg-accent hover:text-accent-foreground dark:hover:bg-accent/50 rounded-md relative h-6 max-w-full gap-1 px-1 py-0 has-[>svg]:px-1 pointer-coarse:after:absolute pointer-coarse:after:-inset-y-2.5 pointer-coarse:after:inset-x-0 pointer-coarse:after:min-w-11"
+            },
+            "content": {
+              "text": "expired@example.test",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "SPAN",
+              "class": "min-w-0 truncate text-left"
+            }
+          },
+          {
+            "control": {
+              "text": "–",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "BUTTON",
+              "class": "inline-flex items-center justify-center whitespace-nowrap text-sm font-medium transition-all disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 shrink-0 [&_svg]:shrink-0 outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive hover:bg-accent hover:text-accent-foreground dark:hover:bg-accent/50 rounded-md relative h-6 max-w-full gap-1 px-1 py-0 has-[>svg]:px-1 pointer-coarse:after:absolute pointer-coarse:after:-inset-y-2.5 pointer-coarse:after:inset-x-0 pointer-coarse:after:min-w-11"
+            },
+            "content": {
+              "text": "–",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "SPAN",
+              "class": "min-w-0 truncate text-left"
+            }
+          },
+          {
+            "control": {
+              "text": "–",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "BUTTON",
+              "class": "inline-flex items-center justify-center whitespace-nowrap text-sm font-medium transition-all disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 shrink-0 [&_svg]:shrink-0 outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive hover:bg-accent hover:text-accent-foreground dark:hover:bg-accent/50 rounded-md relative h-6 max-w-full gap-1 px-1 py-0 has-[>svg]:px-1 pointer-coarse:after:absolute pointer-coarse:after:-inset-y-2.5 pointer-coarse:after:inset-x-0 pointer-coarse:after:min-w-11"
+            },
+            "content": {
+              "text": "–",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "SPAN",
+              "class": "min-w-0 truncate text-left"
+            }
+          },
+          {
+            "control": {
+              "text": "Staff Example",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "BUTTON",
+              "class": "inline-flex items-center justify-center whitespace-nowrap text-sm font-medium transition-all disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 shrink-0 [&_svg]:shrink-0 outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive hover:bg-accent hover:text-accent-foreground dark:hover:bg-accent/50 rounded-md relative h-6 max-w-full gap-1 px-1 py-0 has-[>svg]:px-1 pointer-coarse:after:absolute pointer-coarse:after:-inset-y-2.5 pointer-coarse:after:inset-x-0 pointer-coarse:after:min-w-11"
+            },
+            "content": {
+              "text": "Staff Example",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "SPAN",
+              "class": "min-w-0 truncate text-left"
+            }
+          },
+          {
+            "control": {
+              "text": "–",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "BUTTON",
+              "class": "inline-flex items-center justify-center whitespace-nowrap text-sm font-medium transition-all disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 shrink-0 [&_svg]:shrink-0 outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive hover:bg-accent hover:text-accent-foreground dark:hover:bg-accent/50 rounded-md relative h-6 max-w-full gap-1 px-1 py-0 has-[>svg]:px-1 pointer-coarse:after:absolute pointer-coarse:after:-inset-y-2.5 pointer-coarse:after:inset-x-0 pointer-coarse:after:min-w-11"
+            },
+            "content": {
+              "text": "–",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "SPAN",
+              "class": "min-w-0 truncate text-left"
+            }
+          },
+          {
+            "control": {
+              "text": "–",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "BUTTON",
+              "class": "inline-flex items-center justify-center whitespace-nowrap text-sm font-medium transition-all disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 shrink-0 [&_svg]:shrink-0 outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive hover:bg-accent hover:text-accent-foreground dark:hover:bg-accent/50 rounded-md relative h-6 max-w-full gap-1 px-1 py-0 has-[>svg]:px-1 pointer-coarse:after:absolute pointer-coarse:after:-inset-y-2.5 pointer-coarse:after:inset-x-0 pointer-coarse:after:min-w-11"
+            },
+            "content": {
+              "text": "–",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "SPAN",
+              "class": "min-w-0 truncate text-left"
+            }
+          }
+        ],
+        "stylesheet": [
+          "http://127.0.0.1:29494/assets/index-DJNViF-t.css"
+        ]
+      },
+      "compact": {
+        "token": {
+          "size": ".875rem",
+          "lineHeight": "calc(1.25 / .875)"
+        },
+        "headers": [
+          {
+            "cell": {
+              "text": "Name",
+              "fontSize": "11px",
+              "lineHeight": "15.7143px",
+              "tag": "TH",
+              "class": "text-foreground h-10 px-3 text-left align-middle font-medium whitespace-nowrap [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px] w-56"
+            },
+            "content": {
+              "text": "Name",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "SPAN",
+              "class": ""
+            }
+          },
+          {
+            "cell": {
+              "text": "Code",
+              "fontSize": "11px",
+              "lineHeight": "15.7143px",
+              "tag": "TH",
+              "class": "text-foreground h-10 px-3 text-left align-middle font-medium whitespace-nowrap [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px] w-40"
+            },
+            "content": {
+              "text": "Code",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "SPAN",
+              "class": ""
+            }
+          },
+          {
+            "cell": {
+              "text": "Team id",
+              "fontSize": "11px",
+              "lineHeight": "15.7143px",
+              "tag": "TH",
+              "class": "text-foreground h-10 px-3 text-left align-middle font-medium whitespace-nowrap [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px] w-40"
+            },
+            "content": {
+              "text": "Team id",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "SPAN",
+              "class": ""
+            }
+          },
+          {
+            "cell": {
+              "text": "Status",
+              "fontSize": "11px",
+              "lineHeight": "15.7143px",
+              "tag": "TH",
+              "class": "text-foreground h-10 px-3 text-left align-middle font-medium whitespace-nowrap [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px] w-40"
+            },
+            "content": {
+              "text": "Status",
+              "fontSize": "11px",
+              "lineHeight": "15.7143px",
+              "tag": "SPAN",
+              "class": "px-2 py-1"
+            }
+          },
+          {
+            "cell": {
+              "text": "Application access",
+              "fontSize": "11px",
+              "lineHeight": "15.7143px",
+              "tag": "TH",
+              "class": "text-foreground h-10 px-3 text-left align-middle font-medium whitespace-nowrap [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px] w-48"
+            },
+            "content": {
+              "text": "Application access",
+              "fontSize": "11px",
+              "lineHeight": "15.7143px",
+              "tag": "SPAN",
+              "class": "px-2 py-1"
+            }
+          },
+          {
+            "cell": {
+              "text": "Actions",
+              "fontSize": "11px",
+              "lineHeight": "15.7143px",
+              "tag": "TH",
+              "class": "text-foreground h-10 px-3 text-left align-middle font-medium whitespace-nowrap [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px] w-18 sticky right-0 z-10 border-l bg-background group-hover:bg-muted"
+            },
+            "content": {
+              "text": "Actions",
+              "fontSize": "11px",
+              "lineHeight": "15.7143px",
+              "tag": "SPAN",
+              "class": "px-2 py-1"
+            }
+          }
+        ],
+        "ordinary": [
+          {
+            "cell": {
+              "text": "Worker 001",
+              "fontSize": "11px",
+              "lineHeight": "15.7143px",
+              "tag": "TD",
+              "class": "px-3 py-2 align-middle whitespace-nowrap overflow-hidden text-ellipsis [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px] w-56"
+            },
+            "content": {
+              "text": "Worker 001",
+              "fontSize": "11px",
+              "lineHeight": "15.7143px",
+              "tag": "SPAN",
+              "class": "inline-grid min-w-0 max-w-full gap-0.5"
+            }
+          },
+          {
+            "cell": {
+              "text": "W1",
+              "fontSize": "11px",
+              "lineHeight": "15.7143px",
+              "tag": "TD",
+              "class": "px-3 py-2 align-middle whitespace-nowrap overflow-hidden text-ellipsis [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px] w-40"
+            },
+            "content": {
+              "text": "W1",
+              "fontSize": "11px",
+              "lineHeight": "15.7143px",
+              "tag": "SPAN",
+              "class": "inline-grid min-w-0 max-w-full gap-0.5"
+            }
+          },
+          {
+            "cell": {
+              "text": "North team",
+              "fontSize": "11px",
+              "lineHeight": "15.7143px",
+              "tag": "TD",
+              "class": "px-3 py-2 align-middle whitespace-nowrap overflow-hidden text-ellipsis [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px] w-40"
+            },
+            "content": {
+              "text": "North team",
+              "fontSize": "11px",
+              "lineHeight": "15.7143px",
+              "tag": "SPAN",
+              "class": "inline-grid min-w-0 max-w-full gap-0.5"
+            }
+          },
+          {
+            "cell": {
+              "text": "active",
+              "fontSize": "11px",
+              "lineHeight": "15.7143px",
+              "tag": "TD",
+              "class": "px-3 py-2 align-middle whitespace-nowrap overflow-hidden text-ellipsis [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px] w-40"
+            },
+            "content": {
+              "text": "active",
+              "fontSize": "11px",
+              "lineHeight": "15.7143px",
+              "tag": "SPAN",
+              "class": "inline-grid min-w-0 max-w-full gap-0.5"
+            }
+          }
+        ],
+        "access": [
+          {
+            "control": {
+              "text": "–",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "BUTTON",
+              "class": "inline-flex items-center justify-center whitespace-nowrap text-sm font-medium transition-all disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 shrink-0 [&_svg]:shrink-0 outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive hover:bg-accent hover:text-accent-foreground dark:hover:bg-accent/50 rounded-md relative h-6 max-w-full gap-1 px-1 py-0 has-[>svg]:px-1 pointer-coarse:after:absolute pointer-coarse:after:-inset-y-2.5 pointer-coarse:after:inset-x-0 pointer-coarse:after:min-w-11"
+            },
+            "content": {
+              "text": "–",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "SPAN",
+              "class": "min-w-0 truncate text-left"
+            }
+          },
+          {
+            "control": {
+              "text": "pending@example.test",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "BUTTON",
+              "class": "inline-flex items-center justify-center whitespace-nowrap text-sm font-medium transition-all disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 shrink-0 [&_svg]:shrink-0 outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive hover:bg-accent hover:text-accent-foreground dark:hover:bg-accent/50 rounded-md relative h-6 max-w-full gap-1 px-1 py-0 has-[>svg]:px-1 pointer-coarse:after:absolute pointer-coarse:after:-inset-y-2.5 pointer-coarse:after:inset-x-0 pointer-coarse:after:min-w-11"
+            },
+            "content": {
+              "text": "pending@example.test",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "SPAN",
+              "class": "min-w-0 truncate text-left"
+            }
+          },
+          {
+            "control": {
+              "text": "Linked Example",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "BUTTON",
+              "class": "inline-flex items-center justify-center whitespace-nowrap text-sm font-medium transition-all disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 shrink-0 [&_svg]:shrink-0 outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive hover:bg-accent hover:text-accent-foreground dark:hover:bg-accent/50 rounded-md relative h-6 max-w-full gap-1 px-1 py-0 has-[>svg]:px-1 pointer-coarse:after:absolute pointer-coarse:after:-inset-y-2.5 pointer-coarse:after:inset-x-0 pointer-coarse:after:min-w-11"
+            },
+            "content": {
+              "text": "Linked Example",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "SPAN",
+              "class": "min-w-0 truncate text-left"
+            }
+          },
+          {
+            "control": {
+              "text": "Staff Example",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "BUTTON",
+              "class": "inline-flex items-center justify-center whitespace-nowrap text-sm font-medium transition-all disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 shrink-0 [&_svg]:shrink-0 outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive hover:bg-accent hover:text-accent-foreground dark:hover:bg-accent/50 rounded-md relative h-6 max-w-full gap-1 px-1 py-0 has-[>svg]:px-1 pointer-coarse:after:absolute pointer-coarse:after:-inset-y-2.5 pointer-coarse:after:inset-x-0 pointer-coarse:after:min-w-11"
+            },
+            "content": {
+              "text": "Staff Example",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "SPAN",
+              "class": "min-w-0 truncate text-left"
+            }
+          },
+          {
+            "control": {
+              "text": "expired@example.test",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "BUTTON",
+              "class": "inline-flex items-center justify-center whitespace-nowrap text-sm font-medium transition-all disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 shrink-0 [&_svg]:shrink-0 outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive hover:bg-accent hover:text-accent-foreground dark:hover:bg-accent/50 rounded-md relative h-6 max-w-full gap-1 px-1 py-0 has-[>svg]:px-1 pointer-coarse:after:absolute pointer-coarse:after:-inset-y-2.5 pointer-coarse:after:inset-x-0 pointer-coarse:after:min-w-11"
+            },
+            "content": {
+              "text": "expired@example.test",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "SPAN",
+              "class": "min-w-0 truncate text-left"
+            }
+          },
+          {
+            "control": {
+              "text": "–",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "BUTTON",
+              "class": "inline-flex items-center justify-center whitespace-nowrap text-sm font-medium transition-all disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 shrink-0 [&_svg]:shrink-0 outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive hover:bg-accent hover:text-accent-foreground dark:hover:bg-accent/50 rounded-md relative h-6 max-w-full gap-1 px-1 py-0 has-[>svg]:px-1 pointer-coarse:after:absolute pointer-coarse:after:-inset-y-2.5 pointer-coarse:after:inset-x-0 pointer-coarse:after:min-w-11"
+            },
+            "content": {
+              "text": "–",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "SPAN",
+              "class": "min-w-0 truncate text-left"
+            }
+          },
+          {
+            "control": {
+              "text": "–",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "BUTTON",
+              "class": "inline-flex items-center justify-center whitespace-nowrap text-sm font-medium transition-all disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 shrink-0 [&_svg]:shrink-0 outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive hover:bg-accent hover:text-accent-foreground dark:hover:bg-accent/50 rounded-md relative h-6 max-w-full gap-1 px-1 py-0 has-[>svg]:px-1 pointer-coarse:after:absolute pointer-coarse:after:-inset-y-2.5 pointer-coarse:after:inset-x-0 pointer-coarse:after:min-w-11"
+            },
+            "content": {
+              "text": "–",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "SPAN",
+              "class": "min-w-0 truncate text-left"
+            }
+          },
+          {
+            "control": {
+              "text": "Staff Example",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "BUTTON",
+              "class": "inline-flex items-center justify-center whitespace-nowrap text-sm font-medium transition-all disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 shrink-0 [&_svg]:shrink-0 outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive hover:bg-accent hover:text-accent-foreground dark:hover:bg-accent/50 rounded-md relative h-6 max-w-full gap-1 px-1 py-0 has-[>svg]:px-1 pointer-coarse:after:absolute pointer-coarse:after:-inset-y-2.5 pointer-coarse:after:inset-x-0 pointer-coarse:after:min-w-11"
+            },
+            "content": {
+              "text": "Staff Example",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "SPAN",
+              "class": "min-w-0 truncate text-left"
+            }
+          },
+          {
+            "control": {
+              "text": "–",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "BUTTON",
+              "class": "inline-flex items-center justify-center whitespace-nowrap text-sm font-medium transition-all disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 shrink-0 [&_svg]:shrink-0 outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive hover:bg-accent hover:text-accent-foreground dark:hover:bg-accent/50 rounded-md relative h-6 max-w-full gap-1 px-1 py-0 has-[>svg]:px-1 pointer-coarse:after:absolute pointer-coarse:after:-inset-y-2.5 pointer-coarse:after:inset-x-0 pointer-coarse:after:min-w-11"
+            },
+            "content": {
+              "text": "–",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "SPAN",
+              "class": "min-w-0 truncate text-left"
+            }
+          },
+          {
+            "control": {
+              "text": "–",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "BUTTON",
+              "class": "inline-flex items-center justify-center whitespace-nowrap text-sm font-medium transition-all disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 shrink-0 [&_svg]:shrink-0 outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive hover:bg-accent hover:text-accent-foreground dark:hover:bg-accent/50 rounded-md relative h-6 max-w-full gap-1 px-1 py-0 has-[>svg]:px-1 pointer-coarse:after:absolute pointer-coarse:after:-inset-y-2.5 pointer-coarse:after:inset-x-0 pointer-coarse:after:min-w-11"
+            },
+            "content": {
+              "text": "–",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "SPAN",
+              "class": "min-w-0 truncate text-left"
+            }
+          }
+        ],
+        "stylesheet": [
+          "http://127.0.0.1:29494/assets/index-DJNViF-t.css"
+        ]
+      }
+    },
+    {
+      "width": 390,
+      "comfortable": {
+        "token": {
+          "size": ".875rem",
+          "lineHeight": "calc(1.25 / .875)"
+        },
+        "headers": [
+          {
+            "cell": {
+              "text": "Name",
+              "fontSize": "11px",
+              "lineHeight": "15.7143px",
+              "tag": "TH",
+              "class": "text-foreground h-10 px-3 text-left align-middle font-medium whitespace-nowrap [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px] w-56"
+            },
+            "content": {
+              "text": "Name",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "SPAN",
+              "class": ""
+            }
+          },
+          {
+            "cell": {
+              "text": "Code",
+              "fontSize": "11px",
+              "lineHeight": "15.7143px",
+              "tag": "TH",
+              "class": "text-foreground h-10 px-3 text-left align-middle font-medium whitespace-nowrap [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px] w-40"
+            },
+            "content": {
+              "text": "Code",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "SPAN",
+              "class": ""
+            }
+          },
+          {
+            "cell": {
+              "text": "Team id",
+              "fontSize": "11px",
+              "lineHeight": "15.7143px",
+              "tag": "TH",
+              "class": "text-foreground h-10 px-3 text-left align-middle font-medium whitespace-nowrap [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px] w-40"
+            },
+            "content": {
+              "text": "Team id",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "SPAN",
+              "class": ""
+            }
+          },
+          {
+            "cell": {
+              "text": "Status",
+              "fontSize": "11px",
+              "lineHeight": "15.7143px",
+              "tag": "TH",
+              "class": "text-foreground h-10 px-3 text-left align-middle font-medium whitespace-nowrap [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px] w-40"
+            },
+            "content": {
+              "text": "Status",
+              "fontSize": "11px",
+              "lineHeight": "15.7143px",
+              "tag": "SPAN",
+              "class": "px-2 py-1"
+            }
+          },
+          {
+            "cell": {
+              "text": "Application access",
+              "fontSize": "11px",
+              "lineHeight": "15.7143px",
+              "tag": "TH",
+              "class": "text-foreground h-10 px-3 text-left align-middle font-medium whitespace-nowrap [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px] w-48"
+            },
+            "content": {
+              "text": "Application access",
+              "fontSize": "11px",
+              "lineHeight": "15.7143px",
+              "tag": "SPAN",
+              "class": "px-2 py-1"
+            }
+          },
+          {
+            "cell": {
+              "text": "Actions",
+              "fontSize": "11px",
+              "lineHeight": "15.7143px",
+              "tag": "TH",
+              "class": "text-foreground h-10 px-3 text-left align-middle font-medium whitespace-nowrap [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px] w-18 sticky right-0 z-10 border-l bg-background group-hover:bg-muted"
+            },
+            "content": {
+              "text": "Actions",
+              "fontSize": "11px",
+              "lineHeight": "15.7143px",
+              "tag": "SPAN",
+              "class": "px-2 py-1"
+            }
+          }
+        ],
+        "ordinary": [
+          {
+            "cell": {
+              "text": "Worker 001",
+              "fontSize": "11px",
+              "lineHeight": "15.7143px",
+              "tag": "TD",
+              "class": "px-3 py-2 align-middle whitespace-nowrap overflow-hidden text-ellipsis [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px] w-56"
+            },
+            "content": {
+              "text": "Worker 001",
+              "fontSize": "11px",
+              "lineHeight": "15.7143px",
+              "tag": "SPAN",
+              "class": "inline-grid min-w-0 max-w-full gap-0.5"
+            }
+          },
+          {
+            "cell": {
+              "text": "W1",
+              "fontSize": "11px",
+              "lineHeight": "15.7143px",
+              "tag": "TD",
+              "class": "px-3 py-2 align-middle whitespace-nowrap overflow-hidden text-ellipsis [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px] w-40"
+            },
+            "content": {
+              "text": "W1",
+              "fontSize": "11px",
+              "lineHeight": "15.7143px",
+              "tag": "SPAN",
+              "class": "inline-grid min-w-0 max-w-full gap-0.5"
+            }
+          },
+          {
+            "cell": {
+              "text": "North team",
+              "fontSize": "11px",
+              "lineHeight": "15.7143px",
+              "tag": "TD",
+              "class": "px-3 py-2 align-middle whitespace-nowrap overflow-hidden text-ellipsis [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px] w-40"
+            },
+            "content": {
+              "text": "North team",
+              "fontSize": "11px",
+              "lineHeight": "15.7143px",
+              "tag": "SPAN",
+              "class": "inline-grid min-w-0 max-w-full gap-0.5"
+            }
+          },
+          {
+            "cell": {
+              "text": "active",
+              "fontSize": "11px",
+              "lineHeight": "15.7143px",
+              "tag": "TD",
+              "class": "px-3 py-2 align-middle whitespace-nowrap overflow-hidden text-ellipsis [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px] w-40"
+            },
+            "content": {
+              "text": "active",
+              "fontSize": "11px",
+              "lineHeight": "15.7143px",
+              "tag": "SPAN",
+              "class": "inline-grid min-w-0 max-w-full gap-0.5"
+            }
+          }
+        ],
+        "access": [
+          {
+            "control": {
+              "text": "–",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "BUTTON",
+              "class": "inline-flex items-center justify-center whitespace-nowrap text-sm font-medium transition-all disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 shrink-0 [&_svg]:shrink-0 outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive hover:bg-accent hover:text-accent-foreground dark:hover:bg-accent/50 rounded-md relative h-6 max-w-full gap-1 px-1 py-0 has-[>svg]:px-1 pointer-coarse:after:absolute pointer-coarse:after:-inset-y-2.5 pointer-coarse:after:inset-x-0 pointer-coarse:after:min-w-11"
+            },
+            "content": {
+              "text": "–",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "SPAN",
+              "class": "min-w-0 truncate text-left"
+            }
+          },
+          {
+            "control": {
+              "text": "pending@example.test",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "BUTTON",
+              "class": "inline-flex items-center justify-center whitespace-nowrap text-sm font-medium transition-all disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 shrink-0 [&_svg]:shrink-0 outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive hover:bg-accent hover:text-accent-foreground dark:hover:bg-accent/50 rounded-md relative h-6 max-w-full gap-1 px-1 py-0 has-[>svg]:px-1 pointer-coarse:after:absolute pointer-coarse:after:-inset-y-2.5 pointer-coarse:after:inset-x-0 pointer-coarse:after:min-w-11"
+            },
+            "content": {
+              "text": "pending@example.test",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "SPAN",
+              "class": "min-w-0 truncate text-left"
+            }
+          },
+          {
+            "control": {
+              "text": "Linked Example",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "BUTTON",
+              "class": "inline-flex items-center justify-center whitespace-nowrap text-sm font-medium transition-all disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 shrink-0 [&_svg]:shrink-0 outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive hover:bg-accent hover:text-accent-foreground dark:hover:bg-accent/50 rounded-md relative h-6 max-w-full gap-1 px-1 py-0 has-[>svg]:px-1 pointer-coarse:after:absolute pointer-coarse:after:-inset-y-2.5 pointer-coarse:after:inset-x-0 pointer-coarse:after:min-w-11"
+            },
+            "content": {
+              "text": "Linked Example",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "SPAN",
+              "class": "min-w-0 truncate text-left"
+            }
+          },
+          {
+            "control": {
+              "text": "Staff Example",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "BUTTON",
+              "class": "inline-flex items-center justify-center whitespace-nowrap text-sm font-medium transition-all disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 shrink-0 [&_svg]:shrink-0 outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive hover:bg-accent hover:text-accent-foreground dark:hover:bg-accent/50 rounded-md relative h-6 max-w-full gap-1 px-1 py-0 has-[>svg]:px-1 pointer-coarse:after:absolute pointer-coarse:after:-inset-y-2.5 pointer-coarse:after:inset-x-0 pointer-coarse:after:min-w-11"
+            },
+            "content": {
+              "text": "Staff Example",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "SPAN",
+              "class": "min-w-0 truncate text-left"
+            }
+          },
+          {
+            "control": {
+              "text": "expired@example.test",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "BUTTON",
+              "class": "inline-flex items-center justify-center whitespace-nowrap text-sm font-medium transition-all disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 shrink-0 [&_svg]:shrink-0 outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive hover:bg-accent hover:text-accent-foreground dark:hover:bg-accent/50 rounded-md relative h-6 max-w-full gap-1 px-1 py-0 has-[>svg]:px-1 pointer-coarse:after:absolute pointer-coarse:after:-inset-y-2.5 pointer-coarse:after:inset-x-0 pointer-coarse:after:min-w-11"
+            },
+            "content": {
+              "text": "expired@example.test",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "SPAN",
+              "class": "min-w-0 truncate text-left"
+            }
+          },
+          {
+            "control": {
+              "text": "–",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "BUTTON",
+              "class": "inline-flex items-center justify-center whitespace-nowrap text-sm font-medium transition-all disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 shrink-0 [&_svg]:shrink-0 outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive hover:bg-accent hover:text-accent-foreground dark:hover:bg-accent/50 rounded-md relative h-6 max-w-full gap-1 px-1 py-0 has-[>svg]:px-1 pointer-coarse:after:absolute pointer-coarse:after:-inset-y-2.5 pointer-coarse:after:inset-x-0 pointer-coarse:after:min-w-11"
+            },
+            "content": {
+              "text": "–",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "SPAN",
+              "class": "min-w-0 truncate text-left"
+            }
+          },
+          {
+            "control": {
+              "text": "–",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "BUTTON",
+              "class": "inline-flex items-center justify-center whitespace-nowrap text-sm font-medium transition-all disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 shrink-0 [&_svg]:shrink-0 outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive hover:bg-accent hover:text-accent-foreground dark:hover:bg-accent/50 rounded-md relative h-6 max-w-full gap-1 px-1 py-0 has-[>svg]:px-1 pointer-coarse:after:absolute pointer-coarse:after:-inset-y-2.5 pointer-coarse:after:inset-x-0 pointer-coarse:after:min-w-11"
+            },
+            "content": {
+              "text": "–",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "SPAN",
+              "class": "min-w-0 truncate text-left"
+            }
+          },
+          {
+            "control": {
+              "text": "Staff Example",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "BUTTON",
+              "class": "inline-flex items-center justify-center whitespace-nowrap text-sm font-medium transition-all disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 shrink-0 [&_svg]:shrink-0 outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive hover:bg-accent hover:text-accent-foreground dark:hover:bg-accent/50 rounded-md relative h-6 max-w-full gap-1 px-1 py-0 has-[>svg]:px-1 pointer-coarse:after:absolute pointer-coarse:after:-inset-y-2.5 pointer-coarse:after:inset-x-0 pointer-coarse:after:min-w-11"
+            },
+            "content": {
+              "text": "Staff Example",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "SPAN",
+              "class": "min-w-0 truncate text-left"
+            }
+          },
+          {
+            "control": {
+              "text": "–",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "BUTTON",
+              "class": "inline-flex items-center justify-center whitespace-nowrap text-sm font-medium transition-all disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 shrink-0 [&_svg]:shrink-0 outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive hover:bg-accent hover:text-accent-foreground dark:hover:bg-accent/50 rounded-md relative h-6 max-w-full gap-1 px-1 py-0 has-[>svg]:px-1 pointer-coarse:after:absolute pointer-coarse:after:-inset-y-2.5 pointer-coarse:after:inset-x-0 pointer-coarse:after:min-w-11"
+            },
+            "content": {
+              "text": "–",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "SPAN",
+              "class": "min-w-0 truncate text-left"
+            }
+          },
+          {
+            "control": {
+              "text": "–",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "BUTTON",
+              "class": "inline-flex items-center justify-center whitespace-nowrap text-sm font-medium transition-all disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 shrink-0 [&_svg]:shrink-0 outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive hover:bg-accent hover:text-accent-foreground dark:hover:bg-accent/50 rounded-md relative h-6 max-w-full gap-1 px-1 py-0 has-[>svg]:px-1 pointer-coarse:after:absolute pointer-coarse:after:-inset-y-2.5 pointer-coarse:after:inset-x-0 pointer-coarse:after:min-w-11"
+            },
+            "content": {
+              "text": "–",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "SPAN",
+              "class": "min-w-0 truncate text-left"
+            }
+          }
+        ],
+        "stylesheet": [
+          "http://127.0.0.1:29494/assets/index-DJNViF-t.css"
+        ]
+      },
+      "compact": {
+        "token": {
+          "size": ".875rem",
+          "lineHeight": "calc(1.25 / .875)"
+        },
+        "headers": [
+          {
+            "cell": {
+              "text": "Name",
+              "fontSize": "11px",
+              "lineHeight": "15.7143px",
+              "tag": "TH",
+              "class": "text-foreground h-10 px-3 text-left align-middle font-medium whitespace-nowrap [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px] w-56"
+            },
+            "content": {
+              "text": "Name",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "SPAN",
+              "class": ""
+            }
+          },
+          {
+            "cell": {
+              "text": "Code",
+              "fontSize": "11px",
+              "lineHeight": "15.7143px",
+              "tag": "TH",
+              "class": "text-foreground h-10 px-3 text-left align-middle font-medium whitespace-nowrap [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px] w-40"
+            },
+            "content": {
+              "text": "Code",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "SPAN",
+              "class": ""
+            }
+          },
+          {
+            "cell": {
+              "text": "Team id",
+              "fontSize": "11px",
+              "lineHeight": "15.7143px",
+              "tag": "TH",
+              "class": "text-foreground h-10 px-3 text-left align-middle font-medium whitespace-nowrap [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px] w-40"
+            },
+            "content": {
+              "text": "Team id",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "SPAN",
+              "class": ""
+            }
+          },
+          {
+            "cell": {
+              "text": "Status",
+              "fontSize": "11px",
+              "lineHeight": "15.7143px",
+              "tag": "TH",
+              "class": "text-foreground h-10 px-3 text-left align-middle font-medium whitespace-nowrap [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px] w-40"
+            },
+            "content": {
+              "text": "Status",
+              "fontSize": "11px",
+              "lineHeight": "15.7143px",
+              "tag": "SPAN",
+              "class": "px-2 py-1"
+            }
+          },
+          {
+            "cell": {
+              "text": "Application access",
+              "fontSize": "11px",
+              "lineHeight": "15.7143px",
+              "tag": "TH",
+              "class": "text-foreground h-10 px-3 text-left align-middle font-medium whitespace-nowrap [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px] w-48"
+            },
+            "content": {
+              "text": "Application access",
+              "fontSize": "11px",
+              "lineHeight": "15.7143px",
+              "tag": "SPAN",
+              "class": "px-2 py-1"
+            }
+          },
+          {
+            "cell": {
+              "text": "Actions",
+              "fontSize": "11px",
+              "lineHeight": "15.7143px",
+              "tag": "TH",
+              "class": "text-foreground h-10 px-3 text-left align-middle font-medium whitespace-nowrap [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px] w-18 sticky right-0 z-10 border-l bg-background group-hover:bg-muted"
+            },
+            "content": {
+              "text": "Actions",
+              "fontSize": "11px",
+              "lineHeight": "15.7143px",
+              "tag": "SPAN",
+              "class": "px-2 py-1"
+            }
+          }
+        ],
+        "ordinary": [
+          {
+            "cell": {
+              "text": "Worker 001",
+              "fontSize": "11px",
+              "lineHeight": "15.7143px",
+              "tag": "TD",
+              "class": "px-3 py-2 align-middle whitespace-nowrap overflow-hidden text-ellipsis [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px] w-56"
+            },
+            "content": {
+              "text": "Worker 001",
+              "fontSize": "11px",
+              "lineHeight": "15.7143px",
+              "tag": "SPAN",
+              "class": "inline-grid min-w-0 max-w-full gap-0.5"
+            }
+          },
+          {
+            "cell": {
+              "text": "W1",
+              "fontSize": "11px",
+              "lineHeight": "15.7143px",
+              "tag": "TD",
+              "class": "px-3 py-2 align-middle whitespace-nowrap overflow-hidden text-ellipsis [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px] w-40"
+            },
+            "content": {
+              "text": "W1",
+              "fontSize": "11px",
+              "lineHeight": "15.7143px",
+              "tag": "SPAN",
+              "class": "inline-grid min-w-0 max-w-full gap-0.5"
+            }
+          },
+          {
+            "cell": {
+              "text": "North team",
+              "fontSize": "11px",
+              "lineHeight": "15.7143px",
+              "tag": "TD",
+              "class": "px-3 py-2 align-middle whitespace-nowrap overflow-hidden text-ellipsis [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px] w-40"
+            },
+            "content": {
+              "text": "North team",
+              "fontSize": "11px",
+              "lineHeight": "15.7143px",
+              "tag": "SPAN",
+              "class": "inline-grid min-w-0 max-w-full gap-0.5"
+            }
+          },
+          {
+            "cell": {
+              "text": "active",
+              "fontSize": "11px",
+              "lineHeight": "15.7143px",
+              "tag": "TD",
+              "class": "px-3 py-2 align-middle whitespace-nowrap overflow-hidden text-ellipsis [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px] w-40"
+            },
+            "content": {
+              "text": "active",
+              "fontSize": "11px",
+              "lineHeight": "15.7143px",
+              "tag": "SPAN",
+              "class": "inline-grid min-w-0 max-w-full gap-0.5"
+            }
+          }
+        ],
+        "access": [
+          {
+            "control": {
+              "text": "–",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "BUTTON",
+              "class": "inline-flex items-center justify-center whitespace-nowrap text-sm font-medium transition-all disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 shrink-0 [&_svg]:shrink-0 outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive hover:bg-accent hover:text-accent-foreground dark:hover:bg-accent/50 rounded-md relative h-6 max-w-full gap-1 px-1 py-0 has-[>svg]:px-1 pointer-coarse:after:absolute pointer-coarse:after:-inset-y-2.5 pointer-coarse:after:inset-x-0 pointer-coarse:after:min-w-11"
+            },
+            "content": {
+              "text": "–",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "SPAN",
+              "class": "min-w-0 truncate text-left"
+            }
+          },
+          {
+            "control": {
+              "text": "pending@example.test",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "BUTTON",
+              "class": "inline-flex items-center justify-center whitespace-nowrap text-sm font-medium transition-all disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 shrink-0 [&_svg]:shrink-0 outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive hover:bg-accent hover:text-accent-foreground dark:hover:bg-accent/50 rounded-md relative h-6 max-w-full gap-1 px-1 py-0 has-[>svg]:px-1 pointer-coarse:after:absolute pointer-coarse:after:-inset-y-2.5 pointer-coarse:after:inset-x-0 pointer-coarse:after:min-w-11"
+            },
+            "content": {
+              "text": "pending@example.test",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "SPAN",
+              "class": "min-w-0 truncate text-left"
+            }
+          },
+          {
+            "control": {
+              "text": "Linked Example",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "BUTTON",
+              "class": "inline-flex items-center justify-center whitespace-nowrap text-sm font-medium transition-all disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 shrink-0 [&_svg]:shrink-0 outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive hover:bg-accent hover:text-accent-foreground dark:hover:bg-accent/50 rounded-md relative h-6 max-w-full gap-1 px-1 py-0 has-[>svg]:px-1 pointer-coarse:after:absolute pointer-coarse:after:-inset-y-2.5 pointer-coarse:after:inset-x-0 pointer-coarse:after:min-w-11"
+            },
+            "content": {
+              "text": "Linked Example",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "SPAN",
+              "class": "min-w-0 truncate text-left"
+            }
+          },
+          {
+            "control": {
+              "text": "Staff Example",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "BUTTON",
+              "class": "inline-flex items-center justify-center whitespace-nowrap text-sm font-medium transition-all disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 shrink-0 [&_svg]:shrink-0 outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive hover:bg-accent hover:text-accent-foreground dark:hover:bg-accent/50 rounded-md relative h-6 max-w-full gap-1 px-1 py-0 has-[>svg]:px-1 pointer-coarse:after:absolute pointer-coarse:after:-inset-y-2.5 pointer-coarse:after:inset-x-0 pointer-coarse:after:min-w-11"
+            },
+            "content": {
+              "text": "Staff Example",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "SPAN",
+              "class": "min-w-0 truncate text-left"
+            }
+          },
+          {
+            "control": {
+              "text": "expired@example.test",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "BUTTON",
+              "class": "inline-flex items-center justify-center whitespace-nowrap text-sm font-medium transition-all disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 shrink-0 [&_svg]:shrink-0 outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive hover:bg-accent hover:text-accent-foreground dark:hover:bg-accent/50 rounded-md relative h-6 max-w-full gap-1 px-1 py-0 has-[>svg]:px-1 pointer-coarse:after:absolute pointer-coarse:after:-inset-y-2.5 pointer-coarse:after:inset-x-0 pointer-coarse:after:min-w-11"
+            },
+            "content": {
+              "text": "expired@example.test",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "SPAN",
+              "class": "min-w-0 truncate text-left"
+            }
+          },
+          {
+            "control": {
+              "text": "–",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "BUTTON",
+              "class": "inline-flex items-center justify-center whitespace-nowrap text-sm font-medium transition-all disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 shrink-0 [&_svg]:shrink-0 outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive hover:bg-accent hover:text-accent-foreground dark:hover:bg-accent/50 rounded-md relative h-6 max-w-full gap-1 px-1 py-0 has-[>svg]:px-1 pointer-coarse:after:absolute pointer-coarse:after:-inset-y-2.5 pointer-coarse:after:inset-x-0 pointer-coarse:after:min-w-11"
+            },
+            "content": {
+              "text": "–",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "SPAN",
+              "class": "min-w-0 truncate text-left"
+            }
+          },
+          {
+            "control": {
+              "text": "–",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "BUTTON",
+              "class": "inline-flex items-center justify-center whitespace-nowrap text-sm font-medium transition-all disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 shrink-0 [&_svg]:shrink-0 outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive hover:bg-accent hover:text-accent-foreground dark:hover:bg-accent/50 rounded-md relative h-6 max-w-full gap-1 px-1 py-0 has-[>svg]:px-1 pointer-coarse:after:absolute pointer-coarse:after:-inset-y-2.5 pointer-coarse:after:inset-x-0 pointer-coarse:after:min-w-11"
+            },
+            "content": {
+              "text": "–",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "SPAN",
+              "class": "min-w-0 truncate text-left"
+            }
+          },
+          {
+            "control": {
+              "text": "Staff Example",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "BUTTON",
+              "class": "inline-flex items-center justify-center whitespace-nowrap text-sm font-medium transition-all disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 shrink-0 [&_svg]:shrink-0 outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive hover:bg-accent hover:text-accent-foreground dark:hover:bg-accent/50 rounded-md relative h-6 max-w-full gap-1 px-1 py-0 has-[>svg]:px-1 pointer-coarse:after:absolute pointer-coarse:after:-inset-y-2.5 pointer-coarse:after:inset-x-0 pointer-coarse:after:min-w-11"
+            },
+            "content": {
+              "text": "Staff Example",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "SPAN",
+              "class": "min-w-0 truncate text-left"
+            }
+          },
+          {
+            "control": {
+              "text": "–",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "BUTTON",
+              "class": "inline-flex items-center justify-center whitespace-nowrap text-sm font-medium transition-all disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 shrink-0 [&_svg]:shrink-0 outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive hover:bg-accent hover:text-accent-foreground dark:hover:bg-accent/50 rounded-md relative h-6 max-w-full gap-1 px-1 py-0 has-[>svg]:px-1 pointer-coarse:after:absolute pointer-coarse:after:-inset-y-2.5 pointer-coarse:after:inset-x-0 pointer-coarse:after:min-w-11"
+            },
+            "content": {
+              "text": "–",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "SPAN",
+              "class": "min-w-0 truncate text-left"
+            }
+          },
+          {
+            "control": {
+              "text": "–",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "BUTTON",
+              "class": "inline-flex items-center justify-center whitespace-nowrap text-sm font-medium transition-all disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 shrink-0 [&_svg]:shrink-0 outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive hover:bg-accent hover:text-accent-foreground dark:hover:bg-accent/50 rounded-md relative h-6 max-w-full gap-1 px-1 py-0 has-[>svg]:px-1 pointer-coarse:after:absolute pointer-coarse:after:-inset-y-2.5 pointer-coarse:after:inset-x-0 pointer-coarse:after:min-w-11"
+            },
+            "content": {
+              "text": "–",
+              "fontSize": "14px",
+              "lineHeight": "20px",
+              "tag": "SPAN",
+              "class": "min-w-0 truncate text-left"
+            }
+          }
+        ],
+        "stylesheet": [
+          "http://127.0.0.1:29494/assets/index-DJNViF-t.css"
+        ]
+      }
+    }
+  ]
+}
