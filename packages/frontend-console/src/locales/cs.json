@@ -640,6 +640,8 @@
   "listDisplay": "Sloupce",
   "listDisplayHeading": "Sloupce",
   "listDisplayHint": "První sloupec zůstává vždy viditelný.",
+  "listDisplayMoveUp": "Posunout nahoru: {{column}}",
+  "listDisplayMoveDown": "Posunout dolů: {{column}}",
   "listDisplayCompact": "Kompaktní řádky",
   "listDisplayReset": "Obnovit doporučené zobrazení",
   "savedViewsName": "Název pohledu",

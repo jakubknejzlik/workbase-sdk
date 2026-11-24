@@ -1186,3 +1186,47 @@ for (const language of ['en', 'cs'] as const) for (const font of [16, 32]) {
     } finally { release(); await page.unrouteAll({ behavior: 'wait' }) }
   })
 }
+
+for (const width of [1440, 900, 390]) for (const language of ['en', 'cs'] as const) test(`#292 column order ${width} ${language}`, async ({ page, context }) => {
+  const copy = language === 'cs' ? cs : en
+  await page.setViewportSize({ width, height: 900 })
+  await context.addInitScript(language => localStorage.setItem('console-language', language), language)
+  await gotoSDK(page, route); await settled(page)
+  const expectedIds = expectedRows({}).slice(0, 10).map(row => row.id)
+  await expect.poll(() => ids(page)).toEqual(expectedIds)
+  const headers = list(page).getByRole('columnheader')
+  const initial = await headers.allTextContents()
+  const initialCells = await list(page).locator('tbody tr').first().getByRole('cell').allTextContents()
+  const trigger = page.getByRole('button', { name: copy.listDisplay, exact: true })
+  await trigger.focus(); await page.keyboard.press('Enter')
+  const menu = page.getByRole('dialog', { name: copy.listDisplayHeading, exact: true })
+  const checks = menu.locator('[data-list-display-columns]').getByRole('checkbox')
+  const first = checks.first()
+  await expect(first).toBeFocused()
+  const column = (await first.locator('..').textContent())!.trim()
+  const up = menu.getByRole('button', { name: copy.listDisplayMoveUp.replace('{{column}}', column), exact: true })
+  const down = menu.getByRole('button', { name: copy.listDisplayMoveDown.replace('{{column}}', column), exact: true })
+  await expect(up).toBeDisabled()
+  await expect(menu.getByRole('button', { name: copy.listDisplayMoveDown.replace('{{column}}', copy.rowAccess), exact: true })).toBeDisabled()
+  // Use the same Tab/Enter/Space path available to users, including a real DOM move.
+  await page.keyboard.press('Tab'); await expect(down).toBeFocused()
+  await page.keyboard.press('Enter'); await expect(down).toBeFocused()
+  const reordered = [...initial]; [reordered[1], reordered[2]] = [reordered[2], reordered[1]]
+  await expect(headers).toHaveText(reordered)
+  const reorderedCells = [...initialCells]; [reorderedCells[1], reorderedCells[2]] = [reorderedCells[2], reorderedCells[1]]
+  await expect(list(page).locator('tbody tr').first().getByRole('cell')).toHaveText(reorderedCells)
+  await page.keyboard.press('Shift+Tab'); await expect(up).toBeFocused()
+  await page.keyboard.press('Space'); await expect(up).toBeDisabled(); await expect(down).toBeFocused()
+  await expect(headers).toHaveText(initial)
+  await down.click()
+  const hidden = menu.locator('[data-list-display-columns]').getByRole('checkbox', { checked: false })
+  await expect(hidden).toHaveCount(1)
+  await hidden.click()
+  await menu.getByRole('button', { name: copy.listDisplayReset, exact: true }).click()
+  await expect(headers).toHaveText(initial)
+  await expect(list(page).locator('tbody tr').first().getByRole('cell')).toHaveText(initialCells)
+  // Primary record links and the trailing Actions column survive every move and reset.
+  await expect.poll(() => ids(page)).toEqual(expectedIds)
+  await insideViewport(menu)
+  await page.keyboard.press('Escape'); await expect(trigger).toBeFocused()
+})

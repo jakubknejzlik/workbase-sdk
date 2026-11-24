@@ -620,6 +620,8 @@
   "listDisplay": "Columns",
   "listDisplayHeading": "Columns",
   "listDisplayHint": "The first column always stays visible.",
+  "listDisplayMoveUp": "Move up: {{column}}",
+  "listDisplayMoveDown": "Move down: {{column}}",
   "listDisplayCompact": "Compact rows",
   "listDisplayReset": "Restore recommended view",
   "savedViewsName": "View name",
