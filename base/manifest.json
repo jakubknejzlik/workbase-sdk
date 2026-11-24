@@ -1,0 +1,150 @@
+{
+  "candidate": "591de890f1a0888ab0c453ab6cbe7c697c62644d",
+  "revision": "base",
+  "build": {
+    "version": "0.4.0",
+    "sha": "115f0fd055472617197385de93bc7dcb9cb36506",
+    "sourceCommit": "c31fe5e1914c5daff4cca83427b6caa0aca9d41a",
+    "builtAt": "2026-11-24T10:47:29.853Z"
+  },
+  "captures": [
+    {
+      "width": 1440,
+      "path": "/tmp/codex-scratch/codex-wr-github-jakubknejzlik-workbase-sdk-295-s1-impl-wr-5c760173/base/591de890f1a0888ab0c453ab6cbe7c697c62644d-base-en-1440.png",
+      "rightPath": "/tmp/codex-scratch/codex-wr-github-jakubknejzlik-workbase-sdk-295-s1-impl-wr-5c760173/base/591de890f1a0888ab0c453ab6cbe7c697c62644d-base-en-1440-scroll-end.png",
+      "middlePaths": [],
+      "observed": [
+        {
+          "text": "Alex Example",
+          "align": "start",
+          "header": "flow-start"
+        },
+        {
+          "text": "12",
+          "align": "start",
+          "header": "flow-start"
+        },
+        {
+          "text": "Nov 24, 2026",
+          "align": "start",
+          "header": "flow-start"
+        },
+        {
+          "text": "No",
+          "align": "start",
+          "header": "flow-start"
+        },
+        {
+          "text": "Example Clinic",
+          "align": "start",
+          "header": "flow-start"
+        },
+        {
+          "text": "–",
+          "align": "start",
+          "header": "flow-start"
+        },
+        {
+          "text": "",
+          "align": "start",
+          "header": "center"
+        }
+      ],
+      "browser": "158.0.8127.37",
+      "url": "http://127.0.0.1:19595/o/org-a/e/worker"
+    },
+    {
+      "width": 900,
+      "path": "/tmp/codex-scratch/codex-wr-github-jakubknejzlik-workbase-sdk-295-s1-impl-wr-5c760173/base/591de890f1a0888ab0c453ab6cbe7c697c62644d-base-en-900.png",
+      "rightPath": "/tmp/codex-scratch/codex-wr-github-jakubknejzlik-workbase-sdk-295-s1-impl-wr-5c760173/base/591de890f1a0888ab0c453ab6cbe7c697c62644d-base-en-900-scroll-end.png",
+      "middlePaths": [],
+      "observed": [
+        {
+          "text": "Alex Example",
+          "align": "start",
+          "header": "flow-start"
+        },
+        {
+          "text": "12",
+          "align": "start",
+          "header": "flow-start"
+        },
+        {
+          "text": "Nov 24, 2026",
+          "align": "start",
+          "header": "flow-start"
+        },
+        {
+          "text": "No",
+          "align": "start",
+          "header": "flow-start"
+        },
+        {
+          "text": "Example Clinic",
+          "align": "start",
+          "header": "flow-start"
+        },
+        {
+          "text": "–",
+          "align": "start",
+          "header": "flow-start"
+        },
+        {
+          "text": "",
+          "align": "start",
+          "header": "center"
+        }
+      ],
+      "browser": "158.0.8127.37",
+      "url": "http://127.0.0.1:19595/o/org-a/e/worker"
+    },
+    {
+      "width": 390,
+      "path": "/tmp/codex-scratch/codex-wr-github-jakubknejzlik-workbase-sdk-295-s1-impl-wr-5c760173/base/591de890f1a0888ab0c453ab6cbe7c697c62644d-base-en-390.png",
+      "rightPath": "/tmp/codex-scratch/codex-wr-github-jakubknejzlik-workbase-sdk-295-s1-impl-wr-5c760173/base/591de890f1a0888ab0c453ab6cbe7c697c62644d-base-en-390-scroll-end.png",
+      "middlePaths": [
+        "/tmp/codex-scratch/codex-wr-github-jakubknejzlik-workbase-sdk-295-s1-impl-wr-5c760173/base/591de890f1a0888ab0c453ab6cbe7c697c62644d-base-en-390-scroll-224.png",
+        "/tmp/codex-scratch/codex-wr-github-jakubknejzlik-workbase-sdk-295-s1-impl-wr-5c760173/base/591de890f1a0888ab0c453ab6cbe7c697c62644d-base-en-390-scroll-544.png"
+      ],
+      "observed": [
+        {
+          "text": "Alex Example",
+          "align": "start",
+          "header": "flow-start"
+        },
+        {
+          "text": "12",
+          "align": "start",
+          "header": "flow-start"
+        },
+        {
+          "text": "Nov 24, 2026",
+          "align": "start",
+          "header": "flow-start"
+        },
+        {
+          "text": "No",
+          "align": "start",
+          "header": "flow-start"
+        },
+        {
+          "text": "Example Clinic",
+          "align": "start",
+          "header": "flow-start"
+        },
+        {
+          "text": "–",
+          "align": "start",
+          "header": "flow-start"
+        },
+        {
+          "text": "",
+          "align": "start",
+          "header": "center"
+        }
+      ],
+      "browser": "158.0.8127.37",
+      "url": "http://127.0.0.1:19595/o/org-a/e/worker"
+    }
+  ]
+}
