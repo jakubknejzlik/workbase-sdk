@@ -1,0 +1,114 @@
+[
+  {
+    "name": "F1-return-nested-container",
+    "text": "const p:{name:string;version:string;schemaReferences:{entity:string;field:string}[]}={name:'custom',version:'1.0.0',schemaReferences:[]}; function get(){return {wrapped:p}}; get().wrapped.schemaReferences.push({entity:'worker',field:'note'}); export default {plugins:[p]}",
+    "group": "F1",
+    "expectedSafe": false
+  },
+  {
+    "name": "F1-return-conditional",
+    "text": "const p:{name:string;version:string;schemaReferences:{entity:string;field:string}[]}={name:'custom',version:'1.0.0',schemaReferences:[]}; function get(){return Boolean(0) ? p : p}; get().schemaReferences.push({entity:'worker',field:'note'}); export default {plugins:[p]}",
+    "group": "F1",
+    "expectedSafe": false
+  },
+  {
+    "name": "F1-return-function-expression",
+    "text": "const p:{name:string;version:string;schemaReferences:{entity:string;field:string}[]}={name:'custom',version:'1.0.0',schemaReferences:[]}; const get=function(){return p}; const alias=get(); alias.schemaReferences.push({entity:'worker',field:'note'}); export default {plugins:[p]}",
+    "group": "F1",
+    "expectedSafe": false
+  },
+  {
+    "name": "F1-return-object-method",
+    "text": "const p:{name:string;version:string;schemaReferences:{entity:string;field:string}[]}={name:'custom',version:'1.0.0',schemaReferences:[]}; const get={read(){return p}}; get.read().schemaReferences.push({entity:'worker',field:'note'}); export default {plugins:[p]}",
+    "group": "F1",
+    "expectedSafe": false
+  },
+  {
+    "name": "F2-closure-environments",
+    "text": "const create=(value:{name:string;version:string;schemaReferences:{entity:string;field:string}[]})=>()=>value; const make=Boolean(0) ? create({name:'custom',version:'1.0.0',schemaReferences:[]}) : create({name:'custom',version:'1.0.0',schemaReferences:[{entity:'worker',field:'note'}]}); export default {plugins:[make()]}",
+    "group": "F2",
+    "expectedSafe": false
+  },
+  {
+    "name": "F2-nested-choice",
+    "text": "const make=Boolean(0) ? ()=>({name:'custom',version:'1.0.0',schemaReferences:[]}) : (Boolean(0) ? ()=>({name:'custom',version:'1.0.0',schemaReferences:[]}) : ()=>({name:'custom',version:'1.0.0',schemaReferences:[{entity:'worker',field:'note'}]})); export default {plugins:[make()]}",
+    "group": "F2",
+    "expectedSafe": false
+  },
+  {
+    "name": "F2-property-factory-choice",
+    "text": "const holder=Boolean(0) ? {make:()=>({name:'custom',version:'1.0.0',schemaReferences:[]})} : {make:()=>({name:'custom',version:'1.0.0',schemaReferences:[{entity:'worker',field:'note'}]})}; export default {plugins:[holder.make()]}",
+    "group": "F2",
+    "expectedSafe": false
+  },
+  {
+    "name": "F3-shadow-array-pattern",
+    "text": "const [undefined]=[true]; function make(){return undefined ? {name:'custom',version:'1.0.0',schemaReferences:[{entity:'worker',field:'note'}]} : {name:'custom',version:'1.0.0',schemaReferences:[]}}; export default {plugins:[make()]}",
+    "group": "F3",
+    "expectedSafe": false
+  },
+  {
+    "name": "F3-shadow-destructure",
+    "text": "const {flag:undefined}={flag:true}; function make(){return undefined ? {name:'custom',version:'1.0.0',schemaReferences:[{entity:'worker',field:'note'}]} : {name:'custom',version:'1.0.0',schemaReferences:[]}}; export default {plugins:[make()]}",
+    "group": "F3",
+    "expectedSafe": false
+  },
+  {
+    "name": "F3-shadow-namespace-import",
+    "text": "import * as undefined from './side'; function make(){return undefined ? {name:'custom',version:'1.0.0',schemaReferences:[{entity:'worker',field:'note'}]} : {name:'custom',version:'1.0.0',schemaReferences:[]}}; export default {plugins:[make()]}",
+    "side": "export const flag=true",
+    "group": "F3",
+    "expectedSafe": false
+  },
+  {
+    "name": "F3-shadow-nested-pattern",
+    "text": "const {nested:{flag:undefined}}={nested:{flag:true}}; function make(){return undefined ? {name:'custom',version:'1.0.0',schemaReferences:[{entity:'worker',field:'note'}]} : {name:'custom',version:'1.0.0',schemaReferences:[]}}; export default {plugins:[make()]}",
+    "group": "F3",
+    "expectedSafe": false
+  },
+  {
+    "name": "F6-default-from-earlier",
+    "text": "function make(flag=true,selected=flag){return selected ? {name:'custom',version:'1.0.0',schemaReferences:[{entity:'worker',field:'note'}]} : {name:'custom',version:'1.0.0',schemaReferences:[]}}; export default {plugins:[make(undefined,undefined)]}",
+    "group": "F6",
+    "expectedSafe": false
+  },
+  {
+    "name": "F6-default-choice",
+    "text": "function make(flag=true){return flag ? {name:'custom',version:'1.0.0',schemaReferences:[{entity:'worker',field:'note'}]} : {name:'custom',version:'1.0.0',schemaReferences:[]}}; export default {plugins:[make(Boolean(0) ? false : undefined)]}",
+    "group": "F6",
+    "expectedSafe": false
+  },
+  {
+    "name": "F6-default-shadowed-arg",
+    "text": "const undefined=true; function make(flag=false){return flag ? {name:'custom',version:'1.0.0',schemaReferences:[{entity:'worker',field:'note'}]} : {name:'custom',version:'1.0.0',schemaReferences:[]}}; export default {plugins:[make(undefined)]}",
+    "group": "F6",
+    "expectedSafe": false
+  },
+  {
+    "name": "F6-default-shadowed-namespace",
+    "text": "import * as undefined from './side'; function make(flag=undefined){return flag ? {name:'custom',version:'1.0.0',schemaReferences:[{entity:'worker',field:'note'}]} : {name:'custom',version:'1.0.0',schemaReferences:[]}}; export default {plugins:[make()]}",
+    "side": "export const flag=true",
+    "group": "F6",
+    "expectedSafe": false
+  },
+  {
+    "name": "F6-default-closure",
+    "text": "const make=(flag=true)=>()=>flag ? {name:'custom',version:'1.0.0',schemaReferences:[{entity:'worker',field:'note'}]} : {name:'custom',version:'1.0.0',schemaReferences:[]}; export default {plugins:[make(undefined)()]}",
+    "group": "F6",
+    "expectedSafe": false
+  },
+  {
+    "name": "F1-exported-function-alias",
+    "text": "import {get,descriptor} from './side'; get().schemaReferences.push({entity:'worker',field:'note'}); export default {plugins:[descriptor]}",
+    "side": "const p:{name:string;version:string;schemaReferences:{entity:string;field:string}[]}={name:'custom',version:'1.0.0',schemaReferences:[]}; export function get(){return p}; export const descriptor=p",
+    "group": "F1",
+    "expectedSafe": false
+  },
+  {
+    "name": "F1-default-function-alias",
+    "text": "import get,{descriptor} from './side'; get().schemaReferences.push({entity:'worker',field:'note'}); export default {plugins:[descriptor]}",
+    "side": "const p:{name:string;version:string;schemaReferences:{entity:string;field:string}[]}={name:'custom',version:'1.0.0',schemaReferences:[]}; export default function get(){return p}; export const descriptor=p",
+    "group": "F1",
+    "expectedSafe": false
+  }
+]
