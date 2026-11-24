@@ -3,6 +3,10 @@
 Fork the repository, create a branch, and open a pull request. CI uses read-only
 repository permissions. Maintainers review changes before merging.
 
+All SDK UI changes must follow the [SDK UI definition of done](docs/ui/sdk-ui-definition-of-done.md).
+Implementation briefs must reference an approved pattern; every UI PR requires
+independent visual acceptance of the real built page at the exact candidate SHA.
+
 PRs into `integration/*` use targeted local checks. Whenever a changed file has
 an exact-line review in `scripts/sdk-scan-policy.json` (including `bun.lock` and
 reviewed `package.json` files), or the policy itself changes, also run:
