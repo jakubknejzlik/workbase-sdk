@@ -73,6 +73,42 @@ async function save(page: Page, name: string) {
 const scenarios = ['populated-admin', 'populated-restricted-staff', 'expanded-filters', 'view-menu', 'access-menu', 'personal-views', 'empty', 'error', 'loading'] as const
 for (const language of ['en', 'cs'] as const) {
   const copy = language === 'cs' ? cs : en
+  for (const width of [1440, 900, 390]) test(`R294: ${language} toolbar wraps by available space at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 })
+    await page.addInitScript(language => localStorage.setItem('console-language', language), language)
+    await gotoSDK(page, route); await settled(page)
+    const toolbar = list(page).locator('[data-list-slot="toolbar"]')
+    const search = toolbar.getByRole('searchbox', { name: copy.search, exact: true })
+    const filters = toolbar.getByRole('button', { name: copy.sortAndFilter, exact: true })
+    // Locate the existing trigger by semantics, independent of its text/icon presentation.
+    const saved = toolbar.getByRole('region', { name: copy.savedViews, exact: true }).locator('button[aria-haspopup="dialog"]')
+    const columns = toolbar.getByRole('button', { name: copy.listDisplay, exact: true })
+    const searchBox = (await search.boundingBox())!
+    const filterBox = (await filters.boundingBox())!
+    const savedBox = (await saved.boundingBox())!
+    const columnsBox = (await columns.boundingBox())!
+    expect(searchBox.y + searchBox.height, 'search has its own top row').toBeLessThanOrEqual(Math.min(filterBox.y, savedBox.y, columnsBox.y))
+    if (width >= 900) {
+      expect(filterBox.y, 'Filters and Saved views share the second row').toBe(savedBox.y)
+      expect(filterBox.y, 'Filters and Columns share the second row').toBe(columnsBox.y)
+      expect(filterBox.x + filterBox.width, 'filter and view actions do not overlap').toBeLessThanOrEqual(savedBox.x)
+    }
+    expect(await toolbar.evaluate(node => node.scrollWidth <= node.clientWidth), 'toolbar has no horizontal overflow').toBe(true)
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth), 'page has no horizontal overflow').toBe(true)
+    const controls = await toolbar.locator('input, select, button').evaluateAll(nodes => nodes.map(node => {
+      const { x, y, width, height } = node.getBoundingClientRect()
+      return { x, y, width, height }
+    }).filter(bounds => bounds.width > 0 && bounds.height > 0))
+    const toolbarBox = (await toolbar.boundingBox())!
+    for (const [index, control] of controls.entries()) {
+      expect(control.x, 'control stays inside toolbar left edge').toBeGreaterThanOrEqual(toolbarBox.x)
+      expect(control.x + control.width, 'control stays inside toolbar right edge').toBeLessThanOrEqual(toolbarBox.x + toolbarBox.width)
+      for (const other of controls.slice(index + 1)) {
+        expect(control.x + control.width <= other.x || other.x + other.width <= control.x || control.y + control.height <= other.y || other.y + other.height <= control.y, 'toolbar controls do not overlap').toBe(true)
+      }
+    }
+    observations.push({ kind: 'toolbar-layout', language, width, searchBox, filterBox, savedBox, columnsBox, controls })
+  })
   test(`R4: ${language} toolbar relation filter visibly identifies its configured label`, async ({ page }) => {
     await page.addInitScript(language => localStorage.setItem('console-language', language), language)
     await gotoSDK(page, route); await settled(page)
