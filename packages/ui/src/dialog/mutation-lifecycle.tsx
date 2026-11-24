@@ -131,6 +131,16 @@ export function MutationSession({ children, close, cancelLabel, confirming = fal
 export function useMutationForm<T extends FieldValues>(options: UseFormProps<T>, track = true) {
   const form = useForm<T>(options)
   useMutationState(form.formState.isDirty, () => form.reset(), track)
+  // Inline forms have no dialog session, but still defer a deployment while edited.
+  const session = useMutationSession()
+  const [safety] = useState<SafetySession>(() => ({ dirty: false, submitting: false }))
+  const standalone = track && !session
+  useLayoutEffect(() => {
+    if (!standalone) { safetySessions.delete(safety); notifySafety(); return }
+    safety.dirty = form.formState.isDirty; safety.submitting = form.formState.isSubmitting
+    safetySessions.add(safety); notifySafety()
+  }, [standalone, form.formState.isDirty, form.formState.isSubmitting])
+  useLayoutEffect(() => () => { safetySessions.delete(safety); notifySafety() }, [])
   return form
 }
 export function useMutationState(dirty: boolean, reset?: () => void, track = true) {
