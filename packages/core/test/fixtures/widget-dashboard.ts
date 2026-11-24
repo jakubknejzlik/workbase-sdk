@@ -9,7 +9,7 @@ import { consoleUI } from '@workbasehq/plugins/console'
 import type { ConsoleWidget } from '../../src/console-contract'
 
 export const referenceQuery = { entity: 'jobs', select: ['id', 'title', 'account_id', 'created_at', 'updated_at'], labels: ['account_id'], limit: 5 }
-export function widgetDashboard(repeatedPolicy = 1, restrictedView = false) {
+export function widgetDashboard(repeatedPolicy = 1, restrictedView = false, seamWidgets = false) {
   const all = { read: 'allow', create: 'allow', update: 'allow', delete: 'allow' } as const
   const read = (where: Record<string, unknown>) => ({ read: { where }, create: 'deny', update: 'deny', delete: 'deny' } as const)
   const widgets: ConsoleWidget[] = [
@@ -18,6 +18,7 @@ export function widgetDashboard(repeatedPolicy = 1, restrictedView = false) {
     { id: 'plain', label: 'Job titles', kind: 'list', field: 'title', query: { entity: 'jobs', select: ['id', 'title'], limit: 5 } },
   ]
   const namedQuery = { entity: 'jobs', select: ['id'], limit: 5, view: 'named' }
+  if (seamWidgets) widgets.push({ id: 'records', label: 'Account overview', kind: 'table', columns: ['name', 'user'], query: { entity: 'accounts', select: ['id', 'name', 'user'], labels: ['user'], limit: 5 } })
   const invalidQuery = { entity: 'jobs', select: ['id'], limit: 5, contextList: { entity: 'jobs', list: 'missing', id: 'own' } }
   if (restrictedView) widgets.push(
     { id: 'named', label: 'Named records', kind: 'table', columns: ['id'], query: namedQuery },
@@ -27,7 +28,7 @@ export function widgetDashboard(repeatedPolicy = 1, restrictedView = false) {
   const config = defineConfig({ id: 'widget_dashboard', roles: ['owner', 'staff'], organizationOwnerRole: 'owner', languages: ['en', 'cs'], interactive: true,
     plugins: [identity, localAuth, legacyPermissions, members, organizations, consoleUI(), {
       name: 'widget-dashboard', version: '1', requires: { console: '^1' }, contributes: { console: {
-        pages: [{ id: 'summary', path: '/summary', label: 'Summary', widgets, sections: [{ row: ['count', 'references'] }, { row: ['plain'] }] }],
+        pages: [{ id: 'summary', path: '/summary', label: 'Summary', widgets, sections: [{ row: ['count', 'references'] }, { row: seamWidgets ? ['records', 'plain'] : ['plain'] }] }],
         navigation: [{ id: 'summary', placement: 'sidebar', page: 'summary', label: 'Summary' }],
       } },
     }],
