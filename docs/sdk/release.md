@@ -37,6 +37,15 @@ print or commit its contents. Run `git diff --check`, a redacted gitleaks branch
 scan, SDK boundary and public scans. Never weaken scan policies or add exceptions.
 See [CONTRIBUTING.md](../../CONTRIBUTING.md).
 
+The documented reference-snapshot false positive in
+[workbase-sdk#307](https://github.com/jakubknejzlik/workbase-sdk/issues/307)
+and [PR #319](https://github.com/jakubknejzlik/workbase-sdk/pull/319)
+(CI 45437619150) has exactly 19 immutable gitleaks fingerprints for public
+source-file sha256 digests in commit `aa53f5c9fab01b1197c86e0f235f09f28bbda8ee`,
+which is outside release ancestry. JARVIS and the Codex coordinator verified
+all 19 digests; the exact entries record the coordinator's technical decision
+within the authorized 0.4.1 release (2026-11-24 17:47Z).
+
 ## Phase 2: hosted validation and release evidence
 
 Archive rehearsal and combined screenshots follow assembly, outside the scoped
