@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { readFileSync } from 'node:fs'
 import { expect, it, vi } from 'vitest'
 import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
@@ -284,6 +285,28 @@ it('209 generated list gives record and access controls distinct visible and acc
   expect(record.querySelector('svg.lucide-ellipsis[aria-hidden="true"]')).toBeTruthy()
   await userEvent.setup().click(record)
   expect(screen.getAllByRole('menuitem').map(item => item.textContent)).toEqual(['Delete'])
+})
+
+it.each(['comfortable', 'compact'])('291 %s list cells, access control and all headers share text-sm typography tokens', async density => {
+  await mount({ list: true, recordActions: true, status: { state: 'invited', can_invite: true, can_cancel: true, invitation: { id: 'pending', email: 'alex@example.test' }, inconsistency: null } })
+  const access = await screen.findByRole('button', { name: /alex@example.test.*Application access actions/ })
+  const table = screen.getByRole('table')
+  table.closest('[data-list-density]')!.setAttribute('data-list-density', density)
+  const style = document.createElement('style')
+  style.textContent = readFileSync(`${import.meta.dirname}/../src/styles.css`, 'utf8')
+  document.head.append(style)
+  try {
+    const typography = Array.from(style.sheet!.cssRules).find(rule => 'style' in rule && (rule as CSSStyleRule).style.getPropertyValue('font-size') === 'var(--text-sm)') as CSSStyleRule
+    expect(typography).toBeTruthy()
+    expect(typography.style.getPropertyValue('line-height')).toBe('var(--text-sm--line-height)')
+    // Exercise the rendered shared rule for cells, access and both header paths.
+    const headers = screen.getAllByRole('columnheader')
+    expect(headers.some(header => header.querySelector('button'))).toBe(true)
+    expect(headers.some(header => !header.querySelector('button'))).toBe(true)
+    for (const element of [table, ...screen.getAllByRole('cell'), access, ...headers, ...headers.flatMap(header => Array.from(header.querySelectorAll('button')))]) {
+      expect(element.matches(typography.selectorText)).toBe(true)
+    }
+  } finally { style.remove() }
 })
 
 it('209 list preserves separately authorized account actions when invitation status is unavailable', async () => {
