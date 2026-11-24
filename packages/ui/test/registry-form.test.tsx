@@ -334,3 +334,34 @@ it('A10 custom registered controls expose RHF focus, touched state and server-er
   fireEvent.change(screen.getByLabelText('note'), { target: { value: 'Changed' } })
   await waitFor(() => expect(observed.getFieldState('note').error).toBeUndefined())
 })
+
+// Port of review wr-ffb38ad8's preceding-section grant probe.
+it.each(['Earlier', 'Basics'])('A5/A7 a late grant in preceding %s section retains existing input DOM and focus', async section => {
+  const name = { type: 'string', 'x-ui': { section: 'Basics' } }
+  const late = { type: 'string', 'x-ui': { section } }
+  const props = { label: (name: string) => name, submitLabel: 'Save', invalidLabel: 'Invalid', onSubmit: vi.fn(), values: { name: 'Ada' } }
+  const view = render(<RegistryForm {...props} schema={{ type: 'object', 'x-ui': { fieldOrder: ['late', 'name'] }, properties: { name } }} seeds={{ name: { state: 'known', value: 'Ada' } }} />)
+  const input = screen.getByLabelText('name')
+  input.focus(); fireEvent.change(input, { target: { value: 'Grace' } })
+  view.rerender(<RegistryForm {...props} schema={{ type: 'object', 'x-ui': { fieldOrder: ['late', 'name'] }, properties: { late, name } }} seeds={{ name: { state: 'known', value: 'Ada' }, late: { state: 'known', value: 'Seed' } }} />)
+  await waitFor(() => expect(screen.getByLabelText('late')).toHaveProperty('value', 'Seed'))
+  expect(screen.getByLabelText('name')).toHaveProperty('value', 'Grace')
+  expect(screen.getByLabelText('name')).toBe(input)
+  expect(document.activeElement).toBe(input)
+})
+
+it('A5/A7 repeated section labels retain both existing runs when an earlier run is granted', async () => {
+  const field = (section: string) => ({ type: 'string', 'x-ui': { section } })
+  const props = { label: (name: string) => name, submitLabel: 'Save', invalidLabel: 'Invalid', onSubmit: vi.fn(), values: { name: 'Ada', tail: 'Tail' } }
+  const order = ['late', 'separator', 'name', 'middle', 'tail']
+  const properties = { name: field('Basics'), middle: field('Middle'), tail: field('Basics') }
+  const view = render(<RegistryForm {...props} schema={{ type: 'object', 'x-ui': { fieldOrder: order }, properties }} />)
+  const input = screen.getByLabelText('name'), tail = screen.getByLabelText('tail')
+  input.focus(); fireEvent.change(input, { target: { value: 'Grace' } })
+  view.rerender(<RegistryForm {...props} schema={{ type: 'object', 'x-ui': { fieldOrder: order }, properties: { late: field('Basics'), separator: field('Separator'), ...properties } }} />)
+  expect(screen.getAllByRole('group', { name: 'Basics' })).toHaveLength(3)
+  expect(screen.getByLabelText('name')).toHaveProperty('value', 'Grace')
+  expect(screen.getByLabelText('name')).toBe(input)
+  expect(screen.getByLabelText('tail')).toBe(tail)
+  expect(document.activeElement).toBe(input)
+})

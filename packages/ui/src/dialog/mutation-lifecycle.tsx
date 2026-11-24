@@ -157,7 +157,13 @@ export function useMutationSubmit() {
     if (session) return session.run(action)
     if (latch.current) return
     latch.current = true
-    try { await action(); toast.success(labels.saved, { id: 'mutation-saved' }) } catch { /* inline consumer error */ } finally { latch.current = false }
+    // The action owns this entry independently of its form's mounted lifetime.
+    const safety: SafetySession = { dirty: false, submitting: true }
+    safetySessions.add(safety); notifySafety()
+    try { await action(); toast.success(labels.saved, { id: 'mutation-saved' }) } catch { /* inline consumer error */ } finally {
+      latch.current = false
+      safetySessions.delete(safety); notifySafety()
+    }
   }
 }
 export function MutationSubmitButton({ children, pending = false, footer = true, disabled, ...props }: React.ComponentProps<typeof Button> & { pending?: boolean; footer?: boolean }) {

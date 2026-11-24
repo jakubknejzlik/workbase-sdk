@@ -79,14 +79,25 @@ export function RegistryForm({ schema: inputSchema, values = {}, lockedValues = 
   const busy = pending || session?.pending || form.formState.isSubmitting
   const submitValues = (data: Record<string, any>) => { if (!blocked.current()) return submit(() => Promise.resolve(onSubmit(data))) }
   const submitButton = <MutationSubmitButton data-inline-submit={inline ? '' : undefined} footer={!inline} type={inline ? 'button' : 'submit'} pending={busy} disabled={disabled || !installed || (requireDirty && !form.formState.isDirty)} onClick={inline ? form.handleSubmit(submitValues) : undefined}>{submitLabel}</MutationSubmitButton>
-  // Preserve the existing adjacent-section presentation; the ledger survives mask remounts.
+  // Match section runs by surviving fields, not their visible position or label alone.
+  // This also distinguishes repeated labels when an earlier run becomes authorized.
+  const sectionRuns = useRef<{ next: number; groups: { key: number; section: string; names: string[] }[] }>({ next: 0, groups: [] })
   const groups: { section: string; entries: typeof fields }[] = []
   for (const entry of fields) {
     const section = fieldUI(entry[1]).section ?? ''
     if (groups.at(-1)?.section !== section) groups.push({ section, entries: [] })
     groups.at(-1)!.entries.push(entry)
   }
-  const contents = <>{serverInvalid && <p role="alert">{invalidLabel}</p>}{groups.map(({ section, entries }, index) => <fieldset key={`${section}-${index}`} className="min-w-0 space-y-4" disabled={disabled || busy}>
+  const claimed = new Set<number>()
+  const keyedGroups = groups.map(group => {
+    const names = group.entries.map(([name]) => name)
+    const previous = sectionRuns.current.groups.find(run => run.section === group.section && !claimed.has(run.key) && run.names.some(name => names.includes(name)))
+    const key = previous?.key ?? sectionRuns.current.next++
+    claimed.add(key)
+    return { ...group, names, key }
+  })
+  sectionRuns.current.groups = keyedGroups
+  const contents = <>{serverInvalid && <p role="alert">{invalidLabel}</p>}{keyedGroups.map(({ section, entries, key }) => <fieldset key={key} className="min-w-0 space-y-4" disabled={disabled || busy}>
     {section && <legend className="text-sm font-medium">{label(section)}</legend>}
     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">{entries.map(([name, raw]) => <RegisteredField key={name} name={name} raw={raw} required={!!schema.required?.includes(name)} form={form} seed={fieldSeed(name)} installations={installations} acknowledge={acknowledge} label={label(name)} optionLabel={optionLabel} disabled={disabled || busy} locked={Object.hasOwn(lockedValues, name)} relation={relation} clearServerError={() => clearServerError(name)} />)}</div>
   </fieldset>)}{secondaryAction ? <div className="flex items-center gap-2">{submitButton}{secondaryAction}</div> : submitButton}</>

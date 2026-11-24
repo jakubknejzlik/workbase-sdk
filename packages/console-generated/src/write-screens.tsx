@@ -143,7 +143,7 @@ function EntityMutation(props: EntityMutationProps) {
 }
 function EntityMutationSession(props: EntityMutationProps) {
   const { t, i18n } = useEntityTranslation(props.entity); const { model, caps, entity, row, controls, write: writeRequest, request, inline } = props; const refreshAll = useRefresh(); const authority = useReferenceAuthority(); const actor = authority?.actor
-  const live = useRef({ blocked: true, active: true, caps, fields: [] as string[], membershipCommands: [] as string[] })
+  const live = useRef({ blocked: true, active: true, canInviteAtCreate: false, caps, fields: [] as string[], membershipCommands: [] as string[] })
   useEffect(() => { live.current.active = true; return () => { live.current.active = false } }, [])
   const write: WriteRequest = (...args) => {
     if (!live.current.active || live.current.blocked) return Promise.reject({ code: 'action_unavailable' })
@@ -185,6 +185,7 @@ function EntityMutationSession(props: EntityMutationProps) {
   const createAccess = useApplicationAccess({ ...props, row: savedRow })
   const email = invitationEmail ?? liveEmail
   const canInviteAtCreate = accountForm && !row && model.entities[entity].rowAccess !== false && (hasRecordAccess(model, entity) ? caps.commands?.includes(`${entity}/access_invite`) : model.entities[entity].rowInvitations && (model.entities[entity].rowAccess ?? true))
+  live.current.canInviteAtCreate = !!canInviteAtCreate
   const fullSchema = writeSchema(model, entity, caps, row ? 'edit' : 'create')
   const schema = inline ? { ...fullSchema, properties: { [inline.field]: { ...fullSchema.properties[inline.field], 'x-ui': { ...fullSchema.properties[inline.field]['x-ui'], span: 'full', section: undefined } } }, required: fullSchema.required.filter((name: string) => name === inline.field) } : fullSchema
   const relations = editableManyRelations(model, entity, caps).filter(([name]) => Object.hasOwn(schema.properties, name))
@@ -243,7 +244,8 @@ function EntityMutationSession(props: EntityMutationProps) {
       try {
         // Always establish live status after saving, including before a retry.
         const status = await client.fetchQuery({ ...accessQuery(accessProps, actor), staleTime: 0 })
-        if (!accessGuard(status).valid) throw { code: 'action_unavailable' }
+        // This continuation may belong to a render whose invitation grant was revoked.
+        if (!live.current.active || live.current.blocked || !live.current.canInviteAtCreate || !accessGuard(status).valid) throw { code: 'action_unavailable' }
         // An uncertain prior response may already have created the invitation.
         if (status.state !== 'invited') {
           if (!status.can_invite) throw { code: 'action_unavailable' }

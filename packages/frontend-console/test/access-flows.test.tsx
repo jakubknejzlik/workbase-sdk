@@ -47,10 +47,11 @@ async function mount(surface: 'detail' | 'menu' | 'row' | 'create' | 'edit', opt
   if (options.grouped) model.entities.entries.detail = { groups: [{ id: 'main', label: 'Main', fields: ['name', 'email'] }] }
   const onDenied = vi.fn()
   const props = { disabled: options.disabled, model, caps, onDenied, orgId: 'org', entity: 'entries', write, request }
-  render(<I18nextProvider i18n={i18n}><QueryClientProvider client={client}>{surface === 'create' ? <GeneratedCreateDialog {...props} open onOpenChange={vi.fn()} /> : surface === 'row' ? <GeneratedRowInvitation {...props} row={row} /> : surface === 'menu' ? <><ApplicationAccessCard {...props} row={row} /><GeneratedRowActions {...props} row={row} /></> : <>{surface === 'detail' && <ApplicationAccessCard {...props} row={row} />}<GeneratedActions {...props} row={row} /></>}</QueryClientProvider></I18nextProvider>)
+  const renderSurface = () => <I18nextProvider i18n={i18n}><QueryClientProvider client={client}>{surface === 'create' ? <GeneratedCreateDialog {...props} open onOpenChange={vi.fn()} /> : surface === 'row' ? <GeneratedRowInvitation {...props} row={row} /> : surface === 'menu' ? <><ApplicationAccessCard {...props} row={row} /><GeneratedRowActions {...props} row={row} /></> : <>{surface === 'detail' && <ApplicationAccessCard {...props} row={row} />}<GeneratedActions {...props} row={row} /></>}</QueryClientProvider></I18nextProvider>
+  const view = render(renderSurface())
   const user = userEvent.setup()
   if (surface === 'edit') await user.click(screen.getByRole('button', { name: 'Edit' }))
-  return { write, request, user, client, onDenied }
+  return { write, request, user, client, onDenied, model, caps, view, renderSurface }
 }
 async function accessMenu(state?: string) {
   if (screen.queryByRole('menu')) return screen.getByRole('menu')
@@ -747,3 +748,32 @@ for (const language of ['en', 'cs'] as const) for (const v3 of [true, false]) {
     })
   }
 }
+
+// Port of review wr-ffb38ad8's held-read invitation probe.
+it.each([true, false])('A8 create invitation continuation rechecks a revoked invite grant v3=%s', async v3 => {
+  const test = await mount('create', { v3 })
+  const read = test.write.getMockImplementation()!
+  let release!: () => void
+  const gate = new Promise<void>(resolve => { release = resolve })
+  test.write.mockImplementation(async (path, method, ...args) => {
+    if (method === 'GET' && (path === '/api/entries/created' || path.endsWith('/row-access/entries/created'))) await gate
+    return read(path, method, ...args)
+  })
+  try {
+    await test.user.type(screen.getByLabelText('Name'), 'Draft')
+    await test.user.type(screen.getByLabelText('Contact email'), 'invite@example.test')
+    await test.user.click(screen.getByRole('checkbox', { name: 'Invite now' }))
+    await test.user.click(screen.getByRole('button', { name: 'Create' }))
+    await waitFor(() => expect(test.write.mock.calls.some(([path, method]) => method === 'GET' && path.includes('created'))).toBe(true))
+    // Keep CRUD create authorized; only invitation authority disappears.
+    test.caps.revision = 2
+    if (v3) test.caps.commands = []
+    else test.model.entities.entries.rowInvitations = false
+    test.view.rerender(test.renderSurface())
+    expect(screen.queryByRole('checkbox', { name: 'Invite now' })).toBeNull()
+    await act(async () => release())
+    await waitFor(() => expect(test.client.isMutating()).toBe(0))
+    expect(test.write.mock.calls.filter(([path, method]) => method === 'POST' && (path.endsWith('/actions/invite') || path.endsWith('/invitations')))).toHaveLength(0)
+    expect(test.write.mock.calls.filter(([path, method]) => path === '/api/entries' && method === 'POST')).toHaveLength(1)
+  } finally { release(); test.view.unmount(); test.client.clear() }
+})

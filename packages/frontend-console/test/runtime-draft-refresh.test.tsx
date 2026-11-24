@@ -48,6 +48,8 @@ async function setup(id?: string, beforeDraft?: () => void, initial = document()
   const entityGates: Record<string, Promise<void> | undefined> = {}; const releases: Record<string, () => void> = {}
   const writes: { path: string; method: string; body: any }[] = []
   const queries: any[] = []
+  let releaseWrites: (() => void) | undefined
+  let writeGate: Promise<void> | undefined
   let releaseQueries: (() => void) | undefined
   let queryGate: Promise<void> | undefined
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } })
@@ -70,6 +72,7 @@ async function setup(id?: string, beforeDraft?: () => void, initial = document()
     }
     if (path.startsWith('/api/') || path.startsWith('/commands/')) {
       const body = JSON.parse(String(options?.body ?? '{}')); writes.push({ path, method: options?.method ?? 'GET', body })
+      await writeGate
       if (writeStatus !== 200) return Response.json({ error: 'version_conflict' }, { status: writeStatus })
       return Response.json({ ...rows.entries[0], ...body, version: 10 })
     }
@@ -84,7 +87,7 @@ async function setup(id?: string, beforeDraft?: () => void, initial = document()
   fireEvent.click(screen.getByRole('button', { name: inline ? 'Edit Name' : id ? 'Edit' : 'Add Entry' }))
   const input = await screen.findByRole('textbox', { name: 'Name' }); await waitFor(() => expect(input.matches(':disabled')).toBe(false)); fireEvent.change(input, { target: { value: 'Grace' } })
   expect(getMutationSafetySnapshot().dirty).toBe(true)
-  return { client, input, rows, writes, queries, queryStatus, renderPage, writeStatus: (value: number) => { writeStatus = value }, holdEntity: (entity: string) => { entityGates[entity] = new Promise(resolve => { releases[entity] = resolve }) }, releaseEntity: (entity: string) => { releases[entity]?.(); entityGates[entity] = undefined }, refreshBuild, view, fetcher, holdQueries: () => { queryGate = new Promise<void>(resolve => { releaseQueries = resolve }) }, releaseQueries: () => releaseQueries?.(), next: (value: ConsoleModelContract) => { next = value }, deny: (value: number) => { status = value }, cleanup: () => { releaseQueries?.(); Object.values(releases).forEach(release => release()); view.unmount(); client.clear() } }
+  return { holdWrites: () => { writeGate = new Promise<void>(resolve => { releaseWrites = resolve }) }, releaseWrites: () => releaseWrites?.(), client, input, rows, writes, queries, queryStatus, renderPage, writeStatus: (value: number) => { writeStatus = value }, holdEntity: (entity: string) => { entityGates[entity] = new Promise(resolve => { releases[entity] = resolve }) }, releaseEntity: (entity: string) => { releases[entity]?.(); entityGates[entity] = undefined }, refreshBuild, view, fetcher, holdQueries: () => { queryGate = new Promise<void>(resolve => { releaseQueries = resolve }) }, releaseQueries: () => releaseQueries?.(), next: (value: ConsoleModelContract) => { next = value }, deny: (value: number) => { status = value }, cleanup: () => { releaseWrites?.(); releaseQueries?.(); Object.values(releases).forEach(release => release()); view.unmount(); client.clear() } }
 }
 it('revision-only runtime refresh retains a real registered create draft and requests a build observation', async () => {
   const test = await setup(); test.holdQueries(); test.next(document(2))
@@ -446,4 +449,24 @@ it.each(['command', 'relation'] as const)('A8 %s revocation during a membership 
     await waitFor(() => expect(test.client.isMutating()).toBe(0))
     expect(test.writes).toHaveLength(0)
   } finally { test.cleanup() }
+})
+
+// Port of review wr-ffb38ad8's real generated inline PATCH probe.
+it('A7 in-flight inline save keeps deployment blocked after editor revocation until settlement', async () => {
+  const doc = document(); (doc.model.entities.entries as any).detail = { inlineEdit: true, fields: ['name'] }
+  const test = await setup('one', undefined, doc, undefined, true)
+  test.holdWrites()
+  try {
+    fireEvent.keyDown(test.input, { key: 'Enter' })
+    await waitFor(() => expect(test.writes).toHaveLength(1))
+    expect(test.writes[0]).toEqual({ path: '/api/entries/one', method: 'PATCH', body: { name: 'Grace', version: 1 } })
+    expect(getMutationSafetySnapshot().submitting).toBe(true)
+    const next = structuredClone(doc); next.model.revision = 2; next.capabilities.revision = 2; next.capabilities.entities.entries.operations = ['read']
+    await refreshEditor(test, next)
+    await waitFor(() => expect(screen.queryByRole('textbox', { name: 'Name' })).toBeNull())
+    expect(getMutationSafetySnapshot().submitting).toBe(true)
+    await act(async () => test.releaseWrites())
+    await waitFor(() => expect(test.client.isMutating()).toBe(0))
+    await waitFor(() => expect(getMutationSafetySnapshot().submitting).toBe(false))
+  } finally { await act(async () => test.releaseWrites()); test.cleanup() }
 })
