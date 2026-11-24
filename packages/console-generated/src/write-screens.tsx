@@ -412,7 +412,7 @@ export function GeneratedRowInvitation(props: Context & { row: Record<string, an
 export function ApplicationAccessCard(props: AccessContext) {
   const { t } = useTranslation()
   if (!canReadApplicationAccess(props.caps)) return null
-  return <Card data-application-access=""><CardHeader><CardTitle>{t('rowAccess')}</CardTitle></CardHeader><CardContent><ApplicationAccess {...props} /></CardContent></Card>
+  return <Card data-application-access=""><CardHeader><CardTitle>{t('rowAccess')}</CardTitle></CardHeader><CardContent><ApplicationAccess {...props} rowMenu /></CardContent></Card>
 }
 function ApplicationAccess(props: AccessContext & { rowMenu?: boolean }) {
   const authority = useReferenceAuthority()
