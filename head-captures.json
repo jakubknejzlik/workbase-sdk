@@ -1,0 +1,66 @@
+{
+  "build": {
+    "version": "0.4.0",
+    "sha": "7bb2949e953d27860f383024cf00b8a12197cf6f",
+    "sourceCommit": "d5bc2d74d6cc8bd8d87a174da0fc3d84d393aabc",
+    "builtAt": "2026-11-24T10:44:38.463Z"
+  },
+  "browser": "145.0.7632.6",
+  "captures": [
+    {
+      "filename": "d5bc2d74d6cc8bd8d87a174da0fc3d84d393aabc-head-en-1440-toolbar.png",
+      "width": 1440,
+      "height": 900,
+      "language": "en",
+      "state": "toolbar",
+      "url": "http://127.0.0.1:19593/o/org-a/e/worker",
+      "sha256": "242eb44da19a7643369202d4f2cb1d19bac28f531c7416cf918bffc3bb8836d2"
+    },
+    {
+      "filename": "d5bc2d74d6cc8bd8d87a174da0fc3d84d393aabc-head-en-1440-menu.png",
+      "width": 1440,
+      "height": 900,
+      "language": "en",
+      "state": "menu",
+      "url": "http://127.0.0.1:19593/o/org-a/e/worker",
+      "sha256": "c226788efe251fe72f5a216d2a310af8205c2e399b2028e1d70f0b24a8cd5b70"
+    },
+    {
+      "filename": "d5bc2d74d6cc8bd8d87a174da0fc3d84d393aabc-head-en-900-toolbar.png",
+      "width": 900,
+      "height": 900,
+      "language": "en",
+      "state": "toolbar",
+      "url": "http://127.0.0.1:19593/o/org-a/e/worker",
+      "sha256": "1acf120bda8491cfe593fecf3f7dfe813f91ecd0a7030c51f89464340f42464e"
+    },
+    {
+      "filename": "d5bc2d74d6cc8bd8d87a174da0fc3d84d393aabc-head-en-900-menu.png",
+      "width": 900,
+      "height": 900,
+      "language": "en",
+      "state": "menu",
+      "url": "http://127.0.0.1:19593/o/org-a/e/worker",
+      "sha256": "d3f1e9ce5ae2f06e7b74f149250df7cd4bceee054366888bbfd49c17dd35dcb0"
+    },
+    {
+      "filename": "d5bc2d74d6cc8bd8d87a174da0fc3d84d393aabc-head-en-390-toolbar.png",
+      "width": 390,
+      "height": 900,
+      "language": "en",
+      "state": "toolbar",
+      "url": "http://127.0.0.1:19593/o/org-a/e/worker",
+      "sha256": "db8db52db2a4275cb068d48d5a572e9161c5f940fe35f05243584f3c107e59c8"
+    },
+    {
+      "filename": "d5bc2d74d6cc8bd8d87a174da0fc3d84d393aabc-head-en-390-menu.png",
+      "width": 390,
+      "height": 900,
+      "language": "en",
+      "state": "menu",
+      "url": "http://127.0.0.1:19593/o/org-a/e/worker",
+      "sha256": "9dbeb59d669b46e9db6e16e90cf4b419fabbc89a960184425098ddd11021c5a9"
+    }
+  ],
+  "candidateCommit": "d5bc2d74d6cc8bd8d87a174da0fc3d84d393aabc"
+}
