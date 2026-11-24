@@ -48,6 +48,39 @@ const saveAs = async (user: Awaited<ReturnType<typeof mount>>['user'], name: str
   const input = within(dialog).getByRole('textbox', { name: copy.savedViewsName }); expect(document.activeElement).toBe(input)
   await user.type(input, name); await user.click(within(dialog).getByRole('button', { name: copy.savedViewsConfirm }))
 }
+async function appliedView(user: Awaited<ReturnType<typeof mount>>['user'], name: string, copy: typeof en | typeof cs = en) {
+  const menu = await openViewsMenu(user, copy)
+  expect(within(menu).getByRole('button', { name })).toBeTruthy()
+  for (const label of [copy.savedViewsSaveNew, copy.savedViewsRenameThis, copy.savedViewsDeleteThis, copy.savedViewsClose, copy.savedViewsApplyView]) expect(within(menu).getByRole('button', { name: label })).toBeTruthy()
+  await user.click(within(menu).getByRole('button', { name: copy.savedViewsRenameThis }))
+  const dialog = await screen.findByRole('dialog')
+  expect((within(dialog).getByRole('textbox', { name: copy.savedViewsName }) as HTMLInputElement).value).toBe(name)
+  await user.keyboard('{Escape}')
+}
+it.each(['en', 'cs'] as const)('%s icon keeps its name and tooltip, opens the unchanged menu by keyboard and restores focus', async language => {
+  const copy = language === 'cs' ? cs : en
+  const { user, router } = await mount(language)
+  const trigger = within(viewsRegion(copy)).getByRole('button', { name: copy.savedViewsMenu })
+  expect(trigger.title).toBe(copy.savedViewsMenu)
+  expect(trigger.textContent).toBe('')
+  expect(trigger.querySelector('svg')?.getAttribute('aria-hidden')).toBe('true')
+  expect(screen.getByRole('button', { name: copy.listDisplay })).not.toBe(trigger)
+  for (const key of ['{Enter}', ' ']) {
+    trigger.focus()
+    await user.keyboard(key)
+    const menu = await screen.findByRole('dialog', { name: copy.savedViews })
+    expect(within(menu).getAllByRole('button').map(button => button.textContent)).toEqual([copy.savedViewsSaveNew, copy.savedViewsClose, copy.savedViewsApplyView])
+    expect(within(menu).getByRole('button', { name: copy.savedViewsApplyView }).hasAttribute('disabled')).toBe(true)
+    expect(within(menu).getByText(copy.savedViewsBrowserOnly)).toBeTruthy()
+    await user.keyboard('{Escape}')
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: copy.savedViews })).toBeNull())
+    expect(document.activeElement).toBe(trigger)
+  }
+  await navigate(router, { sort: 'created', direction: 'desc' })
+  expect(within(viewsRegion(copy)).getByRole('button', { name: copy.savedViewsMenu })).toBe(trigger)
+  expect(within(trigger).getByRole('img', { name: copy.savedViewsUnsaved })).toBeTruthy()
+  expect(trigger.title).toBe(copy.savedViewsMenu)
+})
 it.each(['en', 'cs'] as const)('%s saves, applies at page one, renames, updates and deletes with accessible focus', async language => {
   const copy = language === 'cs' ? cs : en
   const { router, request, user } = await mount(language)
@@ -61,12 +94,12 @@ it.each(['en', 'cs'] as const)('%s saves, applies at page one, renames, updates 
   await user.type(input, '  My view  '); await user.click(within(dialog).getByRole('button', { name: copy.savedViewsConfirm }))
   expect(loadSavedViews(scope, 'entries').entries[0]).toMatchObject({ name: 'My view', search: { view: 'all', sort: 'created', direction: 'desc', filters: [{ field: 'name', predicate: { contains: 'Saved' } }] } })
   expect(loadSavedViews(scope, 'entries').entries[0].search.search).toBeUndefined()
-  await waitFor(() => expect(viewsTrigger(copy).textContent).toContain('My view'))
+  await appliedView(user, 'My view', copy)
   expect(document.activeElement).toBe(viewsTrigger(copy))
   const renaming = await openNaming(user, 'savedViewsRenameThis', copy)
   await user.clear(within(renaming).getByRole('textbox', { name: copy.savedViewsName })); await user.type(within(renaming).getByRole('textbox', { name: copy.savedViewsName }), 'Renamed')
   await user.click(within(renaming).getByRole('button', { name: copy.savedViewsConfirm }))
-  await waitFor(() => expect(viewsTrigger(copy).textContent).toContain('Renamed'))
+  await appliedView(user, 'Renamed', copy)
   await navigate(router, { sort: 'none' })
   await waitFor(() => expect(screen.getByRole('button', { name: copy.nextPage }).hasAttribute('disabled')).toBe(false))
   await user.click(screen.getByRole('button', { name: copy.nextPage }))
@@ -89,7 +122,7 @@ it.each(['en', 'cs'] as const)('%s saves, applies at page one, renames, updates 
   const deleting = await openNaming(user, 'savedViewsDeleteThis', copy)
   await user.click(within(deleting).getByRole('button', { name: copy.savedViewsDelete }))
   expect(loadSavedViews(scope, 'entries').entries).toEqual([])
-  await waitFor(() => expect(viewsTrigger(copy).textContent).toBe(copy.savedViewsMenu))
+  await waitFor(() => expect(viewsTrigger(copy).getAttribute('aria-label')).toBe(copy.savedViewsMenu))
   expect(document.activeElement).toBe(viewsTrigger(copy))
 })
 it('revalidates saved settings against reduced capabilities and retains listStateDropped', async () => {
@@ -118,7 +151,7 @@ it('hides the feature without verified scope and resets mounted state on scope r
   expect(screen.queryByRole('textbox', { name: en.savedViewsName })).toBeNull()
   expect(store.setItem).not.toHaveBeenCalled()
   expect(viewsRegion().textContent).not.toContain('Unsubmitted')
-  expect(viewsTrigger().textContent).toBe(en.savedViewsMenu)
+  expect(viewsTrigger().getAttribute('aria-label')).toBe(en.savedViewsMenu)
 })
 it('never shows controls or reads a namespace for embedded lists', async () => {
   await mount('en', scope, true)
@@ -142,7 +175,7 @@ it('storage events refresh the catalogue without navigation; reload and back/for
   store.removeItem(savedViewsKey(scope, 'entries'))
   await act(async () => window.dispatchEvent(new StorageEvent('storage', { key: savedViewsKey(scope, 'entries') })))
   // The applied view vanished in another tab: it can no longer be the dirty baseline.
-  await waitFor(() => expect(viewsTrigger().textContent).toBe(en.savedViewsMenu))
+  await waitFor(() => expect(viewsTrigger().getAttribute('aria-label')).toBe(en.savedViewsMenu))
   expect(within(await openViewsMenu(user)).queryByRole('button', { name: 'Other tab' })).toBeNull()
   expect(router.state.location.search.sort).toBe('none')
   changeSavedViews(scope, 'entries', { kind: 'save', name: 'Persisted', state: { search: '', sort: null, userFilters: [], presetFilters: [], limit: 30 } })
@@ -224,7 +257,7 @@ it('selecting a view never changes the list; switching while dirty is announced 
   await act(async () => window.dispatchEvent(new StorageEvent('storage', { key: savedViewsKey(scope, 'entries') })))
   await applyView(user, 'By name')
   await waitFor(() => expect(router.state.location.search.sort).toBe('name'))
-  await waitFor(() => expect(viewsTrigger().textContent).toBe('By name'))
+  await appliedView(user, 'By name')
   expect(saveBar()).toBeNull()
   // Unsaved work on top of the active view.
   await navigate(router, { sort: 'name', direction: 'desc' })
@@ -237,12 +270,12 @@ it('selecting a view never changes the list; switching while dirty is announced 
   // Opening and cancelling "save as new" changes neither the active view nor the list.
   await user.click(within(menu).getByRole('button', { name: en.savedViewsSaveNew }))
   await user.click(within(await screen.findByRole('dialog')).getByRole('button', { name: en.cancel }))
-  expect(viewsTrigger().textContent).toContain('By name'); expect(router.state.location.search).toMatchObject({ sort: 'name', direction: 'desc' })
+  await appliedView(user, 'By name'); expect(router.state.location.search).toMatchObject({ sort: 'name', direction: 'desc' })
   expect(loadSavedViews(scope, 'entries').entries).toHaveLength(2)
   // Confirming replaces the changes and makes the chosen view the baseline.
   await applyView(user, 'By created')
   await waitFor(() => expect(router.state.location.search).toMatchObject({ sort: 'created', direction: 'asc' }))
-  await waitFor(() => expect(viewsTrigger().textContent).toBe('By created'))
+  await appliedView(user, 'By created')
   await waitFor(() => expect(saveBar()).toBeNull())
   expect((await openViewsMenu(user)).querySelector('[role=status]')).toBeNull()
 })
@@ -284,7 +317,7 @@ it.each(['escape', 'close', 'apply', 'trigger'] as const)('restores personal vie
   // Let the menu receive focus before toggling it closed (the review-trigger probe).
   await waitFor(() => expect(document.activeElement).toBe(within(menu).getAllByRole('button')[0]))
   if (action === 'escape') await user.keyboard('{Escape}')
-  else if (action === 'trigger') await user.click(viewsTrigger().querySelector('span')!)
+  else if (action === 'trigger') await user.click(viewsTrigger().querySelector('svg')!)
   else await user.click(within(menu).getByRole('button', { name: action === 'close' ? en.savedViewsClose : en.savedViewsApplyView }))
   await waitFor(() => expect(screen.queryByRole('dialog', { name: en.savedViews })).toBeNull())
   await waitFor(() => expect(document.activeElement).toBe(viewsTrigger()))
