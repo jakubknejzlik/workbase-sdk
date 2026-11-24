@@ -1,82 +1,84 @@
-# SDK 0.4.0 release preparation
+# SDK 0.4.1 release preparation
 
-The candidate coordinates `@workbasehq/core`, `@workbasehq/plugins` and
-`@workbasehq/mcp` at **0.4.0**, with matching `CORE_VERSION`, plugins core peer
-and lockfile. The private console workspaces ship through plugins; they are not
-separate published packages. See the [0.4.0 changelog](../../CHANGELOG.md),
-[migration notes](migration-0.4.0.md) and
+The patch candidate coordinates `@workbasehq/core`, `@workbasehq/plugins` and
+`@workbasehq/mcp` at **0.4.1**, with matching `CORE_VERSION`, plugins core peer
+and lockfile. Private console workspaces ship through plugins and are not
+separate published packages. See the [0.4.1 changelog](../../CHANGELOG.md),
+[0.4.0 migration notes](migration-0.4.0.md) and
 [runnable Workers configuration](../../packages/core/examples/README.md).
 
-The refreshed candidate starts at accepted integration revision
-`ffce5cb3c2387bf2ebf1197829ae371168af42ed` ([PR #280](https://github.com/jakubknejzlik/workbase-sdk/pull/280))
-and retains the merge of main `cfef8a865331bb65f3a8f41adb2a1ecd7be9a03a`, following
-the `release/sdk-v0.3.1` → main pattern. Review
-[release PR #256](https://github.com/jakubknejzlik/workbase-sdk/pull/256) and
-[#233 ACCEPT](https://github.com/jakubknejzlik/workbase-sdk/issues/233#issuecomment-7018768570).
-The #233 ACCEPT and its acceptance bundle apply to integration revision
-`a51c635eb84cf4e4bd128f28f4704e226fdf6e55`. PR #257 is the #255 P3 polish
-follow-up (G4–G6), reviewed MERGE at `e28bdc23`. The earlier acceptance bundle
-and rubric score a51c635e; release-head screenshots carry their own source commit
-and console asset-tree identity and do not establish rebuilt-archive acceptance.
-This refresh merges two integration commits after release head
-`e940d8fc7858ab69c0210a5bc03c061cf6c95985`: #279 (caller temp paths) and #280
-(Wrangler proxy recovery). Wrangler is pinned exactly to **4.129.1**; the older
-Wrangler patch is removed. The preceding release-head CI run `45165798417`
-attempt 1 was red (182 passed / 5 failed with HTTP 500); #280 addresses that
-proxy failure. The hosted #265 acceptance completed 187/187 in CI run
-`45150426227`; the refreshed release PR still requires its own full hosted CI
-on the new release head. Local preparation runs only the scoped gates below
-and does not dispatch the release workflow.
-Publication pending: tag + provenance after green CI and review.
+## Candidate scope
+
+Start at main `43fbe4daa868283338e0524e8494e5d5eeb1aa9c` (0.4.0). Cherry-pick
+only the reviewed squash commits for #285, #286, #289, #290–#295, #298 and
+#301–#304, in integration/preview order. The handoff records issue, PR, original
+squash SHA and release cherry-pick SHA. Do not merge the whole preview branch.
+Source of scope: [release tracker #307](https://github.com/jakubknejzlik/workbase-sdk/issues/307).
+
+An over-budget dashboard widget still returns no data. Failure isolation keeps
+other widgets rendering and gives the refused widget a localized explanation;
+the machine code remains in JSON. Consumer reference columns stay omitted and
+no budget or limit is raised. Literal 0.4.0 widget captions remain supported.
 
 ## Preparation checks
 
-Run the scoped local checks recorded in the release handoff; full SDK and MCP
-suites run in the release PR's CI. Run `git diff --check`, typecheck, lint,
-version/validator unit tests, `check:ci-invariants` and a redacted gitleaks branch scan.
-Use only the existing maintainer vocabulary file for private-term guards; never
-print or commit its contents. See [CONTRIBUTING.md](../../CONTRIBUTING.md).
+Mirror [.github/workflows/ci.yml](../../.github/workflows/ci.yml) locally: frozen
+install, lint, root/UI/frontend typecheck, CI invariants, full `bun run test`
+(including infra, tools and frontend), List v2 acceptance, MCP and locale checks.
+Verify combined console-model/widgets and widget browser coverage, literal
+0.4.0 captions, Zero/Nonzero/Missing stats, error cards next to linked data
+widgets, and shared header/body tracks. Every mandatory gate must pass on the
+concrete release head; baseline failures are not a waiver.
 
-For a local archive-only rehearsal (no publication or full consumer suite):
+Use only the existing maintainer vocabulary file for private-term guards; never
+print or commit its contents. Run `git diff --check`, a redacted gitleaks branch
+scan, SDK boundary and public scans. Never weaken scan policies or add exceptions.
+See [CONTRIBUTING.md](../../CONTRIBUTING.md).
+
+Run the archive-only rehearsal:
 
 ```sh
 bash scripts/sdk-pack.sh --pack-only
 ```
 
-The public CI workflow builds/packs exactly the three SDK packages, scans source
-and archives and runs the full installed-template proof. Archive-only rehearsal
-is not a substitute for green CI or registry consumer acceptance. Source commit,
-console asset-tree SHA (`consoleArtifactsSHA`, `build-meta.json.sha` and HTML
-stamp), and archive SRI are separate identities. Retain `dist-sdk/PROVENANCE.json`
-and the CI links in the publication handoff. Source: [packer](../../scripts/sdk-pack.sh),
+Retain `dist-sdk/PROVENANCE.json`. Source commit, console asset-tree SHA
+(`consoleArtifactsSHA`, `build-meta.json.sha` and HTML stamp), and archive SRI
+are separate identities. Archive rehearsal does not replace hosted CI or clean
+registry-consumer acceptance. Source: [packer](../../scripts/sdk-pack.sh),
 [provenance](../../scripts/sdk-provenance.ts).
 
-## Publication handoff (pending; not performed during preparation)
+Capture the combined release head with synthetic data in English at 1440, 1280,
+900 and 390 px: worker list, Columns, Saved views, Access detail, widget table
+and row drilldown. Retain real PNGs named `<headSha>-r1-en-<width>-<state>.png`
+and `<headSha>-r1-manifest.json` containing file, width, state and sha256. Inspect
+every image. Keep the evidence until JARVIS uploads it to the Workbase thread;
+owner must see the combined head SHA and PNG set before publication.
 
-After green full CI and maintainer review, select the exact reviewed release
-commit. The release workflow runs on `sdk-v*` tags or manual dispatch; do not
-trigger it as part of this preparation. Its template rehearsal uses
-`bun scripts/smoke-mcp-template.ts --directory dist-sdk`. Publication order is
-core → plugins → mcp; the future tag for this version is `sdk-v0.4.0`.
+## Publication handoff (not performed during preparation)
 
-For a separately authorized local publisher dry run against already checked
-archives, the version-specific command is:
+Preparation pushes only `release/sdk-v0.4.1`. JARVIS opens the release PR, runs
+full hosted CI and independent release review at the exact head, merges and tags.
+Record the release PR URL and hosted CI run URL/conclusion as soon as they exist.
+Hosted tools and every other mandatory gate must be green at the release SHA.
 
-```sh
-bun scripts/sdk-publish.ts --directory dist-sdk --dry-run --expect-version 0.4.0
-```
+After owner visibility of the combined SHA/evidence, green hosted gates and
+independent review MERGE, push **one** real tag `sdk-v0.4.1` on the reviewed main
+commit. Do not additionally dispatch a dry-run workflow: the tag run performs
+all existing release gates once. No tag, dispatch or publication occurs during
+preparation.
 
-The release job pins npm 11.5.1 and authenticates through GitHub Actions OIDC
-(`id-token: write`) using Trusted Publisher for this repository's `release.yml`
-with no environment on all three packages. Real tag publication passes
-`--expect-version 0.4.0 --provenance`; dispatch defaults to dry run. The publisher
-itself defaults to provenance=false unless explicitly opted in, and provenance
-requires the hosted Actions identity. See [release.yml](../../.github/workflows/release.yml)
-and [sdk-publish.ts](../../scripts/sdk-publish.ts).
+Publication order is core → plugins → mcp. The tag workflow pins npm 11.5.1 and
+uses GitHub Actions OIDC Trusted Publisher for this repository's `release.yml`
+with no environment on all three packages. Real publication passes
+`--expect-version 0.4.1 --provenance`. Manual dispatch is optional and defaults
+to dry run; it is not an additional required release step. See
+[release.yml](../../.github/workflows/release.yml) and
+[sdk-publish.ts](../../scripts/sdk-publish.ts).
 
-Before closing #234, retain exact source/tag, green CI URLs, all package versions,
-registry integrity/provenance links, clean npm consumer proof, console SHA and
-required screenshot identities. If retrying publication, compare the integrity
-of any already existing version: the publisher's skip is not byte verification.
-Acceptance and archive rehearsal do not establish registry publication. Consumer
-upgrades and deployments need a separate task. See [consumption.md](consumption.md).
+Before closing #307 or its fixes, retain exact source/tag, green CI and release
+run URLs, all package versions, registry integrity/provenance links, a clean
+0.4.1 consumer install proof, console SHA and screenshot identities. Announce
+publication only after all three npm packages show 0.4.1 as latest. If retrying,
+compare the integrity of an existing version: a publisher skip is not byte
+verification. Consumer pins and ID selections are prepared by the owner; consumer
+upgrades/deployments have their own scope. See [consumption.md](consumption.md).
