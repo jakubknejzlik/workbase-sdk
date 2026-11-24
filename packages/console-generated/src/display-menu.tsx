@@ -6,7 +6,7 @@ import { useLayoutEffect, useRef } from 'react'
 
 export interface DisplayColumn { id: string; label: string; visible: boolean }
 export interface DisplayLabels { trigger: string; heading: string; hint: string; compact: string; reset: string; moveUp: (column: string) => string; moveDown: (column: string) => string }
-/** Controlled, session-local display preference. It is not a permission and never reaches the query or saved views. */
+/** Controlled display preference. It is not a permission and never reaches the query or saved views. */
 export function DisplayMenu({ columns, compact, labels, onToggle, onMove, onCompact, onReset }: { columns: DisplayColumn[]; compact: boolean; labels: DisplayLabels; onToggle: (id: string, visible: boolean) => void; onMove: (id: string, direction: -1 | 1) => void; onCompact: (compact: boolean) => void; onReset: () => void }) {
   const rows = useRef(new Map<string, HTMLDivElement>())
   const moved = useRef<{ id: string; direction: -1 | 1 } | null>(null)
