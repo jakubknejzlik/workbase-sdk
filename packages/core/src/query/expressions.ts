@@ -33,17 +33,50 @@ const arities: Record<string, [number, number]> = {
 const base: Record<string, Kind> = { id: 'string', organization_id: 'string', created_at: 'datetime', updated_at: 'datetime', version: 'number' }
 const fieldKind = (config: Config, entity: string, field: string): Kind => (Object.hasOwn(base, field) ? base[field] : undefined) ?? ({ int: 'number', float: 'number', bool: 'bool', datetime: 'datetime' } as Record<string, Kind>)[config.entities[entity].fields[field]?.type] ?? 'string'
 const cache = new WeakMap<Config, Map<string, ExpressionInfo>>()
+type OperandToken = { kind: 'identifier'; name: string } | { kind: 'literal'; type: 'null' | 'number' | 'string' } | { kind: 'unsupported-literal' | 'other' }
+// Classify wire operands, not SQL keywords: a whole bare name in ORDER BY can
+// identify an output alias. Wrapped names are explicitly identifiers; SQL value
+// tokens retain their literal kind before case-insensitive alias lookup.
+function operandToken(operand: unknown): OperandToken {
+  if (typeof operand !== 'string') return { kind: 'other' }
+  const wrapped = operand.match(/^#([A-Za-z_][A-Za-z0-9_]*)#$/)
+  if (wrapped && wrapped[0] === operand) return { kind: 'identifier', name: wrapped[1] }
+  if (operand === 'NULL') return { kind: 'literal', type: 'null' }
+  if (/^[+-]?\d+(?:\.\d+)?$/.test(operand)) return { kind: 'literal', type: 'number' }
+  if (/^&[^#]*&$/.test(operand)) return { kind: 'literal', type: 'string' }
+  if (/^(?:TRUE|FALSE|CURRENT_TIME|CURRENT_DATE|CURRENT_TIMESTAMP)$/.test(operand)) return { kind: 'unsupported-literal' }
+  const identifier = operand.match(/^[A-Za-z_][A-Za-z0-9_]*$/)
+  return identifier && identifier[0] === operand ? { kind: 'identifier', name: operand } : { kind: 'other' }
+}
+/** Output aliases belong only to this SELECT. Fold ASCII comparison keys, while
+ * retaining declaration spelling and accepting only whole identifier operands.
+ */
+function selectOutputAliases<T extends { alias?: string }>(fields: readonly T[]) {
+  const fold = (identifier: string) => identifier.replace(/[A-Z]/g, letter => letter.toLowerCase())
+  const aliases = new Map<string, T>()
+  for (const field of fields) if (typeof field.alias === 'string' && !aliases.has(fold(field.alias))) aliases.set(fold(field.alias), field)
+  return (operand: unknown): T | undefined => {
+    const token = operandToken(operand)
+    if (token.kind !== 'identifier') return
+    return aliases.get(fold(token.name))
+  }
+}
 /** Clone the validated AST, replacing operand nodes rather than identifier escaping.
  * Alias declarations are strings; ORDER BY aliases belong to their own SELECT.
  * Within a SELECT only `self` references bind to the outer entity; local aliases
  * may share their spelling with a ref path in the enclosing expression.
  */
-export function rebindExpression<T>(node: T, columns: Map<string, string | ISequelizable>, inQuery = false, preserved = new Set<unknown>()): T {
-  if (!node || typeof node !== 'object' || node instanceof Date || preserved.has(node)) return node
+export function rebindExpression<T>(node: T, columns: Map<string, string | ISequelizable>, inQuery = false, preserved = new Map<unknown, string>()): T {
+  if (!node || typeof node !== 'object' || node instanceof Date) return node
+  if (preserved.has(node)) return Q.expr(preserved.get(node)!) as T
   if (node instanceof SelectQuery) {
     inQuery = true
-    const aliases = new Set(node.getFields().map(field => field.alias).filter(alias => alias !== undefined))
-    preserved = new Set(node.getOrderBy().filter(order => aliases.has(order.field.serialize())).map(order => order.field))
+    const outputAlias = selectOutputAliases(node.getFields())
+    preserved = new Map()
+    for (const order of node.getOrderBy()) {
+      const projection = outputAlias(order.field.serialize())
+      if (projection) preserved.set(order.field, `#${projection.alias!}#`)
+    }
   } else if ('serialize' in node && typeof node.serialize === 'function') {
     const wire = node.serialize()
     const column = wire.match(/^#([^#]+)#$/)?.[1] ?? wire
@@ -168,9 +201,8 @@ export function expressionInfo(config: Config, entity: string, field: string, wi
       return { type: 'string', dateOnly: fn === 'CONCAT' && values.every(value => value.dateOnly || value.type === 'null'), textDependencies, ...(fn === 'CONCAT' ? { parts: { concat: values.map(value => value.parts!) } } : {}) }
     }
     if (node.startsWith('{')) return object(JSON.parse(node), context, depth + 1)
-    if (/^[+-]?\d+(?:\.\d+)?$/.test(node)) return { type: 'number', dateOnly: false }
-    if (node === 'NULL') return { type: 'null', dateOnly: false }
-    if (/^&[^#]*&$/.test(node)) return { type: 'string', dateOnly: false } // Library Fn.string encoding.
+    const token = operandToken(node)
+    if (token.kind === 'literal') return { type: token.type, dateOnly: false }
     if (node.startsWith('!!')) fail('Raw SQL is forbidden; use structured ts-query expressions')
     const column = node.match(/^#([^#]+)#$/)?.[1] ?? node
     const type = reference(column, context); return { type, dateOnly: type === 'datetime', textDependencies: type === 'string' ? [dependencies[dependencies.length - 1]] : [] }
@@ -226,10 +258,11 @@ export function expressionInfo(config: Config, entity: string, field: string, wi
       for (const where of node.where ?? []) object(where, { ...context, clause: 'WHERE' }, depth + 1)
       const aggregates = { found: false }
       const result = scalar(node.fields[0].name, { ...context, clause: 'SELECT', aggregates }, depth + 1)
+      const outputAlias = selectOutputAliases<{ alias?: string; name: unknown }>(node.fields)
       for (const order of node.orderBy ?? []) {
         // An unqualified ORDER BY output alias names the projection, not a source
         // column. Validate that expression under this SELECT's aggregate context.
-        const projection = node.fields.find((field: any) => field.alias === order.field)
+        const projection = outputAlias(order.field)
         scalar(projection ? projection.name : order.field, { ...context, clause: 'ORDER BY', selectAggregate: aggregates.found }, depth + 1)
       }
       const correlated = parent.query && context.outerReferences!.size > 0
@@ -274,13 +307,19 @@ export function expressionInfo(config: Config, entity: string, field: string, wi
       const result = { ...node }
       switch (node.type) {
         case 'Table': result.alias ??= result.source; break
-        case 'SelectQuery':
+        case 'SelectQuery': {
+          const outputAlias = selectOutputAliases(node.fields ?? [])
           result.tables = node.tables?.map(canonical)
           result.fields = node.fields?.map((field: any) => ({ ...field, name: canonical(field.name) }))
           result.joins = node.joins?.map((join: any) => ({ ...join, table: canonical(join.table), condition: canonical(join.condition) }))
           result.where = node.where?.map(canonical)
-          result.orderBy = node.orderBy?.map((order: any) => ({ ...order, field: canonical(order.field) }))
+          result.orderBy = node.orderBy?.map((order: any) => {
+            const projection = outputAlias(order.field)
+            // Keep the identifier token kind when declaration spelling is a keyword.
+            return { ...order, field: projection ? `#${projection.alias}#` : canonical(order.field) }
+          })
           break
+        }
         case 'BinaryCondition': case 'NullCondition': case 'LikeCondition': case 'BetweenCondition':
           result.key = canonical(node.key); break
         case 'ColumnComparisonCondition':
