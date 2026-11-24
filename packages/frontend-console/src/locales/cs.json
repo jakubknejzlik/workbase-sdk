@@ -620,6 +620,7 @@
   "savedViewsDelete": "Smazat pohled",
   "savedViewsMenu": "Uložené pohledy",
   "savedViewsHeading": "Uložené pohledy",
+  "savedViewsApplied": "Použitý pohled: {{name}}",
   "savedViewsHint": "Vyberte pohled a potvrďte jeho použití.",
   "savedViewsEmpty": "Zatím nemáte uložený pohled.",
   "savedViewsSaveNew": "Uložit jako nový pohled",
