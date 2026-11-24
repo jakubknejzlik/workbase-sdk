@@ -62,7 +62,7 @@ it('review computed alias keeps hidden non-null dependency unavailable', async (
 it('review real dashboard null reference', async () => {
   const dashboard = defineInstance({ ...config, plugins: [...config.plugins!, ...sample.plugins!.filter(plugin => plugin.name === 'console'), {
     name: 'review-dashboard', version: '1', requires: { console: '^1' }, contributes: { console: { pages: [{ id: 'review.dashboard', path: '/review', label: 'Review', widgets: [
-      { id: 'notes', kind: 'table', label: 'Notes', columns: ['person'], query: { entity: 'notes', select: ['id', 'person'], labels: ['person'], limit: 10 } },
+      { id: 'notes', kind: 'table', label: 'entity_notes', columns: ['person'], query: { entity: 'notes', select: ['id', 'person'], labels: ['person'], limit: 10 } },
     ] }] } },
   }] })
   await setup(dashboard)

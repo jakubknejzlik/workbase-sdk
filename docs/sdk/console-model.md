@@ -5,6 +5,14 @@ for the running instance. It uses the resolved kernel, including plugin entity,
 command and workflow contributions. It has no catalog of known instance IDs and
 requires no instance source in the browser build.
 
+Dashboard `ConsolePage` widgets (`stat`, `table`, `list`) use `label` as a
+translation key. Declare custom captions in `config.enumLabels.en` and
+`config.enumLabels.cs`; both entries must be nonempty. Undeclared keys are
+rejected at startup with the page, widget, key and missing locale in the error.
+The existing `entity_<name>` title remains valid without custom captions or an
+instance dictionary. The runtime model includes custom widget captions only
+for widgets visible to the current actor; unused captions remain server-side.
+
 The endpoint is a public SDK API, authenticated with the same session/cookie or
 Bearer credentials as `/o/:org/capabilities`. The path organization is authoritative
 over `X-Organization-Id`. Anonymous requests return 401; a missing membership or
