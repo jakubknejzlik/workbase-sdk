@@ -22,8 +22,8 @@ export function fieldReady(seed: FieldSeed, installed?: FieldInstallation) {
 }
 
 /** Both renderers register here. Only this registered owner can install/acknowledge a default. */
-export function RegisteredField({ name, raw, required, form, seed, installations, acknowledge, label, optionLabel, disabled, locked, relation, clearServerError }: {
-  name: string; raw: any; required: boolean; form: UseFormReturn<Record<string, any>>; seed: FieldSeed
+export function RegisteredField({ id: fieldId, startRow, name, raw, required, form, seed, installations, acknowledge, label, optionLabel, disabled, locked, relation, clearServerError }: {
+  id?: string; startRow?: boolean; name: string; raw: any; required: boolean; form: UseFormReturn<Record<string, any>>; seed: FieldSeed
   installations: Map<string, FieldInstallation>; acknowledge: () => void; label: string; optionLabel: (value: string) => string
   disabled?: boolean; locked: boolean; clearServerError: () => void
   relation?: (name: string, value: string, change: (value: string) => void, error?: string) => React.ReactNode
@@ -57,7 +57,7 @@ export function RegisteredField({ name, raw, required, form, seed, installations
   const change = (value: any) => { if (!ready || disabled || locked) return; clearServerError(); field.onChange(fieldValue(raw, value?.target ? value.target.value : value, required)) }
   const custom = relation?.(name, field.value ?? '', change, error)
   // Pickers keep their accessible layout; the adapter still owns blur and focus/error refs.
-  return <fieldset ref={node => { if (custom != null) field.ref(node?.querySelector('input,select,textarea,button[role="combobox"]') ?? null) }} onBlur={custom != null ? field.onBlur : undefined} disabled={disabled || locked || !ready} data-write-field={name} data-field-ready={ready} className={raw['x-ui']?.span === 'half' ? 'min-w-0' : 'min-w-0 sm:col-span-2'}>
+  return <fieldset id={fieldId} ref={node => { if (custom != null) field.ref(node?.querySelector('input,select,textarea,button[role="combobox"]') ?? null) }} onBlur={custom != null ? field.onBlur : undefined} disabled={disabled || locked || !ready} data-write-field={name} data-field-ready={ready} className={`${raw['x-ui']?.span === 'half' ? 'min-w-0' : 'min-w-0 sm:col-span-2'}${startRow ? ' sm:col-start-1' : ''}`}>
     {custom ?? <div data-slot="form-item" className="grid gap-2">
       <Label htmlFor={id} data-error={!!error}>{label}</Label>
       <RegistryField raw={raw} required={required} field={{ ...field, value: field.value ?? '', onChange: change }} id={id} aria-invalid={!!error} aria-describedby={error ? `${id}-error` : undefined} label={label} optionLabel={optionLabel} disabled={disabled || locked || !ready} />

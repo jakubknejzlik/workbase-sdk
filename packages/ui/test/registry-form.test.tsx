@@ -69,7 +69,7 @@ it('SR-37 declared field order preserves sections, appends unspecified fields an
     hidden: { type: 'string', 'x-ui': { hidden: true } }, readonly: { type: 'string', readOnly: true },
   } }} label={name => name} submitLabel="Save" invalidLabel="Invalid" onSubmit={() => {}} />)
   expect([...result.container.querySelectorAll('[data-write-field]')].map(node => node.getAttribute('data-write-field'))).toEqual(['name', 'street', 'city', 'members', 'extra'])
-  expect(screen.getByRole('group', { name: 'Address' }).querySelectorAll('[data-write-field]')).toHaveLength(2)
+  expect(screen.getByRole('group', { name: 'Address' }).getAttribute('aria-owns')!.split(' ').map(id => document.getElementById(id)?.getAttribute('data-write-field'))).toEqual(['street', 'city'])
 })
 it('metadata pairs short fields and keeps long/section fields full width without hiding business ids', () => {
   const result = render(<RegistryForm schema={{ type: 'object', properties: {
