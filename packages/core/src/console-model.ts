@@ -18,6 +18,8 @@ export function consoleModel(kernel: KernelRegistry, scope: Scope): ConsoleModel
   const caps = capabilities(kernel, scope)
   const authority = consoleAuthorization(kernel, scope, caps)
   const presentation = consolePresentation(kernel, scope, authority)
+  const registry = kernel.providers.get('console')?.[0]?.consoleRegistry?.(config, scope)
+  const console = registry ? presentation.registry(registry) : null
   const entities: ConsoleRuntimeModel['entities'] = Object.fromEntries(Object.entries(config.entities).filter(([name]) => authority.canRead(name)
     || authority.operation(name, 'create') || authority.operation(name, 'update')).map(([name, entity]) => {
     function entityInputSchema(partial = false) {
@@ -101,6 +103,8 @@ export function consoleModel(kernel: KernelRegistry, scope: Scope): ConsoleModel
           if (authority.canRead(name)) for (const prefix of ['entity', 'entitySingular', 'entityObject']) keys.add(`${prefix}_${name}`)
           for (const field of fieldsFor(config, name)) if (authority.literals(name, field)) keys.add(`field_${field}_${name}`)
         }
+        // Only captions referenced by the authorized registry enter this actor's dictionary.
+        for (const page of console?.pages ?? []) for (const widget of page.widgets ?? []) keys.add(widget.label)
         const dictionary = Object.fromEntries(Object.entries(labels).filter(([key]) => keys.has(key)))
         for (const [name, entity] of Object.entries(config.entities)) if (entity.displayExpression && entity.displayField && authority.read(name, entity.displayField)) {
           const title = labels[`entitySingular_${name}`] ?? labels[`entity_${name}`] ?? name.replaceAll('_', ' ').replace(/^./, first => first.toUpperCase())
@@ -120,10 +124,7 @@ export function consoleModel(kernel: KernelRegistry, scope: Scope): ConsoleModel
       })),
     },
     capabilities: caps,
-    console: (() => {
-      const registry = kernel.providers.get('console')?.[0]?.consoleRegistry?.(config, scope)
-      return registry ? presentation.registry(registry) : null
-    })(),
+    console,
   }
 }
 
