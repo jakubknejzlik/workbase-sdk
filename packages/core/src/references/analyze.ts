@@ -21,6 +21,21 @@ function unwrap(node: ts.Expression): ts.Expression {
 function key(node: ts.PropertyName | undefined): string | undefined {
   return node && (ts.isIdentifier(node) || ts.isStringLiteral(node) || ts.isNumericLiteral(node)) ? node.text : undefined
 }
+// Binding property keys are not local names; recurse through renamed, nested,
+// rest and array patterns (including elisions) to find the actual value bindings.
+function bindingNames(name: ts.BindingName): string[] {
+  return ts.isIdentifier(name) ? [name.text] : name.elements.flatMap(element => ts.isOmittedExpression(element) ? [] : bindingNames(element.name))
+}
+function valueBindings(node: ts.Node): string[] {
+  // Catch parameters and for-in/of heads are VariableDeclarations too.
+  if (ts.isVariableDeclaration(node) || ts.isParameter(node)) return bindingNames(node.name)
+  if (ts.isFunctionDeclaration(node) || ts.isFunctionExpression(node) || ts.isClassDeclaration(node) || ts.isClassExpression(node)
+    || ts.isEnumDeclaration(node) || ts.isModuleDeclaration(node)) return node.name && ts.isIdentifier(node.name) ? [node.name.text] : []
+  if (ts.isImportClause(node)) return !node.isTypeOnly && node.name ? [node.name.text] : []
+  if (ts.isImportSpecifier(node) || ts.isImportEqualsDeclaration(node)) return node.isTypeOnly ? [] : [node.name.text]
+  if (ts.isNamespaceImport(node)) return [node.name.text]
+  return []
+}
 export function span(node: ts.Node): Span {
   const file = node.getSourceFile(), start = node.getStart(file), end = node.getEnd()
   const a = file.getLineAndCharacterOfPosition(start), b = file.getLineAndCharacterOfPosition(end)
@@ -167,8 +182,10 @@ export function analyze(input: Snapshot, options: AnalyzeOptions = {}): Graph {
     let valid = true
     const exportedNames = new Set<string>()
     for (const statement of file.statements) {
-      if (ts.isVariableStatement(statement) && ts.getModifiers(statement)?.some(item=>item.kind===ts.SyntaxKind.ExportKeyword)
-        && statement.declarationList.declarations.some(item=>ts.isIdentifier(item.name)&&item.name.text===name)) exportedNames.add(name)
+      if (ts.canHaveModifiers(statement) && ts.getModifiers(statement)?.some(item=>item.kind===ts.SyntaxKind.ExportKeyword)) {
+        const locals = ts.isVariableStatement(statement) ? statement.declarationList.declarations.flatMap(item=>bindingNames(item.name)) : valueBindings(statement)
+        if (locals.includes(name)) exportedNames.add(ts.getModifiers(statement)?.some(item=>item.kind===ts.SyntaxKind.DefaultKeyword) ? 'default' : name)
+      }
       if (ts.isExportAssignment(statement) && ts.isIdentifier(statement.expression) && statement.expression.text===name) exportedNames.add('default')
       if (ts.isExportDeclaration(statement) && !statement.moduleSpecifier && statement.exportClause && ts.isNamedExports(statement.exportClause))
         for(const item of statement.exportClause.elements) if((item.propertyName??item.name).text===name) exportedNames.add(item.name.text)
@@ -187,8 +204,7 @@ export function analyze(input: Snapshot, options: AnalyzeOptions = {}): Graph {
       let found = false, local = true
       const visitDeclaration = (node: ts.Node): void => {
         if (++stabilityWork > limits.maxNodes * 10) { local = false; return }
-        if ((ts.isVariableDeclaration(node) || ts.isParameter(node) || ts.isFunctionDeclaration(node))
-          && node.name && ts.isIdentifier(node.name) && node.name.text === name) {
+        if (valueBindings(node).includes(name)) {
           found = true
           let ancestor: ts.Node | undefined = node.parent
           while (ancestor && ancestor !== scope) ancestor = ancestor.parent
@@ -228,6 +244,9 @@ export function analyze(input: Snapshot, options: AnalyzeOptions = {}): Graph {
           if ((ts.isPostfixUnaryExpression(parent) || ts.isPrefixUnaryExpression(parent)) && parent.operand === ancestor) valid = false
           if (ts.isDeleteExpression(parent) && parent.expression === ancestor) valid = false
           if(ts.isCallExpression(parent) && parent.arguments.some(arg=>arg===ancestor)) valid=false
+          // Class fields and enum members can publish aliases without a return
+          // statement. Their initialization/consumer semantics are not projected.
+          if ((ts.isPropertyDeclaration(parent) || ts.isEnumMember(parent)) && parent.initializer === ancestor) valid = false
           if(ts.isVariableDeclaration(parent) && parent.initializer===ancestor) {
             if(!ts.isIdentifier(parent.name) || parent.name.text!==name && !stable(file,parent.name.text,seen)) valid=false
             break
@@ -271,6 +290,22 @@ export function analyze(input: Snapshot, options: AnalyzeOptions = {}): Graph {
       return results.length === 1 ? results[0] : unknown(file, results.length ? 'Ambiguous export' : `Missing export ${name}`, results)
     } finally { active.delete(id) }
   }
+  const lexicalBindings = new Map<ts.SourceFile, { names: Set<string>; complete: boolean }>()
+  function lexical(file: ts.SourceFile): { names: Set<string>; complete: boolean } {
+    const cached = lexicalBindings.get(file)
+    if (cached) return cached
+    const result = { names: new Set<string>(), complete: true }
+    let nodes = 0
+    const visit = (node: ts.Node): void => {
+      if (++nodes > limits.maxNodes) { result.complete = false; return }
+      if (ts.isImportDeclaration(node) && node.importClause?.isTypeOnly) return
+      valueBindings(node).forEach(name=>result.names.add(name))
+      ts.forEachChild(node, visit)
+    }
+    visit(file)
+    lexicalBindings.set(file, result)
+    return result
+  }
   function binding(file: ts.SourceFile, name: string, env: Env): Value {
     if (env.has(name)) return force(env.get(name)!)
     const id = `${file.fileName}:binding:${name}`
@@ -290,8 +325,12 @@ export function analyze(input: Snapshot, options: AnalyzeOptions = {}): Graph {
           return statement.declarationList.flags & ts.NodeFlags.Const && item.initializer ? evaluate(item.initializer, env) : unknown(item, 'Binding is not an initialized const')
         }
       }
-      // Intrinsics are only available after lexical declarations/imports have been checked.
-      return name === 'undefined' ? scalar(file) : unknown(file, `Unresolved binding ${name}`)
+      // Unsupported lexical forms must not become intrinsic undefined. This scan
+      // deliberately includes nested scopes: without a resolved environment their
+      // absence cannot be proved. Exhaustion also prevents intrinsic certification.
+      const declarations = lexical(file)
+      return name === 'undefined' && declarations.complete && !declarations.names.has(name)
+        ? scalar(file) : unknown(file, `Unresolved binding ${name}`)
     } finally { active.delete(id) }
   }
   function applySpread(base: Extract<Value, { kind: 'object' }>, spread: Value): Value {
@@ -360,8 +399,8 @@ export function analyze(input: Snapshot, options: AnalyzeOptions = {}): Graph {
     const env = new Map(fn.env)
     // Parameter bindings exist before initializers run; forward/self references must
     // not accidentally resolve to a global intrinsic.
-    for (const parameter of node.parameters) if (ts.isIdentifier(parameter.name))
-      env.set(parameter.name.text, unknown(parameter, 'Uninitialized factory parameter'))
+    for (const parameter of node.parameters) for (const name of bindingNames(parameter.name))
+      env.set(name, unknown(parameter, 'Uninitialized factory parameter'))
     for (let i = 0; i < node.parameters.length; i++) {
       const parameter = node.parameters[i]
       if (!ts.isIdentifier(parameter.name) || parameter.dotDotDotToken) return unknown(parameter, 'Unsupported factory parameter')
@@ -381,9 +420,9 @@ export function analyze(input: Snapshot, options: AnalyzeOptions = {}): Graph {
       // Preserve lexical shadowing even before a declaration is reached. Nested
       // functions remain unsupported when demanded, rather than becoming globals.
       for (const statement of statements) {
-        if (ts.isFunctionDeclaration(statement) && statement.name) current.set(statement.name.text, unknown(statement, 'Local factory declaration'))
+        for (const name of valueBindings(statement)) current.set(name, unknown(statement, 'Local factory declaration'))
         if (ts.isVariableStatement(statement)) for (const declaration of statement.declarationList.declarations)
-          if (ts.isIdentifier(declaration.name)) current.set(declaration.name.text, unknown(declaration, 'Uninitialized factory binding'))
+          for (const name of bindingNames(declaration.name)) current.set(name, unknown(declaration, 'Uninitialized factory binding'))
       }
       for (let i = 0; i < statements.length; i++) {
         const statement = statements[i]

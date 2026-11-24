@@ -27,7 +27,7 @@ Rebinding requires reviewing dependency/configuration effects and repeating the 
 there is no automatic name/prefix/helper-based approval or production summary generator.
 Caller spreads/overrides remain subject to ordinary composition rules.
 On-disk fingerprints use a strict `sha256:` tag; decoded digests retain the same exact-byte
-binding. Analyzer `snapshot-2` and summaries `sdk-leaves-2` include the fix1 semantics.
+binding. Analyzer `snapshot-3` includes the fix2 semantics; summaries remain `sdk-leaves-2`.
 
 Factory alternatives are called separately before comparing dependency projections. Lexical
 bindings take precedence over intrinsic `undefined`; both omitted and proven undefined arguments
@@ -35,6 +35,10 @@ apply parameter defaults. Falling continuations remain gaps. Captured aliases re
 functions, arrows or getters inherit their owner's consumer stability; untracked or escaping
 owners remain gaps. Immutable factory-local returns are supported. The transitive captured runtime resolution closure is
 validated even for modules with no demanded exports, including side-effect imports.
+Named and default declaration exports participate in owner/consumer stability. Before
+intrinsic `undefined` is allowed, a bounded scan checks every value-binding form, including
+nested destructuring, namespace/import-equals bindings, classes/enums/namespaces, catch
+parameters and loop heads. Unsupported bindings or an incomplete scan remain unresolved.
 
 `removal()` reports every matching definite/possible dependency, relevant coverage gap and
 source/validation failure. Entity-only references block the entity, without inventing field
