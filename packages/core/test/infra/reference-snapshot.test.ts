@@ -149,6 +149,12 @@ describe('ordered immutable resolution (A01,A02,A06,A13,A16,A17,A19)', () => {
     blocked(graph('make()', `function make(){return make()}`, {maxDepth:5}))
     blocked(graph(plugin(`schemaReferences:${canonical}, ...(a?{}:{configuration:1})`), '', {maxBranches:1}))
   })
+  it('bounds metadata member work as well as expression evaluation',()=>{
+    const items=Array.from({length:100},()=>"{entity:'unrelated'}").join(',')
+    const result=graph(plugin(`schemaReferences:[${items}]`),'',{maxNodes:20})
+    expect(result.diagnostics.some(item=>item.message.includes('budget'))).toBe(true)
+    expect(removal(result,{entity:'worker'}).safe).toBe(false)
+  })
   it('aggregates independent invalid source, dependency and gaps', () => {
     const result = analyze(snapshot({entry:'runtime.ts',sources:{'runtime.ts':`export default {plugins:[${plugin()}, ${plugin('schemaReferences:refs')}, unknown]}; const broken = ;`},failures:[{file:'other.ts',message:'unreadable'}]}))
     blocked(result); expect(result.references).toHaveLength(1)
@@ -180,7 +186,8 @@ describe('ordered immutable resolution (A01,A02,A06,A13,A16,A17,A19)', () => {
 
 describe('source-bound shipped leaves (A07–A09,A18)', () => {
   const root=process.cwd()
-  const captured = () => templatePluginSnapshot(root)
+  let template:ReturnType<typeof templatePluginSnapshot>|undefined
+  const captured = () => template ??= templatePluginSnapshot(root)
   it('accounts for nine template registrations and seven historical composition sites', () => {
     const input=captured(), result=analyze(input,{summaries:shippedSummaries})
     expect(input.failures).toEqual([])

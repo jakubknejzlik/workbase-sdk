@@ -35,6 +35,10 @@ export function analyze(input: Snapshot, options: AnalyzeOptions = {}): Graph {
   const limits={maxNodes:options.maxNodes??20000,maxModules:options.maxModules??2048,maxDepth:options.maxDepth??80,maxBranches:options.maxBranches??32}
   const summaryHash=hash(JSON.stringify(options.summaries??[]))
   const analysisHash=hash(JSON.stringify([input.fingerprint,ANALYZER_VERSION,SUMMARY_VERSION,limits,summaryHash]))
+  const importers=new Map<string,Set<string>>()
+  for(const edge of input.resolutions) if(edge.target) {
+    const from=importers.get(edge.target)??new Set<string>();from.add(edge.from);importers.set(edge.target,from)
+  }
   const files = new Map<string, ts.SourceFile>(), active = new Set<string>(), diagnostics: Diagnostic[] = []
   const references: Reference[] = [], contracts: Contract[] = [], registrations: Registration[] = []
   let work = 0, depth = 0, stabilityWork = 0
@@ -101,10 +105,12 @@ export function analyze(input: Snapshot, options: AnalyzeOptions = {}): Graph {
     const invalid = (at: ts.Node, message: string) => errors.push(diagnostic(at, 'schema', 'invalid-metadata', message))
     if (!ts.isArrayLiteralExpression(node)) invalid(node, 'schemaReferences must be an unwrapped literal array')
     else for (const item of node.elements) {
+      if(++work > limits.maxNodes) { errors.push(diagnostic(item,'schema','unresolved-metadata','Metadata node budget exhausted')); break }
       if (!ts.isObjectLiteralExpression(item)) { invalid(item, 'Reference item must be a literal object'); continue }
       const seen = new Set<string>(), values: Record<string, ts.StringLiteral> = {}
       const before = errors.length
       for (const member of item.properties) {
+        if(++work > limits.maxNodes) { errors.push(diagnostic(member,'schema','unresolved-metadata','Metadata node budget exhausted')); break }
         const name = key(member.name)
         if (!ts.isPropertyAssignment(member) || !name || !['entity', 'field'].includes(name)
           || seen.has(name) || !ts.isStringLiteral(member.initializer)) { invalid(member, 'Reference item allows only one literal entity and at most one literal field'); continue }
@@ -120,7 +126,8 @@ export function analyze(input: Snapshot, options: AnalyzeOptions = {}): Graph {
     if(seen.has(identity)) return true
     seen.add(identity)
     let valid=true
-    for(const otherName of Object.keys(input.sources)) {
+    for(const otherName of importers.get(file.fileName)??[]) {
+      if(++stabilityWork > limits.maxNodes*10) return false
       const other=source(otherName)
       for(const statement of other.statements) {
         if((!ts.isImportDeclaration(statement)&&!ts.isExportDeclaration(statement)) || !statement.moduleSpecifier
@@ -189,6 +196,7 @@ export function analyze(input: Snapshot, options: AnalyzeOptions = {}): Graph {
     try {
       const results: Value[] = []
       for (const statement of file.statements) {
+        if(++work > limits.maxNodes) return unknown(statement,'Export node budget exhausted',results)
         if (name === 'default' && ts.isExportAssignment(statement) && !statement.isExportEquals) results.push(consumers(file,'default',new Set()) ? evaluate(statement.expression, new Map()) : unknown(statement,'Mutable or escaping default export'))
         if (ts.isExportDeclaration(statement) && !statement.isTypeOnly) {
           const target = statement.moduleSpecifier && ts.isStringLiteral(statement.moduleSpecifier) ? edge(file, statement.moduleSpecifier.text) : undefined
@@ -245,6 +253,7 @@ export function analyze(input: Snapshot, options: AnalyzeOptions = {}): Graph {
     let result: Value = { kind: 'object', node, props: new Map(), errors: [] }
     const declared = new Set<string>()
     for (const member of node.properties) {
+      if(++work > limits.maxNodes) return unknown(member,'Object node budget exhausted',[result])
       const update = (base: Value): Value => {
         if (base.kind === 'choice') return choice(node, base.items.map(update))
         if (base.kind !== 'object') return base
@@ -301,6 +310,7 @@ export function analyze(input: Snapshot, options: AnalyzeOptions = {}): Graph {
       const returns: Value[] = []
       for (let i = 0; i < statements.length; i++) {
         const statement = statements[i]
+        if(++work > limits.maxNodes) return {returns:[...returns,unknown(statement,'Factory node budget exhausted')],falls:false}
         if (ts.isReturnStatement(statement)) return { returns: [...returns, statement.expression ? evaluate(statement.expression, current) : scalar(statement)], falls: false }
         if (ts.isVariableStatement(statement) && statement.declarationList.flags & ts.NodeFlags.Const) {
           for (const declaration of statement.declarationList.declarations) {
