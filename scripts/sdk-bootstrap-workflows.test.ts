@@ -135,7 +135,7 @@ function assertCiWorkflowPolicy(document: { source: string; parsed: Workflow }) 
 
 describe('exported public bootstrap workflow policy', () => {
   it('contains exactly the two public workflows and SDK root documentation', () => {
-    expect(readdirSync(join(root, '.github'))).toEqual(['workflows'])
+    expect(readdirSync(join(root, '.github')).sort()).toEqual(['pull_request_template.md', 'workflows'])
     expect(readdirSync(join(root, '.github/workflows')).sort()).toEqual(['ci.yml', 'release.yml'])
     for (const name of ['README.md', 'CONTRIBUTING.md', 'SECURITY.md']) {
       const content = readFileSync(join(root, name), 'utf8')

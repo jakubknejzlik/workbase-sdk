@@ -2,6 +2,35 @@
 
 ## Unreleased
 
+## 0.4.1 — 2026-11-24
+
+Patch release for `@workbasehq/core`, `@workbasehq/plugins` and
+`@workbasehq/mcp`. Existing 0.4.0 consumer configurations remain compatible.
+Publication awaits release-head hosted CI and independent review.
+
+- Resolve query ORDER BY output aliases according to their wire role. (#286)
+- Clarify invitation acceptance copy for new accounts. (#289)
+- Use the shared compact application-access control in record details, including
+  safe reload/error handling. (#290)
+- Make list header/cell typography consistent, allow visible-column reordering
+  from Columns, and keep Saved views in a compact settings menu. (#291–#293)
+- Wrap list toolbar controls by available space and align generated columns by
+  field type. (#294, #295)
+- Resolve dashboard captions from authorized enumLabels while preserving literal
+  labels and missing/partial translation fallbacks for 0.4.0 consumers. (#298)
+- Isolate dashboard widget query failures so other widgets keep rendering. A
+  widget whose query exceeds the cost budget still returns no data; it shows a
+  localized explanation, while the machine code stays in JSON. Consumer reference
+  columns stay omitted; no budget or limit was raised. (#301)
+- Render zero stat values as data and keep empty stat cards at a stable height.
+  (#302)
+- Link eligible dashboard primary records to their details when the consumer
+  explicitly selects id and grants permit access; preserve reference targets and
+  keyboard navigation. (#303)
+- Render dashboard tables with the shared list table, matching header/body column
+  tracks at desktop and narrow widths. (#304)
+- Document the SDK UI definition of done and shared List v2 pattern. (#285)
+
 ## 0.4.0 — 2026-11-19
 
 Pre-1.0 minor release with a canonical list wire contract and numbered root-list
