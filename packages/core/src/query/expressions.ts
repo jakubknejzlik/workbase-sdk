@@ -33,27 +33,80 @@ const arities: Record<string, [number, number]> = {
 const base: Record<string, Kind> = { id: 'string', organization_id: 'string', created_at: 'datetime', updated_at: 'datetime', version: 'number' }
 const fieldKind = (config: Config, entity: string, field: string): Kind => (Object.hasOwn(base, field) ? base[field] : undefined) ?? ({ int: 'number', float: 'number', bool: 'bool', datetime: 'datetime' } as Record<string, Kind>)[config.entities[entity].fields[field]?.type] ?? 'string'
 const cache = new WeakMap<Config, Map<string, ExpressionInfo>>()
-/** Clone the validated AST, replacing operand nodes rather than identifier escaping.
- * Alias declarations are strings; ORDER BY aliases belong to their own SELECT.
- * Within a SELECT only `self` references bind to the outer entity; local aliases
- * may share their spelling with a ref path in the enclosing expression.
- */
-export function rebindExpression<T>(node: T, columns: Map<string, string | ISequelizable>, inQuery = false, preserved = new Set<unknown>()): T {
-  if (!node || typeof node !== 'object' || node instanceof Date || preserved.has(node)) return node
-  if (node instanceof SelectQuery) {
-    inQuery = true
-    const aliases = new Set(node.getFields().map(field => field.alias).filter(alias => alias !== undefined))
-    preserved = new Set(node.getOrderBy().filter(order => aliases.has(order.field.serialize())).map(order => order.field))
-  } else if ('serialize' in node && typeof node.serialize === 'function') {
-    const wire = node.serialize()
-    const column = wire.match(/^#([^#]+)#$/)?.[1] ?? wire
-    const mapped = !inQuery || column.startsWith('self.') ? columns.get(column) : undefined
-    if (mapped) return (typeof mapped === 'string' ? Q.expr(mapped) : mapped) as T
+type OperandToken =
+  | { kind: 'identifier' | 'qualified'; name: string }
+  | { kind: 'literal'; type: 'null' | 'number' | 'string' }
+  | { kind: 'typed' | 'date' | 'structured' | 'invalid' }
+// `$` alone also matches before a final newline. Wire matches consume every byte;
+// neither trimming nor Unicode case folding is part of the identifier grammar.
+const wholeMatch = (pattern: RegExp, wire: string) => {
+  const match = wire.match(pattern)
+  return match?.[0] === wire ? match : undefined
+}
+const identifier = (name: string) => !!wholeMatch(/^[A-Za-z_][A-Za-z0-9_]*$/, name)
+function operandToken(operand: unknown): OperandToken {
+  if (typeof operand !== 'string') return { kind: 'invalid' }
+  if (operand.startsWith('!!!')) return { kind: 'typed' }
+  if (operand.startsWith('!D!')) return { kind: 'date' }
+  if (operand.startsWith('FN(') || operand.startsWith('OP(') || operand.startsWith('{')) return { kind: 'structured' }
+  const wrapped = wholeMatch(/^#([^#]+)#$/, operand)
+  if (wrapped) {
+    if (identifier(wrapped[1])) return { kind: 'identifier', name: wrapped[1] }
+    if (wholeMatch(/^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)+$/, wrapped[1])) return { kind: 'qualified', name: wrapped[1] }
+    return { kind: 'invalid' }
   }
-  if (Array.isArray(node)) return node.map(child => rebindExpression(child, columns, inQuery, preserved)) as T
-  return Object.assign(Object.create(Object.getPrototypeOf(node)), Object.fromEntries(
-    Object.entries(node).map(([key, child]) => [key, rebindExpression(child, columns, inQuery, preserved)]),
+  if (operand === 'NULL') return { kind: 'literal', type: 'null' }
+  if (wholeMatch(/^[+-]?[0-9]+(?:\.[0-9]+)?$/, operand)) return { kind: 'literal', type: 'number' }
+  if (wholeMatch(/^&[^#]*&$/, operand)) return { kind: 'literal', type: 'string' }
+  if (identifier(operand)) return { kind: 'identifier', name: operand }
+  if (wholeMatch(/^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)+$/, operand)) return { kind: 'qualified', name: operand }
+  return { kind: 'invalid' }
+}
+/** One SELECT-local resolver for validation, canonical wires and both emitters.
+ * Declarations are identifier slots, never expression operands. The exact NULL
+ * declaration cannot be emitted by the current adapter and is diagnosed below.
+ */
+function selectOutputAliases<T extends { alias?: string }>(fields: readonly T[]) {
+  const fold = (name: string) => name.replace(/[A-Z]/g, letter => letter.toLowerCase())
+  const projection = fields.length === 1 ? fields[0] : undefined
+  const name = projection?.alias
+  return (operand: unknown) => {
+    const token = operandToken(operand)
+    if (!projection || typeof name !== 'string' || name === 'NULL' || !identifier(name) || token.kind !== 'identifier' || fold(token.name) !== fold(name)) return
+    return { kind: 'OutputAliasRef' as const, projection, name, wire: `#${name}#` }
+  }
+}
+/** Clone operands by occurrence. A shared object in another clause or SELECT
+ * must not inherit the ORDER BY role, spelling, or column map of this occurrence.
+ * Within a SELECT only explicit `self` references bind to the outer row.
+ */
+export function rebindExpression<T>(node: T, columns: Map<string, string | ISequelizable>, inQuery = false): T {
+  if (!node || typeof node !== 'object' || node instanceof Date) return node
+  const clone = <V extends object>(value: V, query: boolean): V => Object.assign(Object.create(Object.getPrototypeOf(value)), Object.fromEntries(
+    Object.entries(value).map(([key, child]) => [key, rebindExpression(child, columns, query)]),
   ))
+  if (node instanceof SelectQuery) {
+    const outputAlias = selectOutputAliases(node.getFields())
+    let query = clone(node.removeOrderBy(), true)
+    for (const order of node.getOrderBy()) {
+      const resolved = outputAlias(order.field.serialize())
+      query = query.orderBy(resolved ? Q.expr(resolved.wire) : rebindExpression(order.field, columns, true), order.direction)
+    }
+    return query as T
+  }
+  if ('serialize' in node && typeof node.serialize === 'function') {
+    const wire = node.serialize()
+    const token = operandToken(wire)
+    // The adapter's legacy expression emitter treats decimals as columns and
+    // integer ORDER BY operands as ordinals. Typed values preserve literal role.
+    if (token.kind === 'literal' && token.type === 'number') return Q.value(Number(wire)) as T
+    if (token.kind === 'identifier' || token.kind === 'qualified') {
+      const mapped = !inQuery || token.name.startsWith('self.') ? columns.get(token.name) : undefined
+      if (mapped) return (typeof mapped === 'string' ? Q.expr(mapped) : mapped) as T
+    }
+  }
+  if (Array.isArray(node)) return node.map(child => rebindExpression(child, columns, inQuery)) as T
+  return clone(node, inQuery)
 }
 /** Validate the library wire grammar before deserializing. No arbitrary JS or SQL is interpreted.
  * Query aliases are lexical; an outer row is explicitly named `self` inside a subquery.
@@ -71,7 +124,7 @@ export function expressionInfo(config: Config, entity: string, field: string, wi
     aggregateReferences?: { aliases: Set<string>; references: Set<string> }[] }
   const root: Context = { aliases: new Map([['self', entity]]), aliasContexts: new Map(), current: entity, query: false, rawRefs: config.entities[entity].fields[field]?.type === 'ref' }
   const reference = (column: string, context: Context): Kind => {
-    if (column.includes('*') || !/^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)*$/.test(column)) fail(`Unknown field: ${column}`)
+    if (!wholeMatch(/^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)*$/, column)) fail(`Unknown field: ${column}`)
     const parts = column.split('.'); let source = context.current ?? entity; let qualifier: string | undefined
     if (context.query && parts.length > 1 && !context.aliases.has(parts[0])) fail(`Unknown or unavailable schema table alias: ${parts[0]}`, 'Use an alias from FROM or an earlier/current JOIN; move a later JOIN before its first use.')
     if (parts.length > 1 && context.aliases.has(parts[0])) { qualifier = parts.shift()!; source = context.aliases.get(qualifier)! }
@@ -109,8 +162,9 @@ export function expressionInfo(config: Config, entity: string, field: string, wi
     if (typeof node === 'number') return { type: 'number', dateOnly: false }
     if (typeof node === 'boolean') return { type: 'bool', dateOnly: false }
     if (typeof node !== 'string') return fail('Unknown expression node')
-    if (node.startsWith('!!!')) { const value = JSON.parse(node.slice(3)); if (value !== null && !['string', 'number', 'boolean'].includes(typeof value)) fail('Invalid literal'); return { type: value === null ? 'null' : typeof value === 'boolean' ? 'bool' : typeof value === 'number' ? 'number' : 'string', dateOnly: false } }
-    if (node.startsWith('!D!')) return { type: 'datetime', dateOnly: true }
+    const token = operandToken(node)
+    if (token.kind === 'typed') { const value = JSON.parse(node.slice(3)); if (value !== null && !['string', 'number', 'boolean'].includes(typeof value)) fail('Invalid literal'); return { type: value === null ? 'null' : typeof value === 'boolean' ? 'bool' : typeof value === 'number' ? 'number' : 'string', dateOnly: false } }
+    if (token.kind === 'date') return { type: 'datetime', dateOnly: true }
     if (node.startsWith('FN(') || node.startsWith('OP(')) {
       if (!node.endsWith(')')) fail('Invalid function encoding')
       const [name, ...args] = JSON.parse(node.slice(3, -1)) as [string, ...unknown[]]
@@ -168,11 +222,9 @@ export function expressionInfo(config: Config, entity: string, field: string, wi
       return { type: 'string', dateOnly: fn === 'CONCAT' && values.every(value => value.dateOnly || value.type === 'null'), textDependencies, ...(fn === 'CONCAT' ? { parts: { concat: values.map(value => value.parts!) } } : {}) }
     }
     if (node.startsWith('{')) return object(JSON.parse(node), context, depth + 1)
-    if (/^[+-]?\d+(?:\.\d+)?$/.test(node)) return { type: 'number', dateOnly: false }
-    if (node === 'NULL') return { type: 'null', dateOnly: false }
-    if (/^&[^#]*&$/.test(node)) return { type: 'string', dateOnly: false } // Library Fn.string encoding.
+    if (token.kind === 'literal') return { type: token.type, dateOnly: false }
     if (node.startsWith('!!')) fail('Raw SQL is forbidden; use structured ts-query expressions')
-    const column = node.match(/^#([^#]+)#$/)?.[1] ?? node
+    const column = token.kind === 'identifier' || token.kind === 'qualified' ? token.name : node
     const type = reference(column, context); return { type, dateOnly: type === 'datetime', textDependencies: type === 'string' ? [dependencies[dependencies.length - 1]] : [] }
   }
   function object(node: any, parent: Context, depth: number): ValueInfo {
@@ -182,6 +234,11 @@ export function expressionInfo(config: Config, entity: string, field: string, wi
       if (depth > 4) fail('Subquery nesting exceeds the budget')
       if (node.unionQueries?.length || node.groupBy?.length || node.having?.length || node.offset) fail('Unsupported scalar subquery shape', 'Use one SELECT value, schema sources, WHERE, ORDER BY and LIMIT 1, or an aggregate.')
       if (node.fields?.length !== 1) fail('A scalar subquery must select exactly one field')
+      for (const field of node.fields) if (field.alias !== undefined) {
+        if (field.alias === 'NULL') fail('Unsupported output alias declaration: NULL; the current SQLite/D1 adapter cannot quote this declaration', 'Use null, Null, or another identifier as the output alias.')
+        if (typeof field.alias !== 'string' || !identifier(field.alias)) fail(`Invalid output alias declaration: ${field.alias}`, 'Use an ASCII identifier, for example Total; declarations are not encoded expression operands.')
+      }
+      const outputAlias = selectOutputAliases<{ alias?: string; name: unknown }>(node.fields)
       const context: Context = { aliases: new Map(parent.aliases), aliasContexts: new Map(parent.aliasContexts), query: true,
         outerAliases: new Set(parent.aliases.keys()), outerReferences: new Set(), aggregateReferences: parent.aggregateReferences }
       const register = (table: any) => {
@@ -229,8 +286,8 @@ export function expressionInfo(config: Config, entity: string, field: string, wi
       for (const order of node.orderBy ?? []) {
         // An unqualified ORDER BY output alias names the projection, not a source
         // column. Validate that expression under this SELECT's aggregate context.
-        const projection = node.fields.find((field: any) => field.alias === order.field)
-        scalar(projection ? projection.name : order.field, { ...context, clause: 'ORDER BY', selectAggregate: aggregates.found }, depth + 1)
+        const resolved = outputAlias(order.field)
+        scalar(resolved ? resolved.projection.name : order.field, { ...context, clause: 'ORDER BY', selectAggregate: aggregates.found }, depth + 1)
       }
       const correlated = parent.query && context.outerReferences!.size > 0
       const connected = new Set([...parent.aliases.keys(), ...(correlated ? [] : local.slice(0, 1))])
@@ -263,6 +320,12 @@ export function expressionInfo(config: Config, entity: string, field: string, wi
     // must survive the compiler's scoped-table transformation.
     const canonical = (node: any): any => {
       if (typeof node === 'string') {
+        const token = operandToken(node)
+        if (token.kind === 'literal' && token.type === 'number') {
+          if (!Number.isFinite(Number(node))) fail('Invalid numeric literal: value must be finite')
+          return Q.value(Number(node)).serialize()
+        }
+        if (token.kind !== 'structured') return node
         if (node.startsWith('{')) return JSON.stringify(canonical(JSON.parse(node)))
         if (node.startsWith('FN(') || node.startsWith('OP(')) {
           const [name, ...args] = JSON.parse(node.slice(3, -1))
@@ -274,13 +337,15 @@ export function expressionInfo(config: Config, entity: string, field: string, wi
       const result = { ...node }
       switch (node.type) {
         case 'Table': result.alias ??= result.source; break
-        case 'SelectQuery':
+        case 'SelectQuery': {
+          const outputAlias = selectOutputAliases<{ alias?: string }>(node.fields ?? [])
           result.tables = node.tables?.map(canonical)
           result.fields = node.fields?.map((field: any) => ({ ...field, name: canonical(field.name) }))
           result.joins = node.joins?.map((join: any) => ({ ...join, table: canonical(join.table), condition: canonical(join.condition) }))
           result.where = node.where?.map(canonical)
-          result.orderBy = node.orderBy?.map((order: any) => ({ ...order, field: canonical(order.field) }))
+          result.orderBy = node.orderBy?.map((order: any) => ({ ...order, field: outputAlias(order.field)?.wire ?? canonical(order.field) }))
           break
+        }
         case 'BinaryCondition': case 'NullCondition': case 'LikeCondition': case 'BetweenCondition':
           result.key = canonical(node.key); break
         case 'ColumnComparisonCondition':
