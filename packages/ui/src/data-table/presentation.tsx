@@ -3,6 +3,8 @@ import type { Column } from '@tanstack/react-table'
 /** Locale, CSP and server-cursor slots; contains no data fetching. */
 export interface TablePresentation {
   tableClass?: string; label?: string; listV2?: boolean; scrollRegion?: string; scrollHint?: string;
+  // Bounded widget tables keep the first Tab on the record unless scrolling is needed.
+  scrollTabStop?: 'overflow'
   emptyContent: ReactNode; errorLabel: string; stale?: boolean; busy?: boolean
   errorDescription?: string; retryLabel?: string; onRetry?: () => void
   headerId?: (id: string) => string; pagination?: ReactNode
