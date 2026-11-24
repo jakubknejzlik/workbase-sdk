@@ -38,7 +38,7 @@ async function mount(options: { kind?: 'table' | 'list'; select?: string[]; id?:
 it.each(['table', 'list'] as const)('links the permitted primary %s value using the console detail route and accessible name', async kind => {
   const { container } = await mount({ kind })
   const links = screen.getAllByRole('link', { name: 'Alex Example' })
-  expect(links).toHaveLength(kind === 'table' ? 2 : 1)
+  expect(links).toHaveLength(1)
   for (const link of links) expect(link.getAttribute('href')).toBe('/o/org%20%2F%CE%B1/e/entries/entry%20%2F%CE%B1')
   expect(container.querySelector('a a')).toBeNull()
 })
@@ -63,9 +63,9 @@ for (const kind of ['table', 'list'] as const) it.each([
 it.each([false, true])('preserves reference-label destinations and avoids nested links (reference first: %s)', async referenceFirst => {
   const { container } = await mount({ referenceFirst })
   const links = screen.getAllByRole('link', { name: 'Sam Example' })
-  expect(links).toHaveLength(2)
+  expect(links).toHaveLength(1)
   for (const link of links) expect(link.getAttribute('href')).toBe('/o/org%20%2F%CE%B1/e/people/reviewer')
-  expect(screen.getAllByRole('link', { name: 'Alex Example' })).toHaveLength(2)
+  expect(screen.getAllByRole('link', { name: 'Alex Example' })).toHaveLength(1)
   expect(within(container.querySelector('tbody')!).getAllByRole('link')).toHaveLength(2)
   expect(container.querySelector('a a')).toBeNull()
 })
@@ -73,7 +73,7 @@ it.each([false, true])('preserves reference-label destinations and avoids nested
 it('retains reference links when the primary detail is denied', async () => {
   await mount({ operations: [] })
   expect(screen.queryByRole('link', { name: 'Alex Example' })).toBeNull()
-  expect(screen.getAllByRole('link', { name: 'Sam Example' })).toHaveLength(2)
+  expect(screen.getAllByRole('link', { name: 'Sam Example' })).toHaveLength(1)
 })
 
 it('retains the same primary accessible name in Czech', async () => {
