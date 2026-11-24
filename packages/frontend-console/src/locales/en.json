@@ -473,6 +473,8 @@
   "write_relation_save_failed": "The record was saved, but some memberships could not be saved. Retry to finish saving memberships.",
   "searchAllColumns": "Searches all displayed columns, ignoring case.",
   "filterCaseInsensitive": "Ignores case",
+  "dashboardWidgetFailed": "This widget could not be loaded.",
+  "dashboardWidgetErrorCode": "Error code: {{code}}",
   "dashboardEmpty": "No data yet",
   "tableView": "Table",
   "calendarView": "Calendar",

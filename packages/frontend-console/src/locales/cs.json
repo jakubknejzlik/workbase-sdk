@@ -479,6 +479,8 @@
   "write_relation_save_failed": "Záznam byl uložen, ale některá členství se nepodařilo uložit. Zkuste uložení členství znovu.",
   "searchAllColumns": "Hledá ve všech zobrazených sloupcích bez rozlišení velikosti písmen.",
   "filterCaseInsensitive": "Nerozlišuje velká a malá písmena",
+  "dashboardWidgetFailed": "Tuto část přehledu se nepodařilo načíst.",
+  "dashboardWidgetErrorCode": "Kód chyby: {{code}}",
   "dashboardEmpty": "Zatím žádná data",
   "tableView": "Tabulka",
   "calendarView": "Kalendář",

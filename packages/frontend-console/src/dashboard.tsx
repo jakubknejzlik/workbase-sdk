@@ -43,6 +43,7 @@ export function WidgetCards({ orgId, page, result, pending, error, model, caps }
     return spec.ui?.signedBy ? signedValue(row, spec, row[field], i18n.language) : formatFieldValue(row[field], spec, i18n.language, key => t(key, { context: entity }), model?.timeZone)
   }
   const content = (widget: ConsoleWidgetResult) => {
+    if (widget.kind === 'error') return <div role="alert" className="space-y-1 text-sm"><p>{t('dashboardWidgetFailed')}</p><p className="break-words text-xs text-muted-foreground">{t('dashboardWidgetErrorCode', { code: widget.code })}</p></div>
     if (widget.kind === 'stat') {
       const configured = page.widgets?.find(item => item.id === widget.id)
       const empty = widget.value === null || widget.value === 0 && configured?.kind === 'stat' && configured.aggregate.fn === 'count'
