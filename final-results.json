@@ -1,0 +1,29 @@
+{
+  "head": "591de890f1a0888ab0c453ab6cbe7c697c62644d",
+  "listV2": {
+    "startTime": "2026-11-24T11:11:43.362Z",
+    "duration": 526086.5989999999,
+    "expected": 187,
+    "skipped": 0,
+    "unexpected": 0,
+    "flaky": 0
+  },
+  "units": {
+    "files": 52,
+    "passed": 1338,
+    "expectedFailure": 1
+  },
+  "access": {
+    "passed": 4,
+    "failed": 0
+  },
+  "syntheticPreview": {
+    "basePassed": 3,
+    "headPassed": 3,
+    "screenshots": 16
+  },
+  "originalBase": "c31fe5e1914c5daff4cca83427b6caa0aca9d41a",
+  "currentBase": "5cca2e3f1d75022bf51f611db6e3cbf04da6b5d2",
+  "mergeTreeExit": 0,
+  "independentVisualReview": "pending"
+}

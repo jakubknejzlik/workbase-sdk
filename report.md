@@ -1,5 +1,7 @@
 # Issue 295 implementation evidence
 
+PR: https://github.com/jakubknejzlik/workbase-sdk/pull/306
+
 Candidate: `591de890f1a0888ab0c453ab6cbe7c697c62644d`
 Base: `integration/preview` at `c31fe5e1914c5daff4cca83427b6caa0aca9d41a`. Verified remote tip before implementation and after commit.
 Issue read first: https://github.com/jakubknejzlik/workbase-sdk/issues/295 (no comments). Owner implementation authorization is recorded in that issue and the job brief.
@@ -68,8 +70,8 @@ Initial unbounded full unit runs hit timeout failures (frontend: 24 failed / 113
 | UI unit suite | 16 files, 107 passed |
 | Frontend unit suite | 31 files, 1160 passed + 1 expected failure; includes 31 renderer tests |
 | Synthetic rendered browser checks + captures | base 3/3, head 3/3 at 1440 / 900 / 390 EN |
-| List v2 acceptance | Final full 187-case run is in progress with Playwright Chromium. System Chrome 158 run was stopped after native select failures also reproduced on base; the same targeted case passed on Playwright Chromium. |
-| Access e2e | complete run: 3 passed, 1 failed (EN 390 keyboard tooltip absent at application-access.spec.ts:53); targeted head retry: 1 passed; base reproduction fails at the same tooltip assertion (Invitation sent), demonstrating baseline instability |
+| List v2 acceptance | 187 passed (8.8m), 0 failed, 0 skipped, on Playwright Chromium 145.0.7632.6. |
+| Access e2e | final Playwright Chromium 145 run: 4 passed (1.3m). System Chrome 158 complete run: 3 passed, 1 failed (EN 390 keyboard tooltip absent at application-access.spec.ts:53); targeted head retry: 1 passed; base reproduction fails at the same tooltip assertion (Invitation sent), demonstrating baseline instability |
 | git diff --check | passed |
 
 Access commands beyond the full run:
@@ -107,3 +109,15 @@ Final list command (browser override cleared to use Playwright Chromium):
 ```sh
 PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH= W29_PORT=19599 LIST_V2_OUTPUT=$TMPDIR/list-v2-final bun run test:list-v2-acceptance
 ```
+
+Final access command (Playwright Chromium 145, all four cases):
+
+```sh
+PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH= W29_PORT=19597 WB178_OUTPUT=$TMPDIR/application-access-pinned WB178_SCREENSHOTS=$TMPDIR/application-access-pinned/screenshots bun x --no-install playwright test --config packages/frontend-console/playwright.application-access.config.ts
+```
+
+Final unit totals: 52 files; 1338 tests passed + 1 expected failure. Final browser is Playwright Chromium 145.0.7632.6; requested synthetic base/head preview captures retain their separate Chrome 158.0.8127.37 provenance.
+
+## Final branch check
+
+The requested starting base was `c31fe5e1914c5daff4cca83427b6caa0aca9d41a`, used for implementation and base screenshots. During the long checks `integration/preview` advanced to `5cca2e3f1d75022bf51f611db6e3cbf04da6b5d2`. The change still applies cleanly: `git fetch origin integration/preview` followed by `git merge-tree --write-tree HEAD FETCH_HEAD` exited 0 with merge tree `bb808785ce4458a5faff32d58640fb0a65b635f0`. No merge or rebase was performed; the tested PR head remains `591de890f1a0888ab0c453ab6cbe7c697c62644d`. Final worktree is clean and `git diff --check` passes. No failing author gate remains on the final pinned-browser runs; independent visual review remains pending.
