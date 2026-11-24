@@ -284,7 +284,12 @@ test('URL: invalid and forbidden parameters and relation IDs are sanitized', asy
 
 test('personal views: save, apply, rename, delete and reload; settings only', async ({ page }) => {
   await gotoSDK(page, route); await settled(page); await tab(page, 'inactive'); await rows(page, { view: 'inactive' }); await save(page, 'My inactive')
-  await reloadSDK(page); await settled(page); await expect(savedTrigger(page)).toHaveAccessibleName(en.savedViewsMenu)
+  await reloadSDK(page); await settled(page); await savedTrigger(page).click()
+  await expect(savedMenu(page).getByRole('button', { name: 'My inactive', exact: true })).toBeVisible()
+  await expect(savedMenu(page).locator('button[aria-current="true"]')).toHaveCount(0)
+  await expect(savedMenu(page).getByRole('button', { name: en.savedViewsRenameThis, exact: true })).toHaveCount(0)
+  await expect(savedMenu(page).getByRole('button', { name: en.savedViewsDeleteThis, exact: true })).toHaveCount(0)
+  await page.keyboard.press('Escape')
   await tab(page, 'active'); await rows(page, { view: 'active' }); await savedTrigger(page).click()
   await savedMenu(page).getByRole('button', { name: 'My inactive', exact: true }).click(); await rows(page, { view: 'active' })
   await savedMenu(page).getByRole('button', { name: en.savedViewsApplyView, exact: true }).click(); await rows(page, { view: 'inactive' })

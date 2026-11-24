@@ -600,6 +600,7 @@
   "savedViewsDelete": "Delete view",
   "savedViewsMenu": "Saved views",
   "savedViewsHeading": "Saved views",
+  "savedViewsApplied": "Applied view: {{name}}",
   "savedViewsHint": "Select a view and confirm to apply it.",
   "savedViewsEmpty": "You have no saved view yet.",
   "savedViewsSaveNew": "Save as new view",

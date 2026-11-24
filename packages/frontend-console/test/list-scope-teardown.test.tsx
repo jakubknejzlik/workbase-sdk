@@ -13,7 +13,7 @@ import { validateListSearch } from '../../console-generated/src/list-model'
 import { changeSavedViews } from '../../console-generated/src/saved-views'
 import type { Model, Capabilities, ReadQuery } from '../../console-generated/src/read'
 import en from '../src/locales/en.json'
-import { applyView, openViewsMenu, viewsTrigger } from './saved-views-menu'
+import { applyView, openViewsMenu } from './saved-views-menu'
 
 const model: Model = { instance: 'teardown', revision: 1, limits: { root: 100, maxOffset: 100, children: 20, relations: 4, exists: 4 }, entities: {
   entries: { displayField: 'name', fields: { id: { type: 'string' }, name: { type: 'string' }, status: { type: 'enum', values: ['active', 'inactive'] } }, columns: ['name', 'status'], relations: {}, routes: { list: '', detail: '' },
@@ -95,7 +95,13 @@ it('replaces the actor with identical capabilities without any render of the pre
   expect(test.router.state.location.search.view).toBeUndefined(); expect(test.router.state.location.search.pageSize).toBeUndefined()
   expect(screen.queryByRole('button', { name: /Remove/ })).toBeNull()
   expect(screen.queryByRole('group', { name: en.sortAndFilter })).toBeNull()
-  expect(viewsTrigger().getAttribute('aria-label')).toBe(en.savedViewsMenu)
+  const newActorMenu = await openViewsMenu(test.user)
+  expect(within(newActorMenu).queryByRole('button', { name: 'Mine' })).toBeNull()
+  expect(within(newActorMenu).queryByRole('button', { current: true })).toBeNull()
+  expect(within(newActorMenu).queryByRole('button', { pressed: true })).toBeNull()
+  for (const name of [en.savedViewsRenameThis, en.savedViewsDeleteThis]) expect(within(newActorMenu).queryByRole('button', { name })).toBeNull()
+  expect(within(newActorMenu).getByRole('button', { name: en.savedViewsApplyView }).hasAttribute('disabled')).toBe(true)
+  await test.user.keyboard('{Escape}')
   for (const [query] of test.request.mock.calls.slice(before)) { expect(query.where).toBeUndefined(); expect(query.view).toBeUndefined(); expect(query.limit).toBe(10) }
   await test.release()
   expect(await screen.findByText('Row of B@org')).toBeTruthy(); expect(screen.getByText(/1.*10.*12/)).toBeTruthy()
