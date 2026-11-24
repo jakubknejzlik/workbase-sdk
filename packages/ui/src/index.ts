@@ -23,4 +23,4 @@ export { WorkspaceMembersTable } from './vendor/tiketo/components/user-managemen
 export { InviteUserModal } from './vendor/tiketo/components/user-management/InviteUserModal'
 
 export { UserWorkspaceOnboarding } from './vendor/tiketo/components/settings/UserWorkspaceOnboarding'
-export { Columns3 as ColumnsIcon } from 'lucide-react'
+export { Columns3 as ColumnsIcon, Settings2 as SettingsIcon } from 'lucide-react'

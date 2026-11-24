@@ -497,7 +497,7 @@ function ApplicationAccessBody(props: AccessContext & { rowMenu?: boolean }) {
     </DropdownMenu>}
     {selected && <ResourceFormDialog entity={props.entity} key={selected} open onOpenChange={open => { if (!open) setSelected(undefined) }}
       onCloseAutoFocus={event => { event.preventDefault(); trigger.current?.focus() }} schema={actionSchema(selected)}
-      title={label(selected)} description={t(selected === 'find' ? 'rowFindDescription' : selected === 'link' ? 'rowLinkDescription' : selected === 'remove' || selected === 'change' && data?.state === 'signed_in' ? 'rowInviteRemoveDescription' : 'rowInviteDescription')} cancelLabel={t('cancel')}>
+      title={label(selected)} description={t(selected === 'find' ? 'rowFindDescription' : selected === 'link' ? 'rowLinkDescription' : selected === 'remove' || selected === 'change' && data?.state === 'signed_in' ? 'rowInviteRemoveDescription' : selected === 'invite' ? 'rowInviteNewDescription' : 'rowInviteDescription')} cancelLabel={t('cancel')}>
       {controls => selected === 'find' ? <FindMemberOrInvite {...props} email={data?.invitation?.email ?? props.email} write={props.write!} controls={controls} /> : <RowInvitationMutation {...props} write={props.write!} action={selected} controls={controls} />}
     </ResourceFormDialog>}
   </div>
@@ -612,7 +612,7 @@ function FindMemberOrInvite(props: Omit<InvitationMutationProps, 'action'>) {
       onChange={id => { setSelected(choices.find(member => member.user_id === id)); mutation.reset() }} />
     <WriteError error={!conflict ? mutation.error ?? (canSearch ? members.error : null) : null} />
     {selected && selected.linkable !== false && canSearch && <div aria-live="polite"><p className="break-all">{memberLabel(selected)}</p><p>{t('rowLinkDescription')}</p>{access.status.data?.state === 'invited' && access.status.data.invitation && <p>{t('rowLinkSupersedes', { email: access.status.data.invitation.email })}</p>}</div>}
-    {invite && <p>{t('rowInviteDescription')}</p>}
+    {invite && <p>{t(['invited', 'expired'].includes(access.status.data?.state ?? '') ? 'rowInviteDescription' : 'rowInviteNewDescription')}</p>}
     <RegistryForm schema={emptyRowSchema} label={name => name} submitLabel={t(selected ? 'rowInvite_link' : access.actions.includes('change') ? 'rowInvite_change' : 'rowFindSend')} invalidLabel={t('invalidField')} pending={mutation.isPending} disabled={disabled}
       onSubmit={() => {
         if (disabled || (selected ? !choices.some(member => member.user_id === selected.user_id) : !invite)) return Promise.reject({ code: 'action_unavailable' })

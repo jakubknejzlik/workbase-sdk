@@ -23,3 +23,14 @@ export function readableListLabel(model: Model, entity: string, caps: Capabiliti
   const display = target && (caps.entities[target]?.displayField ?? model.entities[target]?.displayField)
   return !!target && !!display && detailReadableField(model, target, caps, display)
 }
+
+/** Alignment follows schema metadata, including label-only related columns; never row values or cell renderers. */
+export function listColumnAlignment(model: Model, entity: string, field: string): 'left' | 'right' | 'center' {
+  const definition = model.entities[entity]
+  if (definition.list?.relatedColumns?.[field]) return 'center'
+  switch (definition.fields[field]?.type) {
+    case 'int': case 'float': case 'number': return 'right'
+    case 'date': case 'datetime': case 'bool': case 'ref': return 'center'
+    default: return 'left'
+  }
+}

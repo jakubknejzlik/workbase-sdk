@@ -131,6 +131,8 @@ for (const language of ['en', 'cs'] as const) for (const width of [1440, 900, 39
     await shot('non-linkable-member')
     await input.fill('new@example.test'); await input.click()
     await expect(confirm).toBeEnabled()
+    await expect(dialog.getByText(t.rowInviteNewDescription, { exact: true })).toBeVisible()
+    await expect(dialog).not.toContainText(language === 'cs' ? 'Po zrušení můžete pozvat jiný e-mail.' : 'Cancel to invite another email.')
     await dialog.getByRole('button', { name: t.cancel, exact: true }).click()
     await page.goto('/o/org-a/e/worker/two')
     await page.locator('[data-application-access]').getByRole('button', { name: new RegExp(t.rowAccessActions) }).click()

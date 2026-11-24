@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { SettingsIcon } from '@workbasehq/ui'
 import { Button } from '@workbasehq/ui/components/ui/button'
 import { Checkbox } from '@workbasehq/ui/components/ui/checkbox'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@workbasehq/ui/components/ui/dialog'
@@ -82,15 +83,15 @@ function Catalogue({ scope, entity, state, current, initial, fingerprint, onAppl
   return <section aria-label={t('savedViews')} className="flex min-w-0 max-w-full flex-wrap items-center gap-2">
     {dirty && <Button type="button" variant="outline" disabled={disabled} onClick={saveFromBar}>{entry ? t('savedViewsSaveChanges') : t('savedViewsSaveView')}</Button>}
     <Popover open={open} onOpenChange={value => { if (value) { outsideInteraction.current = false; setCandidate(selected); setMessage('') } setOpen(value) }}>
-      <PopoverTrigger asChild><Button ref={trigger} type="button" title={t('savedViewsMenu')} variant="outline" disabled={disabled} className="max-w-full min-w-0">
-        <span className="min-w-0 truncate">{entry?.name ?? t('savedViewsMenu')}</span>
-        {dirty && <span role="img" aria-label={t('savedViewsUnsaved')} title={t('savedViewsUnsaved')} className="size-2 shrink-0 rounded-full bg-amber-500" />}
-
+      <PopoverTrigger asChild><Button ref={trigger} type="button" aria-label={t('savedViewsMenu')} title={t('savedViewsMenu')} variant="outline" size="icon" disabled={disabled} className="relative shrink-0">
+        <SettingsIcon className="size-4" aria-hidden="true" />
+        {dirty && <span role="img" aria-label={t('savedViewsUnsaved')} title={t('savedViewsUnsaved')} className="absolute right-1 top-1 size-2 rounded-full bg-amber-500" />}
       </Button></PopoverTrigger>
       <PopoverContent data-list-menu="" onInteractOutside={event => { outsideInteraction.current = !trigger.current?.contains(event.target as Node) }} onCloseAutoFocus={event => { event.preventDefault(); if (!dialogue && !outsideInteraction.current) trigger.current?.focus() }} role="dialog" aria-label={t('savedViews')} align="end" className="grid w-80 max-w-[calc(100vw-1.5rem)] max-h-[var(--radix-popover-content-available-height)] gap-2 overflow-y-auto">
         <div><p className="text-sm font-semibold">{t('savedViewsHeading')}</p><p className="text-xs text-muted-foreground">{t('savedViewsHint')}</p></div>
+        {entry && <p className="min-w-0 text-sm font-medium [overflow-wrap:anywhere]">{t('savedViewsApplied', { name: entry.name })}</p>}
         {catalogue.entries.length ? <ul className="grid min-w-0 gap-1" aria-label={t('savedViewsHeading')}>{catalogue.entries.map(item => <li key={item.id} className="min-w-0">
-          <button type="button" aria-pressed={selected === item.id} className="flex min-h-9 min-w-0 w-full items-center justify-between gap-2 rounded-md px-2 text-left text-sm hover:bg-muted aria-pressed:bg-muted aria-pressed:font-semibold" onClick={() => { setCandidate(item.id); setMessage('') }}><span className="min-w-0 [overflow-wrap:anywhere]">{item.name}</span>{selected === item.id && <span aria-hidden="true">✓</span>}</button>
+          <button type="button" aria-current={activeId === item.id ? true : undefined} aria-pressed={selected === item.id} className="flex min-h-9 min-w-0 w-full items-center justify-between gap-2 rounded-md px-2 text-left text-sm hover:bg-muted aria-pressed:bg-muted aria-pressed:font-semibold" onClick={() => { setCandidate(item.id); setMessage('') }}><span className="min-w-0 [overflow-wrap:anywhere]">{item.name}</span>{selected === item.id && <span aria-hidden="true">✓</span>}</button>
         </li>)}</ul> : <p className="text-xs text-muted-foreground">{t('savedViewsEmpty')}</p>}
         <hr />
         <Button type="button" variant="ghost" className="justify-start" onClick={() => openDialogue({ kind: 'save', asNew: true })}>{t('savedViewsSaveNew')}</Button>
