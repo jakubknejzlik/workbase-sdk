@@ -616,8 +616,14 @@
     },
     {
       "pathDigest": "449cdabd3a1b5bd958fa87e33dc5546c853b64cfcfd5f79f52ca7e3ed9add39f",
-      "lineDigest": "e0e81c5fd5c1e1f5ad740e590756481b79b4a807700cc90b284d1376d17f1a25",
-      "lineNumber": 33,
+      "lineDigest": "b211c1380f198c2a201195b96d5726df671a3129de750c9ed6781f93b8a2bf4e",
+      "lineNumber": 6,
+      "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test."
+    },
+    {
+      "pathDigest": "449cdabd3a1b5bd958fa87e33dc5546c853b64cfcfd5f79f52ca7e3ed9add39f",
+      "lineDigest": "90465f7683ddc421a5c69703badbd9de4f284943ced1077dfe5a195b4b5d2737",
+      "lineNumber": 7,
       "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test."
     },
     {
