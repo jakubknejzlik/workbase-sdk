@@ -80,7 +80,53 @@ for (const theme of ['light', 'dark']) for (const kind of ['anchor', 'router']) 
     await page.keyboard.press('Escape')
     await expect(link).toHaveAttribute('href', '/button-disabled-links.html?destination=1')
     await testInfo.attach('enabled-proof', { body: JSON.stringify({ href: await link.getAttribute('href'), middleClickOpenedTab: true, contextMenuUncancelled: true }), contentType: 'application/json' })
-    await link.click()
+    await link.focus()
+    await page.keyboard.press('Enter')
     await expect(page).toHaveURL(/button-disabled-links\.html\?destination=1$/)
+    await page.goto(originalURL)
+    await page.getByLabel('Disable', { exact: true }).uncheck()
+    await page.getByRole('link', { name: 'Destination', exact: true }).click()
+    await expect(page).toHaveURL(/button-disabled-links\.html\?destination=1$/)
+  })
+}
+
+for (const kind of ['anchor', 'router']) for (const mode of ['disabled', 'aria', 'both']) {
+  for (const action of ['left', 'middle'] as const) {
+    test(`redesign2 ${kind} ${mode} nested handler ${action} is inert`, async ({ page, context }, testInfo) => {
+      await page.goto(`/button-disabled-links.html?kind=${kind}&mode=${mode}&nested=handler`)
+      const text = page.locator('[data-slot="button"]')
+      await expect(text).toHaveText('Destination')
+      const originalURL = page.url()
+      // Click the retained label itself on old implementations, using physical input.
+      const target = await text.locator('span').count() ? text.locator('span') : text
+      const box = (await target.boundingBox())!
+      await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2, { button: action })
+      await expect(page.getByLabel('Handlers')).toHaveText('[]')
+      await expect(page).toHaveURL(originalURL)
+      expect(context.pages().map(tab => tab.url())).toEqual([originalURL])
+      await expect(text.locator('*')).toHaveCount(0)
+      await expect(page.locator('a, [href]')).toHaveCount(0)
+      await expect(text).toHaveCSS('cursor', 'not-allowed')
+      await page.screenshot({ path: testInfo.outputPath('nested-handler.png') })
+    })
+  }
+  test(`redesign2 ${kind} ${mode} nested interactive descendants become text`, async ({ page }, testInfo) => {
+    await page.goto(`/button-disabled-links.html?kind=${kind}&mode=${mode}&nested=interactive`)
+    const text = page.locator('[data-slot="button"]')
+    await expect(text).toHaveText('Nested link Nested button')
+    const originalURL = page.url()
+    await expect(text.locator('*')).toHaveCount(0)
+    await expect(page.locator('a, [href]')).toHaveCount(0)
+    await text.evaluate(element => (element as HTMLElement).focus())
+    await expect(text).not.toBeFocused()
+    await page.getByLabel('Disable', { exact: true }).focus()
+    await page.keyboard.press('Tab')
+    await expect(page.getByRole('button', { name: 'Next', exact: true })).toBeFocused()
+    await text.click()
+    await text.click({ button: 'middle' })
+    await page.keyboard.press('Enter')
+    await expect(page).toHaveURL(originalURL)
+    await expect(page.getByLabel('Handlers')).toHaveText('[]')
+    await page.screenshot({ path: testInfo.outputPath('nested-interactive.png') })
   })
 }

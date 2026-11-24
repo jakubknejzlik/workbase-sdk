@@ -83,3 +83,36 @@ for (const mode of auxiliaryModes) {
     for (const handler of [childCapture, buttonCapture, childHandler, buttonHandler]) expect(handler).toHaveBeenCalledTimes(2)
   })
 }
+
+// Descendants must disappear too: removing just the outer link leaves active labels.
+it.each(['disabled', 'aria-boolean', 'aria-string', 'both'] as const)('207 redesign2 %s reduces nested anchor content to presentation-only text', async mode => {
+  const activate = vi.fn(() => { window.location.hash = 'nested-activated' })
+  const props = {
+    disabled: mode === 'disabled' || mode === 'both',
+    'aria-disabled': mode === 'aria-boolean' ? true : mode === 'aria-string' || mode === 'both' ? 'true' as const : undefined,
+  }
+  const originalURL = window.location.href
+  render(<><Button asChild {...props}><a href="#destination">
+    <><span onClick={activate} onMouseDown={activate} onAuxClick={activate}>Label</span>{' '}<span>
+      <a href="#nested" tabIndex={0} onClick={activate}>Nested link</a>{' '}
+      <button onClick={activate}>Nested button</button>{' '}{[7, <span key="tail">tail</span>]}{false}{null}
+    </span></>
+  </a></Button><button>Next</button></>)
+  const label = await screen.findByText('Label', { exact: false })
+  const root = label.closest('[data-slot="button"]')!
+  const target = root.querySelector('span') ?? root
+  fireEvent.click(target)
+  fireEvent.mouseDown(target, { button: 1 })
+  fireEvent(target, new MouseEvent('auxclick', { button: 1, bubbles: true, cancelable: true }))
+  expect(activate).not.toHaveBeenCalled()
+  expect(window.location.href).toBe(originalURL)
+  expect(root.textContent).toBe('Label Nested link Nested button 7tail')
+  expect(root.children).toHaveLength(0)
+  expect(root.querySelector('a, button, [href], [tabindex]')).toBeNull()
+  expect(root.getAttribute('aria-disabled')).toBe('true')
+  expect(root.classList.contains('aria-disabled:bg-muted')).toBe(true)
+  ;(root as HTMLElement).focus()
+  expect(document.activeElement).not.toBe(root)
+  await userEvent.setup().tab()
+  expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Next' }))
+})

@@ -37,6 +37,19 @@ const buttonVariants = cva(
   }
 )
 
+// Disabled slots retain literal label text only. Never mount descendants that
+// could carry React handlers, focus or navigation behavior (including components).
+function buttonLabelText(children: React.ReactNode): string {
+  return React.Children.toArray(children).map(child => {
+    if (React.isValidElement<{ children?: React.ReactNode }>(child)) {
+      return buttonLabelText(child.props.children)
+    }
+    return typeof child === "string" || typeof child === "number" || typeof child === "bigint"
+      ? String(child)
+      : ""
+  }).join("")
+}
+
 function Button({
   className,
   variant,
@@ -56,7 +69,7 @@ function Button({
   )
   if (slotDisabled) {
     // Do not mount the child: router Links can regenerate href from `to`.
-    // Keep its label/content and presentation, without forwarding interaction
+    // Keep its label text and presentation, without forwarding interaction
     // handlers, navigation props, roles, tabIndex or refs to the plain text.
     return (
       <span
@@ -70,7 +83,7 @@ function Button({
         className={cn(buttonVariants({ variant, size, className }), child?.props.className)}
         style={{ ...props.style, ...child?.props.style }}
       >
-        {child?.props.children}
+        {buttonLabelText(child?.props.children)}
       </span>
     )
   }
