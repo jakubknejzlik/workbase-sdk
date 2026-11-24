@@ -1,3 +1,4 @@
+import { assertEligible, compositionEligibility } from '../change-routing.ts'
 import { catalogPlan, labelCatalog, validatePresentation } from './presentation.ts'
 import { join } from 'node:path'
 import { durableAtomic, json, type Bundle, type Store } from '../storage.ts'
@@ -37,10 +38,7 @@ async function load(store: Store, instance: string, changes: CompositionChange[]
   return store.load(instance, { canonicalRuntime: true })
 }
 async function prepare(bundle: Bundle, changes: CompositionChange[], root: string) {
-  if (changes.some(isPresentationChange) && !changes.every(isPresentationChange)) {
-    fail('mixed_change_kinds', 'Propose V3 presentation changes separately from runtime and access changes')
-  }
-  if (bundle.config.baseline !== 'workbase-sdk') fail('composition_requires_v3', 'Composition authoring requires a V3 instance', 409)
+  assertEligible(compositionEligibility(bundle.config.baseline, changes))
   const runtimeChanges = changes.filter((change): change is RuntimeChange => change.kind === 'set_plugin' || change.kind === 'set_interactive')
   const accessChanges = changes.filter(isAccess)
   const access = accessChanges.length ? await accessPlan(root, accessChanges) : { config: bundle.config, files: [] }

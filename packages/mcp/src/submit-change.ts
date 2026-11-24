@@ -1,3 +1,4 @@
+import { assertEligible, submissionPromotionEligibility } from './change-routing.ts'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { z } from 'zod'
@@ -37,7 +38,7 @@ function state(checks: CheckRun[]) {
   return checks.every(c => ['success', 'neutral', 'skipped'].includes(c.conclusion ?? '')) ? 'success' : 'failure'
 }
 export async function submitChange(directory: string, p: Submission, expectedBaseSha: string, configure?: GitHubConfiguration, readDependencyDigest?: () => Promise<string | undefined>) {
-  if (p.status !== 'promoted') fail('promotion_required', 'Změna musí být nejprve povýšena pomocí promote.', 409)
+  assertEligible(submissionPromotionEligibility(p.status))
   if (!p.validation || !p.verification || hash(p.validation) !== hash(p.verification)) fail('verification_required', 'Chybí ověření této změny.', 409)
   if (!p.promotedFiles || !p.migrationPreview || p.promotionHash !== promotionHash(p)) fail('promotion_snapshot_required', 'Chybí platný záznam souborů povýšené změny.', 409)
   const accessChanges = p.changes.filter(change => ['set_system_access', 'set_entity_access', 'set_account_link'].includes(change.kind))
