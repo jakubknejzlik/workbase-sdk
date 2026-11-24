@@ -22,10 +22,12 @@ no budget or limit is raised. Literal 0.4.0 widget captions remain supported.
 
 ## Preparation checks
 
-Mirror [.github/workflows/ci.yml](../../.github/workflows/ci.yml) locally: frozen
-install, lint, root/UI/frontend typecheck, CI invariants, full `bun run test`
-(including infra, tools and frontend), List v2 acceptance, MCP and locale checks.
-Verify combined console-model/widgets and widget browser coverage, literal
+Local preparation runs only the scoped checks recorded in the release handoff:
+frozen install, lint, root/UI/frontend typecheck, CI invariants and version
+consistency. Full SDK, MCP, tools, frontend, locale and List v2 e2e suites run
+in the release PR's hosted [.github/workflows/ci.yml](../../.github/workflows/ci.yml)
+on the exact release head. Hosted CI must verify combined console-model/widgets
+and widget browser coverage, literal
 0.4.0 captions, Zero/Nonzero/Missing stats, error cards next to linked data
 widgets, and shared header/body tracks. Every mandatory gate must pass on the
 concrete release head; baseline failures are not a waiver.
@@ -35,7 +37,11 @@ print or commit its contents. Run `git diff --check`, a redacted gitleaks branch
 scan, SDK boundary and public scans. Never weaken scan policies or add exceptions.
 See [CONTRIBUTING.md](../../CONTRIBUTING.md).
 
-Run the archive-only rehearsal:
+## Phase 2: hosted validation and release evidence
+
+Archive rehearsal and combined screenshots follow assembly, outside the scoped
+local preparation run. Hosted CI runs the full packer; the archive-only rehearsal
+command is:
 
 ```sh
 bash scripts/sdk-pack.sh --pack-only
