@@ -159,6 +159,20 @@ reference hop, display-expression operands, `where`, `labelWhere`, search fields
 and ordering (including label ordering). An unreadable target entity, ID, display
 field or expression operand drops the complete widget. `ConsoleQuery` exposes
 optional `search` and `labelWhere` with the same shapes as the core query API.
+
+Dashboard `table` and `list` widgets can link their primary record to the generated
+console detail page. Consumers must explicitly include `id` in the widget query,
+for example `query: { entity: 'entries', select: ['id', 'name'], limit: 5 }`.
+The SDK never adds `id` or other unrequested fields to widget results. Omitting
+`id` from `select`, or receiving a row without it, renders ordinary text without
+an error. The link also requires the same entity read operation and readable ID
+as the generated console detail page; server row policies still govern the widget
+query and detail read. A table links its first non-reference column in both the
+desktop table and narrow cards; a list links its configured value. Existing
+reference-label links retain their target record and are never nested inside a
+primary-record link. The native, focusable link uses its visible value as its
+accessible name and supports Enter activation like the console list.
+
 Navigation to excluded views, denied entities/pages or other roles is omitted, together with unused configured navigation groups. These rules apply
 even when no console provider is installed. The `console` member can therefore be
 narrower than the internal `consoleRegistry` provider result.
