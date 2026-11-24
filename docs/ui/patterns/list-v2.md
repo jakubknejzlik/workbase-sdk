@@ -94,7 +94,10 @@ fields, search, filters, sort, requests or counts. Storage failure retains choic
 in memory for the current document, including list remounts.
 
 Explicit generated-console logout clears that account's display preferences
-across organizations and entities and invalidates mounted callbacks. Unknown
-verified account scope clears only this feature's namespaces. Ordinary session
-expiry does not clear preferences, and storage failure cannot block sign-out.
+across organizations and entities and invalidates mounted callbacks. Cleanup uses
+the active organization's verified user and runtime model instance, matching the
+list's persistence scope rather than the global identity cache. Missing or failed
+projections remove nothing; cleanup never falls back to the whole feature prefix.
+The same generated-console logout path scopes D7 cleanup to this account. Ordinary
+session expiry does not clear preferences, and storage failure cannot block sign-out.
 V3 wiring remains separate.

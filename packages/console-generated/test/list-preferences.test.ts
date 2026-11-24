@@ -51,8 +51,13 @@ it('clears the account across organizations/entities while preserving other user
   clearListPreferences(scope, store)
   for (const key of own) expect(store.getItem(key)).toBeNull()
   for (const key of other) expect(store.getItem(key)).not.toBeNull()
+  // @ts-expect-error A complete account is required even when storage is supplied.
   clearListPreferences(undefined, store)
-  expect(store.getItem(other[0])).toBeNull(); expect(store.getItem('console-language')).not.toBeNull()
+  // @ts-expect-error Partial identity must not select a wider namespace.
+  clearListPreferences({ userId: scope.userId }, store)
+  // @ts-expect-error Partial identity must not select a wider namespace.
+  clearListPreferences({ instance: scope.instance }, store)
+  for (const key of other) expect(store.getItem(key)).not.toBeNull()
 })
 
 it('does not resurrect old disk preferences after logout even when enumeration/removal fails', () => {

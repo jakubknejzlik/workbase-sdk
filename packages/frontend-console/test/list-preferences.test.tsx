@@ -20,7 +20,7 @@ function storage() { const values = new Map<string, string>(); return { getItem:
 let store: ReturnType<typeof storage>
 const clients: QueryClient[] = []
 beforeEach(() => { store = storage(); vi.stubGlobal('localStorage', store); vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} }); vi.spyOn(window, 'scrollTo').mockImplementation(() => {}) })
-afterEach(() => { clearListPreferences(); for (const client of clients.splice(0)) client.clear(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
+afterEach(() => { clearListPreferences(scope); for (const client of clients.splice(0)) client.clear(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 async function mount(language: 'en' | 'cs' = 'en', initialScope: SavedViewsScope | null = scope, embedded = false) {
   const i18n = i18next.createInstance()
   await i18n.use(initReactI18next).init({ lng: language, resources: { [language]: { translation: language === 'cs' ? cs : en } } })

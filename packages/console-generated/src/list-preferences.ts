@@ -11,7 +11,7 @@ const pending = new Set<string>()
 // A failed cleanup must not resurrect stale disk data later in this document.
 const cleared = new Set<string>()
 const wasCleared = (key: string) => [...cleared].some(match => key.startsWith(match))
-const listeners = new Set<(account?: Account) => void>()
+const listeners = new Set<(account: Account) => void>()
 function accountPrefix(scope: Account) { return `${prefix}${encodeURIComponent(scope.instance)}:${encodeURIComponent(scope.userId)}:` }
 export function listPreferencesKey(scope: SavedViewsScope, entity: string) {
   return `${accountPrefix(scope)}${encodeURIComponent(scope.orgId)}:${encodeURIComponent(entity)}`
@@ -43,14 +43,15 @@ export function saveListPreferences(scope: SavedViewsScope, entity: string, pref
     else pending.delete(key)
   } catch { pending.add(key) }
 }
-export function onListPreferencesCleared(listener: (account?: Account) => void) {
+export function onListPreferencesCleared(listener: (account: Account) => void) {
   listeners.add(listener)
   return () => { listeners.delete(listener) }
 }
 /** Explicit logout only, across every organization/entity belonging to the verified account. */
-export function clearListPreferences(account?: Account, store?: Store) {
+export function clearListPreferences(account: Account, store?: Store) {
+  if (!account?.instance || !account.userId) return
   for (const listener of listeners) { try { listener(account) } catch { /* Logout must complete. */ } }
-  const match = account ? accountPrefix(account) : prefix
+  const match = accountPrefix(account)
   for (const key of memory.keys()) if (key.startsWith(match)) { memory.delete(key); pending.delete(key) }
   try {
     const target = store ?? globalThis.localStorage, keys: string[] = []

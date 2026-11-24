@@ -15,7 +15,7 @@ export function useListPreferences(scope: SavedViewsScope | undefined, entity: s
     // Commit normalized preferences so removed/unreadable IDs cannot return after a capability change.
     if (scope && current.stored && current.active) saveListPreferences(scope, entity, current.preferences)
     return onListPreferencesCleared(account => {
-      if (scope && (!account || account.instance === scope.instance && account.userId === scope.userId)) {
+      if (scope && account.instance === scope.instance && account.userId === scope.userId) {
         const latest = owner.current
         if (latest.identity !== identity) return
         latest.active = false // Invalidate already captured callbacks synchronously.
