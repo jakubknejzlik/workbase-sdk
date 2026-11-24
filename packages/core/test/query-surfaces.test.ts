@@ -4,6 +4,7 @@ import { setup, runtime, policyGraph, roles } from './fixtures/policy-graph/setu
 import { request, json } from '@workbasehq/test-support/helpers'
 import { queryClient } from '../../mcp/test/data/query-client'
 import { queryMetrics, recordQuery, emptyQueryLog, QUERY_DURATION_SAMPLES } from '../src/query/observability'
+import { parseSummaryRequest } from '@workbasehq/core/query/schema'
 
 let app: Awaited<ReturnType<typeof setup>>
 beforeEach(async () => { app = await setup() })
@@ -40,6 +41,22 @@ it.each(['reviewer', 'coordinator'])('MCP/HTTP byte parity matrix under %s polic
     await parity(client, role, input('records', { select: ['id'], limit: 1, cursor: page.next_cursor }))
     const discovery = await client.callTool({ name: 'describe_schema', arguments: {} })
     expect((discovery.structuredContent as any).data.schema).toEqual(await json(await app.request('http://localhost/schema')))
+  } finally { await close() }
+})
+it('keeps valid summary contracts inactive with the same safe HTTP/MCP envelope and row-only discovery', async () => {
+  const summary = { entity: 'records', summary: { version: 1, metrics: [{ op: 'count', alias: 'rows' }] } }
+  expect(parseSummaryRequest(policyGraph, 'records', summary).ok).toBe(true)
+  const { client, close } = await connect('reviewer')
+  try {
+    const http = await request(app, '/query', 'POST', summary, 'reviewer')
+    expect(http.status).toBe(400)
+    const body = await parity(client, 'reviewer', summary)
+    expect(body).toEqual({ error: 'query_invalid', path: ['limit'] })
+    const discovery = await client.listTools()
+    const query = discovery.tools.find(tool => tool.name === 'query')!
+    expect(query.inputSchema.properties).not.toHaveProperty('summary')
+    expect(query.inputSchema.required).toContain('limit')
+    expect((await parity(client, 'reviewer', input('records', { select: ['id'], limit: 1 }))).data).toHaveLength(1)
   } finally { await close() }
 })
 it.each([...roles, 'unknown'])('MCP canary oracle and forbidden/none/unknown-role parity for %s', async role => {
