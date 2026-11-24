@@ -568,6 +568,7 @@
   "rowInvite_cancel": "Cancel invitation",
   "rowInvite_remove": "Remove access",
   "rowInviteDescription": "The account is linked to this row only after acceptance. Cancel to invite another email.",
+  "rowInviteNewDescription": "The account is linked to this row only after acceptance.",
   "rowLinkDescription": "Link an existing organization member to this row. Access applies immediately.",
   "rowLinkPickerHint": "Select a member to link. Unavailable accounts show why they cannot be linked.",
   "rowInviteRemoveDescription": "Clears all account links in this application. The account is kept.",
