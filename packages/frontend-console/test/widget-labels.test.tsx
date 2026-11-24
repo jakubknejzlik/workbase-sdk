@@ -5,7 +5,7 @@ import { createInstance } from 'i18next'
 import { I18nextProvider } from 'react-i18next'
 import { WidgetCards } from '../src/dashboard'
 import { RuntimeLocalization } from '../src/runtime-localization'
-import type { ConsolePage, ConsolePageResult, ConsoleModelContract } from '@workbasehq/core/console-contract'
+import type { ConsolePage, ConsolePageResult } from '@workbasehq/core/console-contract'
 
 const page: ConsolePage = { id: 'labels', path: '/labels', label: 'overview', widgets: [
   { id: 'count', kind: 'stat', label: 'dashboard_count', query: { entity: 'specimens' }, aggregate: { fn: 'count' } },
@@ -28,7 +28,7 @@ it.each(['en', 'cs'] as const)('renders stat/table/list captions and entity fall
   await i18n.init({ lng: language, resources: {} })
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   client.setQueryData(['console-model', 'org-a'], { model: { enumLabels } })
-  render(<I18nextProvider i18n={i18n}><QueryClientProvider client={client}><RuntimeLocalization orgId="org-a"><WidgetCards orgId="org-a" page={page} result={result} pending={false} error={null} model={{ entities: {}, enumLabels } as ConsoleModelContract['model']} /></RuntimeLocalization></QueryClientProvider></I18nextProvider>)
+  render(<I18nextProvider i18n={i18n}><QueryClientProvider client={client}><RuntimeLocalization orgId="org-a"><WidgetCards orgId="org-a" page={page} result={result} pending={false} error={null} enumLabels={enumLabels} /></RuntimeLocalization></QueryClientProvider></I18nextProvider>)
   for (const caption of Object.values(enumLabels[language])) expect(screen.getByRole('heading', { level: 2, name: caption })).toBeTruthy()
   expect(screen.getByRole('table', { name: enumLabels[language].dashboard_table })).toBeTruthy()
   client.clear()
@@ -46,7 +46,7 @@ it.each([
   await i18n.init({ lng: language, resources: {} })
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   client.setQueryData(['console-model', 'org-a'], { model: { enumLabels: labels } })
-  render(<I18nextProvider i18n={i18n}><QueryClientProvider client={client}><RuntimeLocalization orgId="org-a"><WidgetCards orgId="org-a" page={page} result={result} pending={false} error={null} model={{ entities: {}, enumLabels: labels } as ConsoleModelContract['model']} /></RuntimeLocalization></QueryClientProvider></I18nextProvider>)
-  expect(screen.getByRole('heading', { level: 2, name: expected, exact: true })).toBeTruthy()
+  render(<I18nextProvider i18n={i18n}><QueryClientProvider client={client}><RuntimeLocalization orgId="org-a"><WidgetCards orgId="org-a" page={page} result={result} pending={false} error={null} enumLabels={labels} /></RuntimeLocalization></QueryClientProvider></I18nextProvider>)
+  expect(screen.getByRole('heading', { level: 2, name: expected })).toBeTruthy()
   client.clear()
 })

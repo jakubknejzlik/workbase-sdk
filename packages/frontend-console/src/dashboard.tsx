@@ -7,7 +7,7 @@ import { formatFieldValue, recordLabel, visibleEntities, type Model, type Capabi
 import { signedValue } from '@workbasehq/console-generated/screens'
 import { DetailCards } from '../../console-generated/src/detail-layout'
 import { shortRecordId } from '../../console-generated/src/labels'
-import type { ConsolePage, ConsolePageResult, ConsoleWidgetResult } from '../../plugins/console/src/contract'
+import type { ConsoleModelContract, ConsolePage, ConsolePageResult, ConsoleWidgetResult } from '../../plugins/console/src/contract'
 import { api } from './api/client'
 import { useRuntimeModel } from './api/runtime-model'
 import { Page } from './screens'
@@ -19,20 +19,19 @@ export function WidgetPage({ orgId, page }: { orgId: string; page: ConsolePage }
   const caps = runtime.error ? undefined : runtime.data?.capabilities
   const result = useQuery({ queryKey: ['console-page', orgId, page.id, caps],
     queryFn: () => api<ConsolePageResult>(`/o/${encodeURIComponent(orgId)}/console-pages/${encodeURIComponent(page.id)}`), enabled: !!model && !!caps, refetchOnWindowFocus: true })
-  return <Page title={t(page.label)}><div className="space-y-6"><WidgetCards orgId={orgId} page={page} result={result.data} pending={result.isPending} error={result.error ?? runtime.error} model={model} caps={caps} /></div></Page>
+  return <Page title={t(page.label)}><div className="space-y-6"><WidgetCards orgId={orgId} page={page} result={result.data} pending={result.isPending} error={result.error ?? runtime.error} enumLabels={model?.enumLabels} model={model} caps={caps} /></div></Page>
 }
 
 /** All values, including reference labels, arrive in the single page response. */
-export function WidgetCards({ orgId, page, result, pending, error, model, caps }: {
-  orgId: string; page: ConsolePage; result?: ConsolePageResult; pending: boolean; error: Error | null; model?: Model; caps?: Capabilities
+export function WidgetCards({ orgId, page, result, pending, error, model, caps, enumLabels }: {
+  orgId: string; page: ConsolePage; result?: ConsolePageResult; pending: boolean; error: Error | null; model?: Model; caps?: Capabilities; enumLabels?: ConsoleModelContract['model']['enumLabels']
 }) {
   const { t, i18n } = useTranslation()
   const caption = (label: string) => {
-    const dictionaries = model?.enumLabels
-    if (['en', 'cs'].some(language => Object.hasOwn(dictionaries?.[language] ?? {}, label))) {
+    const entry = (language: string) => Object.hasOwn(enumLabels?.[language] ?? {}, label) ? enumLabels?.[language]?.[label]?.trim() : undefined
+    if (['en', 'cs'].some(language => Object.hasOwn(enumLabels?.[language] ?? {}, label))) {
       const language = i18n.language.split('-')[0]
-      const other = language === 'cs' ? 'en' : 'cs'
-      return dictionaries?.[language]?.[label]?.trim() || dictionaries?.[other]?.[label]?.trim() || label
+      return entry(language) || entry(language === 'cs' ? 'en' : 'cs') || label
     }
     return label.startsWith('entity_') ? t(label) : label
   }
