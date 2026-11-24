@@ -24,6 +24,7 @@ export type ConsoleWidget = { id: string; label: string } & (
 /** The SR-74 row hint, referencing widget IDs instead of detail card keys. */
 export type ConsoleWidgetSection = Extract<ConsoleDetailSection, { row: string[] }>
 export type ConsoleWidgetResult = Pick<ConsoleWidget, 'id' | 'label'> & (
+  | { kind: 'error'; code: 'query_too_expensive' | 'widget_failed' }
   | { kind: 'stat'; value: number | null }
   | { kind: 'table'; columns: string[]; data: Record<string, unknown>[] }
   | { kind: 'list'; field: string; data: Record<string, unknown>[] })
