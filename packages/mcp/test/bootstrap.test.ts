@@ -321,7 +321,7 @@ it.each(['bun', 'node'])('init does not load Worker, core or server modules unde
   await mkdir(join(tool, 'node_modules'), { recursive: true })
   await writeFile(join(tool, 'package.json'), '{"type":"module","version":"0.2.0-test"}')
   // These are all init's source dependencies. server.ts/storage.ts are deliberately absent.
-  for (const file of ['stdio.ts', 'cli.ts', 'schemas.ts', 'bootstrap.ts', 'paths.ts']) await cp(resolve('packages/mcp/src', file), join(tool, 'src', file))
+  for (const file of ['stdio.ts', 'cli.ts', 'schemas.ts', 'doc-manifest.ts', 'bootstrap.ts', 'paths.ts']) await cp(resolve('packages/mcp/src', file), join(tool, 'src', file))
   await cp(resolve('packages/mcp/templates/standalone'), join(tool, 'templates/standalone'), { recursive: true })
   await symlink(resolve('packages/mcp/node_modules/zod'), join(tool, 'node_modules/zod'))
   const result = spawnSync(runtime, [
@@ -406,6 +406,7 @@ it.each([
       { kind: 'set_roles', roles: ['owner', 'viewer'], organizationOwnerRole: 'owner' },
       { kind: 'set_constraints', entity: 'worker', constraints: [{ kind: 'unique', name: 'worker_name_unique', fields: ['name'] }] },
       { kind: 'add_index', entity: 'worker', name: 'worker_name_idx', fields: ['name'] },
+      { kind: 'add_field', entity: 'worker', field: 'notes', definition: { type: 'text' } },
     ] : []),
   ]
   const kinds = examples.map(change => schemas.propose_change.parse({ instance: 'example', baseRevision: 1, changes: [change] }).changes[0].kind)
