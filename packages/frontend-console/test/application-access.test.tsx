@@ -139,10 +139,12 @@ it.each([false, true])('no account command is exposed without a grant with statu
   if (!available) expect(write).not.toHaveBeenCalled()
 })
 it.each(['explicit', 'array'])('multiple linked accounts (%s) warn and disable all account actions', async source => {
-  await mount({ status: { state: 'signed_in', can_invite: true, can_cancel: true, inconsistency: source === 'explicit' ? 'multiple_linked_accounts' : null, linked_accounts: source === 'array' ? [{ id: 'a', label: 'First account' }, { id: 'b', label: 'Second account' }] : [] } })
+  const { write } = await mount({ status: { state: 'signed_in', can_invite: true, can_cancel: true, inconsistency: source === 'explicit' ? 'multiple_linked_accounts' : null, linked_accounts: source === 'array' ? [{ id: 'a', label: 'First account' }, { id: 'b', label: 'Second account' }] : [] } })
   expect((await screen.findByRole('alert')).textContent).toContain('Multiple linked accounts')
   expect(screen.queryByRole('menuitem', { name: 'Remove access' })).toBeNull()
-  expect(screen.queryByText('First account')).toBeNull()
+  const trigger = screen.getByRole('button', { name: `${source === 'array' ? 'First account' : '–'} – ${en.rowAccessMultiple}, ${en.rowAccessActions}` })
+  expect(trigger).toHaveProperty('disabled', true)
+  expect(write.mock.calls.every(([, method]) => method === 'GET')).toBe(true)
   expect(screen.queryByRole('menuitem', { name: 'Link account' })).toBeNull()
 })
 it('background status refresh preserves the open invitation draft and disables submission until settled', async () => {

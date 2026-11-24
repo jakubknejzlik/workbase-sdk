@@ -647,11 +647,27 @@ for (const language of ['en', 'cs'] as const) for (const v3 of [true, false]) {
       expect(screen.queryAllByRole('menuitem').map(item => item.textContent)).toEqual(expected)
       expect(write.mock.calls.every(([, method]) => method === 'GET')).toBe(true)
     })
-  it.each(['multiple_linked_accounts', 'inconsistent'])(`290 ${language} ${v3 ? 'V3' : 'legacy'} detail preserves %s warning without actions`, async inconsistency => {
-    const { write } = await mount('detail', { language, v3, inconsistency })
-    expect((await screen.findByRole('alert')).textContent).toBe(inconsistency === 'multiple_linked_accounts' ? t.rowAccessMultiple : t.requestFailed)
-    expect(screen.queryByRole('button', { name: new RegExp(t.rowAccessActions) })).toBeNull()
+  for (const surface of ['detail', 'row'] as const) it.each(['multiple_linked_accounts', 'inconsistent'])(`290 ${language} ${v3 ? 'V3' : 'legacy'} ${surface} preserves %s warning and compact control without mutations`, async inconsistency => {
+    const { user, write } = await mount(surface, { language, v3, inconsistency, state: 'invited' })
+    const warning = inconsistency === 'multiple_linked_accounts' ? t.rowAccessMultiple : t.requestFailed
+    expect((await screen.findByRole('alert')).textContent).toBe(warning)
+    const trigger = screen.getByRole('button', { name: `invited@example.test – ${warning}, ${t.rowAccessActions}` })
+    expect(trigger).toHaveProperty('disabled', true)
+    expect(trigger.textContent).toBe('invited@example.test')
+    expect(trigger.querySelector('.rounded-full[aria-hidden="true"]')).toBeTruthy()
+    expect(trigger.querySelector('svg[aria-hidden="true"]')).toBeTruthy()
+    await user.click(trigger)
     expect(screen.queryByRole('menuitem')).toBeNull()
+    expect(screen.queryByRole('dialog')).toBeNull()
+    const reload = screen.queryByRole('button', { name: t.reloadRetry })
+    if (inconsistency === 'inconsistent') {
+      expect(reload).toHaveProperty('disabled', false)
+      const reads = write.mock.calls.length
+      await user.click(reload!)
+      await waitFor(() => expect(write.mock.calls.length).toBeGreaterThan(reads))
+      expect(screen.getByRole('alert').textContent).toBe(warning)
+      expect(trigger).toHaveProperty('disabled', true)
+    } else expect(reload).toBeNull()
     expect(write.mock.calls.every(([, method]) => method === 'GET')).toBe(true)
   })
   it(`290 ${language} ${v3 ? 'V3' : 'legacy'} hides detail access without read authority`, async () => {
