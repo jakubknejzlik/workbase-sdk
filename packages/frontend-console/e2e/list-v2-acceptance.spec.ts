@@ -536,7 +536,7 @@ for (const width of [1440, 390, 360]) for (const actor of ['admin', 'staff'] as 
   const table = list(page).locator('[data-slot="data-table"]')
   const row = table.locator('tbody [data-row-id]').first()
   await expect(table).toHaveAttribute('data-list-density', 'comfortable')
-  expect(await row.locator('td').first().evaluate(element => getComputedStyle(element).fontSize)).toBe('11px')
+  expect(await row.locator('td').first().evaluate(element => [getComputedStyle(element).fontSize, getComputedStyle(element).lineHeight])).toEqual(['14px', '20px'])
   expect(Math.round((await row.boundingBox())!.height)).toBe(actor === 'admin' ? 53 : 61)
   if (width === 1440) {
     expect(await page.locator('h1').evaluate(element => [getComputedStyle(element).fontSize, getComputedStyle(element).fontWeight])).toEqual(['29px', '400'])
