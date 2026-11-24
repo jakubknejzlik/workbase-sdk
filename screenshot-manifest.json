@@ -1,0 +1,1357 @@
+{
+  "candidate": "61e2c4370269bae302f9ef59af0880b325d1427d",
+  "base": "c31fe5e1914c5daff4cca83427b6caa0aca9d41a",
+  "headBuild": {
+    "version": "0.4.0",
+    "sha": "bbd1030892fb841b413f7a320e8268168fed8bb3",
+    "sourceCommit": "61e2c4370269bae302f9ef59af0880b325d1427d",
+    "builtAt": "2026-11-24T10:39:31.595Z"
+  },
+  "captures": [
+    {
+      "path": "/tmp/codex-scratch/codex-wr-github-jakubknejzlik-workbase-sdk-290-s1-impl-wr-39aaca9a/base-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-base-en-1440-no_account-closed.png",
+      "state": "no_account",
+      "width": 1440,
+      "language": "en",
+      "mode": "base",
+      "source": "c31fe5e1914c5daff4cca83427b6caa0aca9d41a",
+      "syntheticOverride": false,
+      "file": "base-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-base-en-1440-no_account-closed.png",
+      "sha256": "2a83ad9390482f31e7f604944ee30fc492d769231686a3d7de0b351488731d46",
+      "bytes": 45081,
+      "imageDimensions": [
+        1440,
+        900
+      ]
+    },
+    {
+      "path": "/tmp/codex-scratch/codex-wr-github-jakubknejzlik-workbase-sdk-290-s1-impl-wr-39aaca9a/base-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-base-en-1440-invited-closed.png",
+      "state": "invited",
+      "width": 1440,
+      "language": "en",
+      "mode": "base",
+      "source": "c31fe5e1914c5daff4cca83427b6caa0aca9d41a",
+      "syntheticOverride": false,
+      "file": "base-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-base-en-1440-invited-closed.png",
+      "sha256": "0ac7719d3b6c1247c1c78c49ad665a55838938943612668536445ac645f8019e",
+      "bytes": 51350,
+      "imageDimensions": [
+        1440,
+        900
+      ]
+    },
+    {
+      "path": "/tmp/codex-scratch/codex-wr-github-jakubknejzlik-workbase-sdk-290-s1-impl-wr-39aaca9a/base-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-base-en-1440-signed_in-closed.png",
+      "state": "signed_in",
+      "width": 1440,
+      "language": "en",
+      "mode": "base",
+      "source": "c31fe5e1914c5daff4cca83427b6caa0aca9d41a",
+      "syntheticOverride": false,
+      "file": "base-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-base-en-1440-signed_in-closed.png",
+      "sha256": "576f723dc2cceda1c5833ca99446b991fcd3a8085784064119907a5fc8e65085",
+      "bytes": 47184,
+      "imageDimensions": [
+        1440,
+        900
+      ]
+    },
+    {
+      "path": "/tmp/codex-scratch/codex-wr-github-jakubknejzlik-workbase-sdk-290-s1-impl-wr-39aaca9a/base-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-base-en-1440-expired-closed.png",
+      "state": "expired",
+      "width": 1440,
+      "language": "en",
+      "mode": "base",
+      "source": "c31fe5e1914c5daff4cca83427b6caa0aca9d41a",
+      "syntheticOverride": true,
+      "file": "base-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-base-en-1440-expired-closed.png",
+      "sha256": "57730b9e2e0b5ec792358d6c3a9cd82678ebc5f55e3c96ec6a509f8767a4c5c2",
+      "bytes": 50723,
+      "imageDimensions": [
+        1440,
+        900
+      ]
+    },
+    {
+      "path": "/tmp/codex-scratch/codex-wr-github-jakubknejzlik-workbase-sdk-290-s1-impl-wr-39aaca9a/base-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-base-en-1440-inconsistent-closed.png",
+      "state": "inconsistent",
+      "width": 1440,
+      "language": "en",
+      "mode": "base",
+      "source": "c31fe5e1914c5daff4cca83427b6caa0aca9d41a",
+      "syntheticOverride": true,
+      "file": "base-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-base-en-1440-inconsistent-closed.png",
+      "sha256": "96ea2b75be6ee601405f77e124cb4cf3778c52a38dd5853672c7d84d5ecc3b5e",
+      "bytes": 46754,
+      "imageDimensions": [
+        1440,
+        900
+      ]
+    },
+    {
+      "path": "/tmp/codex-scratch/codex-wr-github-jakubknejzlik-workbase-sdk-290-s1-impl-wr-39aaca9a/base-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-base-en-900-no_account-closed.png",
+      "state": "no_account",
+      "width": 900,
+      "language": "en",
+      "mode": "base",
+      "source": "c31fe5e1914c5daff4cca83427b6caa0aca9d41a",
+      "syntheticOverride": false,
+      "file": "base-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-base-en-900-no_account-closed.png",
+      "sha256": "ffa75298678f304d790174a7395f78a01787f2f987486ccc27d272c8d40833a1",
+      "bytes": 27961,
+      "imageDimensions": [
+        900,
+        900
+      ]
+    },
+    {
+      "path": "/tmp/codex-scratch/codex-wr-github-jakubknejzlik-workbase-sdk-290-s1-impl-wr-39aaca9a/base-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-base-en-900-invited-closed.png",
+      "state": "invited",
+      "width": 900,
+      "language": "en",
+      "mode": "base",
+      "source": "c31fe5e1914c5daff4cca83427b6caa0aca9d41a",
+      "syntheticOverride": false,
+      "file": "base-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-base-en-900-invited-closed.png",
+      "sha256": "c1fcb64a6b5f3c3f86edb3a1bbc051ba4f694a3b27340f32ceab63559baaf087",
+      "bytes": 33852,
+      "imageDimensions": [
+        900,
+        900
+      ]
+    },
+    {
+      "path": "/tmp/codex-scratch/codex-wr-github-jakubknejzlik-workbase-sdk-290-s1-impl-wr-39aaca9a/base-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-base-en-900-signed_in-closed.png",
+      "state": "signed_in",
+      "width": 900,
+      "language": "en",
+      "mode": "base",
+      "source": "c31fe5e1914c5daff4cca83427b6caa0aca9d41a",
+      "syntheticOverride": false,
+      "file": "base-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-base-en-900-signed_in-closed.png",
+      "sha256": "e1c25b3a839b5cf630c6578d82737bed01758eee5770fc5e26ad5b915dae7e6e",
+      "bytes": 30062,
+      "imageDimensions": [
+        900,
+        900
+      ]
+    },
+    {
+      "path": "/tmp/codex-scratch/codex-wr-github-jakubknejzlik-workbase-sdk-290-s1-impl-wr-39aaca9a/base-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-base-en-900-expired-closed.png",
+      "state": "expired",
+      "width": 900,
+      "language": "en",
+      "mode": "base",
+      "source": "c31fe5e1914c5daff4cca83427b6caa0aca9d41a",
+      "syntheticOverride": true,
+      "file": "base-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-base-en-900-expired-closed.png",
+      "sha256": "73fd8a229e0244235ccfdaf43a54ef07260063cc96a66c7246173ccd2df41590",
+      "bytes": 33274,
+      "imageDimensions": [
+        900,
+        900
+      ]
+    },
+    {
+      "path": "/tmp/codex-scratch/codex-wr-github-jakubknejzlik-workbase-sdk-290-s1-impl-wr-39aaca9a/base-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-base-en-900-inconsistent-closed.png",
+      "state": "inconsistent",
+      "width": 900,
+      "language": "en",
+      "mode": "base",
+      "source": "c31fe5e1914c5daff4cca83427b6caa0aca9d41a",
+      "syntheticOverride": true,
+      "file": "base-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-base-en-900-inconsistent-closed.png",
+      "sha256": "59f1ed4bffd62e25572b1a210e81961d38bf0978c0464ad0bd96dc2de820748e",
+      "bytes": 29644,
+      "imageDimensions": [
+        900,
+        900
+      ]
+    },
+    {
+      "path": "/tmp/codex-scratch/codex-wr-github-jakubknejzlik-workbase-sdk-290-s1-impl-wr-39aaca9a/base-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-base-en-390-no_account-closed.png",
+      "state": "no_account",
+      "width": 390,
+      "language": "en",
+      "mode": "base",
+      "source": "c31fe5e1914c5daff4cca83427b6caa0aca9d41a",
+      "syntheticOverride": false,
+      "file": "base-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-base-en-390-no_account-closed.png",
+      "sha256": "c1f8b8cb3e7e36c5121724a566ce0e422441e9a1e4fb08999f838ac681a16a40",
+      "bytes": 24957,
+      "imageDimensions": [
+        390,
+        900
+      ]
+    },
+    {
+      "path": "/tmp/codex-scratch/codex-wr-github-jakubknejzlik-workbase-sdk-290-s1-impl-wr-39aaca9a/base-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-base-en-390-invited-closed.png",
+      "state": "invited",
+      "width": 390,
+      "language": "en",
+      "mode": "base",
+      "source": "c31fe5e1914c5daff4cca83427b6caa0aca9d41a",
+      "syntheticOverride": false,
+      "file": "base-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-base-en-390-invited-closed.png",
+      "sha256": "8c6e1b36608de600fcf09b877cf078b8a5f0dc76b4c79a303154081225347b8b",
+      "bytes": 31657,
+      "imageDimensions": [
+        390,
+        900
+      ]
+    },
+    {
+      "path": "/tmp/codex-scratch/codex-wr-github-jakubknejzlik-workbase-sdk-290-s1-impl-wr-39aaca9a/base-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-base-en-390-signed_in-closed.png",
+      "state": "signed_in",
+      "width": 390,
+      "language": "en",
+      "mode": "base",
+      "source": "c31fe5e1914c5daff4cca83427b6caa0aca9d41a",
+      "syntheticOverride": false,
+      "file": "base-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-base-en-390-signed_in-closed.png",
+      "sha256": "96fb240e077704b802368a47683a86e6bc6b189594d1f61649147ed779a33395",
+      "bytes": 27265,
+      "imageDimensions": [
+        390,
+        900
+      ]
+    },
+    {
+      "path": "/tmp/codex-scratch/codex-wr-github-jakubknejzlik-workbase-sdk-290-s1-impl-wr-39aaca9a/base-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-base-en-390-expired-closed.png",
+      "state": "expired",
+      "width": 390,
+      "language": "en",
+      "mode": "base",
+      "source": "c31fe5e1914c5daff4cca83427b6caa0aca9d41a",
+      "syntheticOverride": true,
+      "file": "base-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-base-en-390-expired-closed.png",
+      "sha256": "53e77ea3da6638417db7698cecdb65d994b5f6f6afce93d57096955f2dfb3fda",
+      "bytes": 30851,
+      "imageDimensions": [
+        390,
+        900
+      ]
+    },
+    {
+      "path": "/tmp/codex-scratch/codex-wr-github-jakubknejzlik-workbase-sdk-290-s1-impl-wr-39aaca9a/base-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-base-en-390-inconsistent-closed.png",
+      "state": "inconsistent",
+      "width": 390,
+      "language": "en",
+      "mode": "base",
+      "source": "c31fe5e1914c5daff4cca83427b6caa0aca9d41a",
+      "syntheticOverride": true,
+      "file": "base-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-base-en-390-inconsistent-closed.png",
+      "sha256": "9bfd4307709e6730a58fa69a097d1166cf4f9b05456fb30d176fb18e6845be27",
+      "bytes": 26921,
+      "imageDimensions": [
+        390,
+        900
+      ]
+    },
+    {
+      "path": "/tmp/codex-scratch/codex-wr-github-jakubknejzlik-workbase-sdk-290-s1-impl-wr-39aaca9a/base-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-base-cs-1440-no_account-closed.png",
+      "state": "no_account",
+      "width": 1440,
+      "language": "cs",
+      "mode": "base",
+      "source": "c31fe5e1914c5daff4cca83427b6caa0aca9d41a",
+      "syntheticOverride": false,
+      "file": "base-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-base-cs-1440-no_account-closed.png",
+      "sha256": "acc581351eb9073559e23d431df5a930f280e0f6863a9d6f5c183ebfbd5a33bb",
+      "bytes": 47731,
+      "imageDimensions": [
+        1440,
+        900
+      ]
+    },
+    {
+      "path": "/tmp/codex-scratch/codex-wr-github-jakubknejzlik-workbase-sdk-290-s1-impl-wr-39aaca9a/base-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-base-cs-1440-invited-closed.png",
+      "state": "invited",
+      "width": 1440,
+      "language": "cs",
+      "mode": "base",
+      "source": "c31fe5e1914c5daff4cca83427b6caa0aca9d41a",
+      "syntheticOverride": false,
+      "file": "base-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-base-cs-1440-invited-closed.png",
+      "sha256": "385c16a93503e22cb1b612a9fea79eb02dc5112082cc14f76f769778af13f932",
+      "bytes": 54807,
+      "imageDimensions": [
+        1440,
+        900
+      ]
+    },
+    {
+      "path": "/tmp/codex-scratch/codex-wr-github-jakubknejzlik-workbase-sdk-290-s1-impl-wr-39aaca9a/base-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-base-cs-1440-signed_in-closed.png",
+      "state": "signed_in",
+      "width": 1440,
+      "language": "cs",
+      "mode": "base",
+      "source": "c31fe5e1914c5daff4cca83427b6caa0aca9d41a",
+      "syntheticOverride": false,
+      "file": "base-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-base-cs-1440-signed_in-closed.png",
+      "sha256": "210df5665a42f6269b3ab1b04668a91039a2859c9eac6fa40ee2d6ff1a2fde2e",
+      "bytes": 49466,
+      "imageDimensions": [
+        1440,
+        900
+      ]
+    },
+    {
+      "path": "/tmp/codex-scratch/codex-wr-github-jakubknejzlik-workbase-sdk-290-s1-impl-wr-39aaca9a/base-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-base-cs-1440-expired-closed.png",
+      "state": "expired",
+      "width": 1440,
+      "language": "cs",
+      "mode": "base",
+      "source": "c31fe5e1914c5daff4cca83427b6caa0aca9d41a",
+      "syntheticOverride": true,
+      "file": "base-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-base-cs-1440-expired-closed.png",
+      "sha256": "ce15b326b753e9ccc9eceec61d7972174a4441408c8f993607e86adbc589a387",
+      "bytes": 53938,
+      "imageDimensions": [
+        1440,
+        900
+      ]
+    },
+    {
+      "path": "/tmp/codex-scratch/codex-wr-github-jakubknejzlik-workbase-sdk-290-s1-impl-wr-39aaca9a/base-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-base-cs-1440-inconsistent-closed.png",
+      "state": "inconsistent",
+      "width": 1440,
+      "language": "cs",
+      "mode": "base",
+      "source": "c31fe5e1914c5daff4cca83427b6caa0aca9d41a",
+      "syntheticOverride": true,
+      "file": "base-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-base-cs-1440-inconsistent-closed.png",
+      "sha256": "5459f76049b0588ef5c02d1b9f23a7202c4e0626f19021d50277ee724e0e6d58",
+      "bytes": 49158,
+      "imageDimensions": [
+        1440,
+        900
+      ]
+    },
+    {
+      "path": "/tmp/codex-scratch/codex-wr-github-jakubknejzlik-workbase-sdk-290-s1-impl-wr-39aaca9a/base-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-base-cs-900-no_account-closed.png",
+      "state": "no_account",
+      "width": 900,
+      "language": "cs",
+      "mode": "base",
+      "source": "c31fe5e1914c5daff4cca83427b6caa0aca9d41a",
+      "syntheticOverride": false,
+      "file": "base-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-base-cs-900-no_account-closed.png",
+      "sha256": "0ae211215111ade41cdce36e4095e35c7552a61d29c8a8a883bff8d6458b680b",
+      "bytes": 30576,
+      "imageDimensions": [
+        900,
+        900
+      ]
+    },
+    {
+      "path": "/tmp/codex-scratch/codex-wr-github-jakubknejzlik-workbase-sdk-290-s1-impl-wr-39aaca9a/base-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-base-cs-900-invited-closed.png",
+      "state": "invited",
+      "width": 900,
+      "language": "cs",
+      "mode": "base",
+      "source": "c31fe5e1914c5daff4cca83427b6caa0aca9d41a",
+      "syntheticOverride": false,
+      "file": "base-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-base-cs-900-invited-closed.png",
+      "sha256": "084913a4a86dc64980f7e3c2758b68ad07ed8e12c1f4e2b23081f25872edbf51",
+      "bytes": 37142,
+      "imageDimensions": [
+        900,
+        900
+      ]
+    },
+    {
+      "path": "/tmp/codex-scratch/codex-wr-github-jakubknejzlik-workbase-sdk-290-s1-impl-wr-39aaca9a/base-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-base-cs-900-signed_in-closed.png",
+      "state": "signed_in",
+      "width": 900,
+      "language": "cs",
+      "mode": "base",
+      "source": "c31fe5e1914c5daff4cca83427b6caa0aca9d41a",
+      "syntheticOverride": false,
+      "file": "base-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-base-cs-900-signed_in-closed.png",
+      "sha256": "ab31154ffdec300bc773029512ea413a5d07af07646fa7ba23c6940de489d9be",
+      "bytes": 32363,
+      "imageDimensions": [
+        900,
+        900
+      ]
+    },
+    {
+      "path": "/tmp/codex-scratch/codex-wr-github-jakubknejzlik-workbase-sdk-290-s1-impl-wr-39aaca9a/base-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-base-cs-900-expired-closed.png",
+      "state": "expired",
+      "width": 900,
+      "language": "cs",
+      "mode": "base",
+      "source": "c31fe5e1914c5daff4cca83427b6caa0aca9d41a",
+      "syntheticOverride": true,
+      "file": "base-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-base-cs-900-expired-closed.png",
+      "sha256": "d9496160772fe9e999daf555595d045e9d38b71ce3deac1d986a1738387ed6cc",
+      "bytes": 36249,
+      "imageDimensions": [
+        900,
+        900
+      ]
+    },
+    {
+      "path": "/tmp/codex-scratch/codex-wr-github-jakubknejzlik-workbase-sdk-290-s1-impl-wr-39aaca9a/base-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-base-cs-900-inconsistent-closed.png",
+      "state": "inconsistent",
+      "width": 900,
+      "language": "cs",
+      "mode": "base",
+      "source": "c31fe5e1914c5daff4cca83427b6caa0aca9d41a",
+      "syntheticOverride": true,
+      "file": "base-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-base-cs-900-inconsistent-closed.png",
+      "sha256": "cf474ad28414f08bfd5396c0c89996b279db1c206d6191208660b5d292fd1359",
+      "bytes": 32005,
+      "imageDimensions": [
+        900,
+        900
+      ]
+    },
+    {
+      "path": "/tmp/codex-scratch/codex-wr-github-jakubknejzlik-workbase-sdk-290-s1-impl-wr-39aaca9a/base-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-base-cs-390-no_account-closed.png",
+      "state": "no_account",
+      "width": 390,
+      "language": "cs",
+      "mode": "base",
+      "source": "c31fe5e1914c5daff4cca83427b6caa0aca9d41a",
+      "syntheticOverride": false,
+      "file": "base-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-base-cs-390-no_account-closed.png",
+      "sha256": "3ce214de9856628eedbe05b7e1f55007cab9f5d9b4f7c3ce1b5f11ee220fe7be",
+      "bytes": 27588,
+      "imageDimensions": [
+        390,
+        900
+      ]
+    },
+    {
+      "path": "/tmp/codex-scratch/codex-wr-github-jakubknejzlik-workbase-sdk-290-s1-impl-wr-39aaca9a/base-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-base-cs-390-invited-closed.png",
+      "state": "invited",
+      "width": 390,
+      "language": "cs",
+      "mode": "base",
+      "source": "c31fe5e1914c5daff4cca83427b6caa0aca9d41a",
+      "syntheticOverride": false,
+      "file": "base-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-base-cs-390-invited-closed.png",
+      "sha256": "f4f3b5fc5ac44a42e5eac4ef5c734d4b7c542ad0570af774d548ef8ce6ccc22b",
+      "bytes": 35261,
+      "imageDimensions": [
+        390,
+        900
+      ]
+    },
+    {
+      "path": "/tmp/codex-scratch/codex-wr-github-jakubknejzlik-workbase-sdk-290-s1-impl-wr-39aaca9a/base-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-base-cs-390-signed_in-closed.png",
+      "state": "signed_in",
+      "width": 390,
+      "language": "cs",
+      "mode": "base",
+      "source": "c31fe5e1914c5daff4cca83427b6caa0aca9d41a",
+      "syntheticOverride": false,
+      "file": "base-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-base-cs-390-signed_in-closed.png",
+      "sha256": "dfdb35e97500fbf3602d8854a3ac2ff623de9a2e2fab63257e4b648ac186c311",
+      "bytes": 29418,
+      "imageDimensions": [
+        390,
+        900
+      ]
+    },
+    {
+      "path": "/tmp/codex-scratch/codex-wr-github-jakubknejzlik-workbase-sdk-290-s1-impl-wr-39aaca9a/base-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-base-cs-390-expired-closed.png",
+      "state": "expired",
+      "width": 390,
+      "language": "cs",
+      "mode": "base",
+      "source": "c31fe5e1914c5daff4cca83427b6caa0aca9d41a",
+      "syntheticOverride": true,
+      "file": "base-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-base-cs-390-expired-closed.png",
+      "sha256": "168c5c7b263a11a2da8bce274c9fa97376595cf8e0db2ac141a13850b1936c0d",
+      "bytes": 34117,
+      "imageDimensions": [
+        390,
+        900
+      ]
+    },
+    {
+      "path": "/tmp/codex-scratch/codex-wr-github-jakubknejzlik-workbase-sdk-290-s1-impl-wr-39aaca9a/base-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-base-cs-390-inconsistent-closed.png",
+      "state": "inconsistent",
+      "width": 390,
+      "language": "cs",
+      "mode": "base",
+      "source": "c31fe5e1914c5daff4cca83427b6caa0aca9d41a",
+      "syntheticOverride": true,
+      "file": "base-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-base-cs-390-inconsistent-closed.png",
+      "sha256": "83704ab6c8a3ee996f9845b713c459d9d664aa59e5ad7b882847122ea3520ad2",
+      "bytes": 28885,
+      "imageDimensions": [
+        390,
+        900
+      ]
+    },
+    {
+      "path": "/tmp/codex-scratch/codex-wr-github-jakubknejzlik-workbase-sdk-290-s1-impl-wr-39aaca9a/head-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-head-en-1440-no_account-closed.png",
+      "state": "no_account",
+      "width": 1440,
+      "language": "en",
+      "mode": "head",
+      "source": "61e2c4370269bae302f9ef59af0880b325d1427d",
+      "syntheticOverride": false,
+      "file": "head-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-head-en-1440-no_account-closed.png",
+      "sha256": "1e22f3d420ea00d33c5a31184f2af1169d676b87ce5947edb6cb8163a045a86e",
+      "bytes": 42165,
+      "imageDimensions": [
+        1440,
+        900
+      ]
+    },
+    {
+      "path": "/tmp/codex-scratch/codex-wr-github-jakubknejzlik-workbase-sdk-290-s1-impl-wr-39aaca9a/head-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-head-en-1440-no_account-menu.png",
+      "state": "no_account",
+      "width": 1440,
+      "language": "en",
+      "mode": "head",
+      "source": "61e2c4370269bae302f9ef59af0880b325d1427d",
+      "syntheticOverride": false,
+      "file": "head-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-head-en-1440-no_account-menu.png",
+      "sha256": "44cc52dca9232a97d567668e7bb162944efa97fd8ae4b9c537a40b8d8e157e1e",
+      "bytes": 46284,
+      "imageDimensions": [
+        1440,
+        900
+      ]
+    },
+    {
+      "path": "/tmp/codex-scratch/codex-wr-github-jakubknejzlik-workbase-sdk-290-s1-impl-wr-39aaca9a/head-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-head-en-1440-invited-closed.png",
+      "state": "invited",
+      "width": 1440,
+      "language": "en",
+      "mode": "head",
+      "source": "61e2c4370269bae302f9ef59af0880b325d1427d",
+      "syntheticOverride": false,
+      "file": "head-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-head-en-1440-invited-closed.png",
+      "sha256": "8d8d8de1dcbefeb428dd38cd857f86a38f9e6a3c81c38ab30bdb0101b7a506e2",
+      "bytes": 46182,
+      "imageDimensions": [
+        1440,
+        900
+      ]
+    },
+    {
+      "path": "/tmp/codex-scratch/codex-wr-github-jakubknejzlik-workbase-sdk-290-s1-impl-wr-39aaca9a/head-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-head-en-1440-invited-menu.png",
+      "state": "invited",
+      "width": 1440,
+      "language": "en",
+      "mode": "head",
+      "source": "61e2c4370269bae302f9ef59af0880b325d1427d",
+      "syntheticOverride": false,
+      "file": "head-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-head-en-1440-invited-menu.png",
+      "sha256": "371160772ac62335779c6b9349636a8ed8cb093ca05da074e1b0e189e913a628",
+      "bytes": 54937,
+      "imageDimensions": [
+        1440,
+        900
+      ]
+    },
+    {
+      "path": "/tmp/codex-scratch/codex-wr-github-jakubknejzlik-workbase-sdk-290-s1-impl-wr-39aaca9a/head-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-head-en-1440-signed_in-closed.png",
+      "state": "signed_in",
+      "width": 1440,
+      "language": "en",
+      "mode": "head",
+      "source": "61e2c4370269bae302f9ef59af0880b325d1427d",
+      "syntheticOverride": false,
+      "file": "head-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-head-en-1440-signed_in-closed.png",
+      "sha256": "9cc0ad69ae0a557d413ae25c8ec80d43fc9f7fe10edb8e6f79611c3c665f7045",
+      "bytes": 43853,
+      "imageDimensions": [
+        1440,
+        900
+      ]
+    },
+    {
+      "path": "/tmp/codex-scratch/codex-wr-github-jakubknejzlik-workbase-sdk-290-s1-impl-wr-39aaca9a/head-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-head-en-1440-signed_in-menu.png",
+      "state": "signed_in",
+      "width": 1440,
+      "language": "en",
+      "mode": "head",
+      "source": "61e2c4370269bae302f9ef59af0880b325d1427d",
+      "syntheticOverride": false,
+      "file": "head-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-head-en-1440-signed_in-menu.png",
+      "sha256": "5d4629bcea1ef0d4e79f2305d6dd4ee2f6e53a689fdd77cd8ab995a9a945f1fb",
+      "bytes": 48024,
+      "imageDimensions": [
+        1440,
+        900
+      ]
+    },
+    {
+      "path": "/tmp/codex-scratch/codex-wr-github-jakubknejzlik-workbase-sdk-290-s1-impl-wr-39aaca9a/head-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-head-en-1440-expired-closed.png",
+      "state": "expired",
+      "width": 1440,
+      "language": "en",
+      "mode": "head",
+      "source": "61e2c4370269bae302f9ef59af0880b325d1427d",
+      "syntheticOverride": true,
+      "file": "head-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-head-en-1440-expired-closed.png",
+      "sha256": "ca30c62415ec7d8aef259cb390396acb7a3e5f967a498002598bb01821da1b13",
+      "bytes": 45994,
+      "imageDimensions": [
+        1440,
+        900
+      ]
+    },
+    {
+      "path": "/tmp/codex-scratch/codex-wr-github-jakubknejzlik-workbase-sdk-290-s1-impl-wr-39aaca9a/head-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-head-en-1440-expired-menu.png",
+      "state": "expired",
+      "width": 1440,
+      "language": "en",
+      "mode": "head",
+      "source": "61e2c4370269bae302f9ef59af0880b325d1427d",
+      "syntheticOverride": true,
+      "file": "head-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-head-en-1440-expired-menu.png",
+      "sha256": "f248bf07b4f3dd2417cc6fece0e4a3ca2ed894d5bfb5133386589d4a4b038e0c",
+      "bytes": 53975,
+      "imageDimensions": [
+        1440,
+        900
+      ]
+    },
+    {
+      "path": "/tmp/codex-scratch/codex-wr-github-jakubknejzlik-workbase-sdk-290-s1-impl-wr-39aaca9a/head-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-head-en-1440-inconsistent-closed.png",
+      "state": "inconsistent",
+      "width": 1440,
+      "language": "en",
+      "mode": "head",
+      "source": "61e2c4370269bae302f9ef59af0880b325d1427d",
+      "syntheticOverride": true,
+      "file": "head-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-head-en-1440-inconsistent-closed.png",
+      "sha256": "96ea2b75be6ee601405f77e124cb4cf3778c52a38dd5853672c7d84d5ecc3b5e",
+      "bytes": 46754,
+      "imageDimensions": [
+        1440,
+        900
+      ]
+    },
+    {
+      "path": "/tmp/codex-scratch/codex-wr-github-jakubknejzlik-workbase-sdk-290-s1-impl-wr-39aaca9a/head-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-head-en-900-no_account-closed.png",
+      "state": "no_account",
+      "width": 900,
+      "language": "en",
+      "mode": "head",
+      "source": "61e2c4370269bae302f9ef59af0880b325d1427d",
+      "syntheticOverride": false,
+      "file": "head-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-head-en-900-no_account-closed.png",
+      "sha256": "1c773e45495d71361fc275fc2f3c5b096257fd0c95343e70afd0735537f21f2b",
+      "bytes": 25090,
+      "imageDimensions": [
+        900,
+        900
+      ]
+    },
+    {
+      "path": "/tmp/codex-scratch/codex-wr-github-jakubknejzlik-workbase-sdk-290-s1-impl-wr-39aaca9a/head-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-head-en-900-no_account-menu.png",
+      "state": "no_account",
+      "width": 900,
+      "language": "en",
+      "mode": "head",
+      "source": "61e2c4370269bae302f9ef59af0880b325d1427d",
+      "syntheticOverride": false,
+      "file": "head-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-head-en-900-no_account-menu.png",
+      "sha256": "8cc32824a1bc76b9191e0399c7b5be13f3c535e8d2a5d974b1ecdbb092fcdd09",
+      "bytes": 28908,
+      "imageDimensions": [
+        900,
+        900
+      ]
+    },
+    {
+      "path": "/tmp/codex-scratch/codex-wr-github-jakubknejzlik-workbase-sdk-290-s1-impl-wr-39aaca9a/head-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-head-en-900-invited-closed.png",
+      "state": "invited",
+      "width": 900,
+      "language": "en",
+      "mode": "head",
+      "source": "61e2c4370269bae302f9ef59af0880b325d1427d",
+      "syntheticOverride": false,
+      "file": "head-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-head-en-900-invited-closed.png",
+      "sha256": "4a1a210c18ecbf7eb25d88b242918e8754a48e1be450f6329cbf58ecf32f793b",
+      "bytes": 29068,
+      "imageDimensions": [
+        900,
+        900
+      ]
+    },
+    {
+      "path": "/tmp/codex-scratch/codex-wr-github-jakubknejzlik-workbase-sdk-290-s1-impl-wr-39aaca9a/head-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-head-en-900-invited-menu.png",
+      "state": "invited",
+      "width": 900,
+      "language": "en",
+      "mode": "head",
+      "source": "61e2c4370269bae302f9ef59af0880b325d1427d",
+      "syntheticOverride": false,
+      "file": "head-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-head-en-900-invited-menu.png",
+      "sha256": "f18158bfb4d4602a6bb3e9feb5e954f5a3dda80a4e6b7d10d84ec81795ae5ace",
+      "bytes": 37068,
+      "imageDimensions": [
+        900,
+        900
+      ]
+    },
+    {
+      "path": "/tmp/codex-scratch/codex-wr-github-jakubknejzlik-workbase-sdk-290-s1-impl-wr-39aaca9a/head-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-head-en-900-signed_in-closed.png",
+      "state": "signed_in",
+      "width": 900,
+      "language": "en",
+      "mode": "head",
+      "source": "61e2c4370269bae302f9ef59af0880b325d1427d",
+      "syntheticOverride": false,
+      "file": "head-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-head-en-900-signed_in-closed.png",
+      "sha256": "3f590ef984ffc6b9671b11f2d9edbe445d7c3998063d8c7155a8f46d30f7f20d",
+      "bytes": 26834,
+      "imageDimensions": [
+        900,
+        900
+      ]
+    },
+    {
+      "path": "/tmp/codex-scratch/codex-wr-github-jakubknejzlik-workbase-sdk-290-s1-impl-wr-39aaca9a/head-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-head-en-900-signed_in-menu.png",
+      "state": "signed_in",
+      "width": 900,
+      "language": "en",
+      "mode": "head",
+      "source": "61e2c4370269bae302f9ef59af0880b325d1427d",
+      "syntheticOverride": false,
+      "file": "head-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-head-en-900-signed_in-menu.png",
+      "sha256": "5063baabc9559be2f789b6f80edb931abdbbe5b3b3144225d866d8e0aba310fe",
+      "bytes": 30699,
+      "imageDimensions": [
+        900,
+        900
+      ]
+    },
+    {
+      "path": "/tmp/codex-scratch/codex-wr-github-jakubknejzlik-workbase-sdk-290-s1-impl-wr-39aaca9a/head-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-head-en-900-expired-closed.png",
+      "state": "expired",
+      "width": 900,
+      "language": "en",
+      "mode": "head",
+      "source": "61e2c4370269bae302f9ef59af0880b325d1427d",
+      "syntheticOverride": true,
+      "file": "head-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-head-en-900-expired-closed.png",
+      "sha256": "a8478549acb7d959fb5ae9597baf82c11d57af3a309df925ed399d6ef952b8ab",
+      "bytes": 28850,
+      "imageDimensions": [
+        900,
+        900
+      ]
+    },
+    {
+      "path": "/tmp/codex-scratch/codex-wr-github-jakubknejzlik-workbase-sdk-290-s1-impl-wr-39aaca9a/head-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-head-en-900-expired-menu.png",
+      "state": "expired",
+      "width": 900,
+      "language": "en",
+      "mode": "head",
+      "source": "61e2c4370269bae302f9ef59af0880b325d1427d",
+      "syntheticOverride": true,
+      "file": "head-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-head-en-900-expired-menu.png",
+      "sha256": "b889c197506b3c729ed507f252db877a68f11a1adb1a76b8a493dda591ba722d",
+      "bytes": 36193,
+      "imageDimensions": [
+        900,
+        900
+      ]
+    },
+    {
+      "path": "/tmp/codex-scratch/codex-wr-github-jakubknejzlik-workbase-sdk-290-s1-impl-wr-39aaca9a/head-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-head-en-900-inconsistent-closed.png",
+      "state": "inconsistent",
+      "width": 900,
+      "language": "en",
+      "mode": "head",
+      "source": "61e2c4370269bae302f9ef59af0880b325d1427d",
+      "syntheticOverride": true,
+      "file": "head-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-head-en-900-inconsistent-closed.png",
+      "sha256": "59f1ed4bffd62e25572b1a210e81961d38bf0978c0464ad0bd96dc2de820748e",
+      "bytes": 29644,
+      "imageDimensions": [
+        900,
+        900
+      ]
+    },
+    {
+      "path": "/tmp/codex-scratch/codex-wr-github-jakubknejzlik-workbase-sdk-290-s1-impl-wr-39aaca9a/head-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-head-en-390-no_account-closed.png",
+      "state": "no_account",
+      "width": 390,
+      "language": "en",
+      "mode": "head",
+      "source": "61e2c4370269bae302f9ef59af0880b325d1427d",
+      "syntheticOverride": false,
+      "file": "head-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-head-en-390-no_account-closed.png",
+      "sha256": "73458bd2df89a9ee111f46110ddf1091ae5a472bcc6d9112f385fde7b50e917f",
+      "bytes": 22294,
+      "imageDimensions": [
+        390,
+        900
+      ]
+    },
+    {
+      "path": "/tmp/codex-scratch/codex-wr-github-jakubknejzlik-workbase-sdk-290-s1-impl-wr-39aaca9a/head-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-head-en-390-no_account-menu.png",
+      "state": "no_account",
+      "width": 390,
+      "language": "en",
+      "mode": "head",
+      "source": "61e2c4370269bae302f9ef59af0880b325d1427d",
+      "syntheticOverride": false,
+      "file": "head-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-head-en-390-no_account-menu.png",
+      "sha256": "81d61af6ce169519bed2fdb5ff22bd4891e0f429d7b06951c6d792dcb1ba0c70",
+      "bytes": 25750,
+      "imageDimensions": [
+        390,
+        900
+      ]
+    },
+    {
+      "path": "/tmp/codex-scratch/codex-wr-github-jakubknejzlik-workbase-sdk-290-s1-impl-wr-39aaca9a/head-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-head-en-390-invited-closed.png",
+      "state": "invited",
+      "width": 390,
+      "language": "en",
+      "mode": "head",
+      "source": "61e2c4370269bae302f9ef59af0880b325d1427d",
+      "syntheticOverride": false,
+      "file": "head-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-head-en-390-invited-closed.png",
+      "sha256": "9395a048d152c1db792c37d6ed497cc41b02604d97bb8b8efd8a4171e127b22f",
+      "bytes": 26041,
+      "imageDimensions": [
+        390,
+        900
+      ]
+    },
+    {
+      "path": "/tmp/codex-scratch/codex-wr-github-jakubknejzlik-workbase-sdk-290-s1-impl-wr-39aaca9a/head-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-head-en-390-invited-menu.png",
+      "state": "invited",
+      "width": 390,
+      "language": "en",
+      "mode": "head",
+      "source": "61e2c4370269bae302f9ef59af0880b325d1427d",
+      "syntheticOverride": false,
+      "file": "head-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-head-en-390-invited-menu.png",
+      "sha256": "54060b6e14058f86461596847aca83a75e52cf4312d5581c85f4171f3523f679",
+      "bytes": 33599,
+      "imageDimensions": [
+        390,
+        900
+      ]
+    },
+    {
+      "path": "/tmp/codex-scratch/codex-wr-github-jakubknejzlik-workbase-sdk-290-s1-impl-wr-39aaca9a/head-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-head-en-390-signed_in-closed.png",
+      "state": "signed_in",
+      "width": 390,
+      "language": "en",
+      "mode": "head",
+      "source": "61e2c4370269bae302f9ef59af0880b325d1427d",
+      "syntheticOverride": false,
+      "file": "head-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-head-en-390-signed_in-closed.png",
+      "sha256": "e13395412bfc3023f48d4e4e4301d995bfb8ae851d406278a576cfac8ecc1baf",
+      "bytes": 23646,
+      "imageDimensions": [
+        390,
+        900
+      ]
+    },
+    {
+      "path": "/tmp/codex-scratch/codex-wr-github-jakubknejzlik-workbase-sdk-290-s1-impl-wr-39aaca9a/head-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-head-en-390-signed_in-menu.png",
+      "state": "signed_in",
+      "width": 390,
+      "language": "en",
+      "mode": "head",
+      "source": "61e2c4370269bae302f9ef59af0880b325d1427d",
+      "syntheticOverride": false,
+      "file": "head-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-head-en-390-signed_in-menu.png",
+      "sha256": "0946a6102fcfca01cbbd662b843c907eb3c00e860dafbf4ca86d530a4dd0f163",
+      "bytes": 27254,
+      "imageDimensions": [
+        390,
+        900
+      ]
+    },
+    {
+      "path": "/tmp/codex-scratch/codex-wr-github-jakubknejzlik-workbase-sdk-290-s1-impl-wr-39aaca9a/head-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-head-en-390-expired-closed.png",
+      "state": "expired",
+      "width": 390,
+      "language": "en",
+      "mode": "head",
+      "source": "61e2c4370269bae302f9ef59af0880b325d1427d",
+      "syntheticOverride": true,
+      "file": "head-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-head-en-390-expired-closed.png",
+      "sha256": "393f164d47b524f81c4c817206970c1d52dadf90244b787892343982377a2b70",
+      "bytes": 26028,
+      "imageDimensions": [
+        390,
+        900
+      ]
+    },
+    {
+      "path": "/tmp/codex-scratch/codex-wr-github-jakubknejzlik-workbase-sdk-290-s1-impl-wr-39aaca9a/head-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-head-en-390-expired-menu.png",
+      "state": "expired",
+      "width": 390,
+      "language": "en",
+      "mode": "head",
+      "source": "61e2c4370269bae302f9ef59af0880b325d1427d",
+      "syntheticOverride": true,
+      "file": "head-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-head-en-390-expired-menu.png",
+      "sha256": "20a69573ce6f003605eca544586bf77c36a9343f30f8c54ada319cea6dbe2d7a",
+      "bytes": 32686,
+      "imageDimensions": [
+        390,
+        900
+      ]
+    },
+    {
+      "path": "/tmp/codex-scratch/codex-wr-github-jakubknejzlik-workbase-sdk-290-s1-impl-wr-39aaca9a/head-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-head-en-390-inconsistent-closed.png",
+      "state": "inconsistent",
+      "width": 390,
+      "language": "en",
+      "mode": "head",
+      "source": "61e2c4370269bae302f9ef59af0880b325d1427d",
+      "syntheticOverride": true,
+      "file": "head-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-head-en-390-inconsistent-closed.png",
+      "sha256": "9bfd4307709e6730a58fa69a097d1166cf4f9b05456fb30d176fb18e6845be27",
+      "bytes": 26921,
+      "imageDimensions": [
+        390,
+        900
+      ]
+    },
+    {
+      "path": "/tmp/codex-scratch/codex-wr-github-jakubknejzlik-workbase-sdk-290-s1-impl-wr-39aaca9a/head-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-head-cs-1440-no_account-closed.png",
+      "state": "no_account",
+      "width": 1440,
+      "language": "cs",
+      "mode": "head",
+      "source": "61e2c4370269bae302f9ef59af0880b325d1427d",
+      "syntheticOverride": false,
+      "file": "head-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-head-cs-1440-no_account-closed.png",
+      "sha256": "a465e404757c9e93ce5e2213d5016f1d6373cd2ff9bf3bf3d9d88463e8ae686f",
+      "bytes": 43819,
+      "imageDimensions": [
+        1440,
+        900
+      ]
+    },
+    {
+      "path": "/tmp/codex-scratch/codex-wr-github-jakubknejzlik-workbase-sdk-290-s1-impl-wr-39aaca9a/head-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-head-cs-1440-no_account-menu.png",
+      "state": "no_account",
+      "width": 1440,
+      "language": "cs",
+      "mode": "head",
+      "source": "61e2c4370269bae302f9ef59af0880b325d1427d",
+      "syntheticOverride": false,
+      "file": "head-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-head-cs-1440-no_account-menu.png",
+      "sha256": "04196cffb89614595d5466c425d7da47a4ff62a4fe33444aa42d8f591730e250",
+      "bytes": 48774,
+      "imageDimensions": [
+        1440,
+        900
+      ]
+    },
+    {
+      "path": "/tmp/codex-scratch/codex-wr-github-jakubknejzlik-workbase-sdk-290-s1-impl-wr-39aaca9a/head-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-head-cs-1440-invited-closed.png",
+      "state": "invited",
+      "width": 1440,
+      "language": "cs",
+      "mode": "head",
+      "source": "61e2c4370269bae302f9ef59af0880b325d1427d",
+      "syntheticOverride": false,
+      "file": "head-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-head-cs-1440-invited-closed.png",
+      "sha256": "e819ac530dcd20d88e99acb82120dd2a01c9f997bbf81502bcbbc09a2c88b83c",
+      "bytes": 47947,
+      "imageDimensions": [
+        1440,
+        900
+      ]
+    },
+    {
+      "path": "/tmp/codex-scratch/codex-wr-github-jakubknejzlik-workbase-sdk-290-s1-impl-wr-39aaca9a/head-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-head-cs-1440-invited-menu.png",
+      "state": "invited",
+      "width": 1440,
+      "language": "cs",
+      "mode": "head",
+      "source": "61e2c4370269bae302f9ef59af0880b325d1427d",
+      "syntheticOverride": false,
+      "file": "head-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-head-cs-1440-invited-menu.png",
+      "sha256": "0639d580f583590a96a19c79458388850eec6ed969d15316140302853bd1be88",
+      "bytes": 58821,
+      "imageDimensions": [
+        1440,
+        900
+      ]
+    },
+    {
+      "path": "/tmp/codex-scratch/codex-wr-github-jakubknejzlik-workbase-sdk-290-s1-impl-wr-39aaca9a/head-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-head-cs-1440-signed_in-closed.png",
+      "state": "signed_in",
+      "width": 1440,
+      "language": "cs",
+      "mode": "head",
+      "source": "61e2c4370269bae302f9ef59af0880b325d1427d",
+      "syntheticOverride": false,
+      "file": "head-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-head-cs-1440-signed_in-closed.png",
+      "sha256": "8c3018723aae1eeda38e263dd06e8f2042d28c082ae034ee5b108e767d2bb237",
+      "bytes": 45379,
+      "imageDimensions": [
+        1440,
+        900
+      ]
+    },
+    {
+      "path": "/tmp/codex-scratch/codex-wr-github-jakubknejzlik-workbase-sdk-290-s1-impl-wr-39aaca9a/head-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-head-cs-1440-signed_in-menu.png",
+      "state": "signed_in",
+      "width": 1440,
+      "language": "cs",
+      "mode": "head",
+      "source": "61e2c4370269bae302f9ef59af0880b325d1427d",
+      "syntheticOverride": false,
+      "file": "head-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-head-cs-1440-signed_in-menu.png",
+      "sha256": "854abcef7a1a3cf730f3847def8911559800c35d18ee48f1b76bf65006a0567d",
+      "bytes": 50389,
+      "imageDimensions": [
+        1440,
+        900
+      ]
+    },
+    {
+      "path": "/tmp/codex-scratch/codex-wr-github-jakubknejzlik-workbase-sdk-290-s1-impl-wr-39aaca9a/head-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-head-cs-1440-expired-closed.png",
+      "state": "expired",
+      "width": 1440,
+      "language": "cs",
+      "mode": "head",
+      "source": "61e2c4370269bae302f9ef59af0880b325d1427d",
+      "syntheticOverride": true,
+      "file": "head-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-head-cs-1440-expired-closed.png",
+      "sha256": "ffe91353be682dc1088019a9f0668c53c80dadef26784e45d80ec03436b96796",
+      "bytes": 47949,
+      "imageDimensions": [
+        1440,
+        900
+      ]
+    },
+    {
+      "path": "/tmp/codex-scratch/codex-wr-github-jakubknejzlik-workbase-sdk-290-s1-impl-wr-39aaca9a/head-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-head-cs-1440-expired-menu.png",
+      "state": "expired",
+      "width": 1440,
+      "language": "cs",
+      "mode": "head",
+      "source": "61e2c4370269bae302f9ef59af0880b325d1427d",
+      "syntheticOverride": true,
+      "file": "head-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-head-cs-1440-expired-menu.png",
+      "sha256": "90c67fd12fbbfc30f936f258dd5828774c27e5cb22a1a9af86c8981c1ccbb72f",
+      "bytes": 57472,
+      "imageDimensions": [
+        1440,
+        900
+      ]
+    },
+    {
+      "path": "/tmp/codex-scratch/codex-wr-github-jakubknejzlik-workbase-sdk-290-s1-impl-wr-39aaca9a/head-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-head-cs-1440-inconsistent-closed.png",
+      "state": "inconsistent",
+      "width": 1440,
+      "language": "cs",
+      "mode": "head",
+      "source": "61e2c4370269bae302f9ef59af0880b325d1427d",
+      "syntheticOverride": true,
+      "file": "head-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-head-cs-1440-inconsistent-closed.png",
+      "sha256": "5459f76049b0588ef5c02d1b9f23a7202c4e0626f19021d50277ee724e0e6d58",
+      "bytes": 49158,
+      "imageDimensions": [
+        1440,
+        900
+      ]
+    },
+    {
+      "path": "/tmp/codex-scratch/codex-wr-github-jakubknejzlik-workbase-sdk-290-s1-impl-wr-39aaca9a/head-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-head-cs-900-no_account-closed.png",
+      "state": "no_account",
+      "width": 900,
+      "language": "cs",
+      "mode": "head",
+      "source": "61e2c4370269bae302f9ef59af0880b325d1427d",
+      "syntheticOverride": false,
+      "file": "head-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-head-cs-900-no_account-closed.png",
+      "sha256": "66923b2aa392786fbe20be3ab40c76385bc0b6f026b1b6ed3ecac92aad387a8d",
+      "bytes": 26922,
+      "imageDimensions": [
+        900,
+        900
+      ]
+    },
+    {
+      "path": "/tmp/codex-scratch/codex-wr-github-jakubknejzlik-workbase-sdk-290-s1-impl-wr-39aaca9a/head-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-head-cs-900-no_account-menu.png",
+      "state": "no_account",
+      "width": 900,
+      "language": "cs",
+      "mode": "head",
+      "source": "61e2c4370269bae302f9ef59af0880b325d1427d",
+      "syntheticOverride": false,
+      "file": "head-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-head-cs-900-no_account-menu.png",
+      "sha256": "6872c8cd9ab804a40c8c0c1402404743e698f0800820e722ffcbe5418d07fa95",
+      "bytes": 31396,
+      "imageDimensions": [
+        900,
+        900
+      ]
+    },
+    {
+      "path": "/tmp/codex-scratch/codex-wr-github-jakubknejzlik-workbase-sdk-290-s1-impl-wr-39aaca9a/head-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-head-cs-900-invited-closed.png",
+      "state": "invited",
+      "width": 900,
+      "language": "cs",
+      "mode": "head",
+      "source": "61e2c4370269bae302f9ef59af0880b325d1427d",
+      "syntheticOverride": false,
+      "file": "head-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-head-cs-900-invited-closed.png",
+      "sha256": "43c6376f6199e0cb7dc62f30c5fb52c15101d7fff52695787985ae9bf2b36f48",
+      "bytes": 30910,
+      "imageDimensions": [
+        900,
+        900
+      ]
+    },
+    {
+      "path": "/tmp/codex-scratch/codex-wr-github-jakubknejzlik-workbase-sdk-290-s1-impl-wr-39aaca9a/head-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-head-cs-900-invited-menu.png",
+      "state": "invited",
+      "width": 900,
+      "language": "cs",
+      "mode": "head",
+      "source": "61e2c4370269bae302f9ef59af0880b325d1427d",
+      "syntheticOverride": false,
+      "file": "head-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-head-cs-900-invited-menu.png",
+      "sha256": "5f8918fe0bd7e9f92eb03ac94c545f2de6434a5b9317fbd0accc2d4e4c276a33",
+      "bytes": 40452,
+      "imageDimensions": [
+        900,
+        900
+      ]
+    },
+    {
+      "path": "/tmp/codex-scratch/codex-wr-github-jakubknejzlik-workbase-sdk-290-s1-impl-wr-39aaca9a/head-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-head-cs-900-signed_in-closed.png",
+      "state": "signed_in",
+      "width": 900,
+      "language": "cs",
+      "mode": "head",
+      "source": "61e2c4370269bae302f9ef59af0880b325d1427d",
+      "syntheticOverride": false,
+      "file": "head-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-head-cs-900-signed_in-closed.png",
+      "sha256": "c3b1447c3491602687ec67d0923a39265a2b483b0936e07c51dd97aa774770d5",
+      "bytes": 28684,
+      "imageDimensions": [
+        900,
+        900
+      ]
+    },
+    {
+      "path": "/tmp/codex-scratch/codex-wr-github-jakubknejzlik-workbase-sdk-290-s1-impl-wr-39aaca9a/head-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-head-cs-900-signed_in-menu.png",
+      "state": "signed_in",
+      "width": 900,
+      "language": "cs",
+      "mode": "head",
+      "source": "61e2c4370269bae302f9ef59af0880b325d1427d",
+      "syntheticOverride": false,
+      "file": "head-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-head-cs-900-signed_in-menu.png",
+      "sha256": "7f37a1977a238a717113f0349d1a24be60357291d8857dc09d25adfe93e0c2ec",
+      "bytes": 33085,
+      "imageDimensions": [
+        900,
+        900
+      ]
+    },
+    {
+      "path": "/tmp/codex-scratch/codex-wr-github-jakubknejzlik-workbase-sdk-290-s1-impl-wr-39aaca9a/head-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-head-cs-900-expired-closed.png",
+      "state": "expired",
+      "width": 900,
+      "language": "cs",
+      "mode": "head",
+      "source": "61e2c4370269bae302f9ef59af0880b325d1427d",
+      "syntheticOverride": true,
+      "file": "head-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-head-cs-900-expired-closed.png",
+      "sha256": "6e272bbeaf8dfdef9928edf2dcf39202f386deef6a223b27e363a1b684ac2dbb",
+      "bytes": 30913,
+      "imageDimensions": [
+        900,
+        900
+      ]
+    },
+    {
+      "path": "/tmp/codex-scratch/codex-wr-github-jakubknejzlik-workbase-sdk-290-s1-impl-wr-39aaca9a/head-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-head-cs-900-expired-menu.png",
+      "state": "expired",
+      "width": 900,
+      "language": "cs",
+      "mode": "head",
+      "source": "61e2c4370269bae302f9ef59af0880b325d1427d",
+      "syntheticOverride": true,
+      "file": "head-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-head-cs-900-expired-menu.png",
+      "sha256": "73934c7b56e394e727484fd3a3fdcdeac3db5a6144694d9895d8ff4919456b2c",
+      "bytes": 39272,
+      "imageDimensions": [
+        900,
+        900
+      ]
+    },
+    {
+      "path": "/tmp/codex-scratch/codex-wr-github-jakubknejzlik-workbase-sdk-290-s1-impl-wr-39aaca9a/head-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-head-cs-900-inconsistent-closed.png",
+      "state": "inconsistent",
+      "width": 900,
+      "language": "cs",
+      "mode": "head",
+      "source": "61e2c4370269bae302f9ef59af0880b325d1427d",
+      "syntheticOverride": true,
+      "file": "head-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-head-cs-900-inconsistent-closed.png",
+      "sha256": "cf474ad28414f08bfd5396c0c89996b279db1c206d6191208660b5d292fd1359",
+      "bytes": 32005,
+      "imageDimensions": [
+        900,
+        900
+      ]
+    },
+    {
+      "path": "/tmp/codex-scratch/codex-wr-github-jakubknejzlik-workbase-sdk-290-s1-impl-wr-39aaca9a/head-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-head-cs-390-no_account-closed.png",
+      "state": "no_account",
+      "width": 390,
+      "language": "cs",
+      "mode": "head",
+      "source": "61e2c4370269bae302f9ef59af0880b325d1427d",
+      "syntheticOverride": false,
+      "file": "head-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-head-cs-390-no_account-closed.png",
+      "sha256": "0d8cdeeffe005663083912806e994aede959d45398efefbcf474ef80f6120901",
+      "bytes": 24025,
+      "imageDimensions": [
+        390,
+        900
+      ]
+    },
+    {
+      "path": "/tmp/codex-scratch/codex-wr-github-jakubknejzlik-workbase-sdk-290-s1-impl-wr-39aaca9a/head-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-head-cs-390-no_account-menu.png",
+      "state": "no_account",
+      "width": 390,
+      "language": "cs",
+      "mode": "head",
+      "source": "61e2c4370269bae302f9ef59af0880b325d1427d",
+      "syntheticOverride": false,
+      "file": "head-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-head-cs-390-no_account-menu.png",
+      "sha256": "0e1500dbcb1d2a8e5988e83f3b5e3188eb8cbb33e15a19b161553387b4af897e",
+      "bytes": 28055,
+      "imageDimensions": [
+        390,
+        900
+      ]
+    },
+    {
+      "path": "/tmp/codex-scratch/codex-wr-github-jakubknejzlik-workbase-sdk-290-s1-impl-wr-39aaca9a/head-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-head-cs-390-invited-closed.png",
+      "state": "invited",
+      "width": 390,
+      "language": "cs",
+      "mode": "head",
+      "source": "61e2c4370269bae302f9ef59af0880b325d1427d",
+      "syntheticOverride": false,
+      "file": "head-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-head-cs-390-invited-closed.png",
+      "sha256": "18fcd385f0e16b4227630562b31dc23928e264684fdc1e8383d5395a9fcb1215",
+      "bytes": 27757,
+      "imageDimensions": [
+        390,
+        900
+      ]
+    },
+    {
+      "path": "/tmp/codex-scratch/codex-wr-github-jakubknejzlik-workbase-sdk-290-s1-impl-wr-39aaca9a/head-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-head-cs-390-invited-menu.png",
+      "state": "invited",
+      "width": 390,
+      "language": "cs",
+      "mode": "head",
+      "source": "61e2c4370269bae302f9ef59af0880b325d1427d",
+      "syntheticOverride": false,
+      "file": "head-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-head-cs-390-invited-menu.png",
+      "sha256": "81024ac92402b11bf6de0760dc7c263ce696e98e9cb71e399eb98e331cb35f07",
+      "bytes": 36946,
+      "imageDimensions": [
+        390,
+        900
+      ]
+    },
+    {
+      "path": "/tmp/codex-scratch/codex-wr-github-jakubknejzlik-workbase-sdk-290-s1-impl-wr-39aaca9a/head-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-head-cs-390-signed_in-closed.png",
+      "state": "signed_in",
+      "width": 390,
+      "language": "cs",
+      "mode": "head",
+      "source": "61e2c4370269bae302f9ef59af0880b325d1427d",
+      "syntheticOverride": false,
+      "file": "head-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-head-cs-390-signed_in-closed.png",
+      "sha256": "d6fd57551644263830a8e8777949599f5efecba5bc11b6e8ebc70054866fc57a",
+      "bytes": 25547,
+      "imageDimensions": [
+        390,
+        900
+      ]
+    },
+    {
+      "path": "/tmp/codex-scratch/codex-wr-github-jakubknejzlik-workbase-sdk-290-s1-impl-wr-39aaca9a/head-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-head-cs-390-signed_in-menu.png",
+      "state": "signed_in",
+      "width": 390,
+      "language": "cs",
+      "mode": "head",
+      "source": "61e2c4370269bae302f9ef59af0880b325d1427d",
+      "syntheticOverride": false,
+      "file": "head-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-head-cs-390-signed_in-menu.png",
+      "sha256": "ef30702473c33563b990dcc325c7fa8f0094bb3401ed3fa40a3045b7a82581c5",
+      "bytes": 29653,
+      "imageDimensions": [
+        390,
+        900
+      ]
+    },
+    {
+      "path": "/tmp/codex-scratch/codex-wr-github-jakubknejzlik-workbase-sdk-290-s1-impl-wr-39aaca9a/head-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-head-cs-390-expired-closed.png",
+      "state": "expired",
+      "width": 390,
+      "language": "cs",
+      "mode": "head",
+      "source": "61e2c4370269bae302f9ef59af0880b325d1427d",
+      "syntheticOverride": true,
+      "file": "head-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-head-cs-390-expired-closed.png",
+      "sha256": "521891c39f77842d20cacef7365e3de33b7cad9994609f68b8d9c25a139921cd",
+      "bytes": 27745,
+      "imageDimensions": [
+        390,
+        900
+      ]
+    },
+    {
+      "path": "/tmp/codex-scratch/codex-wr-github-jakubknejzlik-workbase-sdk-290-s1-impl-wr-39aaca9a/head-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-head-cs-390-expired-menu.png",
+      "state": "expired",
+      "width": 390,
+      "language": "cs",
+      "mode": "head",
+      "source": "61e2c4370269bae302f9ef59af0880b325d1427d",
+      "syntheticOverride": true,
+      "file": "head-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-head-cs-390-expired-menu.png",
+      "sha256": "331d2a261e846e8abe8c97a25676fd65e3fcc219041ec6da9b90528588033526",
+      "bytes": 35722,
+      "imageDimensions": [
+        390,
+        900
+      ]
+    },
+    {
+      "path": "/tmp/codex-scratch/codex-wr-github-jakubknejzlik-workbase-sdk-290-s1-impl-wr-39aaca9a/head-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-head-cs-390-inconsistent-closed.png",
+      "state": "inconsistent",
+      "width": 390,
+      "language": "cs",
+      "mode": "head",
+      "source": "61e2c4370269bae302f9ef59af0880b325d1427d",
+      "syntheticOverride": true,
+      "file": "head-screenshots/61e2c4370269bae302f9ef59af0880b325d1427d-head-cs-390-inconsistent-closed.png",
+      "sha256": "83704ab6c8a3ee996f9845b713c459d9d664aa59e5ad7b882847122ea3520ad2",
+      "bytes": 28885,
+      "imageDimensions": [
+        390,
+        900
+      ]
+    }
+  ],
+  "visualVerdict": "Pending independent rendered review; author capture is not acceptance"
+}
