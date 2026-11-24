@@ -15,6 +15,7 @@ import { labelPath, readableLabel, labelAlias, sortAlias, expressionColumns, exp
 import { QUERY_LIMITS as L, type QueryCost } from './limits'
 import type { Filter, Order, QueryInput, Scalar, Selection } from './schema'
 import { configuredViews, listPredicate } from './list-views'
+import { operandKind } from './input-schema'
 
 export interface Statement { sql: string; bindings: unknown[] }
 const col = (alias: string, field: string) => `${alias}.${field}`
@@ -146,7 +147,7 @@ function filterCondition(kernel: KernelRegistry, entity: string, alias: string, 
       conditions.push(key === 'and' ? Cond.and(children) : Cond.or(children)); continue
     }
     if (key === 'not') { conditions.push(Cond.not(filterCondition(kernel, entity, alias, v as Filter, nextAlias, false))); continue }
-    if (Object.hasOwn(kernel.config.entities[entity].relations, key)) {
+    if (operandKind(kernel.config, entity, key, v) === 'relation') {
       const r = kernel.config.entities[entity].relations[key]; const childAlias = nextAlias()
       const quantifier = r.many ? Object.keys(v as object)[0] : undefined
       const sub = Q.select().from(r.entity, childAlias).field(col(childAlias, 'id'))
@@ -177,6 +178,7 @@ function filterCondition(kernel: KernelRegistry, entity: string, alias: string, 
 function hasRequiredForeignKeySeek(kernel: KernelRegistry, entity: string, filter: Filter): boolean {
   return Object.entries(filter).some(([field, operand]) => {
     if (field === 'and') return (operand as Filter[]).some(child => hasRequiredForeignKeySeek(kernel, entity, child))
+    if (operandKind(kernel.config, entity, field, operand) !== 'scalar') return false
     if (kernel.config.entities[entity].fields[field]?.type !== 'ref' || kernel.config.entities[entity].fields[field].computed) return false
     const operators = operand as Record<string, unknown>
     return (Object.hasOwn(operators, 'eq') && operators.eq !== null)

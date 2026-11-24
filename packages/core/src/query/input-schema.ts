@@ -3,6 +3,7 @@ import { baseFields } from '../model-inputs'
 import type { Field, InstanceConfig } from '../config'
 import { QUERY_LIMITS as L } from './limits'
 import { labelPath } from './labels'
+import { filterOperand } from './filter-operand'
 
 export type Scalar = string | number | boolean | null
 export interface Filter { [key: string]: unknown }
@@ -12,6 +13,8 @@ import type { RowAccessState } from './row-access-state'
 export type { RowAccessState } from './row-access-state'
 export interface QueryInput extends Selection { rowAccess?: RowAccessState; contextList?: { entity: string; list: string; id: string }; search?: { text: string; fields: string[]; locale?: 'en' | 'cs' }; labelWhere?: Record<string, { contains: string; locale?: 'en' | 'cs' }>; entity: string; limit: number; cursor?: string; offset?: number; includeTotal?: boolean; view?: string; includeViewTotals?: boolean }
 export const fieldsFor = (config: InstanceConfig, entity: string) => [...baseFields, ...Object.keys(config.entities[entity].fields)]
+export const operandKind = (config: InstanceConfig, entity: string, key: string, value: unknown) =>
+  filterOperand(fieldsFor(config, entity).includes(key), Object.hasOwn(config.entities[entity].relations, key), value)
 export function fieldType(config: InstanceConfig, entity: string, field: string): Field['type'] {
   return config.entities[entity].fields[field]?.type ?? (field === 'version' ? 'int' : ['created_at', 'updated_at'].includes(field) ? 'datetime' : 'string')
 }
@@ -45,7 +48,9 @@ export function filterSchema(config: InstanceConfig, rest = false, maxDepth = L.
       }
       if (depth < maxDepth) for (const [relation, r] of Object.entries(config.entities[name].relations)) {
         const child = filter(r.entity, depth + 1)
-        shape[relation] = (r.many ? z.union([z.strictObject({ some: child }), z.strictObject({ none: child })]) : child).optional()
+        const nested = r.many ? z.union([z.strictObject({ some: child }), z.strictObject({ none: child })]) : child
+        shape[relation] = (shape[relation] ? z.union([shape[relation], nested])
+          .refine(value => value === undefined || operandKind(config, name, relation, value) !== 'invalid', 'Mixed scalar and relation operands are invalid') : nested).optional()
       }
       if (actorValues) shape.actorLinkedIn = z.string().refine(entity =>
         Object.hasOwn(config.entities, entity) && Object.values(config.entities[entity].fields).some(field => field.userLink),

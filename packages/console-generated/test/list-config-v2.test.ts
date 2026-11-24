@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest'
 import { filterKind, filterableFields, filterMapping } from '../src/filter-kinds'
-import { stateFromSearch, toQueryDocument, validateListSearch } from '../src/list-model'
+import { stateFromSearch, toQueryDocument, validateListSearch, readableWhere } from '../src/list-model'
 import { listSearchableFields, type Model, type Capabilities } from '../src/read'
 
 const model: Model = { instance: 'v2', revision: 1, limits: { root: 100, children: 100, relations: 4, exists: 4 }, entities: {
@@ -110,4 +110,19 @@ it('validates copied one-based page numbers and drops pages beyond the offset ca
   const capped = { ...model, limits: { ...model.limits, maxOffset: 100 } }
   expect(stateFromSearch(validateListSearch({ page: 5 }), capped, 'workers', caps).dropped).toBe(true)
   expect(stateFromSearch(validateListSearch({ page: 4 }), capped, 'workers', caps).dropped).toBe(false)
+})
+
+it('classifies colliding configured predicates by operand and checks target fields and id', () => {
+  const collision = structuredClone(model)
+  collision.entities.workers.relations.team_id = { entity: 'teams', field: 'team_id', cardinality: 'n:1' }
+  const scalar = { team_id: { in: ['target-a'] } }
+  const relation = { team_id: { name: { eq: 'A' } } }
+  expect(readableWhere(scalar, collision, 'workers', caps)).toBe(true)
+  expect(readableWhere(relation, collision, 'workers', caps)).toBe(true)
+  const denied = structuredClone(caps); denied.entities.teams.readable = ['id']
+  expect(readableWhere(scalar, collision, 'workers', denied)).toBe(true)
+  expect(readableWhere(relation, collision, 'workers', denied)).toBe(false)
+  denied.entities.teams.readable = ['name']
+  expect(readableWhere(relation, collision, 'workers', denied)).toBe(false)
+  expect(readableWhere({ team_id: { in: ['target-a'], name: { eq: 'A' } } }, collision, 'workers', caps)).toBe(false)
 })

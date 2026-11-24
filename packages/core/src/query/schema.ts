@@ -12,7 +12,7 @@ import { expressionInfo, fieldExpression, readableComputed } from './expressions
 
 export { fieldsFor, fieldType, operatorsFor, filterSchema, querySchema } from './input-schema'
 export type { Scalar, Filter, Order, Selection, RowAccessState, QueryInput } from './input-schema'
-import { fieldsFor, operatorsFor, querySchema, type Filter, type Selection, type QueryInput } from './input-schema'
+import { fieldsFor, operandKind, operatorsFor, querySchema, type Filter, type Selection, type QueryInput } from './input-schema'
 /** Bound recursion before Zod, including malformed/unrecognized inputs. */
 function preflight(input: unknown) {
   let nodes = 0
@@ -34,17 +34,17 @@ export function validateQuery(kernel: KernelRegistry, scope: Scope, input: unkno
   const entity = (input as QueryInput).entity
   if (typeof entity !== 'string' || !Object.hasOwn(kernel.config.entities, entity)) throw new QueryError('entity_not_found', ['entity'])
   const depthCost: QueryCost = { statements: 0, depth: 0, relations: 0, fieldRows: 0, exists: 0, nodes: 0 }
-  function relationDepth(name: string, node: unknown, depth: number, path: QueryPath) {
+  function relationDepth(name: string, node: unknown, depth: number, path: QueryPath, include = false) {
     depthCost.nodes++; depthCost.depth = Math.max(depthCost.depth, depth)
     if (depth > L.relationDepth) throw new QueryError('query_too_expensive', path, depthCost)
     if (!node || typeof node !== 'object') return
     for (const [key, child] of Object.entries(node)) {
-      if (Object.hasOwn(kernel.config.entities[name].relations, key)) {
+      if (Object.hasOwn(kernel.config.entities[name].relations, key) && (include || operandKind(kernel.config, name, key, child) === 'relation')) {
         const r = kernel.config.entities[name].relations[key]; depthCost.relations++
         relationDepth(r.entity, child, depth + 1, [...path, key])
       } else if (['where', 'include', 'and', 'or', 'not', 'some', 'none'].includes(key)) {
         if (Array.isArray(child)) child.forEach((item, i) => relationDepth(name, item, depth, [...path, key, i]))
-        else relationDepth(name, child, depth, [...path, key])
+        else relationDepth(name, child, depth, [...path, key], key === 'include')
       }
     }
   }
@@ -138,7 +138,7 @@ export function validateQuery(kernel: KernelRegistry, scope: Scope, input: unkno
     for (const [key, value] of Object.entries(node)) {
       if (key === 'and' || key === 'or') (value as Filter[]).forEach((v, i) => where(name, v, depth, [...path, key, i], nesting + 1, expressionContext, rows))
       else if (key === 'not') where(name, value as Filter, depth, [...path, key], nesting + 1, expressionContext, rows)
-      else if (Object.hasOwn(kernel.config.entities[name].relations, key)) {
+      else if (operandKind(kernel.config, name, key, value) === 'relation') {
         const r = relation(name, key, [...path, key]); cost.exists++
         foreignKeyCost(r.entity)
         const quantifier = r.many ? Object.keys(value as object)[0] : undefined
