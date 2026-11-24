@@ -44,9 +44,10 @@ export function WidgetCards({ orgId, page, result, pending, error, model, caps }
   }
   const content = (widget: ConsoleWidgetResult) => {
     if (widget.kind === 'stat') {
-      const configured = page.widgets?.find(item => item.id === widget.id)
-      const empty = widget.value === null || widget.value === 0 && configured?.kind === 'stat' && configured.aggregate.fn === 'count'
-      return <>{widget.value !== null && <p className="text-3xl font-semibold tabular-nums">{new Intl.NumberFormat(i18n.language).format(widget.value)}</p>}{empty && <p className="text-sm text-muted-foreground">{t('dashboardEmpty')}</p>}</>
+      // Missing data shares the value line's height; zero is a normal value.
+      return widget.value == null
+        ? <p className="flex min-h-9 items-center text-sm text-muted-foreground">{t('dashboardEmpty')}</p>
+        : <p className="text-3xl font-semibold tabular-nums">{new Intl.NumberFormat(i18n.language).format(widget.value)}</p>
     }
     if (!widget.data.length) return <p className="text-sm text-muted-foreground">{t('dashboardEmpty')}</p>
     if (widget.kind === 'list') return <ul className="space-y-2 text-sm">{widget.data.map((row, index) => <li key={String(row.id ?? index)}>{value(widget, row, widget.field)}</li>)}</ul>
