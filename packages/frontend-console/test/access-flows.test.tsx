@@ -419,7 +419,7 @@ it('review6 Link picker requests eligible Members and submits without users capa
 it('14 staff without members.read has no Link picker even with an explicit link grant', async () => {
   const { write } = await mount('detail', { membersRead: false, grants: ['access_link_account'] })
   await accessMenu('No access')
-  expect(screen.queryByRole('button', { name: 'Link account' })).toBeNull()
+  expect(screen.queryByRole('menuitem')).toBeNull()
   expect(write.mock.calls.some(([path]) => path.split('?')[0].endsWith('/members'))).toBe(false)
 })
 it('14 failed Members read never falls back to a raw account id input', async () => {
