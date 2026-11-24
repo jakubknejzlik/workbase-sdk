@@ -32,16 +32,33 @@ async function fixture(config: ReturnType<typeof defineInstance>) {
   const run = (query: unknown, current = kernel) => executeQuery(current, scope, env.DB, 'synthetic', query, { writeLog: () => {} })
   return { app, kernel, scope, run }
 }
-function rebindConfig(mode:string){
+function rebindConfig(mode:string, operand:string){
  const v:any=input();const field=mode==='stored'?'amount':'mid';
  if(mode==='computed')v.entities.notes.fields.mid={type:'int',computed:Fn.add('amount',Q.value(1)).serialize()};
- const sub=Q.select().from('notes','n').field(Fn.count('n.id'),field).orderBy(field,'ASC');
+ const sub=Q.select().from('notes','n').field(Fn.count('n.id'),field).orderBy(operand,'ASC');
  v.entities.notes.fields.value.computed=Fn.if(Cond.exists(sub),field,Q.value(0)).serialize();
  return defineInstance(v);
 }
 
-it.each(['stored','computed'].flatMap(mode=>['selected','unselected'].map(selection=>[mode,selection])))('R5 required contract: %s output alias colliding with outer field executes (%s)',async(mode,selection)=>{
- const c=rebindConfig(mode);const {app}=await fixture(c);
- const response=await request(app,'/query','POST',{entity:'notes',select:selection==='selected'?['id','value']:['id','title'],limit:10});
- expect(response.status).toBe(200);expect((await response.json() as any).data).toHaveLength(2);
-});
+
+// A11 is the runtime collision arm of the shared grammar v2 acceptance matrix.
+it.each(['stored', 'computed'].flatMap(mode => ['selected', 'unselected'].flatMap(selection =>
+ ['bare', 'wrapped', 'upper', 'wrapped-upper'].map(spelling => ({ mode, selection, spelling })))))
+('A11 R5 $mode alias collision preserves SQL, HTTP rows and counts ($selection, $spelling)', async ({ mode, selection, spelling }) => {
+ const field = mode === 'stored' ? 'amount' : 'mid'
+ const name = spelling.includes('upper') ? field.toUpperCase() : field
+ const operand = spelling.startsWith('wrapped') ? `#${name}#` : name
+ const config = rebindConfig(mode, operand)
+ const { app, kernel, scope } = await fixture(config)
+ const input = { entity: 'notes', select: selection === 'selected' ? ['id', 'value'] : ['id', 'title'], limit: 10 }
+ const { query, cost } = validateQuery(kernel, scope, input)
+ const statement = compileRoot(kernel, scope, query, undefined, cost)
+ expect(statement.sql).toContain(`ORDER BY \`${field}\` ASC`)
+ const expected = ['n1', 'n2'].map(id => selection === 'selected' ? { id, value: mode === 'stored' ? 3 : 4 } : { id, title: id })
+ expect((await env.DB.prepare(statement.sql).bind(...statement.bindings).all()).results).toEqual(expected)
+ const count = compileAggregate(kernel, scope, query, { fn: 'count' }, cost)
+ expect(await env.DB.prepare(count.sql).bind(...count.bindings).first()).toMatchObject({ value: 2, __count: 2 })
+ const response = await request(app, '/query', 'POST', input)
+ expect(response.status).toBe(200)
+ expect((await response.json() as any).data).toEqual(expected)
+})

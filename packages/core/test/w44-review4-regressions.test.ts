@@ -1,5 +1,5 @@
-import { toSQLWithBindings } from '@jakub.knejzlik/ts-query'
-import { expect, it } from 'vitest'
+import { toSQLWithBindings, type SelectQuery } from '@jakub.knejzlik/ts-query'
+import { describe, expect, it } from 'vitest'
 import { env } from 'cloudflare:workers'
 import { defineInstance, Q, Fn, Cond } from '../src/config'
 import { identity } from '@workbasehq/plugins/identity'
@@ -12,8 +12,9 @@ import { resolveActor, requireScope } from '../src/authorization'
 import { executeQuery } from '../src/query/executor'
 import { validateQuery } from '../src/query/schema'
 import { scopeOperations } from '../src/scope-operations'
+import { DisplayPartsExpression } from '../src/query/display-parts'
 import { compileRoot, compileAggregate } from '../src/query/compiler'
-import { ExpressionError, expressionInfo } from '../src/query/expressions'
+import { ExpressionError, expressionInfo, rebindExpression, readableComputed } from '../src/query/expressions'
 
 const count = () => Q.select().from('people', 'p').field(Fn.count(Q.value(1))).where(Cond.isNotNull('self.id')).serialize()
 const input = () => ({ id: 'w44_review', revision: 1, interactive: true, plugins: [identity, localAuth, tenancy, legacyPermissions], roles: ['owner'],
@@ -195,4 +196,229 @@ it.each(['n.amount', Fn.abs(Fn.sum('n.amount')).serialize()])('R4 ORDER BY resol
   const { run } = await fixture(defineInstance(value))
   const expected = projection === 'n.amount' ? 3 : 6
   expect((await run({ entity: 'notes', select: ['value'], limit: 10 })).data).toEqual([{ value: expected }, { value: expected }])
+})
+
+
+// The approved grammar v2 acceptance matrix. Keep NULL and all keyword/value
+// spellings together: SQL keyword lists do not determine operand roles.
+describe('ORDER BY grammar v2 acceptance matrix', () => {
+  const keywords = ['order', 'select', 'key']
+  const valueWords = ['TRUE', 'FALSE', 'CURRENT_TIME', 'CURRENT_DATE', 'CURRENT_TIMESTAMP']
+  const query = (alias: string, operand: string) => Q.select().from('notes', 'n')
+    .field('n.amount', alias).orderBy(Q.expr(operand), 'ASC').limit(1)
+  const configFor = (wire: string) => {
+    const value = input()
+    value.entities.notes.fields.value.computed = wire
+    return defineInstance(value)
+  }
+  const infoFor = (wire: string) => expressionInfo(configFor(wire), 'notes', 'value', wire)
+  const sql = (ast: Parameters<typeof toSQLWithBindings>[0]) => toSQLWithBindings(ast, Q.flavors.sqlite)
+  async function amounts(config: ReturnType<typeof defineInstance>) {
+    const result = await fixture(config)
+    await env.DB.prepare("UPDATE notes SET amount=-5 WHERE id='n2'").run()
+    return result
+  }
+  async function assertOrder(alias: string, operand: string, literal = false) {
+    const original = query(alias, operand)
+    const wire = original.serialize()
+    const config = configFor(wire) // unchanged serialized builder configuration
+    expect(config.entities.notes.fields.value.computed).toBe(wire)
+    const info = expressionInfo(config, 'notes', 'value', wire)
+    const statement = sql(info.ast)
+    expect(statement.sql).toContain(`ORDER BY ${literal ? 'NULL' : `\`${alias}\``} ASC`)
+    expect(statement.bindings).toEqual([1])
+    expect(sql(rebindExpression(original, new Map([[alias, 'outer.amount']])))).toEqual(statement)
+    expect(original.serialize()).toBe(wire)
+    expect(await env.DB.prepare(statement.sql).bind(...statement.bindings).first())
+      .toEqual({ [alias]: literal ? 3 : -5 })
+  }
+
+  it.each(['null', 'Null'])('A1 exact NULL stays literal beside declaration %s through both caller paths', async alias => {
+    const wire = query(alias, 'NULL').serialize()
+    expect(Q.select().from('notes', 'n').field('n.amount', alias).orderBy('NULL', 'ASC').limit(1).serialize()).toBe(wire)
+    const { run } = await amounts(configFor(wire))
+    await assertOrder(alias, 'NULL', true)
+    expect((await run({ entity: 'notes', select: ['value'], limit: 10 })).data).toEqual([{ value: 3 }, { value: 3 }])
+  })
+
+  it.each(['null', 'Null'])('A2 non-sentinel and wrapped NULL resolve declaration %s', async alias => {
+    await amounts(configFor(query(alias, alias).serialize()))
+    for (const operand of ['null', 'Null', '#null#', '#NULL#']) await assertOrder(alias, operand)
+  })
+
+  it.each(keywords)('A3 unchanged keyword alias config %s remains accepted', async alias => {
+    await amounts(configFor(query(alias, alias).serialize()))
+    await assertOrder(alias, alias)
+  })
+  it.each(valueWords)('A4 unchanged uppercase alias config %s remains accepted', async alias => {
+    await amounts(configFor(query(alias, alias).serialize()))
+    await assertOrder(alias, alias)
+  })
+
+  const crossProduct = [...keywords, ...valueWords, 'NULL'].flatMap(word => {
+    const lower = word.toLowerCase(), title = lower[0].toUpperCase() + lower.slice(1), upper = word.toUpperCase()
+    return [lower, title, upper].map(alias => ({ alias, operands: [lower, title, upper, `#${lower}#`, `#${upper}#`] }))
+  })
+  it.each(crossProduct)('A5 spelling cross-product declaration $alias (five operands)', async ({ alias, operands }) => {
+    if (alias === 'NULL') {
+      for (const operand of operands) expect(() => configFor(query(alias, operand).serialize())).toThrow(/unsupported.*alias.*NULL/i)
+      return
+    }
+    await amounts(configFor(query(alias, alias).serialize()))
+    for (const operand of operands) await assertOrder(alias, operand, operand === 'NULL')
+  })
+
+  it('A6 variants have equivalent canonical AST, SQL, bindings, type, dependencies and display parts', () => {
+    const baseline = infoFor(query('Total', 'Total').serialize())
+    for (const operand of ['total', '#total#', 'TOTAL', '#ToTaL#']) {
+      const raw = query('Total', operand), wire = raw.serialize(), info = infoFor(wire)
+      expect((info.ast as SelectQuery).serialize()).toBe((baseline.ast as SelectQuery).serialize())
+      expect((info.ast as SelectQuery).serialize()).toContain('#Total#')
+      expect(sql(info.ast)).toEqual(sql(baseline.ast))
+      expect(info.type).toBe(baseline.type)
+      expect(info.dependencies).toEqual(baseline.dependencies)
+      expect(info.parts).toEqual(baseline.parts)
+      const columns = new Map([['total', 'outer.amount'], ['Total', 'outer.amount']])
+      const source = (entity: string) => Q.select().from(entity).field('amount')
+      const render = (parts: NonNullable<typeof info.parts>) => sql(new DisplayPartsExpression(parts, columns, new Map(), source))
+      expect(render({ wire, type: 'number' })).toEqual(render(baseline.parts!))
+      expect(sql(rebindExpression(raw, columns))).toEqual(sql(info.ast))
+      expect(raw.serialize()).toBe(wire)
+    }
+  })
+
+  it('A7 unmatched uppercase words reject while typed values and condition data retain their roles', async () => {
+    for (const word of valueWords) expect(() => infoFor(query('Total', word).serialize())).toThrow(/Unknown field/)
+    const data = ['Total', '#Total#', 'NULL', 'FN(["ABS","Total"])']
+    const original = query('Total', 'Total').where(Cond.in('n.title', data))
+      .orderBy(Q.value(true)).orderBy(Q.value(false)).orderBy(Q.value('Total')).orderBy(Q.value(null as any))
+      .orderBy(Q.expr('&Total&')).orderBy(Q.expr('+2.5'))
+    const info = infoFor(original.serialize()), statement = sql(info.ast)
+    expect(statement.bindings).toEqual([...data, true, false, 'Total', null, 'Total', 2.5, 1])
+    expect(statement.sql).toContain('ORDER BY `Total` ASC, ? ASC, ? ASC, ? ASC, ? ASC, ? ASC, ? ASC')
+    expect(JSON.parse((info.ast as SelectQuery).serialize()).where[0].values).toEqual(data.map(value => Q.value(value).serialize()))
+  })
+
+  it('A7 number wires are scalar literals rather than positional ORDER BY ordinals', async () => {
+    await amounts(configFor(query('Total', '1').serialize()))
+    for (const operand of ['1', '-5', '+2.5', '0.25']) {
+      const raw = Q.select().from('notes', 'n').field(Fn.abs('n.amount'), 'Total').orderBy(Q.expr(operand)).limit(1)
+      const statement = sql(infoFor(raw.serialize()).ast)
+      expect(statement.sql).toContain('ORDER BY ? ASC')
+      expect(statement.bindings).toEqual([Number(operand), 1])
+      expect(sql(rebindExpression(raw, new Map()))).toEqual(statement)
+      expect(await env.DB.prepare(statement.sql).bind(...statement.bindings).first()).toEqual({ Total: 3 })
+    }
+  })
+
+  it('A8 qualified references retain source semantics and malformed operands/declarations reject whole', async () => {
+    await amounts(configFor(query('Total', 'n.amount').serialize()))
+    for (const operand of ['n.amount', '#n.amount#']) {
+      const statement = sql(infoFor(query('Total', operand).serialize()).ast)
+      expect(statement.sql).toContain('ORDER BY `n`.`amount` ASC')
+      expect(await env.DB.prepare(statement.sql).bind(...statement.bindings).first()).toEqual({ Total: -5 })
+    }
+    for (const operand of ['n.Total', '#n.Total#', 'missing', '#NULL#', 'Total\n', '#Total#\n', ' Total', 'Total ', 'Total+1', '##Total##', '"Total"', "'Total'", 'ToTaK', 'ſelect']) {
+      expect(() => infoFor(query('Total', operand).serialize()), operand).toThrow(ExpressionError)
+    }
+    for (const alias of ['#Total#', 'Total\n', 'Total ', 'Total;DROP_TABLE', 'ſelect', '1Total']) {
+      expect(() => infoFor(query(alias, 'n.amount').serialize()), alias).toThrow(/alias/i)
+    }
+  })
+
+  it('A9 aliases inside FN, OP and raw SQL reject; qualified source functions remain supported', () => {
+    for (const operand of [Fn.abs('Total').serialize(), Fn.add('Total', Q.value(1)).serialize(), Q.raw('Total').serialize()]) {
+      expect(() => infoFor(query('Total', operand).serialize())).toThrow(ExpressionError)
+    }
+    expect(sql(infoFor(query('Total', Fn.abs('n.amount').serialize()).serialize()).ast).sql).toContain('ORDER BY ABS(`n`.`amount`) ASC')
+  })
+
+  it.each(['nested', 'sibling'])('A10 output alias visibility does not leak to a %s SELECT', mode => {
+    const first = Q.select().from('notes', 'n').field(Fn.count('n.id'), 'Total').orderBy('#TOTAL#')
+    const second = Q.select().from('people', 'p').field(Fn.count('p.id'), 'Other').orderBy('#total#')
+    const wire = mode === 'nested' ? first.where(Cond.exists(second)).serialize()
+      : Fn.if(Cond.and([Cond.exists(first), Cond.exists(second)])!, 'amount', Q.value(0)).serialize()
+    expect(() => infoFor(wire)).toThrow(/needs a schema table alias/)
+  })
+  it('A10 shared operand resolves separately per SELECT and per clause without mutation', () => {
+    const shared = Q.expr('total')
+    const first = Q.select().from('notes', 'n').field('n.amount', 'Total').orderBy(shared).limit(1)
+    const second = Q.select().from('notes', 'n').field('n.amount', 'TOTAL').orderBy(shared).limit(1)
+    const nested = first.where(Cond.exists(second))
+    const siblings = Fn.add(first, second)
+    for (const raw of [nested, siblings]) {
+      const before = raw.serialize()
+      const rebound = rebindExpression(raw, new Map([['total', 'outer.amount']]))
+      expect(sql(rebound).sql).toContain('ORDER BY `Total` ASC')
+      expect(sql(rebound).sql).toContain('ORDER BY `TOTAL` ASC')
+      expect(raw.serialize()).toBe(before)
+    }
+    const otherClause = first.where(Cond.isNull(shared))
+    const wire = otherClause.serialize()
+    const rebound = JSON.parse(rebindExpression(otherClause, new Map()).serialize())
+    expect(rebound.orderBy[0].field).toBe('#Total#')
+    expect(rebound.where[0].key).toBe('total')
+    expect(() => infoFor(wire)).toThrow(/needs a schema table alias/)
+    expect(otherClause.serialize()).toBe(wire)
+    expect(shared.serialize()).toBe('total')
+  })
+
+  it('A12 alias resolution retains scalar LIMIT, aggregate ownership, clause and forward-join restrictions', () => {
+    const wires = [
+      query('Total', '#total#').clearLimit().serialize(),
+      Q.select().from('notes', 'n').field(Fn.sum('self.amount'), 'Total').orderBy('#TOTAL#').serialize(),
+      query('Total', Fn.sum('n.amount').serialize()).serialize(),
+      query('Total', '#TOTAL#').where(Cond.greaterThan(Fn.sum('n.amount'), 0)).serialize(),
+      query('Total', '#TOTAL#').innerJoin(Q.table('people', 'p'), Cond.columnEqual('later.id', 'n.id'))
+        .innerJoin(Q.table('people', 'later'), Cond.columnEqual('later.note', 'n.id')).serialize(),
+    ]
+    for (const wire of wires) expect(() => infoFor(wire)).toThrow(ExpressionError)
+  })
+
+  it('A13 masked projection dependencies stay unreadable, NULL and unfilterable; source scoping persists', async () => {
+    const config = configFor(query('Total', '#TOTAL#').serialize())
+    const { kernel, scope, run } = await amounts(config)
+    await env.DB.prepare("INSERT INTO notes(id,organization_id,title,amount,created_at,updated_at) VALUES ('foreign','org-b','foreign',-99,'2026-01-01','2026-01-01')").run()
+    expect((await run({ entity: 'notes', select: ['value'], limit: 10 })).data).toEqual([{ value: -5 }, { value: -5 }])
+    const masked = new KernelRegistry(config, { plugins: [...config.plugins!, { name: 'mask_amount', version: '1',
+      fieldMask: entity => kernel.fieldMask(entity, scope).filter(field => entity !== 'notes' || field !== 'amount') }] })
+    expect(readableComputed(masked, scope, 'notes', 'value')).toBe(false)
+    expect((await run({ entity: 'notes', select: ['value'], limit: 10 }, masked)).data).toEqual([{ value: null }, { value: null }])
+    const { query: validated, cost } = validateQuery(masked, scope, { entity: 'notes', select: ['value'], where: { value: { eq: -5 } }, limit: 10 })
+    const count = compileAggregate(masked, scope, validated, { fn: 'count' }, cost)
+    expect(await env.DB.prepare(count.sql).bind(...count.bindings).first()).toMatchObject({ value: 0, __count: 0 })
+    const restricted = new KernelRegistry(config, { plugins: [...config.plugins!, { name: 'scope_amount', version: '1',
+      tableFilter: entity => entity === 'notes' ? { kind: 'where', predicate: { amount: { eq: 3 } } } : { kind: 'all' } }] })
+    expect((await run({ entity: 'notes', select: ['value'], limit: 10 }, restricted)).data).toEqual([{ value: 3 }])
+  })
+
+  it.each(['Total', 'TOTAL'])('A14 duplicate/case-fold projection alias %s rejects before choosing a winner', alias => {
+    expect(() => infoFor(query('Total', '#total#').field('n.amount', alias).serialize())).toThrow(/exactly one field/)
+  })
+
+  it('A15 cache reuse/isolation and both emission routes preserve original wire/AST and canonical idempotence', () => {
+    const original = query('Total', '#tOtAl#'), wire = original.serialize(), config = configFor(wire)
+    const info = expressionInfo(config, 'notes', 'value', wire), astWire = (info.ast as SelectQuery).serialize(), parts = JSON.stringify(info.parts)
+    const second = configFor(wire)
+    expect(expressionInfo(second, 'notes', 'value', wire)).not.toBe(info)
+    expect(expressionInfo(config, 'notes', 'amount', wire)).not.toBe(info)
+    expect(expressionInfo(config, 'notes', 'value', query('Total', 'total').serialize())).not.toBe(info)
+    expect((expressionInfo(config, 'notes', 'value', astWire).ast as SelectQuery).serialize()).toBe(astWire)
+    const columns = new Map([['Total', Fn.abs(Q.value(99))]])
+    for (let i = 0; i < 3; i++) {
+      expect(expressionInfo(config, 'notes', 'value', wire)).toBe(info)
+      expect(sql(rebindExpression(info.ast, columns)).sql).toContain('ORDER BY `Total` ASC')
+      expect(sql(new DisplayPartsExpression({ wire, type: 'number' }, columns, new Map(), entity => Q.select().from(entity).field('amount'))).sql).toContain('ORDER BY `Total` ASC')
+    }
+    expect(original.serialize()).toBe(wire)
+    expect((info.ast as SelectQuery).serialize()).toBe(astWire)
+    expect(JSON.stringify(info.parts)).toBe(parts)
+    expect(config.entities.notes.fields.value.computed).toBe(wire)
+  })
+
+  it('A16 exact uppercase NULL declaration fails validation before emission', () => {
+    for (const operand of ['NULL', 'null', '#NULL#', 'n.amount']) {
+      expect(() => configFor(query('NULL', operand).serialize())).toThrow(/unsupported.*alias.*NULL/i)
+    }
+  })
 })
