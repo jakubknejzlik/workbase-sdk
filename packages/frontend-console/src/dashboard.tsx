@@ -33,7 +33,7 @@ export function WidgetCards({ orgId, page, result, pending, error, model, caps, 
       const language = i18n.language.split('-')[0]
       return entry(language) || entry(language === 'cs' ? 'en' : 'cs') || label
     }
-    return label.startsWith('entity_') ? t(label) : label
+    return label.startsWith('entity_') && Object.hasOwn(model?.entities ?? {}, label.slice('entity_'.length)) ? t(label) : label
   }
   const value = (widget: ConsoleWidgetResult, row: Record<string, any>, field: string, primary = false) => {
     const configured = page.widgets?.find(item => item.id === widget.id)

@@ -50,3 +50,10 @@ it.each([
   expect(screen.getByRole('heading', { level: 2, name: expected })).toBeTruthy()
   client.clear()
 })
+
+it.each(['Free form caption', 'missing_key', 'entity_missing', 'overview'])('renders an unconfigured label literally: %s', async label => {
+  const i18n = createInstance()
+  await i18n.init({ lng: 'en', resources: { en: { translation: { overview: 'Built-in overview' } } } })
+  render(<I18nextProvider i18n={i18n}><WidgetCards orgId="org-a" page={page} result={{ ...result, widgets: [{ id: 'count', kind: 'stat', value: 1, label }] }} pending={false} error={null} /></I18nextProvider>)
+  expect(screen.getByRole('heading', { level: 2, name: label })).toBeTruthy()
+})
