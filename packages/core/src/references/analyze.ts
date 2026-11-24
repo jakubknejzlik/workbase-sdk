@@ -1,4 +1,6 @@
 import ts from 'typescript'
+import { posix } from 'node:path'
+import { publicationStep } from './publication'
 import { ANALYZER_VERSION, SUMMARY_VERSION, freeze, hash, type Snapshot, type Span, type Domain, type Diagnostic, type LeafSummary, type Graph, type Reference, type Contract, type Registration, type Coverage } from './model'
 
 type Env = Map<string, Value>
@@ -16,7 +18,7 @@ const keys = ['plugins', 'name', 'schemaReferences', 'provides', 'requires', 'op
 const unknown = (node: ts.Node, reason: string, possible: Value[] = []): Value => ({ kind: 'unknown', node, reason, possible })
 const scalar = (node: ts.Node, value?: string | number | boolean | null): Value => ({ kind: 'scalar', node, value })
 function unwrap(node: ts.Expression): ts.Expression {
-  return ts.isParenthesizedExpression(node) || ts.isAsExpression(node) || ts.isSatisfiesExpression(node) || ts.isTypeAssertionExpression(node) ? unwrap(node.expression) : node
+  return ts.isParenthesizedExpression(node) || ts.isAsExpression(node) || ts.isSatisfiesExpression(node) || ts.isTypeAssertionExpression(node) || ts.isNonNullExpression(node) ? unwrap(node.expression) : node
 }
 function key(node: ts.PropertyName | undefined): string | undefined {
   return node && (ts.isIdentifier(node) || ts.isStringLiteral(node) || ts.isNumericLiteral(node)) ? node.text : undefined
@@ -149,29 +151,106 @@ export function analyze(input: Snapshot, options: AnalyzeOptions = {}): Graph {
     }
     return { value: { kind: 'metadata', refs, node }, errors }
   }
+  function validSummary(summary: LeafSummary): boolean {
+    const actual = Object.fromEntries(Object.keys(summary.dependencies).map(file => [file, hash(input.sources[file] ?? input.dependencies[file] ?? '')]))
+    if (summary.version !== SUMMARY_VERSION || summary.sourceHash !== hash(input.sources[summary.file] ?? '')
+      || hash(JSON.stringify(Object.entries(actual).sort(([a], [b]) => a.localeCompare(b, 'en')))) !== summary.dependencyHash
+      || hash(JSON.stringify(input.resolutions.filter(edge => edge.from in summary.dependencies))) !== summary.resolutionHash
+      || Object.entries(summary.dependencies).some(([file, digest]) => actual[file] !== digest || Object.hasOwn(input.dependencies,file) && hash(input.dependencies[file])!==digest)) return false
+    return true
+  }
+  // The ordinary runtime closure is interpreted. A current reviewed leaf is an
+  // opaque factory frontier; its exact dependency bytes/resolutions are validated
+  // by summaryValue, rather than treating unrelated captured SDK tools as consumers.
+  const consumerFiles = new Set<string>(), consumerQueue = [input.entry]
+  while (consumerQueue.length) {
+    const name = consumerQueue.pop()!
+    if (consumerFiles.has(name)) continue
+    const leaf = options.summaries?.find(item => item.file === name)
+    if (leaf && validSummary(leaf)) continue // only a current summary can be an opaque frontier
+    consumerFiles.add(name)
+    for (const resolution of input.resolutions) if (resolution.from === name && resolution.target) consumerQueue.push(resolution.target)
+  }
+  const unsupportedConsumers = new Map<string, { targets: Set<string>; opaque: boolean }>()
+  function unsupportedConsumer(name: string): { targets: Set<string>; opaque: boolean } {
+    const cached = unsupportedConsumers.get(name)
+    if (cached) return cached
+    const result = { targets: new Set<string>(), opaque: false }, file = source(name)
+    const moduleTarget = (specifier: string): string | undefined => {
+      const resolved = edge(file, specifier)
+      if (resolved) return resolved
+      // A nonstatic loader need not have a capture edge. Compare its literal
+      // reference against captured module identities, without host resolution.
+      if (specifier.startsWith('.')) {
+        const path = posix.normalize(posix.join(posix.dirname(name), specifier))
+        return [path, path + '.ts', path + '.tsx', path + '/index.ts', path.replace(/\.([cm]?)js$/, '.$1ts')]
+          .find(candidate => Object.hasOwn(input.sources, candidate))
+      }
+      return input.resolutions.find(item => item.specifier === specifier && item.target)?.target
+    }
+    const load = (specifier: ts.Expression | undefined): void => {
+      const target = specifier && ts.isStringLiteral(specifier) ? moduleTarget(specifier.text) : undefined
+      if (target) result.targets.add(target)
+      else result.opaque = true
+    }
+    const inspect = (node: ts.Node): void => {
+      if (++stabilityWork > limits.maxNodes * 10) { result.opaque = true; return }
+      if (node.kind === ts.SyntaxKind.Unknown || ts.SyntaxKind[node.kind] === undefined) { result.opaque = true; return }
+      if (ts.isTypeNode(node)) return
+      // Closed consumer vocabulary: every reference to a captured module
+      // specifier needs the exact static import/export moduleSpecifier position.
+      // Other parent kinds (including future syntax) are unsupported consumers.
+      if (ts.isStringLiteral(node)) {
+        const target = moduleTarget(node.text)
+        const parent = node.parent
+        if (target && !((ts.isImportDeclaration(parent) || ts.isExportDeclaration(parent)) && parent.moduleSpecifier === node)) result.targets.add(target)
+      }
+      if (ts.isImportEqualsDeclaration(node) && !node.isTypeOnly) {
+        load(ts.isExternalModuleReference(node.moduleReference) ? node.moduleReference.expression : undefined)
+        return
+      }
+      if (ts.isCallExpression(node) && (node.expression.kind === ts.SyntaxKind.ImportKeyword
+        || ts.isIdentifier(node.expression) && node.expression.text === 'require')) {
+        load(node.arguments[0])
+      } else if (ts.isMetaProperty(node) && node.keywordToken === ts.SyntaxKind.ImportKeyword
+        || ts.isIdentifier(node) && node.text === 'require' && !(ts.isCallExpression(node.parent) && node.parent.expression === node)) result.opaque = true
+      ts.forEachChild(node, inspect)
+    }
+    inspect(file)
+    unsupportedConsumers.set(name, result)
+    return result
+  }
   function consumers(file: ts.SourceFile, exportedName: string, seen: Set<string>): boolean {
-    const identity=`${file.fileName}:consumer:${exportedName}`
-    if(seen.has(identity)) return true
+    const identity = `${file.fileName}:consumer:${exportedName}`
+    if (seen.has(identity)) return true
     seen.add(identity)
-    let valid=true
-    for(const otherName of importers.get(file.fileName)??[]) {
-      if(++stabilityWork > limits.maxNodes*10) return false
-      const other=source(otherName)
-      for(const statement of other.statements) {
-        if((!ts.isImportDeclaration(statement)&&!ts.isExportDeclaration(statement)) || !statement.moduleSpecifier
-          || !ts.isStringLiteral(statement.moduleSpecifier) || edge(other,statement.moduleSpecifier.text)!==file.fileName) continue
-        if(ts.isImportDeclaration(statement)) {
-          const clause=statement.importClause, locals:string[]=[]
-          if(clause?.name && exportedName==='default') locals.push(clause.name.text)
-          if(clause?.namedBindings && ts.isNamespaceImport(clause.namedBindings)) locals.push(clause.namedBindings.name.text)
-          if(clause?.namedBindings && ts.isNamedImports(clause.namedBindings)) for(const item of clause.namedBindings.elements)
-            if((item.propertyName??item.name).text===exportedName) locals.push(item.name.text)
-          for(const local of locals) if(!stable(other,local,seen)) valid=false
-        } else if(statement.exportClause && ts.isNamedExports(statement.exportClause)) {
-          for(const item of statement.exportClause.elements) if((item.propertyName??item.name).text===exportedName && !consumers(other,item.name.text,seen)) valid=false
-        } else if(statement.exportClause && ts.isNamespaceExport(statement.exportClause)) {
-          if(!consumers(other,statement.exportClause.name.text,seen)) valid=false
-        } else if(!statement.exportClause && exportedName!=='default' && !consumers(other,exportedName,seen)) valid=false
+    let valid = true
+    for (const otherName of consumerFiles) {
+      const unsupported = unsupportedConsumer(otherName)
+      if (unsupported.opaque || unsupported.targets.has(file.fileName)) valid = false
+    }
+    for (const otherName of importers.get(file.fileName) ?? []) {
+      if (++stabilityWork > limits.maxNodes * 10) return false
+      const other = source(otherName)
+      for (const statement of other.statements) {
+        if ((!ts.isImportDeclaration(statement) && !ts.isExportDeclaration(statement)) || !statement.moduleSpecifier
+          || !ts.isStringLiteral(statement.moduleSpecifier) || edge(other, statement.moduleSpecifier.text) !== file.fileName) continue
+        if (ts.isImportDeclaration(statement)) {
+          const clause = statement.importClause, locals: string[] = []
+          if (clause?.isTypeOnly) continue
+          if (clause?.name && exportedName === 'default') locals.push(clause.name.text)
+          if (clause?.namedBindings && ts.isNamespaceImport(clause.namedBindings)) locals.push(clause.namedBindings.name.text)
+          if (clause?.namedBindings && ts.isNamedImports(clause.namedBindings)) for (const item of clause.namedBindings.elements)
+            if (!item.isTypeOnly && (item.propertyName ?? item.name).text === exportedName) locals.push(item.name.text)
+          for (const local of locals) if (!stable(other, local, seen)) valid = false
+        } else if (statement.isTypeOnly) continue
+        else if (statement.exportClause && ts.isNamedExports(statement.exportClause)) {
+          for (const item of statement.exportClause.elements) if (!item.isTypeOnly && (item.propertyName ?? item.name).text === exportedName && !consumers(other, item.name.text, seen)) valid = false
+        } else if (statement.exportClause && ts.isNamespaceExport(statement.exportClause)) {
+          if (!consumers(other, statement.exportClause.name.text, seen)) valid = false
+        } else if (!statement.exportClause && exportedName !== 'default') {
+          if (!consumers(other, exportedName, seen)) valid = false
+        } else valid = false // no unmodeled export clause may certify a consumer
       }
     }
     return valid
@@ -188,17 +267,11 @@ export function analyze(input: Snapshot, options: AnalyzeOptions = {}): Graph {
         const locals = ts.isVariableStatement(statement) ? statement.declarationList.declarations.flatMap(item=>bindingNames(item.name)) : valueBindings(statement)
         if (locals.includes(name)) exportedNames.add(ts.getModifiers(statement)?.some(item=>item.kind===ts.SyntaxKind.DefaultKeyword) ? 'default' : name)
       }
-      if (ts.isExportAssignment(statement) && ts.isIdentifier(statement.expression) && statement.expression.text===name) exportedNames.add('default')
+      if (ts.isExportAssignment(statement) && ts.isIdentifier(unwrap(statement.expression)) && (unwrap(statement.expression) as ts.Identifier).text===name) exportedNames.add('default')
       if (ts.isExportDeclaration(statement) && !statement.moduleSpecifier && statement.exportClause && ts.isNamedExports(statement.exportClause))
         for(const item of statement.exportClause.elements) if((item.propertyName??item.name).text===name) exportedNames.add(item.name.text)
     }
     for(const exportedName of exportedNames) if(!consumers(file,exportedName,seen)) valid=false
-    const rootName = (node: ts.Node): string | undefined => {
-      if (ts.isParenthesizedExpression(node) || ts.isAsExpression(node) || ts.isSatisfiesExpression(node) || ts.isTypeAssertionExpression(node)) return rootName(node.expression)
-      if (ts.isIdentifier(node)) return node.text
-      if (ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node) || ts.isCallExpression(node)) return rootName(node.expression)
-      return undefined
-    }
     // Returned aliases inherit their function/getter owner's consumer stability.
     // Untracked owners remain gaps. Factory-local declarations returned from their
     // own scope remain supported: each invocation creates its own value.
@@ -221,51 +294,53 @@ export function analyze(input: Snapshot, options: AnalyzeOptions = {}): Graph {
       if (localTo(scope)) return true
       if (ts.isFunctionDeclaration(scope) && scope.name) return stable(file, scope.name.text, seen)
       // Arrows/function expressions and getters inherit their owning container's
-      // consumers. Calls in rootName connect result mutations back to that owner.
+      // consumers. Modeled callee paths connect result mutations back to that owner.
       let ancestor = scope
       while (ancestor.parent && !ts.isStatement(ancestor.parent)) {
         const parent = ancestor.parent
-        if (ts.isVariableDeclaration(parent) && parent.initializer === ancestor)
+        const step = publicationStep(parent, ancestor)
+        if (step === 'binding' && ts.isVariableDeclaration(parent))
           return ts.isIdentifier(parent.name) && stable(file, parent.name.text, seen)
+        if (step !== 'next') return false
         ancestor = parent
       }
       return false
     }
     const visit = (node: ts.Node, inNamespace = false) => {
-      if(++stabilityWork > (options.maxNodes ?? 20000)*10) { valid=false; return }
-      // Namespace initialization can publish aliases through nested exports. Until
-      // those scopes are projected, references inside them cannot prove stability.
-      if(inNamespace && ts.isIdentifier(node) && node.text===name) valid=false
-      if (ts.isBinaryExpression(node) && node.operatorToken.kind >= ts.SyntaxKind.FirstAssignment && node.operatorToken.kind <= ts.SyntaxKind.LastAssignment && rootName(node.left) === name) valid = false
-      if ((ts.isPostfixUnaryExpression(node) || ts.isPrefixUnaryExpression(node) || ts.isDeleteExpression(node)) && rootName(ts.isDeleteExpression(node) ? node.expression : node.operand) === name) valid = false
-      if (ts.isCallExpression(node) && (node.arguments.some(arg => rootName(arg) === name) || rootName(node.expression) === name && !ts.isIdentifier(node.expression))) valid = false
-      if(ts.isIdentifier(node) && node.text===name && !(ts.isPropertyAssignment(node.parent) && node.parent.name===node) && !(ts.isPropertyAccessExpression(node.parent) && node.parent.name===node)) {
-        let ancestor: ts.Node=node
-        while(ancestor.parent && !ts.isStatement(ancestor.parent)) {
-          const parent=ancestor.parent
-          if (ts.isArrowFunction(parent) && parent.body === ancestor && !returnedAliasStable(parent)) valid = false
-          if (ts.isCallExpression(parent) && parent.expression === ancestor && rootName(ancestor) !== name) valid = false
-          if (ts.isBinaryExpression(parent) && parent.left === ancestor && parent.operatorToken.kind >= ts.SyntaxKind.FirstAssignment && parent.operatorToken.kind <= ts.SyntaxKind.LastAssignment) valid = false
-          if ((ts.isPostfixUnaryExpression(parent) || ts.isPrefixUnaryExpression(parent)) && parent.operand === ancestor) valid = false
-          if (ts.isDeleteExpression(parent) && parent.expression === ancestor) valid = false
-          if(ts.isCallExpression(parent) && parent.arguments.some(arg=>arg===ancestor)) valid=false
-          // Class fields and enum members can publish aliases without a return
-          // statement. Their initialization/consumer semantics are not projected.
-          if ((ts.isPropertyDeclaration(parent) || ts.isEnumMember(parent)) && parent.initializer === ancestor) valid = false
-          if(ts.isVariableDeclaration(parent) && parent.initializer===ancestor) {
-            if(!ts.isIdentifier(parent.name) || parent.name.text!==name && !stable(file,parent.name.text,seen)) valid=false
+      if (++stabilityWork > limits.maxNodes * 10) { valid = false; return }
+      // Unknown parser kinds cannot be traversed by forEachChild. Reject them
+      // before traversal so an opaque subtree cannot hide a tracked identifier.
+      if (node.kind === ts.SyntaxKind.Unknown || ts.SyntaxKind[node.kind] === undefined) { valid = false; return }
+      // Type positions do not publish runtime values (including typeof queries).
+      if (ts.isTypeNode(node)) return
+      if (ts.isIdentifier(node) && node.text === name) {
+        if (inNamespace) valid = false
+        let child: ts.Node = node
+        while (child.parent) {
+          if (++stabilityWork > limits.maxNodes * 10) { valid = false; break }
+          const parent = child.parent, step = publicationStep(parent, child)
+          if (step === 'gap') { valid = false; break }
+          if (step === 'declaration') break
+          if (step === 'binding') {
+            if (!ts.isVariableDeclaration(parent) || !ts.isIdentifier(parent.name)
+              || !ts.isVariableDeclarationList(parent.parent) || !(parent.parent.flags & ts.NodeFlags.Const)
+              || parent.name.text !== name && !stable(file, parent.name.text, seen)) valid = false
             break
           }
-          ancestor=parent
-        }
-        if (ancestor.parent && ts.isReturnStatement(ancestor.parent)) {
-          let scope: ts.Node | undefined = ancestor.parent.parent
-          while (scope && !ts.isFunctionLike(scope)) scope = scope.parent
-          if (!scope || !returnedAliasStable(scope)) valid = false
+          if (step === 'exported') {
+            if (!consumers(file, 'default', seen)) valid = false
+            break
+          }
+          if (step === 'returned') {
+            let scope: ts.Node | undefined = ts.isArrowFunction(parent) ? parent : parent.parent
+            while (scope && !ts.isFunctionLike(scope)) scope = scope.parent
+            if (!scope || !returnedAliasStable(scope)) valid = false
+            break
+          }
+          child = parent
         }
       }
-      if (ts.isVariableDeclaration(node) && node.initializer && rootName(unwrap(node.initializer)) === name && (!ts.isIdentifier(node.name) || !stable(file, node.name.text, seen))) valid = false
-      ts.forEachChild(node, child=>visit(child,inNamespace || ts.isModuleDeclaration(node)))
+      ts.forEachChild(node, child => visit(child, inNamespace || ts.isModuleDeclaration(node)))
     }
     visit(file)
     return valid
@@ -278,7 +353,7 @@ export function analyze(input: Snapshot, options: AnalyzeOptions = {}): Graph {
       const results: Value[] = []
       for (const statement of file.statements) {
         if(++work > limits.maxNodes) return unknown(statement,'Export node budget exhausted',results)
-        if (name === 'default' && ts.isExportAssignment(statement) && !statement.isExportEquals) results.push(consumers(file,'default',new Set()) ? evaluate(statement.expression, new Map()) : unknown(statement,'Mutable or escaping default export'))
+        if (name === 'default' && ts.isExportAssignment(statement) && !statement.isExportEquals) results.push(consumers(file,'default',new Set()) ? evaluate(statement.expression, new Map()) : unknown(statement, stabilityWork > limits.maxNodes * 10 ? 'Consumer stability budget exhausted' : 'Mutable or escaping default export'))
         if (ts.isExportDeclaration(statement) && !statement.isTypeOnly) {
           const target = statement.moduleSpecifier && ts.isStringLiteral(statement.moduleSpecifier) ? edge(file, statement.moduleSpecifier.text) : undefined
           if (statement.exportClause && ts.isNamedExports(statement.exportClause)) {
@@ -302,7 +377,7 @@ export function analyze(input: Snapshot, options: AnalyzeOptions = {}): Graph {
     const result = { names: new Set<string>(), complete: true }
     let nodes = 0
     const visit = (node: ts.Node): void => {
-      if (++nodes > limits.maxNodes) { result.complete = false; return }
+      if (++nodes > limits.maxNodes || node.kind === ts.SyntaxKind.Unknown || ts.SyntaxKind[node.kind] === undefined) { result.complete = false; return }
       if (ts.isImportDeclaration(node) && node.importClause?.isTypeOnly) return
       valueBindings(node).forEach(name=>result.names.add(name))
       ts.forEachChild(node, visit)
@@ -387,11 +462,7 @@ export function analyze(input: Snapshot, options: AnalyzeOptions = {}): Graph {
     return options.summaries?.find(item => item.file === file && item.symbol === symbol)
   }
   function summaryValue(summary: LeafSummary, node: ts.Node): Value {
-    const actual = Object.fromEntries(Object.keys(summary.dependencies).map(file => [file, hash(input.sources[file] ?? input.dependencies[file] ?? '')]))
-    if (summary.version !== SUMMARY_VERSION || summary.sourceHash !== hash(input.sources[summary.file] ?? '')
-      || hash(JSON.stringify(Object.entries(actual).sort(([a], [b]) => a.localeCompare(b, 'en')))) !== summary.dependencyHash
-      || hash(JSON.stringify(input.resolutions.filter(edge => edge.from in summary.dependencies))) !== summary.resolutionHash
-      || Object.entries(summary.dependencies).some(([file, digest]) => actual[file] !== digest || Object.hasOwn(input.dependencies,file) && hash(input.dependencies[file])!==digest)) return unknown(node, 'Stale or incomplete SDK leaf summary')
+    if (!validSummary(summary)) return unknown(node, 'Stale or incomplete SDK leaf summary')
     const props = new Map<string, Value>([['name', scalar(node, summary.name)], ['schemaReferences', { kind: 'metadata', node, refs: summary.schemaReferences.map(ref => ({ ...ref, node })) }]])
     for (const kind of ['provides', 'requires', 'optionalRequires'] as const) props.set(kind, { kind: 'object', node, errors: [], props: new Map(Object.entries(summary[kind]).map(([name, range]) => [name, scalar(node, range)])) })
     return { kind: 'object', node, props, errors: [], summary }
@@ -402,6 +473,35 @@ export function analyze(input: Snapshot, options: AnalyzeOptions = {}): Graph {
     const node = fn.node
     if (!node.body || node.modifiers?.some(item => item.kind === ts.SyntaxKind.AsyncKeyword) || node.asteriskToken) return unknown(node, 'Unsupported factory body')
     const env = new Map(fn.env)
+    // Hoisted var declarations exist throughout the entire function, including
+    // unreachable nested statements. Unknown statement kinds forbid outer fallback.
+    const hoisted = new Map<string, Value>()
+    const scanScope = (statement: ts.Statement): boolean => {
+      if (++work > limits.maxNodes) return false
+      if (ts.isFunctionDeclaration(statement) || ts.isClassDeclaration(statement)
+        || ts.isInterfaceDeclaration(statement) || ts.isTypeAliasDeclaration(statement)) return true
+      if (ts.isVariableStatement(statement)) {
+        if (!(statement.declarationList.flags & ts.NodeFlags.BlockScoped))
+          for (const declaration of statement.declarationList.declarations) for (const name of bindingNames(declaration.name))
+            hoisted.set(name, unknown(declaration, 'Hoisted factory var binding'))
+        return true
+      }
+      if (ts.isBlock(statement)) return statement.statements.every(scanScope)
+      if (ts.isIfStatement(statement)) return scanScope(statement.thenStatement) && (!statement.elseStatement || scanScope(statement.elseStatement))
+      if (ts.isForStatement(statement) || ts.isForInStatement(statement) || ts.isForOfStatement(statement)) {
+        if (statement.initializer && ts.isVariableDeclarationList(statement.initializer) && !(statement.initializer.flags & ts.NodeFlags.BlockScoped))
+          for (const declaration of statement.initializer.declarations) for (const name of bindingNames(declaration.name))
+            hoisted.set(name, unknown(declaration, 'Hoisted loop var binding'))
+        return scanScope(statement.statement)
+      }
+      if (ts.isWhileStatement(statement) || ts.isDoStatement(statement) || ts.isLabeledStatement(statement)) return scanScope(statement.statement)
+      if (ts.isSwitchStatement(statement)) return statement.caseBlock.clauses.every(clause => clause.statements.every(scanScope))
+      if (ts.isTryStatement(statement)) return scanScope(statement.tryBlock) && (!statement.catchClause || scanScope(statement.catchClause.block)) && (!statement.finallyBlock || scanScope(statement.finallyBlock))
+      return ts.isReturnStatement(statement) || ts.isExpressionStatement(statement) || ts.isThrowStatement(statement)
+        || ts.isBreakStatement(statement) || ts.isContinueStatement(statement) || ts.isEmptyStatement(statement) || ts.isDebuggerStatement(statement)
+    }
+    if (ts.isBlock(node.body) && !node.body.statements.every(scanScope)) return unknown(node, 'Unmodeled function scope statement')
+    for (const [name, value] of hoisted) env.set(name, value)
     // Parameter bindings exist before initializers run; forward/self references must
     // not accidentally resolve to a global intrinsic.
     for (const parameter of node.parameters) for (const name of bindingNames(parameter.name))
@@ -438,7 +538,7 @@ export function analyze(input: Snapshot, options: AnalyzeOptions = {}): Graph {
             if (!ts.isIdentifier(declaration.name) || !declaration.initializer || !stable(node.getSourceFile(), declaration.name.text)) return { returns: [...returns, unknown(declaration, 'Mutable factory binding')], falls: false }
             current.set(declaration.name.text, lazy(declaration.initializer, current))
           }
-        } else if (ts.isFunctionDeclaration(statement)) { /* unrelated nested returns */ }
+        } else if (ts.isFunctionDeclaration(statement) || ts.isInterfaceDeclaration(statement) || ts.isTypeAliasDeclaration(statement)) { /* declarations have no factory effects */ }
         else if (ts.isIfStatement(statement)) {
           const condition = force(evaluate(statement.expression, current))
           const run = (branch: ts.Statement | undefined) => branch ? block(ts.isBlock(branch) ? branch.statements : [branch], new Map(current)) : { returns: [] as Value[], falls: true }
@@ -590,7 +690,8 @@ export function analyze(input: Snapshot, options: AnalyzeOptions = {}): Graph {
           ...(resolved.kind === 'object' && resolved.summary ? { summary: { version: resolved.summary.version, file: resolved.summary.file, symbol: resolved.summary.symbol, dependencyHash: resolved.summary.dependencyHash } } : {}) })
       }
     } else if (value.kind === 'choice' || value.kind === 'unknown') {
-      diagnostics.push(diagnostic(value.node, 'registration', 'unresolved-registration', value.kind === 'unknown' ? value.reason : 'Registration projections differ'))
+      for (const domain of ['registration', 'schema', 'contract'] as const)
+        diagnostics.push(diagnostic(value.node, domain, 'unresolved-registration', value.kind === 'unknown' ? value.reason : 'Registration projections differ'))
       for (const variant of value.kind === 'choice' ? value.items : value.possible) collectPlugins(variant, true)
     } else diagnostics.push(diagnostic(value.node, 'registration', 'unresolved-registration', 'Expected an explicit plugins array'))
   }

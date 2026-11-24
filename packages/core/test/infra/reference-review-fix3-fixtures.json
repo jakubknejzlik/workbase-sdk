@@ -1,0 +1,251 @@
+[
+  {
+    "name": "named-alias",
+    "files": {
+      "side.ts": "const p:{name:string;version:string;schemaReferences:{entity:string;field:string}[]}={name:'custom',version:'1.0.0',schemaReferences:[]}; function get(){return p}; export const descriptor=p;export {get as fetch};",
+      "runtime.ts": "import {fetch as get,descriptor} from './side'; get().schemaReferences.push({entity:'worker',field:'note'}); export default {plugins:[descriptor]}"
+    }
+  },
+  {
+    "name": "default-alias",
+    "files": {
+      "side.ts": "const p:{name:string;version:string;schemaReferences:{entity:string;field:string}[]}={name:'custom',version:'1.0.0',schemaReferences:[]}; function get(){return p}; export const descriptor=p;const alias=get; export default alias;",
+      "runtime.ts": "import get,{descriptor} from './side'; get().schemaReferences.push({entity:'worker',field:'note'}); export default {plugins:[descriptor]}"
+    }
+  },
+  {
+    "name": "default-parenthesized",
+    "files": {
+      "side.ts": "const p:{name:string;version:string;schemaReferences:{entity:string;field:string}[]}={name:'custom',version:'1.0.0',schemaReferences:[]}; function get(){return p}; export const descriptor=p;export default (get);",
+      "runtime.ts": "import get,{descriptor} from './side'; get().schemaReferences.push({entity:'worker',field:'note'}); export default {plugins:[descriptor]}"
+    }
+  },
+  {
+    "name": "default-assertion",
+    "files": {
+      "side.ts": "const p:{name:string;version:string;schemaReferences:{entity:string;field:string}[]}={name:'custom',version:'1.0.0',schemaReferences:[]}; function get(){return p}; export const descriptor=p;export default get as typeof get;",
+      "runtime.ts": "import get,{descriptor} from './side'; get().schemaReferences.push({entity:'worker',field:'note'}); export default {plugins:[descriptor]}"
+    }
+  },
+  {
+    "name": "default-container",
+    "files": {
+      "side.ts": "const p:{name:string;version:string;schemaReferences:{entity:string;field:string}[]}={name:'custom',version:'1.0.0',schemaReferences:[]}; function get(){return p}; export const descriptor=p;export default {get};",
+      "runtime.ts": "import owner,{descriptor} from './side'; owner.get().schemaReferences.push({entity:'worker',field:'note'}); export default {plugins:[descriptor]}"
+    }
+  },
+  {
+    "name": "dynamic-import-consumer",
+    "files": {
+      "side.ts": "const p:{name:string;version:string;schemaReferences:{entity:string;field:string}[]}={name:'custom',version:'1.0.0',schemaReferences:[]}; function get(){return p}; export const descriptor=p;export {get};",
+      "runtime.ts": "import {descriptor} from './side'; const {get}=await import('./side'); get().schemaReferences.push({entity:'worker',field:'note'}); export default {plugins:[descriptor]}"
+    }
+  },
+  {
+    "name": "assigned-export-alias",
+    "files": {
+      "side.ts": "const p:{name:string;version:string;schemaReferences:{entity:string;field:string}[]}={name:'custom',version:'1.0.0',schemaReferences:[]}; function get(){return p}; export const descriptor=p;let alias:typeof get; alias=get; export {alias};",
+      "runtime.ts": "import {alias as get,descriptor} from './side'; get().schemaReferences.push({entity:'worker',field:'note'}); export default {plugins:[descriptor]}"
+    }
+  },
+  {
+    "name": "class-static-block-alias",
+    "files": {
+      "side.ts": "const p:{name:string;version:string;schemaReferences:{entity:string;field:string}[]}={name:'custom',version:'1.0.0',schemaReferences:[]}; function get(){return p}; export const descriptor=p;export class Owner {static value:typeof p; static {this.value=p}}",
+      "runtime.ts": "import {Owner,descriptor} from './side'; Owner.value.schemaReferences.push({entity:'worker',field:'note'}); export default {plugins:[descriptor]}"
+    }
+  },
+  {
+    "name": "reexport-chain",
+    "files": {
+      "side.ts": "const p:{name:string;version:string;schemaReferences:{entity:string;field:string}[]}={name:'custom',version:'1.0.0',schemaReferences:[]}; function get(){return p}; export const descriptor=p;export {get as fetch};",
+      "barrel.ts": "export {fetch as alias,descriptor} from './side';",
+      "barrel2.ts": "export {alias as default,descriptor} from './barrel';",
+      "runtime.ts": "import get,{descriptor} from './barrel2'; get().schemaReferences.push({entity:'worker',field:'note'}); export default {plugins:[descriptor]}"
+    }
+  },
+  {
+    "name": "destructure-default",
+    "files": {
+      "runtime.ts": "const {flag:undefined=true}={}; function make(){return undefined ? {name:'custom',version:'1.0.0',schemaReferences:[{entity:'worker',field:'note'}]} : {name:'custom',version:'1.0.0',schemaReferences:[]}}; export default {plugins:[make()]}"
+    }
+  },
+  {
+    "name": "catch-default",
+    "files": {
+      "runtime.ts": "function make(){try{throw {}}catch({flag:undefined=true}:any){return undefined ? {name:'custom',version:'1.0.0',schemaReferences:[{entity:'worker',field:'note'}]} : {name:'custom',version:'1.0.0',schemaReferences:[]}}}; export default {plugins:[make()]}"
+    }
+  },
+  {
+    "name": "var-hoisting",
+    "files": {
+      "runtime.ts": "const undefined=true; function make(){return undefined ? {name:'custom',version:'1.0.0',schemaReferences:[]} : {name:'custom',version:'1.0.0',schemaReferences:[{entity:'worker',field:'note'}]}; var undefined: boolean | undefined=true}; export default {plugins:[make()]}"
+    }
+  },
+  {
+    "name": "var-nested-hoisting",
+    "files": {
+      "runtime.ts": "const undefined=true; function make(){return undefined ? {name:'custom',version:'1.0.0',schemaReferences:[]} : {name:'custom',version:'1.0.0',schemaReferences:[{entity:'worker',field:'note'}]}; if(false){var undefined: boolean | undefined=true}}; export default {plugins:[make()]}"
+    }
+  },
+  {
+    "name": "class-shadow",
+    "files": {
+      "runtime.ts": "const flag=false; function make(){class flag{}; return (flag as unknown) ? {name:'custom',version:'1.0.0',schemaReferences:[{entity:'worker',field:'note'}]} : {name:'custom',version:'1.0.0',schemaReferences:[]}}; export default {plugins:[make()]}"
+    }
+  },
+  {
+    "name": "function-shadow",
+    "files": {
+      "runtime.ts": "const undefined=false; function make(){return (undefined as unknown) ? {name:'custom',version:'1.0.0',schemaReferences:[{entity:'worker',field:'note'}]} : {name:'custom',version:'1.0.0',schemaReferences:[]}; function undefined(){}}; export default {plugins:[make()]}"
+    }
+  },
+  {
+    "name": "function-block-shadow",
+    "files": {
+      "runtime.ts": "const undefined=false; function make(){if(true){return (undefined as unknown) ? {name:'custom',version:'1.0.0',schemaReferences:[{entity:'worker',field:'note'}]} : {name:'custom',version:'1.0.0',schemaReferences:[]}; function undefined(){}}}; export default {plugins:[make()]}"
+    }
+  },
+  {
+    "name": "import-equals-consumer",
+    "files": {
+      "side.ts": "const p:{name:string;version:string;schemaReferences:{entity:string;field:string}[]}={name:'custom',version:'1.0.0',schemaReferences:[]}; function get(){return p}; export const descriptor=p;export {get};",
+      "runtime.ts": "import {descriptor} from './side'; import owner = require('./side'); owner.get().schemaReferences.push({entity:'worker',field:'note'}); export default {plugins:[descriptor]}"
+    }
+  },
+  {
+    "name": "own-export-satisfies",
+    "files": {
+      "side.ts": "const p:{name:string;version:string;schemaReferences:{entity:string;field:string}[]}={name:'custom',version:'1.0.0',schemaReferences:[]}; function get(){return p}; export const descriptor=p;export default get satisfies typeof get;",
+      "runtime.ts": "import owner,{descriptor} from './side'; owner().schemaReferences.push({entity:'worker',field:'note'}); export default {plugins:[descriptor]}"
+    }
+  },
+  {
+    "name": "own-export-nonnull",
+    "files": {
+      "side.ts": "const p:{name:string;version:string;schemaReferences:{entity:string;field:string}[]}={name:'custom',version:'1.0.0',schemaReferences:[]}; function get(){return p}; export const descriptor=p;export default get!;",
+      "runtime.ts": "import owner,{descriptor} from './side'; owner().schemaReferences.push({entity:'worker',field:'note'}); export default {plugins:[descriptor]}"
+    }
+  },
+  {
+    "name": "own-export-array",
+    "files": {
+      "side.ts": "const p:{name:string;version:string;schemaReferences:{entity:string;field:string}[]}={name:'custom',version:'1.0.0',schemaReferences:[]}; function get(){return p}; export const descriptor=p;export default [get];",
+      "runtime.ts": "import owner,{descriptor} from './side'; owner[0]().schemaReferences.push({entity:'worker',field:'note'}); export default {plugins:[descriptor]}"
+    }
+  },
+  {
+    "name": "own-export-nested-wrapper",
+    "files": {
+      "side.ts": "const p:{name:string;version:string;schemaReferences:{entity:string;field:string}[]}={name:'custom',version:'1.0.0',schemaReferences:[]}; function get(){return p}; export const descriptor=p;export default ((get as typeof get)!);",
+      "runtime.ts": "import owner,{descriptor} from './side'; owner().schemaReferences.push({entity:'worker',field:'note'}); export default {plugins:[descriptor]}"
+    }
+  },
+  {
+    "name": "own-export-call",
+    "files": {
+      "side.ts": "const p:{name:string;version:string;schemaReferences:{entity:string;field:string}[]}={name:'custom',version:'1.0.0',schemaReferences:[]}; function get(){return p}; export const descriptor=p;export default (()=>get)();",
+      "runtime.ts": "import owner,{descriptor} from './side'; owner().schemaReferences.push({entity:'worker',field:'note'}); export default {plugins:[descriptor]}"
+    }
+  },
+  {
+    "name": "own-consumer-require",
+    "files": {
+      "side.ts": "const p:{name:string;version:string;schemaReferences:{entity:string;field:string}[]}={name:'custom',version:'1.0.0',schemaReferences:[]}; function get(){return p}; export const descriptor=p;export {get};",
+      "runtime.ts": "import {descriptor} from './side'; const {get}=require('./side');get().schemaReferences.push({entity:'worker',field:'note'}); export default {plugins:[descriptor]}"
+    }
+  },
+  {
+    "name": "own-consumer-computed-import",
+    "files": {
+      "side.ts": "const p:{name:string;version:string;schemaReferences:{entity:string;field:string}[]}={name:'custom',version:'1.0.0',schemaReferences:[]}; function get(){return p}; export const descriptor=p;export {get};",
+      "runtime.ts": "import {descriptor} from './side'; const spec='./side'; const {get}=await import(spec);get().schemaReferences.push({entity:'worker',field:'note'}); export default {plugins:[descriptor]}"
+    }
+  },
+  {
+    "name": "own-consumer-import-meta",
+    "files": {
+      "side.ts": "const p:{name:string;version:string;schemaReferences:{entity:string;field:string}[]}={name:'custom',version:'1.0.0',schemaReferences:[]}; function get(){return p}; export const descriptor=p;export {get};",
+      "runtime.ts": "import {descriptor} from './side'; const {get}=await import(new URL('./side.ts',import.meta.url).href);get().schemaReferences.push({entity:'worker',field:'note'}); export default {plugins:[descriptor]}"
+    }
+  },
+  {
+    "name": "own-consumer-require-alias",
+    "files": {
+      "side.ts": "const p:{name:string;version:string;schemaReferences:{entity:string;field:string}[]}={name:'custom',version:'1.0.0',schemaReferences:[]}; function get(){return p}; export const descriptor=p;export {get};",
+      "runtime.ts": "import {descriptor} from './side'; const load=require; const {get}=load('./side');get().schemaReferences.push({entity:'worker',field:'note'}); export default {plugins:[descriptor]}"
+    }
+  },
+  {
+    "name": "own-binding-loop",
+    "files": {
+      "runtime.ts": "const flag=true; function make(){return flag ? {name:'custom',version:'1.0.0',schemaReferences:[]} : {name:'custom',version:'1.0.0',schemaReferences:[{entity:'worker',field:'note'}]}; for(;false;){var flag:boolean|undefined=true}}; export default {plugins:[make()]}"
+    }
+  },
+  {
+    "name": "own-binding-switch",
+    "files": {
+      "runtime.ts": "const flag=true; function make(){return flag ? {name:'custom',version:'1.0.0',schemaReferences:[]} : {name:'custom',version:'1.0.0',schemaReferences:[{entity:'worker',field:'note'}]}; switch(Number('0')){case 1:var flag:boolean|undefined=true}}; export default {plugins:[make()]}"
+    }
+  },
+  {
+    "name": "own-binding-try",
+    "files": {
+      "runtime.ts": "const flag=true; function make(){return flag ? {name:'custom',version:'1.0.0',schemaReferences:[]} : {name:'custom',version:'1.0.0',schemaReferences:[{entity:'worker',field:'note'}]}; try{}finally{if(false){var flag:boolean|undefined=true}}}; export default {plugins:[make()]}"
+    }
+  },
+  {
+    "name": "own-binding-label",
+    "files": {
+      "runtime.ts": "const flag=true; function make(){return flag ? {name:'custom',version:'1.0.0',schemaReferences:[]} : {name:'custom',version:'1.0.0',schemaReferences:[{entity:'worker',field:'note'}]}; unused:{if(false){var flag:boolean|undefined=true}}}; export default {plugins:[make()]}"
+    }
+  },
+  {
+    "name": "own-binding-deep-block",
+    "files": {
+      "runtime.ts": "const flag=true; function make(){return flag ? {name:'custom',version:'1.0.0',schemaReferences:[]} : {name:'custom',version:'1.0.0',schemaReferences:[{entity:'worker',field:'note'}]}; {{{{var flag:boolean|undefined=true}}}}}; export default {plugins:[make()]}"
+    }
+  },
+  {
+    "name": "own-publication-logical",
+    "files": {
+      "side.ts": "const p:{name:string;version:string;schemaReferences:{entity:string;field:string}[]}={name:'custom',version:'1.0.0',schemaReferences:[]}; function get(){return p}; export const descriptor=p;let alias:typeof get|undefined; alias ||= get; export {alias};",
+      "runtime.ts": "import {alias,descriptor} from './side'; alias!().schemaReferences.push({entity:'worker',field:'note'}); export default {plugins:[descriptor]}"
+    }
+  },
+  {
+    "name": "own-publication-nullish",
+    "files": {
+      "side.ts": "const p:{name:string;version:string;schemaReferences:{entity:string;field:string}[]}={name:'custom',version:'1.0.0',schemaReferences:[]}; function get(){return p}; export const descriptor=p;let alias:typeof get|undefined; alias ??= get; export {alias};",
+      "runtime.ts": "import {alias,descriptor} from './side'; alias!().schemaReferences.push({entity:'worker',field:'note'}); export default {plugins:[descriptor]}"
+    }
+  },
+  {
+    "name": "own-publication-object-assign",
+    "files": {
+      "side.ts": "const p:{name:string;version:string;schemaReferences:{entity:string;field:string}[]}={name:'custom',version:'1.0.0',schemaReferences:[]}; function get(){return p}; export const descriptor=p;export const owner=Object.assign({}, {get});",
+      "runtime.ts": "import {owner,descriptor} from './side'; owner.get().schemaReferences.push({entity:'worker',field:'note'}); export default {plugins:[descriptor]}"
+    }
+  },
+  {
+    "name": "own-publication-define-property",
+    "files": {
+      "side.ts": "const p:{name:string;version:string;schemaReferences:{entity:string;field:string}[]}={name:'custom',version:'1.0.0',schemaReferences:[]}; function get(){return p}; export const descriptor=p;export const owner={} as {get:typeof get}; Object.defineProperty(owner,'get',{value:get});",
+      "runtime.ts": "import {owner,descriptor} from './side'; owner.get().schemaReferences.push({entity:'worker',field:'note'}); export default {plugins:[descriptor]}"
+    }
+  },
+  {
+    "name": "own-publication-array-push",
+    "files": {
+      "side.ts": "const p:{name:string;version:string;schemaReferences:{entity:string;field:string}[]}={name:'custom',version:'1.0.0',schemaReferences:[]}; function get(){return p}; export const descriptor=p;export const owners:(typeof get)[]=[]; owners.push(get);",
+      "runtime.ts": "import {owners,descriptor} from './side'; owners[0]().schemaReferences.push({entity:'worker',field:'note'}); export default {plugins:[descriptor]}"
+    }
+  },
+  {
+    "name": "own-publication-spread",
+    "files": {
+      "side.ts": "const p:{name:string;version:string;schemaReferences:{entity:string;field:string}[]}={name:'custom',version:'1.0.0',schemaReferences:[]}; function get(){return p}; export const descriptor=p;export const owner={...{get}};",
+      "runtime.ts": "import {owner,descriptor} from './side'; owner.get().schemaReferences.push({entity:'worker',field:'note'}); export default {plugins:[descriptor]}"
+    }
+  }
+]

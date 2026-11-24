@@ -27,7 +27,7 @@ Rebinding requires reviewing dependency/configuration effects and repeating the 
 there is no automatic name/prefix/helper-based approval or production summary generator.
 Caller spreads/overrides remain subject to ordinary composition rules.
 On-disk fingerprints use a strict `sha256:` tag; decoded digests retain the same exact-byte
-binding. Analyzer `snapshot-3` includes the fix2 semantics; summaries remain `sdk-leaves-2`.
+binding. Analyzer `snapshot-4` includes fail-closed use paths; summaries remain `sdk-leaves-2`.
 
 Factory alternatives are called separately before comparing dependency projections. Lexical
 bindings take precedence over intrinsic `undefined`; both omitted and proven undefined arguments
@@ -41,6 +41,26 @@ nested destructuring, namespace/import-equals bindings, classes/enums/namespaces
 parameters and loop heads. Unsupported bindings or an incomplete scan remain unresolved.
 Namespace re-exports propagate consumer stability; aliases published by unprojected
 class fields, enum members or namespace initialization remain gaps.
+
+Stability uses the closed `publicationStep` vocabulary. Tracked identifiers may pass through
+parentheses, assertions, satisfies and non-null wrappers; property reads; object/array literals,
+property/shorthand assignments and ordered spreads; finite conditional/logical/equality expressions;
+and direct factory callee positions. Every path must terminate at an immutable simple binding
+(with its own checked uses), a checked static import/export owner, or a modeled return owner.
+Assignment RHS/LHS, call arguments, member calls, class/enum publication, unmodeled parent kinds
+and parser kinds opaque to traversal yield gaps. Type-only positions and nonbinding property
+keys are inert. Container aliases propagate stability to their default-export consumers.
+
+Only static import/export declarations have modeled consumer edges. Other uses of a captured
+module specifier, dynamic imports, import-equals, require and import.meta are unsupported; opaque
+loaders conservatively invalidate exported inventories. Consumer scans stop at current source-bound
+SDK summary frontiers; stale summaries cannot create a frontier and demanded leaves are always
+validated. Unrelated dependency-only SDK tooling is not treated as an instance consumer.
+Function-scope var predeclaration recursively covers blocks, if, loops, switch, try/catch/finally
+and labeled statements, stopping at nested functions/classes. Unknown scope statements fail
+closed before any outer lookup; local lexical declarations are prebound in each interpreted block.
+Unusual safe expression statements, assignment aliases and pure-looking argument publication may
+now be gaps. Ordinary immutable literal/imported-factory inventories remain precise.
 
 `removal()` reports every matching definite/possible dependency, relevant coverage gap and
 source/validation failure. Entity-only references block the entity, without inventing field

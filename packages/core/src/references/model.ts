@@ -1,7 +1,7 @@
 /** Internal build-time API. Deliberately absent from package exports/runtime index. */
 import { createHash } from 'node:crypto'
 
-export const ANALYZER_VERSION = 'snapshot-3'
+export const ANALYZER_VERSION = 'snapshot-4'
 export const SUMMARY_VERSION = 'sdk-leaves-2'
 export const hash = (value: string | Uint8Array): string => createHash('sha256').update(value).digest('hex')
 export function freeze<T>(value: T): T {
