@@ -33,14 +33,6 @@ export function validateWidgets(config: InstanceConfig, page: ConsolePage) {
     ids.add(widget.id)
     const query = widgetQuery(widget)
     if (!Object.hasOwn(config.entities, query.entity)) throw new Error(`Unknown console widget entity: ${query.entity}`)
-    if (!Object.keys(config.entities).some(entity => widget.label === `entity_${entity}`)) {
-      for (const language of ['en', 'cs']) {
-        const labels = config.enumLabels?.[language]
-        if (!labels || !Object.hasOwn(labels, widget.label) || !labels[widget.label].trim()) {
-          throw new Error(`Unknown console widget label key: ${page.id}.${widget.id}: ${widget.label} (declare a nonempty config.enumLabels.${language} entry)`)
-        }
-      }
-    }
     querySchema(config, query.entity).parse(query)
     // Dashboard widgets are flat single statements, never include trees or cursors.
     if (query.include || query.cursor) throw new Error(`Console widget must use one query: ${widget.id}`)

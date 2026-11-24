@@ -29,18 +29,18 @@ it.each(widgets)('accepts the declared or entity fallback label for $kind/$id', 
   expect(() => new KernelRegistry(config(labels, [widget]))).not.toThrow()
 })
 
-it.each(['en', 'cs'] as const)('rejects a caption missing from %s with the key and widget location', language => {
+it.each(['en', 'cs'] as const)('accepts a caption missing from %s', language => {
   const incomplete = structuredClone(labels)
   delete (incomplete[language] as Record<string, string>).dashboard_count
-  expect(() => new KernelRegistry(config(incomplete))).toThrow(`Unknown console widget label key: labels.count: dashboard_count (declare a nonempty config.enumLabels.${language} entry)`)
+  expect(() => new KernelRegistry(config(incomplete))).not.toThrow()
 })
 
-it.each(['missing_key', 'Free form caption', 'entity_missing'])('rejects undeclared label %s', label => {
-  expect(() => new KernelRegistry(config(labels, [{ ...widgets[0], label }]))).toThrow(`Unknown console widget label key: labels.count: ${label}`)
+it.each(['missing_key', 'Free form caption', 'entity_missing'])('accepts literal label %s', label => {
+  expect(() => new KernelRegistry(config(labels, [{ ...widgets[0], label }]))).not.toThrow()
 })
 
-it.each(['', '   '])('rejects blank declared captions (%j)', caption => {
-  expect(() => new KernelRegistry(config({ ...labels, cs: { ...labels.cs, dashboard_count: caption } }))).toThrow('config.enumLabels.cs')
+it.each(['', '   '])('accepts blank declared captions (%j)', caption => {
+  expect(() => new KernelRegistry(config({ ...labels, cs: { ...labels.cs, dashboard_count: caption } }))).not.toThrow()
 })
 
 it('keeps entity fallback valid without an instance dictionary', () => {

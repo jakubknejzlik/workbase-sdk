@@ -39,7 +39,7 @@ function rebindConfig(mode:string,selection:string){
  const sub=Q.select().from('notes','n').field(Fn.count('n.id'),field).orderBy(field,'ASC');
  v.entities.notes.fields.value.computed=Fn.if(Cond.exists(sub),field,Q.value(0)).serialize();
  v.plugins.push(consoleUI(),{name:'rebind-count',version:'1',requires:{console:'^1'},contributes:{console:{pages:[{
-  id:'r5.count',path:'/r5-count',label:'Count',widgets:[{id:'count',kind:'stat',label:'entity_notes',aggregate:{fn:'count'},
+  id:'r5.count',path:'/r5-count',label:'Count',widgets:[{id:'count',kind:'stat',label:'Count',aggregate:{fn:'count'},
    query:{entity:'notes',...(selection==='selected'?{where:{value:{eq:mode==='stored'?3:4}}}:{})}}],
  }]}}});
  return defineInstance(v);
@@ -61,7 +61,7 @@ it.each(['stored','computed'].flatMap(mode=>['selected','unselected'].map(select
  expect(response.status).toBe(200);expect((await response.json() as any).data).toEqual(expected);
  const countResponse=await request(app,'/o/org-a/console-pages/r5.count');
  expect(countResponse.status).toBe(200);
- expect((await countResponse.json() as any).widgets).toEqual([{id:'count',kind:'stat',label:'entity_notes',value:2}]);
+ expect((await countResponse.json() as any).widgets).toEqual([{id:'count',kind:'stat',label:'Count',value:2}]);
 });
 
 it.each(['stored','computed'])('R5 P2 preserves a %s field name used as a table alias',async mode=>{

@@ -604,9 +604,9 @@ it.each([false, true])('readable sensitive presentation literals fail closed for
       contributes: { console: {
         entities: { specimens: { ...display, fields: { count: { signedBy: { field: 'state', negativeValue: canary } } } } },
         pages: [{ id: 'sensitive_widgets', path: '/sensitive-widgets', label: 'Widgets', widgets: [
-          ...dependencies.map((dependency, index) => ({ id: `private_${index}`, label: 'entity_specimens', kind: 'table' as const,
+          ...dependencies.map((dependency, index) => ({ id: `private_${index}`, label: 'Private widget', kind: 'table' as const,
             columns: ['name'], query: { entity: 'specimens', select: ['id', 'name'], limit: 1, ...dependency } })),
-          { id: 'public', label: 'entity_specimens', kind: 'table' as const, columns: ['name'],
+          { id: 'public', label: 'Public widget', kind: 'table' as const, columns: ['name'],
             query: { entity: 'specimens', select: ['id', 'name'], limit: 1, search: { text: 'public', fields: ['name'] }, orderBy: [{ field: 'name', dir: 'asc' as const }] } },
         ] }],
       } },
@@ -699,7 +699,7 @@ it.each(['entity', 'id', 'display', 'dependency', 'sensitive_hop', 'sensitive_di
     plugins: [...plugins, consoleUI(), { name: 'target-display', version: '1', requires: { console: '^1' },
       fieldMask(entity) { return entity === 'vaults' ? denial === 'id' ? ['name'] : denial === 'display' ? ['id'] : denial === 'sensitive_dependency' ? ['id', 'name', 'private_value'] : ['id', 'name'] : ['id', 'name', 'parent_id'] },
       contributes: { console: { pages: [{ id: 'dependencies', path: '/dependencies', label: 'Dependencies',
-        widgets: queries.map((dependencies, index) => ({ id: `dependency_${index}`, label: 'entity_specimens', kind: 'table' as const, columns: ['name'],
+        widgets: queries.map((dependencies, index) => ({ id: `dependency_${index}`, label: 'Dependent widget', kind: 'table' as const, columns: ['name'],
           query: { entity: 'specimens', select: ['id', 'name'], limit: 1, ...dependencies } })) }] } },
     }],
     entities: {

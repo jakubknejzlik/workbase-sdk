@@ -27,6 +27,15 @@ export function WidgetCards({ orgId, page, result, pending, error, model, caps }
   orgId: string; page: ConsolePage; result?: ConsolePageResult; pending: boolean; error: Error | null; model?: Model; caps?: Capabilities
 }) {
   const { t, i18n } = useTranslation()
+  const caption = (label: string) => {
+    const dictionaries = model?.enumLabels
+    if (['en', 'cs'].some(language => Object.hasOwn(dictionaries?.[language] ?? {}, label))) {
+      const language = i18n.language.split('-')[0]
+      const other = language === 'cs' ? 'en' : 'cs'
+      return dictionaries?.[language]?.[label]?.trim() || dictionaries?.[other]?.[label]?.trim() || label
+    }
+    return label.startsWith('entity_') ? t(label) : label
+  }
   const value = (widget: ConsoleWidgetResult, row: Record<string, any>, field: string) => {
     if (field === 'id') return <span title={String(row.id)}>{shortRecordId(row.id)}</span>
     const configured = page.widgets?.find(item => item.id === widget.id)
@@ -53,15 +62,15 @@ export function WidgetCards({ orgId, page, result, pending, error, model, caps }
     const entity = page.widgets?.find(item => item.id === widget.id)?.query.entity
     const fieldLabel = (field: string) => t(`field_${field}`, { context: entity })
     return <div className="generated-related-records">
-      <table aria-label={t(widget.label)} className="generated-relation-table"><thead><tr>{widget.columns.map(field => <th key={field} scope="col">{fieldLabel(field)}</th>)}</tr></thead>
+      <table aria-label={caption(widget.label)} className="generated-relation-table"><thead><tr>{widget.columns.map(field => <th key={field} scope="col">{fieldLabel(field)}</th>)}</tr></thead>
         <tbody>{widget.data.map((row, index) => <tr key={String(row.id ?? index)}>{widget.columns.map(field => <td key={field}>{value(widget, row, field)}</td>)}</tr>)}</tbody></table>
-      <ul aria-label={t(widget.label)} className="generated-relation-cards">{widget.data.map((row, index) => <li key={String(row.id ?? index)}><dl>{widget.columns.map(field => <div key={field}><dt>{fieldLabel(field)}</dt><dd>{value(widget, row, field)}</dd></div>)}</dl></li>)}</ul>
+      <ul aria-label={caption(widget.label)} className="generated-relation-cards">{widget.data.map((row, index) => <li key={String(row.id ?? index)}><dl>{widget.columns.map(field => <div key={field}><dt>{fieldLabel(field)}</dt><dd>{value(widget, row, field)}</dd></div>)}</dl></li>)}</ul>
     </div>
   }
   // Successful responses contain only server-authorized widgets; denied cards never mount.
   const widgets = result ? result.widgets : page.widgets ?? []
   if (!widgets.length) return <p className="text-sm text-muted-foreground">{t('dashboardEmpty')}</p>
   return <DetailCards sections={result ? result.sections : page.sections} cards={widgets.map(widget => ({ key: widget.id, content: <Card className="min-w-0" data-widget={widget.id}>
-    <CardHeader><CardTitle><h2>{t(widget.label)}</h2></CardTitle></CardHeader><CardContent className="space-y-3">{error ? <p role="alert">{t('requestFailed')}</p> : pending ? <Skeleton role="status" aria-label={t('loading')} className="h-16 w-full" /> : content(widget as ConsoleWidgetResult)}</CardContent>
+    <CardHeader><CardTitle><h2>{caption(widget.label)}</h2></CardTitle></CardHeader><CardContent className="space-y-3">{error ? <p role="alert">{t('requestFailed')}</p> : pending ? <Skeleton role="status" aria-label={t('loading')} className="h-16 w-full" /> : content(widget as ConsoleWidgetResult)}</CardContent>
   </Card> }))} />
 }
