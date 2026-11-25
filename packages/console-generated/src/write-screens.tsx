@@ -129,6 +129,14 @@ function RecordActionMenu(input: Context & { row: Record<string, any>; disabled?
     return <ResourceFormDialog entity={command.permission.entity} outcome={command.name.endsWith('/create') ? 'created' : command.name.endsWith('/delete') ? 'deleted' : undefined} schema={commandFormSchema(command.inputSchema)} {...common} title={action.label} description={t('commandDescription', { context: command.name.replace('/', '_') })}>{controls => <CommandMutation {...props} schema={command.inputSchema} name={command.name} values={{ [commandRowField(command, entity)!]: row.id }} controls={controls} />}</ResourceFormDialog>
   }}</RowActions></>
 }
+/** Controlled entry point for an already projected collection command. Reuses its form and mutation lifecycle. */
+export function GeneratedCollectionCommandDialog({ name, ...props }: Context & { name: string; open: boolean; onOpenChange: (open: boolean) => void; onCloseAutoFocus?: (event: Event) => void }) {
+  const { t, i18n } = useEntityTranslation(props.entity)
+  const actions = listCommandActions(props.model, props.entity, props.caps)
+  const command = [actions.create, ...actions.secondary].find(command => command?.name === name)
+  if (!command || !visibleEntities(props.model, props.caps).includes(props.entity)) return null
+  return <ResourceFormDialog entity={command.permission.entity} outcome={command.name.endsWith('/create') ? 'created' : command.name.endsWith('/delete') ? 'deleted' : undefined} schema={commandFormSchema(command.inputSchema)} open={props.open} onOpenChange={props.onOpenChange} onCloseAutoFocus={props.onCloseAutoFocus} title={commandLabel(command, i18n.language, t)} description={t('commandDescription', { context: command.name.replace('/', '_') })} cancelLabel={t('cancel')}>{controls => <CommandMutation {...props} schema={command.inputSchema} name={command.name} controls={controls} />}</ResourceFormDialog>
+}
 export function HeaderCommands(props: Context) {
   const { t, i18n } = useEntityTranslation(props.entity)
   const commands = listCommandActions(props.model, props.entity, props.caps).secondary
@@ -143,7 +151,7 @@ export function HeaderCommands(props: Context) {
         {commands.map(command => <DropdownMenuItem key={command.name} onSelect={() => { requested.current = command.name }}>{commandLabel(command, i18n.language, t)}</DropdownMenuItem>)}
       </DropdownMenuContent>
     </DropdownMenu>}
-    {command && <ResourceFormDialog entity={command.permission.entity} outcome={command.name.endsWith('/create') ? 'created' : command.name.endsWith('/delete') ? 'deleted' : undefined} schema={commandFormSchema(command.inputSchema)} key={command.name} open onOpenChange={open => { if (!open) setSelected(undefined) }} onCloseAutoFocus={event => { event.preventDefault(); trigger.current?.focus() }} title={commandLabel(command, i18n.language, t)} description={t('commandDescription', { context: command.name.replace('/', '_') })} cancelLabel={t('cancel')}>{controls => <CommandMutation {...props} schema={command.inputSchema} name={command.name} controls={controls} />}</ResourceFormDialog>}
+    {command && <GeneratedCollectionCommandDialog {...props} name={command.name} key={command.name} open onOpenChange={open => { if (!open) setSelected(undefined) }} onCloseAutoFocus={event => { event.preventDefault(); trigger.current?.focus() }} />}
   </>
 }
 function useRefresh() {

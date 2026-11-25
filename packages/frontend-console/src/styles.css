@@ -269,3 +269,33 @@ body:has([data-slot="list-page"]) [data-list-row-menu] [role="menuitem"] { min-h
 .c5-audit-screen summary { cursor: pointer; }
 .c5-audit-screen .c5-audit-details { overflow-wrap: anywhere; }
 /* End #317 s5 audit. */
+
+/* E3 dashboard actions */
+.dashboard-work { container-type: inline-size; display: grid; gap: 16px; min-width: 0; }
+.dashboard-priority { display: grid; gap: 16px; min-width: 0; align-items: start; }
+.dashboard-actions { min-width: 0; }
+.dashboard-action-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr)); gap: 14px; min-width: 0; }
+.dashboard-action-grid > div { display: flex; min-width: 0; }
+.dashboard-action-grid .dashboard-action { display: flex; flex-direction: row; align-items: start; justify-content: start; gap: 14px; width: 100%; height: auto; min-height: 150px; padding: 18px; border-radius: 18px; white-space: normal; text-align: left; font-weight: 400; }
+.dashboard-action-icon { display: flex; align-items: center; justify-content: center; flex: 0 0 50px; width: 50px; height: 50px; border-radius: 14px; background: color-mix(in srgb, currentColor 10%, transparent); }
+.dashboard-action-icon > svg { width: 24px; height: 24px; flex-shrink: 0; }
+.dashboard-action-copy { display: grid; min-width: 0; gap: 8px; overflow-wrap: anywhere; }
+.dashboard-action-title { font-size: 24px; line-height: 1.12; }
+.dashboard-action-description { font-size: 13px; line-height: 1.45; opacity: .8; }
+@container (min-width: 760px) {
+  .dashboard-priority { grid-template-columns: minmax(0, 1.25fr) minmax(0, 1.9fr); }
+}
+@container (min-width: 1100px) {
+  .dashboard-priority > .dashboard-cards > [data-dashboard-columns="2"] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@container (max-width: 1099px) {
+  .dashboard-priority > .dashboard-cards > [data-dashboard-row] { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 680px) {
+  .dashboard-action-grid { grid-template-columns: minmax(0, 1fr); }
+  .dashboard-action-grid .dashboard-action { min-height: 128px; padding: 16px; }
+  .dashboard-action-icon { flex-basis: 46px; width: 46px; height: 46px; }
+  .dashboard-action-title { font-size: 21px; }
+  .dashboard-action-description { font-size: 12px; }
+}
+/* end E3 */

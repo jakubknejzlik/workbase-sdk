@@ -8,6 +8,7 @@ import { TablePresentationContext, useTablePresentation } from '../../ui/src/dat
 import { formatFieldValue, recordLabel, visibleEntities, type Model, type Capabilities } from '@workbasehq/console-generated/read'
 import { signedValue } from '@workbasehq/console-generated/screens'
 import { DashboardCards } from './dashboard-layout'
+import { DashboardActions } from './dashboard-actions'
 import { shortRecordId } from '../../console-generated/src/labels'
 import { listColumnAlignment } from '../../console-generated/src/list-presentation'
 import type { ConsoleModelContract, ConsolePage, ConsolePageResult, ConsoleWidgetResult } from '../../plugins/console/src/contract'
@@ -42,12 +43,12 @@ export function WidgetPage({ orgId, page }: { orgId: string; page: ConsolePage }
   const caps = runtime.error ? undefined : runtime.data?.capabilities
   const result = useQuery({ queryKey: ['console-page', orgId, page.id, caps],
     queryFn: () => api<ConsolePageResult>(`/o/${encodeURIComponent(orgId)}/console-pages/${encodeURIComponent(page.id)}`), enabled: !!model && !!caps, refetchOnWindowFocus: true })
-  return <Page title={t(page.label)}><div className="space-y-6"><WidgetCards orgId={orgId} page={page} result={result.data} pending={result.isPending} error={result.error ?? runtime.error} enumLabels={model?.enumLabels} model={model} caps={caps} /></div></Page>
+  return <DashboardActions orgId={orgId} page={page} runtime={runtime}>{({ header, actions }) => <Page title={t(page.label)} actions={header}><div className="space-y-6"><WidgetCards orgId={orgId} page={page} actions={actions} result={result.data} pending={result.isPending} error={result.error ?? runtime.error} enumLabels={model?.enumLabels} model={model} caps={caps} /></div></Page>}</DashboardActions>
 }
 
 /** All values, including reference labels, arrive in the single page response. */
-export function WidgetCards({ orgId, page, result, pending, error, model, caps, enumLabels }: {
-  orgId: string; page: ConsolePage; result?: ConsolePageResult; pending: boolean; error: Error | null; model?: Model; caps?: Capabilities; enumLabels?: ConsoleModelContract['model']['enumLabels']
+export function WidgetCards({ orgId, page, actions, result, pending, error, model, caps, enumLabels }: {
+  orgId: string; page: ConsolePage; actions?: ReactNode; result?: ConsolePageResult; pending: boolean; error: Error | null; model?: Model; caps?: Capabilities; enumLabels?: ConsoleModelContract['model']['enumLabels']
 }) {
   const { t, i18n } = useTranslation()
   const caption = (label: string) => {
@@ -95,8 +96,14 @@ export function WidgetCards({ orgId, page, result, pending, error, model, caps, 
   }
   // Successful responses contain only server-authorized widgets; denied cards never mount.
   const widgets = result ? result.widgets : page.widgets ?? []
-  if (!widgets.length) return <p className="text-sm text-muted-foreground">{t('dashboardEmpty')}</p>
-  return <DashboardCards sections={result ? result.sections : page.sections} cards={widgets.map(widget => ({ key: widget.id, content: <Card className="dashboard-card min-w-0" data-widget={widget.id}>
+  if (!widgets.length) return <>{actions}<p className="text-sm text-muted-foreground">{t('dashboardEmpty')}</p></>
+  const sections = result ? result.sections : page.sections
+  const cards = widgets.map(widget => ({ key: widget.id, content: <Card className="dashboard-card min-w-0" data-widget={widget.id}>
     <CardHeader><CardTitle><h2>{caption(widget.label)}</h2></CardTitle></CardHeader><CardContent className="space-y-3">{error ? <p role="alert">{t('requestFailed')}</p> : pending ? <Skeleton role="status" aria-label={t('loading')} className="h-16 w-full" /> : content(widget as ConsoleWidgetResult)}</CardContent>
-  </Card> }))} />
+  </Card> }))
+  if (!actions) return <DashboardCards sections={sections} cards={cards} />
+  // Share the first configured, nonempty row with actions. Later rows retain
+  // their exact section/legacy order, without inferring urgency from names.
+  const first = sections?.find(section => section.row.some(id => cards.some(card => card.key === id)))?.row ?? [cards[0].key]
+  return <div className="dashboard-work"><div className="dashboard-priority">{actions}<DashboardCards sections={[{ row: first }]} cards={cards.filter(card => first.includes(card.key))} /></div><DashboardCards sections={sections} cards={cards.filter(card => !first.includes(card.key))} /></div>
 }
