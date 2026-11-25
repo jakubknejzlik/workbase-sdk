@@ -188,3 +188,22 @@ body:has([data-slot="list-page"]) [data-list-row-menu] [role="menuitem"] { min-h
 @media (max-width: 1023px) {
   .list-page-footer { padding: 14px; flex-direction: column; align-items: stretch; }
 }
+
+/* #315 A3c compact filter captions: size draft columns by available text space. */
+[data-list-slot="panel"] > form[role="group"] > .grid:first-child {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, max(9rem, calc((100% - 3rem) / 4))), 1fr));
+}
+[data-list-slot="panel"] > form[role="group"] :is(legend, label, p) {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+/* Field dictionaries also caption the corresponding sortable columns. */
+[data-slot="list-page"] th :is(button, button > span) { min-width: 0; max-width: 100%; }
+[data-slot="list-page"] th [id] {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* End #315 A3c compact filter captions. */

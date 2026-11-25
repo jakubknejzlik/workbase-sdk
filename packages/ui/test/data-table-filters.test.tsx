@@ -31,12 +31,14 @@ it('C7b multi-select explains cap and still allows deselection', () => {
 it('calendar range and tri-state Select preserve staged host values without native widgets', async () => {
   const user = userEvent.setup(); const change = vi.fn()
   const { rerender } = render(<RangeFilter value={{}} onChange={change} type="date" labels={{ single: 'Single', from: 'From', to: 'To' }} />)
-  expect(screen.getByLabelText('From').getAttribute('type')).toBe('text')
-  await user.click(screen.getByRole('button', { name: 'Select date range' }))
+  expect(screen.getByLabelText('Single').getAttribute('type')).toBe('text')
+  expect(screen.queryByLabelText('From')).toBeNull()
+  await user.click(screen.getByRole('button', { name: 'Select date range: Single' }))
   expect(screen.getByRole('grid')).toBeTruthy()
   await user.keyboard('{Escape}')
-  expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Select date range' }))
+  expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Select date range: Single' }))
   rerender(<RangeFilter value={{}} onChange={vi.fn()} type="number" labels={{ single: 'Single', from: 'From', to: 'To' }} />)
+  await user.selectOptions(screen.getByRole('combobox', { name: 'Operator' }), 'from')
   expect(screen.getByLabelText('From').getAttribute('type')).toBe('number')
   rerender(<ToggleFilter value={undefined} onChange={change} labels={{ label: 'Value', all: 'All', yes: 'Yes', no: 'No' }} />)
   expect(screen.getByRole('combobox').tagName).toBe('BUTTON')
@@ -46,9 +48,9 @@ it('calendar range and tri-state Select preserve staged host values without nati
 it('lower-bound calendar selects one date and emits no equality or upper bound', async () => {
   const user = userEvent.setup(), change = vi.fn()
   render(<RangeFilter lowerBoundOnly value={{ from: '2026-11-19', to: '2026-11-25', value: '2026-11-01' }} onChange={change} type="date" labels={{ single: 'Single', from: 'From', to: 'To' }} />)
-  expect((screen.getByLabelText('Single') as HTMLInputElement).value).toBe('')
-  expect((screen.getByLabelText('To') as HTMLInputElement).value).toBe('')
-  await user.click(screen.getByRole('button', { name: 'Select date range' }))
+  expect(screen.queryByLabelText('Single')).toBeNull()
+  expect(screen.queryByLabelText('To')).toBeNull()
+  await user.click(screen.getByRole('button', { name: 'Select date range: From' }))
   await user.click(screen.getByRole('button', { name: /November 20th, 2026/ }))
   expect(change).toHaveBeenLastCalledWith({ from: '2026-11-20' })
   expect(screen.queryByRole('grid')).toBeNull()
@@ -70,4 +72,28 @@ it('D17 truncated cells retain their full text in a title', () => {
   const title = 'A long record name '.repeat(40)
   render(<DataTable rows={[{ id: '1', title }]} columns={[{ id: 'title', label: 'Title', cell: row => row.title }]} state={{ search: '', sort: null, limit: 30 }} onStateChange={vi.fn()} page={0} onPage={vi.fn()} isFetching={false} label="Records" labels={{ search: 'Search', clearSearch: 'Clear search', noResults: 'No results', previous: 'Previous', next: 'Next', pageSize: 'Rows per page', sort: String, range: (start, end) => `${start}–${end}` }} onRowClick={vi.fn()} />)
   expect(screen.getByRole('cell').firstElementChild?.getAttribute('title')).toBe(title)
+})
+
+it.each(['number', 'date'] as const)('compact %s modes show only matching inputs and discard hidden values', async type => {
+  const user = userEvent.setup(), change = vi.fn()
+  render(<RangeFilter value={{}} onChange={change} type={type} labels={{ single: 'Single', from: 'From', to: 'To', operator: 'Operator', equals: 'Equals', between: 'Between' }} />)
+  for (const [operator, labels] of [['equals', ['Single']], ['from', ['From']], ['to', ['To']], ['between', ['From', 'To']]] as const) {
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Operator' }), operator)
+    expect(change).toHaveBeenLastCalledWith({})
+    for (const label of ['Single', 'From', 'To']) expect(!!screen.queryByLabelText(label)).toBe(labels.includes(label as never))
+    expect(screen.queryByRole('grid')).toBeNull()
+    fireEvent.change(screen.getByLabelText(labels[0]), { target: { value: type === 'date' ? '2026-11-20' : '12' } })
+    expect(change).toHaveBeenLastCalledWith(operator === 'equals' ? { value: type === 'date' ? '2026-11-20' : '12' } : operator === 'to' ? { to: type === 'date' ? '2026-11-20' : '12' } : operator === 'between' ? { from: type === 'date' ? '2026-11-20' : '12', to: undefined } : { from: type === 'date' ? '2026-11-20' : '12' })
+  }
+})
+it.each([
+  { operators: ['eq'], expected: ['equals'] },
+  { operators: ['gte'], expected: ['from'] },
+  { operators: ['lte'], expected: ['to'] },
+  { operators: ['gte', 'lte'], expected: ['from', 'to', 'between'] },
+  { operators: ['gte', 'lt'], localDay: true, expected: ['equals', 'from', 'to', 'between'] },
+  { operators: ['lt'], localDay: true, expected: ['to'] },
+])('exposes exactly descriptor-compatible operators: %j', ({ operators, localDay, expected }) => {
+  render(<RangeFilter value={{}} onChange={vi.fn()} type={localDay ? 'date' : 'number'} localDay={localDay} operators={operators} labels={{ single: 'Single', from: 'From', to: 'To' }} />)
+  expect(screen.getAllByRole('option').map(option => (option as HTMLOptionElement).value)).toEqual(expected)
 })
