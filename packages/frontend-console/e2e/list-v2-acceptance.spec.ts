@@ -232,6 +232,7 @@ test('G1: desktop configured access column fits beside separate Actions without 
   const display = page.getByRole('dialog', { name: en.listDisplayHeading })
   for (const name of ['Amount', 'Due on', 'Approved', 'Description']) await display.getByRole('checkbox', { name, exact: true }).click()
   await page.keyboard.press('Escape')
+  await expect(display).toBeHidden()
   const headers = list(page).getByRole('columnheader')
   await expect(headers).toHaveCount(6)
   for (const header of await headers.all()) await insideViewport(header)
@@ -598,6 +599,9 @@ for (const width of [1110, 1231, 1233]) for (const language of ['en', 'cs'] as c
     await checkPaging('overflow fallback after focusing Next', [next], true)
     await captureSDK(page, 'pagination-focused-Next', language, testInfo)
     await page.setViewportSize({ width, height: 1000 })
+    // The shell and responsive paging change together after the 320px probe.
+    // Observe their settled layout before starting a fresh keyboard traversal.
+    await layoutDiagnostics(paging, true)
   }
   // Exercise the visible buttons in DOM order, excluding collapsed numbers.
   const visible = paging.getByRole('button')
@@ -605,6 +609,7 @@ for (const width of [1110, 1231, 1233]) for (const language of ['en', 'cs'] as c
   // compact and full compositions must keep every shown control reachable.
   expect([3, number === 900 ? 9 : 7]).toContain(await visible.count())
   await previous.focus()
+  await expect(previous).toBeFocused()
   for (let index = 1; index < await visible.count(); index++) {
     await page.keyboard.press('Tab')
     await expect(visible.nth(index)).toBeFocused()
@@ -1461,7 +1466,7 @@ for (const language of ['en', 'cs'] as const) for (const width of [1440, 1280, 9
     expect(bytes[24]).toBe(8); expect([2, 6]).toContain(bytes[25])
     const pixels = inflateSync(Buffer.concat(chunks)), stride = 1 + dimensions.width * (bytes[25] === 6 ? 4 : 3)
     expect(pixels.length).toBe(stride * dimensions.height)
-    for (let row = 0; row < dimensions.height; row++) expect(pixels[row * stride]).toBeLessThanOrEqual(4)
+    expect(Array.from({ length: dimensions.height }, (_, row) => pixels[row * stride]).every(filter => filter <= 4)).toBe(true)
     expect(dimensions.width).toBe(width)
     expect(build.sourceCommit).toBe(sourceSHA)
     record('A1', `${language}-${width}-${state}`, { path, relativePath: `${sourceSHA}/${name}`, sha256: createHash('sha256').update(bytes).digest('hex'), bytes: bytes.length, dimensions, locale: language, state, sourceSHA, builtAssetSHA: build.sha, metrics, status: 'captured; independent visual review pending' })
@@ -1547,7 +1552,7 @@ async function a2Capture(page: Page, language: 'en' | 'cs', state: string, fullP
   expect(bytes[24]).toBe(8); expect([2, 6]).toContain(bytes[25])
   const pixels = inflateSync(Buffer.concat(chunks)), stride = 1 + dimensions.width * (bytes[25] === 6 ? 4 : 3)
   expect(pixels.length).toBe(stride * dimensions.height)
-  for (let row = 0; row < dimensions.height; row++) expect(pixels[row * stride]).toBeLessThanOrEqual(4)
+  expect(Array.from({ length: dimensions.height }, (_, row) => pixels[row * stride]).every(filter => filter <= 4)).toBe(true)
   if (!closeup) expect(dimensions.width).toBe(width)
   const build = JSON.parse(readFileSync('packages/frontend-console/dist/build-meta.json', 'utf8'))
   expect(build.sourceCommit).toBe(sourceSHA)
