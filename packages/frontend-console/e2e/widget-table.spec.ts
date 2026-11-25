@@ -153,10 +153,11 @@ for (const language of ['en', 'cs']) for (const width of [1440, 1280, 900, 390])
           expect(await region.locator('button button, a button, button a, a a').count()).toBe(0)
           const geometry = await region.locator('.dashboard-action').evaluateAll(nodes => nodes.map(node => {
             const rect = node.getBoundingClientRect(), icon = node.querySelector('svg')!.getBoundingClientRect(), badge = node.querySelector('.dashboard-action-icon')!.getBoundingClientRect(), title = node.querySelector('.dashboard-action-copy') as HTMLElement
-            return { width: rect.width, fits: node.scrollWidth <= node.clientWidth && title.scrollWidth <= title.clientWidth, iconWidth: icon.width, iconHeight: icon.height,
+            return { x: rect.x, width: rect.width, fits: node.scrollWidth <= node.clientWidth && title.scrollWidth <= title.clientWidth, iconWidth: icon.width, iconHeight: icon.height,
               centered: Math.abs(icon.x + icon.width / 2 - badge.x - badge.width / 2) < 1 && Math.abs(icon.y + icon.height / 2 - badge.y - badge.height / 2) < 1 }
           }))
           expect(geometry.every(card => card.fits && card.centered && card.iconWidth === 24 && card.iconHeight === 24)).toBe(true)
+          expect(new Set(geometry.map(card => Math.round(card.x))).size).toBe(count > 1 && width > 680 ? 2 : 1)
           const priority = await page.locator('.dashboard-priority').evaluate(node => {
             const action = node.querySelector('.dashboard-actions')!.getBoundingClientRect(), widget = node.querySelector('[data-widget]')!.getBoundingClientRect()
             return { action: { x: action.x, y: action.y, bottom: action.bottom }, widget: { x: widget.x, y: widget.y } }
