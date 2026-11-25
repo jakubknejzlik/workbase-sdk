@@ -50,7 +50,7 @@ function ActionScope({ actor, orgId, pageId, data, blocked, children }: {
     const organization = client.getQueryState<Me>(['organization', orgId])
     const current = authority?.data?.console.pages.find(page => page.id === pageId)?.actions?.find(action => action.id === selection.id && JSON.stringify(action.target) === JSON.stringify(selection.target))
     if (authority?.status !== 'success' || authority.fetchStatus !== 'idle' || organization?.status !== 'success' || organization.fetchStatus !== 'idle'
-      || authority.data.model.instance !== data.model.instance || organization.data.user?.id !== actor || !current) throw { code: 'action_unavailable' }
+      || authority.data?.model.instance !== data.model.instance || organization.data?.user?.id !== actor || !current) throw { code: 'action_unavailable' }
     const [path, method, body, idempotencyKey] = args
     const result = await api(path, { method, body, orgId, idempotencyKey })
     await client.invalidateQueries({ queryKey: ['console-page', orgId] })

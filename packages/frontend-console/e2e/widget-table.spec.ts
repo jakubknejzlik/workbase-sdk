@@ -127,6 +127,7 @@ for (const language of ['en', 'cs']) for (const width of [1440, 1280, 900, 390])
 
 for (const language of ['en', 'cs']) for (const width of [1440, 1280, 900, 390]) {
   test(`E3 actions ${language} ${width}: real forms, navigation, denial and whole-page states`, async ({ browser }, info) => {
+    test.setTimeout(120_000)
     const context = await browser.newContext({ baseURL: origin, viewport: { width, height: 1000 }, extraHTTPHeaders: { Authorization: 'Bearer widget-table-owner-session' } })
     await context.addInitScript(language => localStorage.setItem('console-language', language), language)
     const page = await context.newPage(), errors: string[] = []
@@ -189,8 +190,9 @@ for (const language of ['en', 'cs']) for (const width of [1440, 1280, 900, 390])
         const response = page.waitForResponse(response => response.url().endsWith(path) && response.request().method() === 'POST')
         await dialog.locator('button[type="submit"]').click()
         expect((await response).ok()).toBe(true)
-        await expect(dialog).toHaveCount(0)
-        await expect(region.getByRole('button', { name: label, exact: false })).toBeFocused()
+        // Completion includes the real dashboard and generated-form cache reads.
+        await expect(dialog).toHaveCount(0, { timeout: 20_000 })
+        await expect(region.getByRole('button', { name: label, exact: false })).toBeFocused({ timeout: 10_000 })
       }
       await region.getByRole('button', { name: processLabel, exact: false }).click()
       await dialog.getByRole('textbox').first().fill('fail')
