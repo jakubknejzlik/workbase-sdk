@@ -684,5 +684,16 @@
   "membersS4EmptyHelp": "Zde se zobrazí dostupní aktivní členové a čekající pozvánky.",
   "membersS4SearchFields": "Hledání ve jménech a e-mailových adresách v tomto seznamu.",
   "membersS4RequestFailed": "Seznam se nepodařilo načíst",
-  "membersS4RetryHelp": "Zkuste seznam načíst znovu. Vaše hledání zůstane zachováno."
+  "membersS4RetryHelp": "Zkuste seznam načíst znovu. Vaše hledání zůstane zachováno.",
+  "auditS5EmptyPage": "Na této stránce nejsou události",
+  "auditS5ContinueHelp": "Historie pokračuje. Na další stránce můžete hledat další doručené události.",
+  "auditS5NoMatches": "Na této stránce nejsou události pro zvolené filtry",
+  "auditS5FilterHelp": "Tato stránka nevrátila doručené události. Vymazáním filtrů rozšíříte historii.",
+  "auditS5Empty": "Nebyly vráceny doručené události",
+  "auditS5EmptyHelp": "Tato stránka nyní nevrací doručené události. Další události mohou dorazit později.",
+  "auditS5RequestFailed": "Historii auditu se nepodařilo načíst",
+  "auditS5RetryHelp": "Zkuste stejný požadavek znovu. Použité filtry, rozepsané změny i stránka zůstanou zachovány.",
+  "auditS5AppliedFilters_one": "{{count}} použitý filtr",
+  "auditS5AppliedFilters_few": "{{count}} použité filtry",
+  "auditS5AppliedFilters_other": "{{count}} použitých filtrů"
 }
