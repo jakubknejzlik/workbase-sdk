@@ -117,3 +117,18 @@ it('absent facts stay unavailable; credential-shaped actor labels and changes st
   await screen.findByText('event-1', { exact: true }); expect(document.body.textContent).not.toContain(secret); expect(document.body.textContent).not.toContain('CMS')
   expect(screen.getAllByText(test.t.unavailable).length).toBeGreaterThan(2); expect(screen.getByText(test.t.auditNoChanges)).toBeTruthy(); expect(screen.getAllByText(test.t.redactedValue).length).toBeGreaterThan(0)
 })
+it.each(['en', 'cs'] as const)('%s terminal filtered page after populated history retains Previous and real clear', async language => {
+  const test = await mount({ language }); await screen.findByText(/Ada Example/); await test.open()
+  fireEvent.change(screen.getByLabelText(test.t.auditFilter_entity), { target: { value: 'records' } })
+  await test.user.click(screen.getByRole('button', { name: test.t.auditApply })); await waitFor(() => expect(test.auditRequests()).toHaveLength(2))
+  await waitFor(() => expect(screen.getByRole<HTMLButtonElement>('button', { name: test.t.nextPage }).disabled).toBe(false))
+  test.world.page = { data: [], next_cursor: null }
+  await test.user.click(screen.getByRole('button', { name: test.t.nextPage })); await screen.findByText(test.t.auditS5NoMatches)
+  expect(screen.getByRole<HTMLButtonElement>('button', { name: test.t.previousPage }).disabled).toBe(false)
+  expect(screen.getByRole<HTMLButtonElement>('button', { name: test.t.nextPage }).disabled).toBe(true)
+  expect(screen.getByRole('button', { name: test.t.clearAllFilters })).toBeTruthy()
+  expect(test.auditRequests().at(-1)!.path).toBe('/audit/events?limit=25&entity=records&cursor=next-page')
+  test.world.page = { data: [event], next_cursor: 'next-page' }
+  await test.user.click(screen.getByRole('button', { name: test.t.previousPage })); await screen.findByText(/Ada Example/)
+  expect(test.auditRequests().at(-1)!.path).toBe('/audit/events?limit=25&entity=records')
+})
