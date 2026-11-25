@@ -252,3 +252,44 @@ it('178 narrow tables retain opted-in state and identity alongside row actions',
     expect(screen.queryByText('2026-11-17')).toBeNull()
   } finally { vi.restoreAllMocks() }
 })
+
+it('A3 overflow hint precedes the table, describes its region and disappears when columns fit', () => {
+  let resize = () => {}
+  vi.stubGlobal('ResizeObserver', class { constructor(callback: () => void) { resize = callback } observe() {} disconnect() {} })
+  try {
+    render(<DataTable listV2 hideFooter onRowClick={vi.fn()} rows={[{ id: 'one' }]} columns={[{ id: 'id', label: 'ID', cell: row => row.id }]} state={{ search: '', sort: null, limit: 10 }} onStateChange={vi.fn()} page={0} onPage={vi.fn()} isFetching={false} label="Records" labels={{ ...labels, scrollRegion: 'Scrollable records', scrollHint: 'Scroll for more columns' }} />)
+    const region = screen.getByRole('region', { name: 'Scrollable records' })
+    Object.defineProperties(region, { clientWidth: { configurable: true, value: 300 }, scrollWidth: { configurable: true, value: 900 } })
+    act(resize)
+    const hint = screen.getByText('Scroll for more columns', { exact: false })
+    expect(hint.compareDocumentPosition(region) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(region.getAttribute('aria-describedby')).toBe(hint.id)
+    expect(document.querySelectorAll('[data-list-overflow]')).toHaveLength(1)
+    fireEvent.keyDown(region, { key: 'End' })
+    expect(region.scrollLeft).toBe(900)
+    expect(hint.getAttribute('data-list-overflow')).toBe('start')
+    Object.defineProperty(region, 'scrollWidth', { configurable: true, value: 300 })
+    act(resize)
+    expect(document.querySelector('[data-list-overflow]')).toBeNull()
+    expect(region.hasAttribute('aria-describedby')).toBe(false)
+  } finally { vi.unstubAllGlobals() }
+})
+it('A3 footer preserves direct page jumps, exact totals, maxOffset and busy/unknown guards', async () => {
+  const { ListPageFooter } = await import('../src')
+  const onPage = vi.fn(), onPageSize = vi.fn(), user = userEvent.setup()
+  const props = { total: 47, page: 0, limit: 10, pageSize: 10, maxOffset: 20, busy: false, labels: { ...labels, range: (start: number, end: number, total: number) => `${start}–${end} of ${total}` }, onPage, onPageSize }
+  const view = render(<ListPageFooter {...props} />)
+  expect(screen.getByRole('status').textContent).toBe('1–10 of 47')
+  expect(document.querySelector('[data-list-page-counter]')?.textContent).toBe('1 / 3')
+  expect(screen.getByRole('button', { name: labels.previous }).hasAttribute('disabled')).toBe(true)
+  screen.getByRole('button', { name: '3' }).focus(); await user.keyboard('{Enter}')
+  expect(onPage).toHaveBeenLastCalledWith(2)
+  view.rerender(<ListPageFooter {...props} page={2} />)
+  expect(screen.getByRole('button', { name: labels.next }).hasAttribute('disabled')).toBe(true)
+  expect(screen.getByRole('status').textContent).toBe('21–30 of 47')
+  await user.selectOptions(screen.getByRole('combobox'), '20'); expect(onPageSize).toHaveBeenCalledWith(20)
+  view.rerender(<ListPageFooter {...props} busy />)
+  expect([...document.querySelectorAll('button,select')].every(node => (node as HTMLButtonElement).disabled)).toBe(true)
+  view.rerender(<ListPageFooter {...props} total={undefined} />)
+  expect(screen.queryByRole('status')).toBeNull(); expect(document.querySelector('[data-list-page-counter]')).toBeNull()
+})

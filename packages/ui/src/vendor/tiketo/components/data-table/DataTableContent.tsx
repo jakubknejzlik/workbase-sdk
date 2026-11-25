@@ -53,6 +53,7 @@ export const DataTableContent = <RecordType,>() => {
 
   return (
     <div className="relative">
+      {presentation.listV2 && overflow.edge && <p id={overflow.hintId} data-list-overflow={overflow.edge} className="list-v2-overflow-hint"><span aria-hidden="true">{overflow.edge === 'start' ? '←' : overflow.edge === 'end' ? '→' : '↔'}</span> {presentation.scrollHint}</p>}
       <Table containerProps={presentation.listV2 ? { ref: overflow.ref, role: 'region', tabIndex: presentation.scrollTabStop === 'overflow' && !overflow.edge ? -1 : 0, 'aria-label': presentation.scrollRegion, 'aria-describedby': overflow.edge ? overflow.hintId : undefined, 'data-overflow-edge': overflow.edge, onScroll: overflow.update, onKeyDown: overflow.onKeyDown } : undefined} className={`table-fixed ${presentation.tableClass ?? 'min-w-[600px]'}`} aria-label={presentation.label}>
         <colgroup>
           {visibleColumns.map((column) => {
@@ -136,7 +137,6 @@ export const DataTableContent = <RecordType,>() => {
           )}
         </TableBody>
       </Table>
-      {presentation.listV2 && overflow.edge && <p id={overflow.hintId} data-list-overflow={overflow.edge} className="list-v2-overflow-hint"><span aria-hidden="true">{overflow.edge === 'start' ? '←' : overflow.edge === 'end' ? '→' : '↔'}</span> {presentation.scrollHint}</p>}
       {/* Feedback belongs to the visible panel, outside Table's x scroller. */}
       {showNoResults && <div className="min-h-24 w-full text-center">{presentation.emptyContent}</div>}
       {showError && <div role="alert" className="flex min-h-32 w-full flex-col items-center justify-center gap-2 p-4 text-center text-destructive">

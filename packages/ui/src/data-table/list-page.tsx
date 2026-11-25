@@ -11,7 +11,7 @@ export function ListPageComposition({ tabs, toolbar, panel, chips, children, foo
     {panel && <div data-list-slot="panel" className="border-b bg-muted/30 p-3 sm:p-4">{panel}</div>}
     {chips && <div data-list-slot="chips" className="px-3 sm:px-4">{chips}</div>}
     <div data-list-slot="table" className="min-w-0">{children}</div>
-    {footer && <div data-list-slot="footer" className="border-t p-3 sm:p-4">{footer}</div>}
+    {footer && <div data-list-slot="footer" className="border-t">{footer}</div>}
   </section>
 }
 function revealViewTab(tab: HTMLElement) {
@@ -57,7 +57,7 @@ export function ListPageFooter({ total, page, limit, pageSize, maxOffset, busy, 
   const known = Number.isSafeInteger(total) && total! >= 0
   const pages = known ? Math.min(Math.max(1, Math.ceil(total! / limit)), Math.floor(maxOffset / limit) + 1) : 0
   const numbers = [...new Set([0, page - 2, page - 1, page, page + 1, page + 2, pages - 1])].filter(value => value >= 0 && value < pages).sort((a, b) => a - b)
-  return <footer className="@container/list-footer flex flex-wrap items-center justify-between gap-3 text-sm">
+  return <footer className="list-page-footer @container/list-footer flex flex-wrap items-center justify-between gap-3 text-sm">
     <div data-list-page-summary="" className="flex min-w-0 max-w-full flex-wrap items-center gap-x-4 gap-y-2">
       {busy && labels.loading && <p role="status" aria-live="polite" className="text-muted-foreground">{labels.loading}</p>}
       {known && <p data-list-range="" role={busy ? undefined : "status"} aria-live="polite" className="tabular-nums text-muted-foreground">{labels.range(total === 0 ? 0 : Math.min(page * limit + 1, total!), Math.min((page + 1) * limit, total!), total!)}</p>}
@@ -67,6 +67,7 @@ export function ListPageFooter({ total, page, limit, pageSize, maxOffset, busy, 
     <div data-list-paging="" className="ml-auto flex max-w-full items-center gap-1 overflow-x-auto p-1 scroll-p-1" onFocusCapture={event => {
       if (event.currentTarget.scrollWidth > event.currentTarget.clientWidth) event.target.scrollIntoView({ block: 'nearest', inline: 'nearest' })
     }}>
+      {known && <span data-list-page-counter="" className="shrink-0 tabular-nums">{page + 1} / {pages}</span>}
       <Button type="button" variant="ghost" size="icon" aria-label={labels.previous} disabled={busy || !known || page <= 0} onClick={() => onPage(page - 1)}><ChevronLeft aria-hidden="true" className="size-4" /></Button>
       {/* Reserve room for three/four-digit pages through the supported 10,000
           offset at 10 rows/page, scaling with enlarged text. display:none

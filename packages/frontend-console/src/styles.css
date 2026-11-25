@@ -156,7 +156,7 @@ main:has([data-slot="list-page"]) h1 { font-weight: 400; }
 [data-list-density] [data-slot="table-container"]:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
 [data-list-density] [data-overflow-edge="end"], [data-list-density] [data-overflow-edge="both"] { border-right: 3px solid var(--border); }
 [data-list-density] [data-overflow-edge="start"], [data-list-density] [data-overflow-edge="both"] { border-left: 3px solid var(--border); }
-.list-v2-overflow-hint { padding: .5rem .75rem; border-top: 1px solid var(--border); color: var(--muted-foreground); font-size: .75rem; }
+.list-v2-overflow-hint { padding: .5rem .75rem; border-bottom: 1px solid var(--border); color: var(--muted-foreground); font-size: .75rem; }
 .list-v2-skeleton { display: block; width: 80%; height: .625rem; border-radius: .25rem; background: #edf1f7; }
 [data-list-display] { gap: .25rem; padding: .5rem; }
 [data-list-display] > label { min-height: 2.0625rem; padding: .5rem .625rem; font-size: .75rem; }
@@ -172,3 +172,19 @@ body:has([data-slot="list-page"]) [data-list-menu] :is(p, button),
 body:has([data-slot="list-page"]) [data-list-row-menu] :is([role="menuitem"], [data-slot="dropdown-menu-label"]) { font-size: inherit; }
 body:has([data-slot="list-page"]) [data-list-menu] { gap: .25rem; padding: .5rem; }
 body:has([data-slot="list-page"]) [data-list-row-menu] [role="menuitem"] { min-height: 2.0625rem; padding: .5625rem .625rem; }
+
+/* Measured list footer: keep direct-page buttons and exact server totals. */
+.list-page-footer { padding: 15px 20px; font-size: .6875rem; line-height: 1.48; }
+.list-page-footer :is(select, button) { font-size: inherit; line-height: inherit; }
+/* Native select appearance forces Chromium's line-height back to normal. */
+.list-page-footer select {
+  appearance: none;
+  padding-right: 20px;
+  background-image: linear-gradient(45deg, transparent 50%, currentColor 50%), linear-gradient(135deg, currentColor 50%, transparent 50%);
+  background-position: right 9px center, right 5px center;
+  background-size: 4px 4px;
+  background-repeat: no-repeat;
+}
+@media (max-width: 1023px) {
+  .list-page-footer { padding: 14px; flex-direction: column; align-items: stretch; }
+}
