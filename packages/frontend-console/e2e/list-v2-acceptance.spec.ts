@@ -224,7 +224,7 @@ test('paging: exact total, next, previous, last and page-size reset', async ({ p
   await footer(page).getByRole('combobox', { name: en.rowsPerPage, exact: true }).selectOption('20'); await rows(page, {}, 0, 20)
 })
 
-test('G1: desktop configured access column fits beside separate Actions without scrolling or coverage', async ({ page }) => {
+test('G1: desktop access controls are reachable beside separate Actions without horizontal scrolling or coverage', async ({ page }) => {
   await gotoSDK(page, route); await settled(page); await rows(page); await atScrollStart(page)
   const headers = list(page).getByRole('columnheader')
   await expect(headers).toHaveCount(6)
@@ -236,7 +236,14 @@ test('G1: desktop configured access column fits beside separate Actions without 
   const buttons = page.getByRole('button', { name: new RegExp(en.rowAccessActions) })
   await expect(buttons).toHaveCount(10)
   for (const button of await buttons.all()) {
+    // A1's approved 66px rows extend below the fold; prove each control is
+    // reachable without horizontal scrolling and remains uncovered by Actions.
+    await button.scrollIntoViewIfNeeded()
+    await atScrollStart(page)
     await insideViewport(button)
+    const bounds = (await button.boundingBox())!
+    const actionsCell = (await button.locator('xpath=ancestor::tr').locator('td').last().boundingBox())!
+    expect(bounds.x + bounds.width).toBeLessThanOrEqual(actionsCell.x)
     expect(await button.evaluate(element => {
       const rect = element.getBoundingClientRect()
       return [rect.left + 1, rect.right - 1].every(x => element.contains(document.elementFromPoint(x, rect.top + rect.height / 2)))
@@ -646,7 +653,7 @@ for (const density of ['comfortable', 'compact'] as const) test(`#291: applied t
       // Icon-only access controls still need the same applied button metrics.
       if (group.name !== 'application access buttons') expect(measurement.text.length, label).toBeGreaterThan(0)
       for (const node of [measurement.root, ...measurement.text]) {
-        expect.soft({ fontSize: node.fontSize, lineHeight: node.lineHeight }, `${label} (${node.tag})`).toEqual({ fontSize: '14px', lineHeight: '20px' })
+        expect.soft({ fontSize: node.fontSize, lineHeight: node.lineHeight }, `${label} (${node.tag})`).toEqual({ fontSize: '12px', lineHeight: '17.76px' })
       }
     }
   }
@@ -662,17 +669,17 @@ for (const width of [1440, 390, 360]) for (const actor of ['admin', 'staff'] as 
   const table = list(page).locator('[data-slot="data-table"]')
   const row = table.locator('tbody [data-row-id]').first()
   await expect(table).toHaveAttribute('data-list-density', 'comfortable')
-  expect(await row.locator('td').first().evaluate(element => [getComputedStyle(element).fontSize, getComputedStyle(element).lineHeight])).toEqual(['14px', '20px'])
-  expect(Math.round((await row.boundingBox())!.height)).toBe(actor === 'admin' ? 53 : 61)
+  expect(await row.locator('td').first().evaluate(element => [getComputedStyle(element).fontSize, getComputedStyle(element).lineHeight])).toEqual(['12px', '17.76px'])
+  expect(Math.round((await row.boundingBox())!.height)).toBe(66)
   if (width === 1440) {
-    expect(await page.locator('h1').evaluate(element => [getComputedStyle(element).fontSize, getComputedStyle(element).fontWeight])).toEqual(['29px', '400'])
+    expect(await page.locator('h1').evaluate(element => [getComputedStyle(element).fontSize, getComputedStyle(element).fontWeight])).toEqual(['32px', '400'])
     await expect.poll(async () => Math.round((await page.locator('[data-slot="sidebar-gap"]').boundingBox())!.width)).toBe(206)
   }
   await page.getByRole('button', { name: copy.listDisplay, exact: true }).click()
   const display = page.getByRole('dialog', { name: copy.listDisplayHeading })
   await display.getByRole('checkbox', { name: copy.listDisplayCompact }).click()
   await expect(table).toHaveAttribute('data-list-density', 'compact')
-  expect(Math.round((await row.boundingBox())!.height)).toBe(actor === 'admin' ? 53 : 45)
+  expect(Math.round((await row.boundingBox())!.height)).toBe(54)
   expect(new URL(page.url()).searchParams.has('compact')).toBe(false)
   await page.keyboard.press('Escape')
   const scroller = list(page).getByRole('region', { name: copy.listScrollRegion })
@@ -764,7 +771,7 @@ for (const width of [1440, 390, 360]) for (const actor of ['admin', 'staff'] as 
     await expect(list(page).locator('[data-list-range]')).toHaveCount(0)
     const skeleton = list(page).locator('[data-list-skeleton]').first()
     await expect(skeleton.locator('td')).toHaveCount(await table.getByRole('columnheader').count())
-    expect(Math.round((await skeleton.boundingBox())!.height)).toBe(actor === 'admin' ? 53 : 45)
+    expect(Math.round((await skeleton.boundingBox())!.height)).toBe(54)
     release!()
     await expect(list(page).getByRole('heading', { name: copy.noResults })).toBeVisible()
     await insideViewport(list(page).getByText(copy.listEmptyViewDescription))
