@@ -676,5 +676,13 @@
   "listS3EmptyPageHeading": "Na této stránce nejsou žádné záznamy",
   "listS3EmptyPageHelp": "Na jiných stránkách mohou být záznamy. Pomocí stránkování se vraťte na předchozí stránku.",
   "listS3CreateHelp": "Začněte vytvořením záznamu.",
-  "listS3EmptyViewHelp": "V tomto pohledu nejsou žádné záznamy. Mohou být dostupné v jiném pohledu."
+  "listS3EmptyViewHelp": "V tomto pohledu nejsou žádné záznamy. Mohou být dostupné v jiném pohledu.",
+  "membersS4NoMatches": "Nikdo neodpovídá hledání",
+  "membersS4SearchHelp": "Zkuste jiné jméno nebo e-mail, nebo vymažte hledání a zobrazte celý seznam.",
+  "membersS4HistoryHelp": "Zde se zobrazí přijaté, zrušené, odmítnuté a vypršené pozvánky. Čekající pozvánky najdete mezi členy.",
+  "membersS4InviteHelp": "Pozvěte někoho a umožněte mu přístup do této organizace.",
+  "membersS4EmptyHelp": "Zde se zobrazí dostupní aktivní členové a čekající pozvánky.",
+  "membersS4SearchFields": "Hledání ve jménech a e-mailových adresách v tomto seznamu.",
+  "membersS4RequestFailed": "Seznam se nepodařilo načíst",
+  "membersS4RetryHelp": "Zkuste seznam načíst znovu. Vaše hledání zůstane zachováno."
 }
