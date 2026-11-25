@@ -4,7 +4,7 @@ import { stateFromSearch, toQueryDocument, validateListSearch } from '../src/lis
 import { listSearchableFields, type Model, type Capabilities } from '../src/read'
 
 const model: Model = { instance: 'v2', revision: 1, limits: { root: 100, children: 100, relations: 4, exists: 4 }, entities: {
-  workers: { rowInvitations: true, displayField: 'name', fields: { id: { type: 'string' }, name: { type: 'string' }, code: { type: 'string' }, team_id: { type: 'ref', entity: 'teams' }, enabled: { type: 'bool', required: false }, created_at: { type: 'datetime' } },
+  workers: { rowAccess: true, rowInvitations: false, displayField: 'name', fields: { id: { type: 'string' }, name: { type: 'string' }, code: { type: 'string' }, team_id: { type: 'ref', entity: 'teams' }, enabled: { type: 'bool', required: false }, created_at: { type: 'datetime' } },
     columns: ['name', 'code', 'team_id', 'enabled', 'created_at'], relations: { team: { entity: 'teams', field: 'team_id', cardinality: 'n:1' } }, routes: { list: '', detail: '' },
     list: { columns: [{ field: 'name', secondary: 'code' }], relatedColumns: { location: { via: 'team_id', field: 'location_id' } }, filter: {
       team_id: { kind: 'relation', placement: 'toolbar', operators: ['in'] },
@@ -110,4 +110,17 @@ it('validates copied one-based page numbers and drops pages beyond the offset ca
   const capped = { ...model, limits: { ...model.limits, maxOffset: 100 } }
   expect(stateFromSearch(validateListSearch({ page: 5 }), capped, 'workers', caps).dropped).toBe(true)
   expect(stateFromSearch(validateListSearch({ page: 4 }), capped, 'workers', caps).dropped).toBe(false)
+})
+
+it('never restores or emits status access from invitation-create capability alone', () => {
+  const definition = structuredClone(model)
+  definition.entities.workers.rowAccess = false
+  definition.entities.workers.rowInvitations = true
+  const restored = stateFromSearch({ view: 'invited', rowAccess: 'expired' }, definition, 'workers', caps)
+  expect(restored.dropped).toBe(true)
+  expect(restored.state.view).toBe('all')
+  expect(restored.state.rowAccess).toBeUndefined()
+  const query = toQueryDocument({ ...restored.state, view: 'invited', rowAccess: 'expired', offset: 0 }, definition, 'workers', caps)
+  expect(query).not.toHaveProperty('view')
+  expect(query).not.toHaveProperty('rowAccess')
 })
