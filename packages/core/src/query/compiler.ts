@@ -412,7 +412,7 @@ function requiredDisplayEntities(kernel: KernelRegistry, scope: Scope, entity: s
     for (const [field, operand] of Object.entries(where)) {
       if (field === 'and' || field === 'or') { (operand as Filter[]).forEach(child => filter(source, child)); continue }
       if (field === 'not') { filter(source, operand as Filter); continue }
-      const relation = kernel.config.entities[source].relations[field]
+      const relation = operandKind(kernel.config, source, field, operand) === 'relation' ? kernel.config.entities[source].relations[field] : undefined
       if (relation) filter(relation.entity, relation.many ? Object.values(operand as Record<string, Filter>)[0] : operand as Filter)
       else add(source, [field])
     }

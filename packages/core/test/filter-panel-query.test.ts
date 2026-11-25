@@ -3,6 +3,10 @@ import { beforeEach, expect, it } from 'vitest'
 import { setup, policyGraph, runtime } from './fixtures/policy-graph/setup'
 import { defineInstance, baseFields } from '../src/config'
 import { createApp } from '../src/app'
+import { KernelRegistry } from '../src/kernel/registry'
+import { requireScope, resolveActor } from '../src/authorization'
+import { validateQuery } from '../src/query/schema'
+import { compileRoot } from '../src/query/compiler'
 import { request, json } from '@workbasehq/test-support/helpers'
 import { stateFromSearch, toQueryDocument } from '../../console-generated/src/list-model'
 import { pickerQuery } from '../../console-generated/src/write'
@@ -125,6 +129,33 @@ it('collision mixed scalar/relation operand fails closed with the existing docum
   const response = await request(collision, '/query', 'POST', { entity: 'records', limit: 1, where: { client: { in: ['team-a'], id: { eq: 'team-a' } } } }, 'administrator')
   expect(response.status).toBe(400)
   expect(await json(response)).toEqual({ error: 'query_invalid', path: ['where', 'client'] })
+})
+
+it.each([
+  [true, true], [false, true], [true, false], [false, false],
+])('collision empty-in stays scalar with operator-named target relation: collision=%s, target relation=%s', async (collision, operatorRelation) => {
+  await env.DB.exec('ALTER TABLE records ADD COLUMN client TEXT; UPDATE records SET client=team_id;')
+  const source = defineInstance({ ...policyGraph, entities: { ...policyGraph.entities,
+    records: { ...policyGraph.entities.records,
+      fields: { ...policyGraph.entities.records.fields, client: { type: 'ref', entity: 'teams' } },
+      relations: { ...policyGraph.entities.records.relations, ...(collision ? { client: { entity: 'teams', field: 'client' } } : {}) } },
+    teams: { ...policyGraph.entities.teams,
+      relations: { ...policyGraph.entities.teams.relations, ...(operatorRelation ? { in: { entity: 'records', field: 'client', many: true } } : {}) } },
+  } })
+  const kernel = new KernelRegistry(source)
+  const actor = await resolveActor(new Request('http://localhost', { headers: { Authorization: 'Bearer synthetic-administrator' } }), runtime(), kernel.config)
+  const scope = await requireScope(actor, 'org-a', kernel.config)
+  const input = { entity: 'records', select: ['id'], limit: 100, where: { client: { in: [] } } }
+  const { query, cost } = validateQuery(kernel, scope, input)
+  expect(cost).toMatchObject({ depth: 0, relations: 0, exists: 2 })
+  // Check both boundaries even if compilation regresses before HTTP execution.
+  expect.soft(() => compileRoot(kernel, scope, query, undefined, cost)).not.toThrow()
+  const response = await request(createApp(source, runtime()), '/query', 'POST', input, 'administrator')
+  expect.soft(response.status).toBe(200)
+  expect((await json(response)).data).toEqual([])
+  const statement = compileRoot(kernel, scope, query, undefined, cost)
+  const rows = await env.DB.prepare(statement.sql).bind(...statement.bindings).all()
+  expect(rows.results).toEqual([])
 })
 
 it('collision picker selection produces the unchanged scalar payload and correct HTTP rows', async () => {
