@@ -5,8 +5,8 @@ import { useSidebar } from '../components/ui/sidebar'
 export interface LayoutProps {
   title: ReactNode; navigationLabel: string; navigation: ReactNode; workspace?: ReactNode; account?: ReactNode; skipLabel?: string; navigationTriggerLabel?: string; mobileNavigationLabel?: string; sidebarTitle?: string; routeKey?: string; children: ReactNode; closeLabel?: string; noContentPadding?: boolean
 }
-// Preserve the full content width on tablets; desktop navigation starts at 1024px.
-const mobileNavigationQuery = '(max-width: 1023px)'
+// Tablets retain the settled desktop sidebar; match the shared shell breakpoint.
+const mobileNavigationQuery = '(max-width: 849px)'
 function subscribeMobileNavigation(change: () => void) {
   const media = window.matchMedia(mobileNavigationQuery)
   media.addEventListener('change', change)
@@ -37,5 +37,5 @@ function ShellBody(props: LayoutProps) {
 }
 export function ConsoleLayout(props: LayoutProps) {
   const mobile = useSyncExternalStore(subscribeMobileNavigation, mobileNavigationSnapshot, () => false)
-  return <LayoutBase mobile={mobile}><ShellBody {...props} /></LayoutBase>
+  return <div className="wb-console-shell"><LayoutBase mobile={mobile}><ShellBody {...props} /></LayoutBase></div>
 }

@@ -269,6 +269,21 @@ h1, h2, h3, strong, b,
 }
 
 /* Shared composition extensions. All layout rules are served in this asset (strict CSP). */
+.wb-console-shell [data-slot="sidebar-wrapper"] { --sidebar-width: 224px; --header-height: 76px; }
+.wb-console-shell [data-slot="sidebar-inset"] { container-type: inline-size; container-name: console-frame; }
+.wb-console-shell [data-slot="sidebar-inset"] > main.p-4 { padding: 22px 27px 48px; }
+.wb-console-shell [data-slot="sidebar-inset"] > header > div { min-height: calc(var(--header-height) - 1px); padding-inline: 27px; }
+@media (max-width: 849px) {
+  .wb-console-shell [data-slot="sidebar-wrapper"] { --header-height: 61px; }
+}
+@media (max-width: 749px) {
+  .wb-console-shell [data-slot="sidebar-inset"] > main.p-4 { padding: 18px 14px 40px; }
+  .wb-console-shell [data-slot="sidebar-inset"] > header > div { padding-inline: 14px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .wb-console-shell [data-slot="sidebar-gap"], .wb-console-shell [data-slot="sidebar-container"],
+  [data-slot="sidebar"][data-mobile="true"], [data-slot="sheet-overlay"] { animation-duration: 0s; transition-duration: 0s; }
+}
 [data-slot="sidebar-inset"] { background-color: var(--canvas); }
 .wb-skip { position: absolute; left: 16px; top: -100px; padding: 12px; background: var(--background); z-index: 100; }
 .wb-skip:focus { top: 16px; }

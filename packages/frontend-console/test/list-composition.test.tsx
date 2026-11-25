@@ -16,8 +16,9 @@ const caps: Capabilities = { revision: 1, entities: { entries: { readable: Objec
 let client: QueryClient
 beforeEach(() => { vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} }); vi.spyOn(window, 'scrollTo').mockImplementation(() => {}) })
 afterEach(() => { client?.clear(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
-async function mount(options: { access?: boolean; invitations?: boolean; readAccess?: boolean; accessPlacement?: 'toolbar' | 'column'; missingTotals?: boolean; empty?: boolean; range?: boolean; lowerBound?: 'number' | 'date' } = {}) {
+async function mount(options: { enumToolbar?: boolean; access?: boolean; invitations?: boolean; readAccess?: boolean; accessPlacement?: 'toolbar' | 'column'; missingTotals?: boolean; empty?: boolean; range?: boolean; lowerBound?: 'number' | 'date' } = {}) {
   const definition = structuredClone(model), permissions = structuredClone(caps)
+  if (options.enumToolbar) { definition.entities.entries.fields.status.values = ['active', 'inactive', 'pending', 'archived']; definition.entities.entries.list!.filter!.status = { kind: 'enum', placement: 'toolbar', operators: ['in'] } }
   if (options.range) { definition.entities.entries.fields.amount = { type: 'number' }; definition.entities.entries.list!.filter!.amount = { kind: 'number', placement: 'panel', operators: ['eq', 'gte', 'lte'] }; permissions.entities.entries.readable.push('amount') }
   if (options.lowerBound) { definition.entities.entries.fields.amount = { type: options.lowerBound === 'date' ? 'datetime' : 'number' }; definition.entities.entries.list!.filter!.amount = { kind: options.lowerBound, placement: 'panel', operators: ['gte'] }; permissions.entities.entries.readable.push('amount') }
   if (options.access) { definition.entities.entries.rowInvitations = options.invitations ?? true; definition.entities.entries.rowAccess = options.readAccess ?? true; definition.entities.entries.list!.views!.push({ id: 'linked', label: 'Linked view', where: {}, rowAccess: 'signed_in' }); definition.entities.entries.list!.rowAccess = options.accessPlacement === 'column' ? { column: true } : { placement: options.accessPlacement ?? 'panel' }; permissions.resources = { 'invitations.read': true } }
@@ -303,4 +304,28 @@ it('hides access tabs and status controls when the model denies read, even with 
   expect(screen.queryByRole('button', { name: /Linked view/ })).toBeNull()
   const panel = await openPanel(test.user)
   expect(within(panel).queryByRole('combobox', { name: en.rowAccessFilter })).toBeNull()
+})
+
+it('keeps four toolbar enum choices in the existing popover and applies selection immediately to query and URL', async () => {
+  const test = await mount({ enumToolbar: true })
+  const trigger = screen.getByRole('button', { name: 'Status' })
+  expect(screen.queryByRole('checkbox', { name: 'Active' })).toBeNull()
+  await test.user.click(trigger)
+  const choices = screen.getByRole('dialog', { name: 'Status' })
+  expect(within(choices).getAllByRole('checkbox')).toHaveLength(4)
+  await test.user.click(within(choices).getByRole('checkbox', { name: 'Active' }))
+  await waitFor(() => expect(test.request.mock.calls.at(-1)?.[0]).toMatchObject({ offset: 0, where: { and: [{ status: { in: ['active'] } }] } }))
+  expect(test.router.state.location.search.filters).toEqual([{ field: 'status', predicate: { in: ['active'] } }])
+  expect(trigger.textContent).toBe('Status(1)')
+  await test.user.click(within(choices).getByRole('checkbox', { name: 'Inactive' }))
+  await waitFor(() => expect(test.router.state.location.search.filters).toEqual([{ field: 'status', predicate: { in: ['active', 'inactive'] } }]))
+  await test.user.click(within(choices).getByRole('checkbox', { name: 'Active' }))
+  await waitFor(() => expect(test.router.state.location.search.filters).toEqual([{ field: 'status', predicate: { in: ['inactive'] } }]))
+  await test.user.click(within(choices).getByRole('checkbox', { name: 'Inactive' }))
+  await waitFor(() => expect(test.router.state.location.search.filters).toBeUndefined())
+  // The original unfiltered result can be reused from the query cache.
+  expect(await screen.findByText('1–10 of 73')).toBeTruthy()
+  await test.user.keyboard('{Escape}')
+  expect(screen.queryByRole('dialog', { name: 'Status' })).toBeNull()
+  expect(document.activeElement).toBe(trigger)
 })

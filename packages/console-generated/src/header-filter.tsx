@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useEntityTranslation } from './entity-translation'
 import { DataTableFilterDropdown, TextFilter, MultiSelectFilter, RangeFilter, ToggleFilter, EntityPicker } from '@workbasehq/ui'
 import { Button } from '@workbasehq/ui/components/ui/button'
+import { Popover, PopoverContent, PopoverTrigger } from '@workbasehq/ui/components/ui/popover'
 import { filterMapping, selectionCap, type FilterDescriptor, type FilterValue } from './filter-kinds'
 import { usePickerSearch } from './use-picker-search'
 import { useSelectedReferences } from './use-selected-references'
@@ -18,9 +19,19 @@ export function ToolbarFilter(props: Props) {
   const { t } = useEntityTranslation(props.entity)
   const { descriptor } = props
   const mapping = filterMapping(descriptor.kind, props.model.entities[props.entity].fields[descriptor.field], undefined, descriptor.operators, props.model.timeZone)
+  const label = descriptor.label ?? t(`field_${descriptor.field}`)
+  const value = props.predicate ? mapping.fromPredicate(props.predicate) : undefined
+  const input = <FilterInput {...props} value={value} onChange={value => props.onChange(mapping.toPredicate(value))} />
+  if (descriptor.kind === 'enum') return <Popover>
+    <PopoverTrigger asChild><Button type="button" variant="outline" className="list-toolbar-filter" aria-label={label} aria-description={props.predicate ? t('filterActive') : undefined}>
+      {label}{Array.isArray(value) && value.length > 0 && <span aria-hidden="true" className="tabular-nums">({value.length})</span>}
+      <svg aria-hidden="true" className="size-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m6 9 6 6 6-6" /></svg>
+    </Button></PopoverTrigger>
+    <PopoverContent role="dialog" aria-label={label} align="start" collisionPadding={8} className="w-64 max-w-[calc(100vw-2rem)] max-h-[min(80dvh,var(--radix-popover-content-available-height))] overflow-y-auto">{input}</PopoverContent>
+  </Popover>
   return <fieldset className="list-toolbar-filter min-w-40 space-y-1 text-sm [&_.wb-picker>label]:sr-only">
     <legend className={descriptor.kind === 'relation' ? 'sr-only' : 'px-1'}>{descriptor.label ?? t(`field_${descriptor.field}`)}</legend>
-    <FilterInput {...props} value={props.predicate ? mapping.fromPredicate(props.predicate) : undefined} onChange={value => props.onChange(mapping.toPredicate(value))} />
+    {input}
   </fieldset>
 }
 function FilterEditor(props: Props & { close: () => void }) {

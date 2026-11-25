@@ -110,7 +110,7 @@ test('Q2: display preferences survive reload without changing queries, counts, U
 const scenarios = ['populated-admin', 'populated-restricted-staff', 'expanded-filters', 'view-menu', 'access-menu', 'personal-views', 'empty', 'error', 'loading'] as const
 for (const language of ['en', 'cs'] as const) {
   const copy = language === 'cs' ? cs : en
-  for (const width of [1440, 900, 390]) test(`R294: ${language} toolbar wraps by available space at ${width}px`, async ({ page }) => {
+  for (const width of [1440, 1280, 900, 390]) test(`R294: ${language} toolbar wraps by available space at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 900 })
     await page.addInitScript(language => localStorage.setItem('console-language', language), language)
     await gotoSDK(page, route); await settled(page)
@@ -124,10 +124,10 @@ for (const language of ['en', 'cs'] as const) {
     const filterBox = (await filters.boundingBox())!
     const savedBox = (await saved.boundingBox())!
     const columnsBox = (await columns.boundingBox())!
-    expect(searchBox.y + searchBox.height, 'search has its own top row').toBeLessThanOrEqual(Math.min(filterBox.y, savedBox.y, columnsBox.y))
-    if (width >= 900) {
-      expect(filterBox.y, 'Filters and Saved views share the second row').toBe(savedBox.y)
-      expect(filterBox.y, 'Filters and Columns share the second row').toBe(columnsBox.y)
+    if (width >= 1280) {
+      expect(searchBox.y, 'desktop controls share one row').toBe(filterBox.y)
+      expect(filterBox.y, 'Filters and Saved views share the row').toBe(savedBox.y)
+      expect(filterBox.y, 'Filters and Columns share the row').toBe(columnsBox.y)
       expect(filterBox.x + filterBox.width, 'filter and view actions do not overlap').toBeLessThanOrEqual(savedBox.x)
     }
     expect(await toolbar.evaluate(node => node.scrollWidth <= node.clientWidth), 'toolbar has no horizontal overflow').toBe(true)
@@ -154,12 +154,12 @@ for (const language of ['en', 'cs'] as const) {
     await expect(team).toHaveValue('')
     await expect(team).toHaveAttribute('placeholder', 'Team')
   })
-  for (const width of [767, 768, 769, 800, 1023, 1024]) test(`R1: ${language} shell navigation at ${width}px`, async ({ page }) => {
+  for (const width of [767, 768, 800, 849, 850, 900, 1024]) test(`R1: ${language} shell navigation at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 900 })
     await page.addInitScript(language => localStorage.setItem('console-language', language), language)
     await gotoSDK(page, route); await settled(page)
     const gap = page.locator('[data-slot="sidebar-gap"]')
-    if (width >= 1024) {
+    if (width >= 850) {
       await expect(page.locator('[data-slot="sidebar-container"]')).toBeVisible()
       expect(await gap.evaluate(element => element.getBoundingClientRect().width)).toBeGreaterThan(0)
       return
@@ -172,7 +172,8 @@ for (const language of ['en', 'cs'] as const) {
       const style = getComputedStyle(element)
       return element.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight)
     })
-    expect((await search.boundingBox())!.width).toBe(geometry)
+    if (width <= 800) expect((await search.boundingBox())!.width).toBe(geometry)
+    else expect((await search.boundingBox())!.width).toBeLessThanOrEqual(geometry)
     const trigger = page.getByRole('button', { name: copy.openNavigation, exact: true })
     await trigger.click()
     const dialog = page.getByRole('dialog')
@@ -224,7 +225,7 @@ test('paging: exact total, next, previous, last and page-size reset', async ({ p
   await footer(page).getByRole('combobox', { name: en.rowsPerPage, exact: true }).selectOption('20'); await rows(page, {}, 0, 20)
 })
 
-test('G1: desktop configured access column fits beside separate Actions without scrolling or coverage', async ({ page }) => {
+test('G1: desktop configured access column fits beside separate Actions without horizontal scrolling or coverage', async ({ page }) => {
   await gotoSDK(page, route); await settled(page); await rows(page); await atScrollStart(page)
   const headers = list(page).getByRole('columnheader')
   await expect(headers).toHaveCount(6)
@@ -236,6 +237,9 @@ test('G1: desktop configured access column fits beside separate Actions without 
   const buttons = page.getByRole('button', { name: new RegExp(en.rowAccessActions) })
   await expect(buttons).toHaveCount(10)
   for (const button of await buttons.all()) {
+    // A1's 66px rows need vertical scrolling; horizontal reachability is the invariant.
+    await button.scrollIntoViewIfNeeded()
+    await atScrollStart(page)
     await insideViewport(button)
     expect(await button.evaluate(element => {
       const rect = element.getBoundingClientRect()
@@ -1425,8 +1429,8 @@ for (const language of ['en', 'cs'] as const) for (const width of [1440, 1280, 9
     expect(metrics.padding[0]).toEqual(width >= 1024 ? ['12px', '11px', '12px', '9px'] : ['12px', '15px', '12px', '11px'])
     expect(metrics.weights.every(weight => weight === '400')).toBe(true)
     expect(metrics.pageWidth).toBeLessThanOrEqual(width)
-    // Assert the current final shell geometry; 224px/900px parity belongs to A2.
-    if (width >= 1024) expect(metrics.sidebar?.width).toBe(206)
+    // Shared shell keeps its 224px desktop navigation down to 850px.
+    if (width >= 850) expect(metrics.sidebar?.width).toBe(224)
     else expect(metrics.sidebar).toBeNull()
     expect(violations).toEqual([]); expect(external).toEqual([])
     const { readFileSync, statSync, mkdirSync } = await import('node:fs')
@@ -1495,3 +1499,192 @@ test('A1: Czech glyph raster and shared title weights remain local when offline'
   record('A1', 'cs-glyphs-offline', { path, relativePath: `${sourceSHA}/A1-cs-glyphs-offline.png`, sha256: createHash('sha256').update(bytes).digest('hex'), bytes: bytes.length, dimensions: { width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) }, locale: 'cs', state: 'glyphs-offline', sourceSHA, builtAssetSHA: build.sha, metrics })
   await context.setOffline(false)
 })
+
+// A2 adapts only the SDK-owned representative model to retain a four-option
+// toolbar enum alongside the existing relation picker and draft Filters panel.
+async function a2Fixture(page: Page, language: 'en' | 'cs', long = false) {
+  await page.route('**/console-model', async intercepted => {
+    const response = await intercepted.fetch(), body = await response.json()
+    body.model.entities.worker.fields.status.values = ['active', 'inactive', 'archived', 'pending']
+    body.console.entities.worker.list.filter.status = { kind: 'enum', placement: 'toolbar', label: long ? 'Velmi dlouhý stav záznamu pro ověření zalamování' : language === 'cs' ? 'Stav' : 'Status' }
+    await intercepted.fulfill({ response, json: body })
+  })
+}
+async function a2Stable(page: Page) {
+  await page.evaluate(async () => {
+    await document.fonts.ready
+    await Promise.all(document.getAnimations().filter(animation => animation.effect?.getComputedTiming().iterations !== Infinity).map(animation => animation.finished.catch(() => {})))
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+  })
+}
+async function a2Geometry(page: Page) {
+  return page.evaluate(() => {
+    const box = (node: Element) => { const r = node.getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height, right: r.right, bottom: r.bottom } }
+    const main = document.querySelector('main')!, frame = document.querySelector('[data-slot="sidebar-inset"]')!, toolbar = document.querySelector('[data-list-slot="toolbar"]')!
+    const sidebar = document.querySelector('[data-slot="sidebar-container"]')
+    return { frame: box(frame), main: box(main), header: box(frame.querySelector('header')!), toolbar: box(toolbar), list: box(document.querySelector('[data-slot="list-page"]')!),
+      sidebar: sidebar ? { ...box(sidebar), position: getComputedStyle(sidebar).position } : null, scrollY, documentHeight: document.documentElement.scrollHeight,
+      fontReady: document.fonts.check('12px Alata'), font: getComputedStyle(toolbar).fontFamily, pageWidth: document.documentElement.scrollWidth, viewport: innerWidth,
+      controls: Array.from(toolbar.querySelectorAll('input:not([type="hidden"]),button')).map(node => ({ ...box(node), name: node.getAttribute('aria-label') ?? node.textContent })).filter(item => item.width && item.height) }
+  })
+}
+async function a2Capture(page: Page, language: 'en' | 'cs', state: string, fullPage = false) {
+  await a2Stable(page)
+  const { readFileSync, statSync, mkdirSync } = await import('node:fs')
+  const { createHash } = await import('node:crypto'), { join } = await import('node:path'), { inflateSync } = await import('node:zlib')
+  const sourceSHA = provenanceSHA(), width = page.viewportSize()!.width, directory = join(output, sourceSHA)
+  mkdirSync(directory, { recursive: true })
+  const name = `A2-${language}-${width}-${state}.png`, path = join(directory, name), metrics = await a2Geometry(page)
+  await page.screenshot({ path, fullPage, animations: 'disabled' })
+  const bytes = readFileSync(path), dimensions = { width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) }
+  expect(statSync(path).size).toBeGreaterThan(0)
+  expect(bytes.subarray(0, 8).toString('hex')).toBe('89504e470d0a1a0a')
+  const chunks: Buffer[] = []
+  for (let offset = 8; offset < bytes.length;) {
+    const size = bytes.readUInt32BE(offset), type = bytes.toString('ascii', offset + 4, offset + 8)
+    if (type === 'IDAT') chunks.push(bytes.subarray(offset + 8, offset + 8 + size))
+    offset += size + 12
+  }
+  expect(bytes[24]).toBe(8); expect([2, 6]).toContain(bytes[25])
+  const pixels = inflateSync(Buffer.concat(chunks)), stride = 1 + dimensions.width * (bytes[25] === 6 ? 4 : 3)
+  expect(pixels.length).toBe(stride * dimensions.height)
+  for (let row = 0; row < dimensions.height; row++) expect(pixels[row * stride]).toBeLessThanOrEqual(4)
+  expect(dimensions.width).toBe(width)
+  const build = JSON.parse(readFileSync('packages/frontend-console/dist/build-meta.json', 'utf8'))
+  expect(build.sourceCommit).toBe(sourceSHA)
+  record('A2', name, { path, relativePath: `${sourceSHA}/${name}`, sha256: createHash('sha256').update(bytes).digest('hex'), bytes: bytes.length, dimensions, locale: language, state, fullPage,
+    purpose: fullPage ? 'content only; not shell/sidebar evidence' : 'viewport shell/sidebar and controls', sourceSHA, builtAssetSHA: build.sha, metrics, status: 'captured; independent visual review pending' })
+}
+async function a2ControlsFit(page: Page) {
+  const geometry = await a2Geometry(page)
+  expect(geometry.fontReady).toBe(true); expect(geometry.font).toMatch(/^Alata/)
+  expect(geometry.pageWidth).toBeLessThanOrEqual(geometry.viewport)
+  for (const [index, control] of geometry.controls.entries()) {
+    expect(control.x, control.name ?? '').toBeGreaterThanOrEqual(geometry.toolbar.x)
+    expect(control.right, control.name ?? '').toBeLessThanOrEqual(geometry.toolbar.right)
+    for (const other of geometry.controls.slice(index + 1)) expect(control.right <= other.x || other.right <= control.x || control.bottom <= other.y || other.bottom <= control.y, `${control.name} / ${other.name}`).toBe(true)
+  }
+  return geometry
+}
+for (const language of ['en', 'cs'] as const) for (const width of [1440, 1280, 900, 390]) {
+  test(`A2: ${language} ${width} shell toolbar enum and content matrix`, async ({ page, context }) => {
+    const copy = language === 'cs' ? cs : en, label = language === 'cs' ? 'Stav' : 'Status'
+    await page.setViewportSize({ width, height: 900 })
+    await context.addInitScript(locale => localStorage.setItem('console-language', locale), language)
+    await a2Fixture(page, language)
+    await gotoSDK(page, route); await settled(page); await a2Stable(page)
+    const initial = await a2ControlsFit(page)
+    await a2Stable(page); expect(await a2Geometry(page)).toEqual(initial)
+    expect(initial.frame.width).toBe(width >= 850 ? width - 224 : width)
+    expect(initial.frame.x).toBe(width >= 850 ? 224 : 0)
+    expect(initial.header.height).toBe(width >= 850 ? 76 : 61)
+    expect(initial.list.x - initial.main.x).toBe(width >= 750 ? 27 : 14)
+    if (width >= 850) {
+      expect(initial.sidebar).toMatchObject({ x: 0, y: 0, width: 224, height: 900, position: 'fixed' })
+    } else { expect(initial.sidebar).toBeNull(); await expect(page.getByRole('dialog')).toHaveCount(0) }
+    if (width >= 1280) {
+      expect((await page.getByRole('searchbox', { name: copy.search, exact: true }).boundingBox())!.width).toBe(width === 1440 ? 332 : 275)
+      expect(new Set(initial.controls.map(control => control.y)).size).toBe(1)
+      expect(initial.toolbar.height).toBe(73) // 40px controls + 32px padding + border
+    }
+    const trigger = page.getByRole('button', { name: label, exact: true })
+    await expect(trigger).toBeVisible()
+    await expect(list(page).locator('[data-list-slot="toolbar"]').getByRole('checkbox')).toHaveCount(0)
+    await a2Capture(page, language, 'closed-top')
+    await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight)); await a2Stable(page)
+    const end = await a2Geometry(page)
+    if (width >= 850) expect(end.sidebar).toEqual(initial.sidebar)
+    expect(end.scrollY).toBeGreaterThan(0)
+    await a2Capture(page, language, 'closed-end')
+    await page.evaluate(() => window.scrollTo(0, 0)); await a2Capture(page, language, 'default-content', true)
+    await trigger.focus(); await page.keyboard.press('Enter')
+    const choices = page.getByRole('dialog', { name: label, exact: true })
+    const checkbox = choices.getByRole('checkbox').first()
+    await expect(choices.getByRole('checkbox')).toHaveCount(4)
+    await expect(checkbox).toBeFocused()
+    await page.keyboard.press('Space')
+    await expect(checkbox).toBeChecked()
+    await expect.poll(() => new URL(page.url()).searchParams.get('filters')).toContain('active')
+    await expect.poll(() => ids(page)).toEqual(expectedRows({ status: 'active' }).slice(0, 10).map(row => row.id))
+    await page.keyboard.press('Escape'); await expect(trigger).toBeFocused()
+    await a2ControlsFit(page); await a2Capture(page, language, 'enum-closed-checked')
+    await page.keyboard.press('Enter'); await expect(checkbox).toBeChecked()
+    await a2Capture(page, language, 'enum-open-checked')
+    const popup = (await choices.boundingBox())!
+    expect(popup.x).toBeGreaterThanOrEqual(0); expect(popup.x + popup.width).toBeLessThanOrEqual(width)
+    await page.keyboard.press('Tab'); await expect(choices.getByRole('checkbox').nth(1)).toBeFocused()
+    await page.keyboard.press('Shift+Tab'); await page.keyboard.press('Space')
+    await expect(checkbox).not.toBeChecked()
+    await expect.poll(() => new URL(page.url()).searchParams.has('filters')).toBe(false)
+    await expect.poll(() => ids(page)).toEqual(expectedRows().slice(0, 10).map(row => row.id))
+    await page.keyboard.press('Escape'); await expect(choices).toBeHidden(); await expect(trigger).toBeFocused()
+    await page.keyboard.press('Space'); await expect(choices).toBeVisible()
+    await page.keyboard.press('Escape'); await expect(trigger).toBeFocused()
+    await page.getByRole('button', { name: copy.sortAndFilter, exact: true }).click()
+    await expect(page.getByRole('group', { name: copy.sortAndFilter, exact: true })).toBeVisible()
+    await a2ControlsFit(page); await a2Capture(page, language, 'filters-content', true)
+    await page.getByRole('button', { name: copy.sortAndFilter, exact: true }).click()
+    const display = page.getByRole('button', { name: copy.listDisplay, exact: true })
+    expect(await display.evaluate(node => getComputedStyle(node).backgroundColor)).toBe('rgba(0, 0, 0, 0)')
+    await display.click(); await expect(page.getByRole('dialog', { name: copy.listDisplayHeading, exact: true })).toBeVisible()
+    await a2Capture(page, language, 'columns-content', true)
+    await page.keyboard.press('Escape'); await expect(display).toBeFocused()
+    await expect(page.getByRole('region', { name: copy.savedViews, exact: true }).locator('button[aria-haspopup="dialog"]')).toHaveText('')
+  })
+}
+for (const language of ['en', 'cs'] as const) for (const reducedMotion of ['reduce', 'no-preference'] as const) {
+  test(`A2: ${language} mobile navigation ${reducedMotion} and 200 percent long labels`, async ({ page, context }) => {
+    const copy = language === 'cs' ? cs : en
+    await page.setViewportSize({ width: 390, height: 900 }); await page.emulateMedia({ reducedMotion })
+    await context.addInitScript(locale => localStorage.setItem('console-language', locale), language)
+    await a2Fixture(page, language, true)
+    await gotoSDK(page, route); await settled(page); await a2Stable(page)
+    await expect(page.locator('[data-slot="sidebar"][data-mobile="true"]')).toHaveCount(0)
+    const trigger = page.getByRole('button', { name: copy.openNavigation, exact: true })
+    await trigger.click(); await a2Stable(page)
+    const navigation = page.getByRole('dialog').filter({ has: page.getByRole('navigation') })
+    await expect(navigation).toBeVisible(); await a2Capture(page, language, `navigation-${reducedMotion}`)
+    await page.keyboard.press('Escape'); await expect(navigation).toBeHidden(); await expect(trigger).toBeFocused()
+    await trigger.click(); await navigation.getByRole('link').filter({ hasText: 'Team' }).first().click()
+    await expect(navigation).toBeHidden(); await expect(page.locator('main h1')).toBeFocused()
+    await gotoSDK(page, route); await settled(page)
+    await page.evaluate(() => { document.documentElement.style.fontSize = '32px' })
+    await a2Stable(page); await a2ControlsFit(page)
+    await a2Capture(page, language, `long-labels-200-${reducedMotion}`)
+  })
+}
+
+for (const language of ['en', 'cs'] as const) for (const width of [1440, 390]) for (const state of ['permission-reduced', 'loading', 'error', 'empty'] as const) {
+  test(`A2: ${language} ${width} ${state} affected controls`, async ({ page, context }) => {
+    const copy = language === 'cs' ? cs : en
+    await page.setViewportSize({ width, height: 900 })
+    await context.addInitScript(locale => localStorage.setItem('console-language', locale), language)
+    await a2Fixture(page, language)
+    let release: (() => void) | undefined
+    const hold = new Promise<void>(resolve => { release = resolve })
+    if (state === 'permission-reduced') await context.setExtraHTTPHeaders({ Authorization: 'Bearer list-v2-staff-session' })
+    else if (state === 'loading' || state === 'error') await page.route('**/query', async intercepted => {
+      const query = intercepted.request().postDataJSON()
+      if (query.entity !== 'worker' || !query.includeTotal) return intercepted.continue()
+      if (state === 'loading') await hold
+      await intercepted.fulfill({ status: 503, contentType: 'application/json', body: '{"error":"list_v2_injected_failure"}' })
+    })
+    try {
+      await gotoSDK(page, route)
+      if (state === 'permission-reduced') {
+        await settled(page)
+        const allowed = expectedRows({ actor: 'staff' })
+        await expect.poll(() => ids(page)).toEqual(allowed.slice(0, 10).map(row => row.id))
+        await expect(footer(page).locator('[data-list-range]')).toHaveText(copy.listRangeTotal.replace('{{start}}', '1').replace('{{end}}', '10').replace('{{total}}', String(allowed.length)))
+        await expect(page.getByRole('columnheader', { name: copy.rowAccess, exact: true })).toHaveCount(0)
+        await expect(page.getByRole('button', { name: new RegExp(copy.rowAccessActions) })).toHaveCount(0)
+      } else if (state === 'empty') {
+        await settled(page)
+        await page.getByRole('group', { name: copy.listViews }).getByRole('button', { name: /^Archived workers/ }).click()
+        await expect(list(page).getByRole('heading', { name: copy.noResults, exact: true })).toBeVisible()
+      } else if (state === 'loading') await expect(list(page).locator('[aria-busy="true"]')).toBeVisible()
+      else await expect(list(page).getByText(copy.requestFailed, { exact: true }).first()).toBeVisible()
+      await a2ControlsFit(page); await a2Capture(page, language, state)
+    } finally { release?.(); await page.unrouteAll({ behavior: 'wait' }) }
+  })
+}
