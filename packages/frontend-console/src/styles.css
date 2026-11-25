@@ -173,7 +173,22 @@ body:has([data-slot="list-page"]) [data-list-row-menu] :is([role="menuitem"], [d
 body:has([data-slot="list-page"]) [data-list-menu] { gap: .25rem; padding: .5rem; }
 body:has([data-slot="list-page"]) [data-list-row-menu] [role="menuitem"] { min-height: 2.0625rem; padding: .5625rem .625rem; }
 
-<<<<<<< HEAD
+/* Measured list footer: keep direct-page buttons and exact server totals. */
+.list-page-footer { padding: 15px 20px; font-size: .6875rem; line-height: 1.48; }
+.list-page-footer :is(select, button) { font-size: inherit; line-height: inherit; }
+/* Native select appearance forces Chromium's line-height back to normal. */
+.list-page-footer select {
+  appearance: none;
+  padding-right: 20px;
+  background-image: linear-gradient(45deg, transparent 50%, currentColor 50%), linear-gradient(135deg, currentColor 50%, transparent 50%);
+  background-position: right 9px center, right 5px center;
+  background-size: 4px 4px;
+  background-repeat: no-repeat;
+}
+@media (max-width: 1023px) {
+  .list-page-footer { padding: 14px; flex-direction: column; align-items: stretch; }
+}
+
 /* #318 E1 — existing dashboard widget composition and card presentation. */
 .dashboard-cards { display: grid; gap: 16px; min-width: 0; container-type: inline-size; }
 [data-dashboard-row] { display: grid; grid-template-columns: minmax(0, 1fr); align-items: start; gap: 16px; min-width: 0; }
@@ -191,20 +206,3 @@ body:has([data-slot="list-page"]) [data-list-row-menu] [role="menuitem"] { min-h
   .dashboard-card > [data-slot="card-header"], .dashboard-card > [data-slot="card-content"] { padding: 18px; }
 }
 /* End #318 E1. */
-=======
-/* Measured list footer: keep direct-page buttons and exact server totals. */
-.list-page-footer { padding: 15px 20px; font-size: .6875rem; line-height: 1.48; }
-.list-page-footer :is(select, button) { font-size: inherit; line-height: inherit; }
-/* Native select appearance forces Chromium's line-height back to normal. */
-.list-page-footer select {
-  appearance: none;
-  padding-right: 20px;
-  background-image: linear-gradient(45deg, transparent 50%, currentColor 50%), linear-gradient(135deg, currentColor 50%, transparent 50%);
-  background-position: right 9px center, right 5px center;
-  background-size: 4px 4px;
-  background-repeat: no-repeat;
-}
-@media (max-width: 1023px) {
-  .list-page-footer { padding: 14px; flex-direction: column; align-items: stretch; }
-}
->>>>>>> bfef820376aad580d19b2ace607a92c92bf5fc9c
