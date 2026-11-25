@@ -275,13 +275,16 @@ body:has([data-slot="list-page"]) [data-list-row-menu] [role="menuitem"] { min-h
 .dashboard-priority { display: grid; gap: 16px; min-width: 0; align-items: start; }
 .dashboard-actions { min-width: 0; }
 .dashboard-action-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr)); gap: 14px; min-width: 0; }
-.dashboard-action-grid > div { display: flex; min-width: 0; }
-.dashboard-action-grid .dashboard-action { display: flex; flex-direction: row; align-items: start; justify-content: start; gap: 14px; width: 100%; height: auto; min-height: 150px; padding: 18px; border-radius: 18px; white-space: normal; text-align: left; font-weight: 400; }
+.dashboard-action-grid > div { display: flex; min-width: 0; container-type: inline-size; }
+.dashboard-action-grid .dashboard-action { display: flex; flex-direction: column; align-items: start; justify-content: start; gap: 14px; width: 100%; height: auto; min-height: 150px; padding: 18px; border-radius: 18px; white-space: normal; text-align: left; font-weight: 400; }
 .dashboard-action-icon { display: flex; align-items: center; justify-content: center; flex: 0 0 50px; width: 50px; height: 50px; border-radius: 14px; background: color-mix(in srgb, currentColor 10%, transparent); }
 .dashboard-action-icon > svg { width: 24px; height: 24px; flex-shrink: 0; }
 .dashboard-action-copy { display: grid; min-width: 0; gap: 8px; overflow-wrap: anywhere; }
 .dashboard-action-title { font-size: 24px; line-height: 1.12; }
 .dashboard-action-description { font-size: 13px; line-height: 1.45; opacity: .8; }
+@container (min-width: 250px) {
+  .dashboard-action-grid .dashboard-action { flex-direction: row; }
+}
 @container dashboard-work (min-width: 760px) {
   .dashboard-priority { grid-template-columns: minmax(0, 1.25fr) minmax(0, 1.9fr); }
 }
