@@ -103,13 +103,13 @@ export function stateFromSearch(search: ListSearch, model: Model, entity: string
     if (!predicate || filters.some(item => item.field === filter.field)) { dropped = true; continue }
     filters.push({ field: filter.field, predicate })
   }
-  if (search.rowAccess && model.entities[entity].rowInvitations && caps.resources?.['invitations.read'] === true) state.rowAccess = search.rowAccess
+  if (search.rowAccess && model.entities[entity].rowAccess && caps.resources?.['invitations.read'] === true) state.rowAccess = search.rowAccess
   else if (search.rowAccess) dropped = true
   // useGeneratedList follows this definition pruning with fresh selected-ID reconciliation.
   state.userFilters = filters
   const viewId = search.view ?? state.view
   const view = viewId === 'all' ? undefined : model.entities[entity].list?.views?.find(view => view.id === viewId)
-  if (viewId && viewId !== 'all' && (!view || !readableWhere(view.where, model, entity, caps) || !!view.rowAccess && (!model.entities[entity].rowInvitations || caps.resources?.['invitations.read'] !== true))) { dropped ||= !!search.view; state.view = 'all' }
+  if (viewId && viewId !== 'all' && (!view || !readableWhere(view.where, model, entity, caps) || !!view.rowAccess && (!model.entities[entity].rowAccess || caps.resources?.['invitations.read'] !== true))) { dropped ||= !!search.view; state.view = 'all' }
   else if (viewId) state.view = viewId
 
   state.sort = unavailableSort ? null : sort
@@ -138,13 +138,13 @@ export function toQueryDocument(state: ListState, model: Model, entity: string, 
     return { [filter.field]: mapping?.toPredicate(mapping.fromPredicate(filter.predicate), true) ?? filter.predicate }
   })
   const view = model.entities[entity].list?.views?.find(view => view.id === state.view)
-  const allowedView = view && readableWhere(view.where, model, entity, caps) && (!view.rowAccess || model.entities[entity].rowInvitations && caps.resources?.['invitations.read'] === true) ? view : undefined
+  const allowedView = view && readableWhere(view.where, model, entity, caps) && (!view.rowAccess || model.entities[entity].rowAccess && caps.resources?.['invitations.read'] === true) ? view : undefined
   if (allowedView && state.offset === undefined) conditions.unshift(allowedView.where)
   const rowAccess = state.offset === undefined ? allowedView?.rowAccess ?? state.rowAccess : state.rowAccess
   const strings = listSearchableFields(model, entity, caps, embedded && state.presentation !== 'calendar' ? 'embedded' : state.presentation)
   const fields = state.sort ? sortFields(model, entity, caps, state.sort.key) : []
   const labels = labelColumns(model, entity, caps).filter(key => listColumnFields(model, entity).includes(key) && readableListField(model, entity, caps, key))
-  const query: ReadQuery = { entity, ...(state.offset !== undefined ? { offset: state.offset, includeTotal: true, includeViewTotals: true, ...(allowedView ? { view: allowedView.id } : {}) } : {}), ...(rowAccess && model.entities[entity].rowInvitations && caps.resources?.['invitations.read'] === true ? { rowAccess } : {}), ...(state.search.trim() && strings.length ? { search: { text: state.search.trim(), fields: strings, locale } } : {}), select: select.length ? select : ['id'], ...(labels.length ? { labels } : {}), limit: Math.min(pageSizes.includes(state.limit as any) ? state.limit : 30, model.limits.root),
+  const query: ReadQuery = { entity, ...(state.offset !== undefined ? { offset: state.offset, includeTotal: true, includeViewTotals: true, ...(allowedView ? { view: allowedView.id } : {}) } : {}), ...(rowAccess && model.entities[entity].rowAccess && caps.resources?.['invitations.read'] === true ? { rowAccess } : {}), ...(state.search.trim() && strings.length ? { search: { text: state.search.trim(), fields: strings, locale } } : {}), select: select.length ? select : ['id'], ...(labels.length ? { labels } : {}), limit: Math.min(pageSizes.includes(state.limit as any) ? state.limit : 30, model.limits.root),
     ...(conditions.length ? { where: { and: conditions } } : {}),
     ...(Object.keys(labelWhere).length ? { labelWhere } : {}),
     orderBy: (fields.length ? fields : ['id']).map(field => ({ field, dir: fields.length ? state.sort!.direction : 'asc', ...(labelColumns(model, entity, caps).includes(field) ? { label: true } : {}) })),
