@@ -62,7 +62,9 @@ function ActionScope({ orgId, pageId, data, blocked, children }: {
       if (!item || !page && !item.entity) return null
       return <Button {...props} asChild variant={action.primary ? 'default' : 'outline'}><Link to={'/o/' + encodeURIComponent(orgId) + (page?.path ?? '/e/' + item.entity)} search={item.view ? { view: item.view } : {}}>{content}</Link></Button>
     }
-    return <Button {...props} variant={action.primary ? 'default' : 'outline'} disabled={blocked} onClick={() => open(action)}>{content}</Button>
+    // Keep the return-focus target focusable during authority refreshes, as on
+    // generated lists. The existing form and the write boundary block submits.
+    return <Button {...props} variant={action.primary ? 'default' : 'outline'} onClick={() => open(action)}>{content}</Button>
   }
   const primary = actions.find(action => action.primary)
   const target = selection?.target

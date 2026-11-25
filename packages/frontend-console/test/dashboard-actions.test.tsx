@@ -31,12 +31,13 @@ function document(kind: Kind = 'crud', actions?: ConsolePageAction[]): ConsoleMo
 async function setup(kind: Kind = 'crud', initial = document(kind)) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity }, mutations: { retry: false } } })
   let next = initial, status = 200, release: (() => void) | undefined, gate: Promise<void> | undefined
+  let releaseAuthority: (() => void) | undefined, authorityGate: Promise<void> | undefined
   const writes: { path: string; body: any; headers: any }[] = []
   client.setQueryData(['console-model', 'org'], adaptConsoleModel(next))
   client.setQueryData(['organization', 'org'], { user: { id: 'owner' }, memberships: [{ organization_id: 'org' }] })
   vi.stubGlobal('fetch', vi.fn(async (path: string, options?: RequestInit) => {
     if (path === '/me?scope=organization') return Response.json(client.getQueryData(['organization', 'org']))
-    if (path.endsWith('/console-model')) return Response.json(next)
+    if (path.endsWith('/console-model')) { await authorityGate; return Response.json(next) }
     if (path.includes('/console-pages/')) return Response.json({ id: 'summary', label: 'Summary', widgets: [] })
     if (path === '/query') return Response.json({ data: [] })
     if (path.startsWith('/api/') || path.startsWith('/commands/')) {
@@ -56,7 +57,7 @@ async function setup(kind: Kind = 'crud', initial = document(kind)) {
   await screen.findByRole('heading', { name: 'Summary' })
   await waitFor(() => expect(client.isFetching()).toBe(0))
   const update = async (value: ConsoleModelContract) => { next = value; await act(async () => { client.setQueryData(['console-model', 'org'], adaptConsoleModel(next)) }) }
-  return { client, router, view, writes, update, initial, hold: () => { gate = new Promise(resolve => { release = resolve }) }, release: () => release?.(), status: (value: number) => { status = value }, cleanup: () => { release?.(); view.unmount(); client.clear() } }
+  return { client, router, view, writes, update, initial, holdAuthority: () => { authorityGate = new Promise(resolve => { releaseAuthority = resolve }) }, releaseAuthority: () => releaseAuthority?.(), hold: () => { gate = new Promise(resolve => { release = resolve }) }, release: () => release?.(), status: (value: number) => { status = value }, cleanup: () => { release?.(); releaseAuthority?.(); view.unmount(); client.clear() } }
 }
 const region = () => screen.getByRole('region', { name: 'Quick actions' })
 const start = () => within(region()).getByRole('button', { name: /Start work/ })
@@ -154,5 +155,23 @@ it('does not promote a secondary after primary denial and keeps long labels inta
     expect(within(region()).getByRole('link', { name: label })).toBeTruthy()
     expect(screen.getAllByRole('link', { name: label })).toHaveLength(1)
     expect(screen.queryByRole('button', { name: /Start work/ })).toBeNull()
+  } finally { test.cleanup() }
+})
+
+it('blocks submits during an authority refresh while preserving the cancel focus target', async () => {
+  const test = await setup(), user = userEvent.setup()
+  try {
+    const trigger = start(); await user.click(trigger)
+    const input = await screen.findByRole('textbox', { name: 'Name' }), form = input.closest('form')!
+    fireEvent.change(input, { target: { value: 'Valid draft' } })
+    test.holdAuthority()
+    let refresh: Promise<void>
+    await act(async () => { refresh = test.client.refetchQueries({ queryKey: ['console-model', 'org'] }) })
+    fireEvent.submit(form); await act(async () => {}); expect(test.writes).toHaveLength(0)
+    await user.keyboard('{Escape}')
+    await user.click(screen.getByRole('button', { name: 'Discard', exact: true }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    await waitFor(() => expect(globalThis.document.activeElement).toBe(trigger))
+    await act(async () => { test.releaseAuthority(); await refresh! })
   } finally { test.cleanup() }
 })
