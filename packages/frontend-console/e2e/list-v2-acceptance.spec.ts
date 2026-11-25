@@ -2,6 +2,8 @@ import { execFileSync } from 'node:child_process'
 const provenanceSHA = () => execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()
 import { test, expect, type Page, type Locator, type CDPSession } from '@playwright/test'
 import setup from './runtime/setup'
+let fieldLabels: Record<string, Record<string, string>>
+const fieldCaption = (field: string, language = 'en') => fieldLabels[language][`field_${field}_worker`]
 import { observePreview500, assertNoPreview500 } from './list-v2-http'
 import { observeSDKStylesheet, sdkStylesheetReady, gotoSDK, reloadSDK } from './list-v2-readiness'
 import { layoutDiagnostics, attachLayoutDiagnostics } from './list-v2-layout-diagnostics'
@@ -16,7 +18,7 @@ const route = '/o/org-a/e/worker'
 const labels: Record<string, string> = { all: 'All workers', active: 'Active workers', inactive: 'Inactive workers', empty: 'Empty workers', invited: 'Pending invitations' }
 test.beforeAll(async ({ browser }) => { stop = await setup({ worker: 'list-v2-worker.ts', seed: 'list-v2-seed.ts' }); provenance(browser.version()) })
 test.afterAll(async () => { await stop?.() })
-test.beforeEach(async ({ context, page }) => { observations = []; observeSDKStylesheet(page); observePreview500(context); page.on('response', response => { if (new URL(response.url()).pathname === '/query') void response.json().then(body => observations.push({ kind: 'query', request: response.request().postDataJSON(), status: response.status(), response: body })).catch(() => {}) }); await context.addInitScript(() => localStorage.setItem('console-language', 'en')) })
+test.beforeEach(async ({ context, page }) => { fieldLabels = (await (await context.request.get('/o/org-a/console-model')).json()).model.enumLabels; observations = []; observeSDKStylesheet(page); observePreview500(context); page.on('response', response => { if (new URL(response.url()).pathname === '/query') void response.json().then(body => observations.push({ kind: 'query', request: response.request().postDataJSON(), status: response.status(), response: body })).catch(() => {}) }); await context.addInitScript(() => localStorage.setItem('console-language', 'en')) })
 test.afterEach(async ({ page, context }, info) => { observations.push({ kind: 'final', url: page.url(), ids: await ids(page).catch(() => []), footer: await footer(page).textContent().catch(() => null), tabs: await list(page).locator('[data-list-slot="tabs"]').textContent().catch(() => null) }); record('functionalEvidence', info.title, observations); try { await assertNoPreview500(context, info); result(info) } catch (error) { result(info, error); throw error } })
 const list = (page: Page) => page.locator('[data-slot="list-page"]')
 const footer = (page: Page) => list(page).locator('footer')
@@ -230,7 +232,7 @@ test('G1: desktop configured access column fits beside separate Actions without 
   // Exercise the original fitting layout through real display preferences.
   await page.getByRole('button', { name: en.listDisplay, exact: true }).click()
   const display = page.getByRole('dialog', { name: en.listDisplayHeading })
-  for (const name of ['Amount', 'Due on', 'Approved', 'Description']) await display.getByRole('checkbox', { name, exact: true }).click()
+  for (const name of ['Amount', 'Due on', fieldCaption('approved'), 'Description']) await display.getByRole('checkbox', { name, exact: true }).click()
   await page.keyboard.press('Escape')
   await expect(display).toBeHidden()
   const headers = list(page).getByRole('columnheader')
@@ -1572,7 +1574,7 @@ async function a2ControlsFit(page: Page) {
 }
 for (const language of ['en', 'cs'] as const) for (const width of [1440, 1280, 900, 390]) {
   test(`A2: ${language} ${width} shell toolbar enum and content matrix`, async ({ page, context }) => {
-    const copy = language === 'cs' ? cs : en, label = 'Status'
+    const copy = language === 'cs' ? cs : en, label = fieldCaption('status', language)
     await page.setViewportSize({ width, height: 900 })
     await context.addInitScript(locale => localStorage.setItem('console-language', locale), language)
     await gotoSDK(page, route); await settled(page); await a2Stable(page)
@@ -1760,8 +1762,8 @@ for (const language of ['en', 'cs'] as const) for (const width of [1440, 1280, 9
     }
     // Every enum value is configured, seeded and accepted by the actual endpoint.
     for (const value of ['active', 'inactive', 'archived', 'pending']) {
-      await page.getByRole('button', { name: 'Status', exact: true }).click()
-      const dialog = page.getByRole('dialog', { name: 'Status', exact: true })
+      await page.getByRole('button', { name: fieldCaption('status', language), exact: true }).click()
+      const dialog = page.getByRole('dialog', { name: fieldCaption('status', language), exact: true })
       await expect(dialog.getByRole('checkbox')).toHaveCount(4)
       const choice = dialog.getByRole('checkbox', { name: value, exact: true })
       await choice.click(); await expect(choice).toBeChecked()
@@ -1769,7 +1771,7 @@ for (const language of ['en', 'cs'] as const) for (const width of [1440, 1280, 9
       if (value === 'active') {
         await a3TopEnd(page, language, 'enum-open-checked')
         await page.keyboard.press('Escape'); await a3TopEnd(page, language, 'enum-closed-checked')
-        await page.getByRole('button', { name: 'Status', exact: true }).click()
+        await page.getByRole('button', { name: fieldCaption('status', language), exact: true }).click()
       }
       await choice.click(); await page.keyboard.press('Escape')
       await expect.poll(() => ids(page)).toEqual(workers.slice(0, 10).map(row => row.id))
@@ -1784,7 +1786,7 @@ for (const language of ['en', 'cs'] as const) for (const width of [1440, 1280, 9
           const group = page.getByRole('group', { name: copy.sortAndFilter, exact: true })
           if (field === 'amount') { await group.getByRole('group', { name: 'Amount', exact: true }).getByLabel(copy.filterFrom, { exact: true }).fill('200'); expected = workers.filter(row => row.amount >= 200) }
           else if (field === 'due_on') { await group.getByRole('group', { name: 'Due date', exact: true }).getByLabel(copy.filterSingle, { exact: true }).fill('2026-02-10'); expected = workers.filter(row => row.due_on.startsWith('2026-02-10')) }
-          else { await group.getByRole('group', { name: 'Approved', exact: true }).getByRole('combobox').click(); await page.getByRole('option', { name: copy.no, exact: true }).click(); expected = workers.filter(row => !row.approved) }
+          else { await group.getByRole('group', { name: fieldCaption('approved', language), exact: true }).getByRole('combobox').click(); await page.getByRole('option', { name: copy.no, exact: true }).click(); expected = workers.filter(row => !row.approved) }
           await group.getByRole('button', { name: copy.applyFilter, exact: true }).click()
         }
         await verify(expected, field)

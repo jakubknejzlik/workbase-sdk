@@ -1,4 +1,8 @@
 {
+  "filterOperator": "Operátor",
+  "filterEquals": "Rovná se",
+  "filterBetween": "Mezi",
+
   "listIdentifierCopy": "Kopírovat identifikátor",
   "listIdentifierCopied": "Identifikátor zkopírován",
   "listIdentifierCopyFailed": "Identifikátor se nepodařilo zkopírovat",

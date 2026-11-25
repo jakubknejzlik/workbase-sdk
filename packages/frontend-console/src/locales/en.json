@@ -1,4 +1,8 @@
 {
+  "filterOperator": "Operator",
+  "filterEquals": "Equals",
+  "filterBetween": "Between",
+
   "listIdentifierCopy": "Copy identifier",
   "listIdentifierCopied": "Identifier copied",
   "listIdentifierCopyFailed": "Could not copy identifier",
