@@ -139,7 +139,7 @@ for (const language of ['en', 'cs']) for (const width of [1440, 1280, 900, 390])
     }
     const create = language === 'cs' ? 'Vytvořit vzorek' : 'Create specimen'
     const register = language === 'cs' ? 'Zaregistrovat klienta' : 'Register client'
-    const process = language === 'cs' ? 'Zpracovat vzorky' : 'Process specimens'
+    const processLabel = language === 'cs' ? 'Zpracovat vzorky' : 'Process specimens'
     const browse = language === 'cs' ? 'Procházet vzorky' : 'Browse specimens'
     try {
       for (const [state, count] of [['zero', 0], ['one', 1], ['multiple', 4], ['long', 4], ['denied', 0]] as const) {
@@ -181,7 +181,7 @@ for (const language of ['en', 'cs']) for (const width of [1440, 1280, 900, 390])
       await expect(dialog).toBeVisible()
       await page.keyboard.press('Escape')
       await expect(trigger).toBeFocused()
-      for (const [label, path] of [[create, '/api/specimens'], [register, '/commands/clients/register'], [process, '/commands/specimens/process']]) {
+      for (const [label, path] of [[create, '/api/specimens'], [register, '/commands/clients/register'], [processLabel, '/commands/specimens/process']]) {
         await region.getByRole('button', { name: label, exact: false }).click()
         await expect(dialog).toBeVisible()
         // Fill only visible generated controls; actual API validation and mutation run in D1.
@@ -192,7 +192,7 @@ for (const language of ['en', 'cs']) for (const width of [1440, 1280, 900, 390])
         await expect(dialog).toHaveCount(0)
         await expect(region.getByRole('button', { name: label, exact: false })).toBeFocused()
       }
-      await region.getByRole('button', { name: process, exact: false }).click()
+      await region.getByRole('button', { name: processLabel, exact: false }).click()
       await dialog.getByRole('textbox').first().fill('fail')
       const failure = page.waitForResponse(response => response.url().endsWith('/commands/specimens/process') && response.request().method() === 'POST')
       await dialog.locator('button[type="submit"]').click()

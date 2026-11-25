@@ -31,7 +31,7 @@ function WidgetRecords({ widget, caption, entity, model, value }: {
     meta: { fixedWidth: false, align: model && entity && model.entities[entity] ? listColumnAlignment(model, entity, field) : 'left', widthClass: index === 0 ? 'w-56' : 'w-40' },
     cell: ({ row }: { row: { original: Record<string, any> } }) => <div className="whitespace-normal break-words">{value(row.original, field)}</div>,
   }))
-  return <TablePresentationContext.Provider value={{ ...presentation, tableClass: 'w-full', listV2: true, scrollTabStop: 'overflow', scrollRegion: t('listScrollRegion'), scrollHint: t('listScrollHint') }}>
+  return <TablePresentationContext.Provider value={{ ...presentation, tableClass: 'w-full', listV2: true, scrollTabStop: 'overflow', scrollRegion: `${caption} — ${t('listScrollRegion')}`, scrollHint: t('listScrollHint') }}>
     <div data-list-density="comfortable" className="min-w-0 max-w-full"><StaticDataTable data={widget.data} columns={columns} label={caption} /></div>
   </TablePresentationContext.Provider>
 }
