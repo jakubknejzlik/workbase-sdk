@@ -271,6 +271,7 @@ body:has([data-slot="list-page"]) [data-list-row-menu] [role="menuitem"] { min-h
 /* End #317 s5 audit. */
 
 /* E3 dashboard actions */
+.dashboard-header-action { height: auto; min-height: 36px; max-width: 100%; white-space: normal; overflow-wrap: anywhere; text-align: left; }
 .dashboard-work { container-type: inline-size; container-name: dashboard-work; display: grid; gap: 16px; min-width: 0; }
 .dashboard-priority { display: grid; gap: 16px; min-width: 0; align-items: start; }
 .dashboard-actions { min-width: 0; }

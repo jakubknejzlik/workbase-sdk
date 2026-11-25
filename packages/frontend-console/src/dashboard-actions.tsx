@@ -52,7 +52,7 @@ function ActionScope({ orgId, pageId, data, blocked, children }: {
   const open = (action: ConsolePageAction) => { trigger.current = document.activeElement as HTMLElement; setSelected(action) }
   const label = (key: string) => t(key, { defaultValue: key })
   const control = (action: ConsolePageAction, card = false) => {
-    const className = card ? 'dashboard-action' : undefined
+    const className = card ? 'dashboard-action' : 'dashboard-header-action'
     const content = card ? <><span className="dashboard-action-icon" aria-hidden="true"><NavigationIconView name={action.icon ?? 'Database'} /></span><span className="dashboard-action-copy"><span className="dashboard-action-title">{label(action.label)}</span>{action.description && <span className="dashboard-action-description">{label(action.description)}</span>}</span></> : label(action.label)
     const props = { className, 'data-primary': action.primary ? 'true' : undefined }
     const target = action.target
