@@ -656,5 +656,13 @@
   "listS3EmptyPageHeading": "No records on this page",
   "listS3EmptyPageHelp": "Other pages may contain records. Use the page controls to return to a previous page.",
   "listS3CreateHelp": "Create a record to get started.",
-  "listS3EmptyViewHelp": "There are no records in this view. Records may be available in another view."
+  "listS3EmptyViewHelp": "There are no records in this view. Records may be available in another view.",
+  "membersS4NoMatches": "No matching people",
+  "membersS4SearchHelp": "Try another name or email, or clear the search to see this list.",
+  "membersS4HistoryHelp": "Accepted, cancelled, declined and expired invitations will appear here. Pending invitations are shown in Members.",
+  "membersS4InviteHelp": "Invite someone to give them access to this organization.",
+  "membersS4EmptyHelp": "Active members and pending invitations will appear here when available.",
+  "membersS4SearchFields": "Search names and email addresses in this list.",
+  "membersS4RequestFailed": "Could not load this list",
+  "membersS4RetryHelp": "Try again to reload this list. Your search will be kept."
 }

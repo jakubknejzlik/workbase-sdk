@@ -1,7 +1,6 @@
 import { MembersScreen } from './members'
 
-// Workbase-only closed invitations. Pending owner decision: remove this wrapper,
-// its route and the Members history link if history is dropped.
+// Closed invitations use their own authorized collection in the shared Members list.
 export function InvitationHistory({ orgId }: { orgId: string }) {
   return <MembersScreen orgId={orgId} history />
 }
