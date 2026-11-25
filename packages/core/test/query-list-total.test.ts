@@ -12,7 +12,7 @@ import type { Scope } from '../src/types'
 import { executeQuery } from '../src/query/executor'
 import { validateQuery, querySchema } from '../src/query/schema'
 import { QUERY_LIMITS as L } from '../src/query/limits'
-import { compileListTotal, compileRoot } from '../src/query/compiler'
+import { compileListTotal, compileRoot, listTotalReferenceCost } from '../src/query/compiler'
 import { resolveActor, requireScope } from '../src/authorization'
 import { setup, insertDomain, runtime } from '@workbasehq/test-support/helpers'
 
@@ -299,4 +299,49 @@ it('wide totals still reject a view filter that genuinely demands many ref probe
   await setup(configured)
   const actor = await wideScope(current)
   expect(() => validateQuery(current, actor, wideInput)).toThrowError(expect.objectContaining({ code: 'query_too_expensive', cost: expect.objectContaining({ exists: 35, statements: 7 }) }))
+})
+
+function repeatedVisibilityFixture() {
+  const { configured: seed } = wideTotalsFixture(7, 3)
+  const configured = defineInstance({ ...seed, entities: { ...seed.entities, tasks: { ...seed.entities.tasks,
+    fields: { ...seed.entities.tasks.fields, chosen: { type: 'ref', entity: 'people', computed: 'ref_0' } },
+  } } })
+  return { configured, current: new KernelRegistry(configured) }
+}
+it('repeated visibility rejects computed reference totals above the EXISTS budget', async () => {
+  const { configured, current } = repeatedVisibilityFixture()
+  await setup(configured)
+  const actor = await wideScope(current)
+  expect(() => validateQuery(current, actor, { entity: 'tasks', select: ['id'], limit: 1,
+    where: { chosen: { isNull: false } }, includeTotal: true, includeViewTotals: true,
+  })).toThrowError(expect.objectContaining({ code: 'query_too_expensive', cost: expect.objectContaining({ exists: 28, statements: 5 }) }))
+})
+it.each(['owner', 'viewer'])('repeated visibility estimates cover each emitted count and aggregate for %s', async role => {
+  const { configured, current: original } = repeatedVisibilityFixture()
+  const policy: WorkbasePlugin = { name: 'repeated_visibility_policy', version: '1',
+    tableFilter(entity, actor): TableFilter {
+      return actor.role === 'viewer' && entity === 'tasks'
+        ? { kind: 'where', predicate: { status: { ne: 'denied' } } }
+        : { kind: 'all' }
+    },
+  }
+  const current = new KernelRegistry(original.config, { plugins: [...configured.plugins!, policy] })
+  await setup(configured)
+  const actor = await wideScope(current, role)
+  const emitted = (sql: string) => (sql.match(/\bEXISTS\s*\(/gi) ?? []).length
+  for (const where of [undefined, { ref_0: { isNull: false } }, { chosen: { isNull: false } }, { not: { chosen: { isNull: true } } }]) {
+    const input = { entity: 'tasks', select: ['id'], limit: 1, where, includeTotal: true, includeViewTotals: true }
+    // Compile all statements even when admission correctly rejects the request.
+    const variants = [input, ...configured.ui!.entities!.tasks.list!.views!.map(view => ({ ...input, view: view.id }))]
+    const counts = variants.map(variant => compileListTotal(current, actor, variant))
+    const estimates = variants.map(variant => listTotalReferenceCost(current, actor, variant))
+    counts.forEach((statement, i) => expect(estimates[i]).toBeGreaterThanOrEqual(emitted(statement.sql)))
+    let cost
+    try { cost = validateQuery(current, actor, input).cost } catch (error) {
+      expect(error).toMatchObject({ code: 'query_too_expensive' })
+      cost = (error as { cost: { exists: number; statements: number } }).cost
+    }
+    const actual = emitted(compileRoot(current, actor, input).sql) + counts.reduce((sum, statement) => sum + emitted(statement.sql), 0)
+    expect(cost.exists).toBeGreaterThanOrEqual(actual)
+  }
 })

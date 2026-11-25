@@ -135,7 +135,17 @@ const numberedSQLite: ISQLFlavor = Object.assign(Object.create(Q.flavors.sqlite)
     return ['YEAR', 'MONTH'].includes(args[0].name) ? `CAST(${sql} AS INTEGER)` : sql
   },
 })
-/** One visibility check per readable FK in the scoped source, shared by all uses. */
+/** Cached visibility ASTs can render repeatedly in computed projections. Charge
+ * each occurrence while retaining the existing source/policy table guard.
+ */
+class ReferenceVisibility extends Condition {
+  constructor(private source: SelectQuery, private onRender?: () => void) { super() }
+  toSQL(flavor: ISQLFlavor) {
+    this.onRender?.()
+    return Cond.exists(this.source).toSQL(flavor)
+  }
+}
+/** One visibility AST per readable FK; computed expressions may reuse it. */
 class ForeignKeyValue extends Condition {
   constructor(private column: string | ISequelizable, private visible: Condition) { super() }
   toSQL(flavor: ISQLFlavor) {
@@ -251,7 +261,7 @@ export function assertStatement(statement: Statement, cost?: QueryCost) {
 export function renderStatement(kernel: KernelRegistry, scope: Scope, ast: SelectQuery, cost?: QueryCost, requiredDisplays?: Set<string>, onReferenceVisibility?: () => void): Statement {
   let references = 0
   function scopedTable(entity: string, extra?: (alias: string) => Condition, maskForeignKeys = true, displayRequired = requiredDisplays?.has(entity) ?? true, demand?: ReadonlySet<string>): SelectQuery {
-    if (!maskForeignKeys) { demand = new Set(); onReferenceVisibility?.() }
+    if (!maskForeignKeys) demand = new Set()
     if (!Object.hasOwn(kernel.config.entities, entity)) throw new QueryError('query_invalid')
     // Bounds policy recursion too, before a future policy compiler can introduce cycles.
     if (++references > L.tableReferences) throw new QueryError('query_too_expensive', [], cost)
@@ -268,7 +278,7 @@ export function renderStatement(kernel: KernelRegistry, scope: Scope, ast: Selec
       if (!visible) {
         const target = definition.fields[field].entity!
         visible = kernel.fieldMask(target, scope).includes('id') && kernel.can(scope, target, 'read')
-          ? Cond.exists(scopedTable(target, child => Cond.columnEqual(col(child, 'id'), col(alias, field)), false))
+          ? new ReferenceVisibility(scopedTable(target, child => Cond.columnEqual(col(child, 'id'), col(alias, field)), false), onReferenceVisibility)
           : truth(false)
         foreignKeys.set(field, visible)
       }
@@ -347,7 +357,7 @@ export function renderStatement(kernel: KernelRegistry, scope: Scope, ast: Selec
         // dependencies, including nullable scalar intermediates and joined rows.
         const empty = Cond.and([dependenciesVisible, Cond.isNull(operand)])
         emptyComputedReferences.set(field, empty)
-        const allowed = Cond.exists(scopedTable(definition.fields[field].entity!, child => Cond.equal(col(child, 'id'), operand), false))
+        const allowed = new ReferenceVisibility(scopedTable(definition.fields[field].entity!, child => Cond.equal(col(child, 'id'), operand), false), onReferenceVisibility)
         computedVisibility.set(field, Cond.and([dependenciesVisible, Cond.or([Cond.isNull(operand), allowed])]))
         result = new ForeignKeyValue(operand, Cond.and([dependenciesVisible, allowed]))
       }
@@ -613,7 +623,7 @@ export function listTotalQuery(query: QueryInput): QueryInput {
     ...(query.labelWhere ? { labelWhere: query.labelWhere } : {}),
   }
 }
-/** Measure FK visibility sources through the same per-occurrence demand renderer.
+/** Measure every rendered FK visibility occurrence, including cached conditions.
  * Mandatory policy expansion keeps its existing table-reference accounting.
  */
 export function listTotalReferenceCost(kernel: KernelRegistry, scope: Scope, query: QueryInput, cost?: QueryCost) {
