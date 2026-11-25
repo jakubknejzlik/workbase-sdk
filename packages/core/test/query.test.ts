@@ -13,7 +13,7 @@ import { resolveActor, requireScope } from '../src/authorization'
 import type { Scope } from '../src/types'
 import { executeQuery, type QueryLog } from '../src/query/executor'
 import { validateQuery, querySchema } from '../src/query/schema'
-import { compileRoot, compileInclude, assertStatement } from '../src/query/compiler'
+import { compileRoot, compileListTotal, compileInclude, assertStatement } from '../src/query/compiler'
 import { QUERY_LIMITS as L } from '../src/query/limits'
 import { restQuery } from '../src/query/facade'
 import { ApiError } from '../src/errors'
@@ -517,4 +517,108 @@ it('collision scalar at the relation-depth limit consumes no extra hop; real rel
   expect(() => validateQuery(collision, scope, relation)).toThrowError(expect.objectContaining({ code: 'query_too_expensive' }))
   // Includes always consume a relation hop, even if their name also names a field.
   expect(() => validateQuery(collision, scope, { entity: 'jobs', limit: 1, include: { client_id: { select: ['id'], include: { jobs: { include: { client_id: {} } } } } } })).toThrowError(expect.objectContaining({ code: 'query_too_expensive' }))
+})
+
+// A wide target has six readable refs, each requiring ten policy relations.
+// Its label consumes only id/name; policy_key is intentionally unreadable.
+// Repeated mandatory relations also make duplicate target visibility exceed 64.
+function demandedProjectionFixture(extraRelations = 10) {
+  const entities = {
+    orders: { displayField: 'title', fields: { title: { type: 'string' as const }, customer_id: { type: 'ref' as const, entity: 'customers' }, agent_id: { type: 'ref' as const, entity: 'agents' },
+      ...Object.fromEntries(Array.from({ length: 5 }, (_, i) => [`visibility_${i}`, { type: 'ref' as const, entity: 'agents' }])) } },
+    customers: { displayField: 'name', fields: { name: { type: 'string' as const }, private_value: { type: 'string' as const }, policy_key: { type: 'string' as const },
+      ...Object.fromEntries(Array.from({ length: 6 }, (_, i) => [`extra_${i}`, { type: 'ref' as const, entity: 'auxiliary' }])) } },
+    agents: { displayField: 'name', fields: { name: { type: 'string' as const } } },
+    auxiliary: { displayField: 'policy_key', fields: { policy_key: { type: 'string' as const } } },
+  }
+  const configured = defineInstance({ id: 'demanded_projection', revision: 1, interactive: true,
+    plugins: [identity, localAuth, tenancy, rbac], roles: ['owner', 'dispatcher', 'viewer'], entities,
+    permissions: Object.fromEntries(['owner', 'dispatcher', 'viewer'].map(role => [role,
+      Object.fromEntries(Object.keys(entities).map(entity => [entity, role === 'viewer' && entity === 'customers' ? [] : ['read' as const]]))])),
+    policies: Object.fromEntries(Object.keys(entities).map(entity => [entity, { owner: 'all' as const, dispatcher: 'all' as const, viewer: 'all' as const }])),
+  })
+  const policy: WorkbasePlugin = { name: 'demanded_projection_policy', version: '1',
+    fieldMask(entity, current) {
+      return ['id', 'organization_id', 'created_at', 'updated_at', 'version', ...Object.keys(entities[entity as keyof typeof entities]?.fields ?? {})]
+        .filter(field => current.role === 'owner' || !['private_value', 'policy_key'].includes(field))
+    },
+    tableFilter(entity, current): TableFilter {
+      if (current.role === 'owner') return { kind: 'all' }
+      const count = entity === 'orders' ? 8 : entity === 'customers' ? 28 : entity === 'auxiliary' ? extraRelations : 0
+      return { kind: 'where', predicate: { all: [
+        ...(entity === 'orders' ? [{ title: { ne: 'denied' } }] : []),
+        ...Array.from({ length: count }, () => ({ exists: {
+          entity: 'agents', field: 'id', parentField: entity === 'orders' ? 'agent_id' : 'policy_key', predicate: { name: { eq: 'Allowed' } },
+        } })),
+      ] } }
+    },
+  }
+  return { configured, kernel: new KernelRegistry(configured, { plugins: [...configured.plugins!, policy] }) }
+}
+async function demandedScope(kernel: KernelRegistry, role: string) {
+  const user = role === 'owner' ? 'owner-a' : role === 'dispatcher' ? 'dispatcher-a' : 'viewer-a'
+  return requireScope(await resolveActor(new Request('http://localhost', { headers: { Authorization: `Bearer synthetic-${user}` } }), runtime(), kernel.config), 'org-a', kernel.config)
+}
+const demandedInput = { entity: 'orders', select: ['id', 'title'], limit: 1, offset: 0, includeTotal: true, includeViewTotals: true }
+
+it.each(['owner', 'dispatcher'].flatMap(role => [undefined, ['agent_id'], ['customer_id']].flatMap(labels =>
+  ['root', 'total'].map(phase => ({ role, labels, phase })))))('demanded label projection compiles $role $labels $phase under unchanged limits', async ({ role, labels, phase }) => {
+  const { kernel } = demandedProjectionFixture()
+  const current = await demandedScope(kernel, role)
+  expect(L.tableReferences).toBe(64)
+  const { query, cost } = validateQuery(kernel, current, { ...demandedInput, labels })
+  expect(cost.exists).toBeLessThanOrEqual(L.exists)
+  expect(cost.statements).toBe(2)
+  expect(() => phase === 'root' ? compileRoot(kernel, current, query, undefined, cost) : compileListTotal(kernel, current, query, cost)).not.toThrow()
+})
+
+it('demanded label projection preserves policy dependencies, masks, tenant denial and exact pages/totals', async () => {
+  const { configured, kernel } = demandedProjectionFixture()
+  await setup(configured)
+  // Legacy ref column without a physical FK also permits hostile cross-tenant links.
+  await env.DB.exec('DROP TABLE orders; CREATE TABLE orders (id TEXT, organization_id TEXT, title TEXT, customer_id TEXT, agent_id TEXT, created_at TEXT, updated_at TEXT, version INTEGER DEFAULT 1)')
+  const now = new Date().toISOString()
+  for (const org of ['org-a', 'org-b']) {
+    await env.DB.prepare('INSERT INTO agents(id,organization_id,name,created_at,updated_at) VALUES (?,?,?,?,?)').bind(`agent-${org}`, org, 'Allowed', now, now).run()
+    for (const suffix of ['1', '2', 'denied']) {
+      await env.DB.prepare('INSERT INTO customers(id,organization_id,name,private_value,policy_key,created_at,updated_at) VALUES (?,?,?,?,?,?,?)')
+        .bind(`customer-${org}-${suffix}`, org, `Customer ${suffix}`, 'PRIVATE_VALUE_CANARY', suffix === 'denied' ? 'missing' : `agent-${org}`, now, now).run()
+      await env.DB.prepare('INSERT INTO orders(id,organization_id,title,customer_id,agent_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?)')
+        .bind(`order-${org}-${suffix}`, org, 'Visible', `customer-${org}-${suffix}`, `agent-${org}`, now, now).run()
+    }
+  }
+  await env.DB.prepare('INSERT INTO orders(id,organization_id,title,customer_id,created_at,updated_at) VALUES (?,?,?,?,?,?)')
+    .bind('order-row-denied', 'org-a', 'denied', 'customer-org-a-1', now, now).run()
+  // A cross-tenant non-null FK must yield unavailable, never a value or empty.
+  await env.DB.prepare('INSERT INTO orders(id,organization_id,title,customer_id,agent_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?)')
+    .bind('order-cross', 'org-a', 'Visible', 'customer-org-b-1', 'agent-org-a', now, now).run()
+  const run = async (input: unknown, role = 'dispatcher') => executeQuery(kernel, await demandedScope(kernel, role), env.DB, secret, input, { writeLog() {} })
+  const seen: string[] = []
+  for (let offset = 0; offset < 4; offset++) {
+    const result = await run({ ...demandedInput, labels: ['customer_id'], offset })
+    expect(result.total).toBe(4); expect(result.data).toHaveLength(1)
+    const row = result.data[0]; seen.push(row.id)
+    expect(row.__labels.customer_id).toEqual(row.id === 'order-cross' || row.id.endsWith('-denied')
+      ? { status: 'unavailable' }
+      : { status: 'ok', entity: 'customers', display: 'name', row: { id: row.id.replace('order-', 'customer-'), name: `Customer ${row.id.slice(-1)}` } })
+    expect(JSON.stringify(result)).not.toContain('PRIVATE_VALUE_CANARY')
+  }
+  expect(seen).toEqual(['order-cross', 'order-org-a-1', 'order-org-a-2', 'order-org-a-denied'])
+  const customers = await run({ entity: 'customers', select: ['id', 'name'], limit: 10 })
+  for (const field of ['private_value', 'policy_key']) await expect(run({ entity: 'customers', select: ['id', field], limit: 10 })).rejects.toMatchObject({ code: 'field_forbidden' })
+  expect(customers.data.map(row => row.id)).toEqual(['customer-org-a-1', 'customer-org-a-2'])
+  expect(customers.data.every(row => !Object.hasOwn(row, 'private_value') && !Object.hasOwn(row, 'policy_key'))).toBe(true)
+  const denied = await run({ ...demandedInput, labels: ['customer_id'] }, 'viewer')
+  expect(denied.data[0].__labels.customer_id).toEqual({ status: 'unavailable' })
+})
+
+it('demanded projection still rejects actual over-budget sources with query_too_expensive', async () => {
+  const { kernel } = demandedProjectionFixture(11)
+  const current = await demandedScope(kernel, 'dispatcher')
+  // Here all six refs are explicitly demanded by the client, so their visibility
+  // and mandatory relations cannot be pruned even though id alone is cheap.
+  const { query, cost } = validateQuery(kernel, current, { entity: 'customers', limit: 1 })
+  for (const compile of [() => compileRoot(kernel, current, query, undefined, cost), () => compileListTotal(kernel, current, query, cost)]) {
+    expect(compile).toThrowError(expect.objectContaining({ code: 'query_too_expensive' }))
+  }
 })

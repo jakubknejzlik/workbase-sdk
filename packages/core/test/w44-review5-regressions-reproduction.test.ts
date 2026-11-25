@@ -50,8 +50,10 @@ it.each(['stored','computed'].flatMap(mode=>['selected','unselected'].map(select
  const input={entity:'notes',select:selection==='selected'?['id','value']:['id','title'],limit:10};
  const {query,cost}=validateQuery(kernel,scope,input);const st=compileRoot(kernel,scope,query,undefined,cost);
  const field=mode==='stored'?'amount':'mid';
- expect(st.sql).toContain(`AS \`${field}\``);
- expect(st.sql).toContain(`ORDER BY \`${field}\` ASC`);
+ if(selection==='selected') {
+  expect(st.sql).toContain(`AS \`${field}\``);
+  expect(st.sql).toContain(`ORDER BY \`${field}\` ASC`);
+ }
  const expected=['n1','n2'].map(id=>selection==='selected'?{id,value:mode==='stored'?3:4}:{id,title:id});
  expect((await env.DB.prepare(st.sql).bind(...st.bindings).all()).results).toEqual(expected);
  expect((await run(input)).data).toEqual(expected);
