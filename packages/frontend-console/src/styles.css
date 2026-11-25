@@ -254,3 +254,15 @@ body:has([data-slot="list-page"]) [data-list-row-menu] [role="menuitem"] { min-h
   text-overflow: ellipsis;
 }
 /* End #315 A3c compact filter captions. */
+
+/* #316 C1 — detail heading and secondary identity */
+[data-slot="detail-page"] h1 { font-size: 32px; line-height: 1.17; letter-spacing: -.95px; }
+.generated-detail-identity { display: flex; align-items: baseline; gap: 8px; min-width: 0; color: var(--muted-foreground); font-size: 12px; }
+.generated-detail-identity dt { flex-shrink: 0; }
+.generated-detail-identity dd { min-width: 0; }
+/* Reuse the identifier copy cell with a fully readable value in this header. */
+.generated-detail-identity span[title] { max-width: 100%; overflow: visible; white-space: normal; overflow-wrap: anywhere; text-overflow: clip; }
+@media (max-width: 767px) {
+  [data-slot="detail-page"] h1 { font-size: 27px; }
+}
+/* End #316 C1 */

@@ -1,5 +1,6 @@
 import { listColumnAlignment } from './list-presentation'
 import { GeneratedListCell } from './list-cell'
+import { GeneratedDetailIdentity } from './detail-identity'
 import { accountLinkField, accountLinkRelation } from './account-link'
 import { EntityCalendar } from './calendar'
 import { availableCalendar } from './calendar-model'
@@ -104,9 +105,8 @@ function GeneratedDetailPage({ model, caps, orgId, entity, id, request, actions,
     }}>{content}</GeneratedInlineEdit> : content
     const informationTitle = t('detailInformation', { defaultValue: '', fallbackLng: false })
     const information = row && (plan ? <DetailGroups plan={plan} row={row} label={fieldLabel} value={field => value(row, field)} edit={edit} translate={key => t(key, { defaultValue: key })} /> : <DetailFields className="c2-detail border-0 p-0" fields={(definition.detail?.fields ?? readable.filter(field => !definition.fields[field].ui?.hidden)).filter(field => readable.includes(field) && !['id', 'organization_id'].includes(field)).map(field => ({ name: field, label: fieldLabel(field), value: edit(field, value(row, field), fieldLabel(field)) }))} />)
-    return <DetailPage title={row ? rowName(entity, row) : t('loading')} backLink={<Button asChild variant="ghost" size="sm"><Link to="/o/$orgId/e/$entity" params={{ orgId, entity }}><svg aria-hidden="true" className="mr-2 size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m12 19-7-7 7-7M5 12h14" /></svg>{t('backToList')}</Link></Button>} actions={row && actions?.(row, blocked)}>
+    return <DetailPage title={row ? rowName(entity, row) : t('loading')} secondary={!blocked && row && <GeneratedDetailIdentity model={model} caps={caps} entity={entity} orgId={orgId} row={row} label={fieldLabel('id')} />} backLink={<Button asChild variant="ghost" size="sm"><Link to="/o/$orgId/e/$entity" params={{ orgId, entity }}><svg aria-hidden="true" className="mr-2 size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m12 19-7-7 7-7M5 12h14" /></svg>{t('backToList')}</Link></Button>} actions={row && actions?.(row, blocked)}>
       <QueryBoundary pending={result.isPending && !row} error={error} loadingLabel={t('loading')}>{row && <>
-        {readable.includes('id') && <dl className="generated-technical mb-4 text-sm text-muted-foreground"><dt>{fieldLabel('id')}</dt><dd className="break-all font-mono">{String(row.id)}</dd></dl>}
         {definition.detail?.metrics && <dl className="generated-metrics">{(plan?.metrics ?? definition.detail.metrics.filter(metric => readable.includes(metric.field))).map(metric => <div key={metric.field}>
           <dt>{fieldLabel(metric.field)}</dt><dd className={metric.tone === 'positive' ? 'text-green-700' : metric.tone === 'negative' ? 'text-red-700' : ''}>{value(row, metric.field)}{metric.unitField && readable.includes(metric.unitField) && <span className="generated-metric-unit"> {row[metric.unitField]}</span>}</dd>
         </div>)}</dl>}

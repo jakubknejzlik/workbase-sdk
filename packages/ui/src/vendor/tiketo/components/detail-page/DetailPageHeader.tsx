@@ -13,6 +13,8 @@ export interface DetailPageHeaderProps {
   backLabel?: string
   /** The title to display - can be a string or ReactNode */
   title: string | ReactNode
+  /** Secondary record identity or supporting content below the title. */
+  secondary?: ReactNode
   /** Optional badge to display next to the title (e.g., type badge) */
   badge?: ReactNode
   /** Callback when edit button is clicked. If not provided, edit button won't be shown */
@@ -78,6 +80,7 @@ export function DetailPageHeader({
   backUrl,
   backLabel = 'Back',
   title,
+  secondary,
   badge,
   onEdit,
   editDisabled,
@@ -108,9 +111,12 @@ export function DetailPageHeader({
 
       {/* Title and Actions */}
       <div className="flex flex-wrap justify-between items-start gap-2">
-        <div className="flex min-w-0 items-center gap-3">
-          <h1 tabIndex={-1} className="text-2xl font-bold [overflow-wrap:anywhere]">{title}</h1>
-          {badge}
+        <div className="min-w-0 max-w-full flex-1 basis-full space-y-1 sm:basis-0">
+          <div className="flex min-w-0 items-center gap-3">
+            <h1 tabIndex={-1} className="min-w-0 text-2xl font-bold [overflow-wrap:anywhere]">{title}</h1>
+            {badge}
+          </div>
+          {secondary}
         </div>
         <div className="flex flex-wrap gap-2">
           {extraActions}
