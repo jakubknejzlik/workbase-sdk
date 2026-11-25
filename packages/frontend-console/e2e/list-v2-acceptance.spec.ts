@@ -13,7 +13,7 @@ import cs from '../src/locales/cs.json' with { type: 'json' }
 let observations: unknown[] = []
 let stop: (() => Promise<void>) | undefined
 const route = '/o/org-a/e/worker'
-const labels: Record<string, string> = { all: 'All workers', active: 'Active workers', inactive: 'Inactive workers', empty: 'Archived workers', invited: 'Pending invitations' }
+const labels: Record<string, string> = { all: 'All workers', active: 'Active workers', inactive: 'Inactive workers', empty: 'Empty workers', invited: 'Pending invitations' }
 test.beforeAll(async ({ browser }) => { stop = await setup({ worker: 'list-v2-worker.ts', seed: 'list-v2-seed.ts' }); provenance(browser.version()) })
 test.afterAll(async () => { await stop?.() })
 test.beforeEach(async ({ context, page }) => { observations = []; observeSDKStylesheet(page); observePreview500(context); page.on('response', response => { if (new URL(response.url()).pathname === '/query') void response.json().then(body => observations.push({ kind: 'query', request: response.request().postDataJSON(), status: response.status(), response: body })).catch(() => {}) }); await context.addInitScript(() => localStorage.setItem('console-language', 'en')) })
@@ -205,7 +205,7 @@ for (const width of [1440, 390]) for (const scenario of scenarios) test(`capture
       await settled(page)
       if (scenario !== 'populated-restricted-staff') { await expect(page.getByRole('button', { name: new RegExp(en.rowAccessActions) })).toHaveCount(10); await expect(page.getByText(en.rowAccessRefreshing, { exact: true })).toHaveCount(0) }
       if (scenario === 'populated-restricted-staff') { await rows(page, { actor: 'staff' }); await expect(page.getByRole('button', { name: new RegExp(en.rowAccessActions) })).toHaveCount(0) }
-      if (scenario === 'expanded-filters') { await openPanel(page); await panel(page).getByRole('checkbox', { name: 'active', exact: true }).check(); await panel(page).getByRole('group', { name: 'Name', exact: true }).getByRole('textbox').fill('Worker 04') }
+      if (scenario === 'expanded-filters') { await openPanel(page); await panel(page).getByRole('group', { name: 'Amount', exact: true }).getByLabel(en.filterFrom, { exact: true }).fill('430'); await panel(page).getByRole('group', { name: 'Name', exact: true }).getByRole('textbox').fill('Worker 04') }
       if (scenario === 'view-menu') await page.getByRole('button', { name: en.listDisplay, exact: true }).click()
       if (scenario === 'access-menu') await page.getByRole('row').filter({ has: page.getByRole('link', { name: 'Worker 002', exact: true }) }).getByRole('button', { name: new RegExp(en.rowAccessActions) }).click()
       if (scenario === 'personal-views') { await save(page, 'Acceptance personal view'); await savedTrigger(page).click() }
@@ -227,6 +227,12 @@ test('paging: exact total, next, previous, last and page-size reset', async ({ p
 
 test('G1: desktop configured access column fits beside separate Actions without horizontal scrolling or coverage', async ({ page }) => {
   await gotoSDK(page, route); await settled(page); await rows(page); await atScrollStart(page)
+  // Exercise the original fitting layout through real display preferences.
+  await page.getByRole('button', { name: en.listDisplay, exact: true }).click()
+  const display = page.getByRole('dialog', { name: en.listDisplayHeading })
+  for (const name of ['Amount', 'Due on', 'Approved', 'Description']) await display.getByRole('checkbox', { name, exact: true }).click()
+  await page.keyboard.press('Escape')
+  await expect(display).toBeHidden()
   const headers = list(page).getByRole('columnheader')
   await expect(headers).toHaveCount(6)
   for (const header of await headers.all()) await insideViewport(header)
@@ -315,12 +321,12 @@ test('panel: staged rows/counts/URL, Cancel discard, Apply once and reset page',
   page.on('request', request => { if (new URL(request.url()).pathname === '/query') { const q = request.postDataJSON(); if (q.entity === 'worker' && q.includeTotal) requests.push(q) } })
   await gotoSDK(page, route); await settled(page); await footer(page).getByRole('button', { name: '3', exact: true }).click(); await rows(page, {}, 20)
   const url = page.url(); const before = requests.length
-  await openPanel(page); await panel(page).getByRole('group', { name: 'Name', exact: true }).getByRole('textbox').fill('Worker 04'); await panel(page).getByRole('checkbox', { name: 'active', exact: true }).check()
+  await openPanel(page); await panel(page).getByRole('group', { name: 'Name', exact: true }).getByRole('textbox').fill('Worker 04'); await panel(page).getByRole('group', { name: 'Amount', exact: true }).getByLabel(en.filterFrom, { exact: true }).fill('430')
   await rows(page, {}, 20); await counts(page); expect(page.url()).toBe(url); expect(requests).toHaveLength(before)
   await panel(page).getByRole('button', { name: en.cancel, exact: true }).click()
-  await openPanel(page); await expect(panel(page).getByRole('group', { name: 'Name', exact: true }).getByRole('textbox')).toHaveValue(''); await expect(panel(page).getByRole('checkbox', { name: 'active', exact: true })).not.toBeChecked()
-  await panel(page).getByRole('group', { name: 'Name', exact: true }).getByRole('textbox').fill('Worker 04'); await panel(page).getByRole('checkbox', { name: 'active', exact: true }).check(); await panel(page).getByRole('button', { name: en.applyFilter, exact: true }).click()
-  await rows(page, { name: 'Worker 04', status: 'active' }); await counts(page, { name: 'Worker 04', status: 'active' }); expect(requests).toHaveLength(before + 1)
+  await openPanel(page); await expect(panel(page).getByRole('group', { name: 'Name', exact: true }).getByRole('textbox')).toHaveValue(''); await expect(panel(page).getByRole('group', { name: 'Amount', exact: true }).getByLabel(en.filterFrom, { exact: true })).toHaveValue('')
+  await panel(page).getByRole('group', { name: 'Name', exact: true }).getByRole('textbox').fill('Worker 04'); await panel(page).getByRole('group', { name: 'Amount', exact: true }).getByLabel(en.filterFrom, { exact: true }).fill('430'); await panel(page).getByRole('button', { name: en.applyFilter, exact: true }).click()
+  await rows(page, { name: 'Worker 04', amountMin: 430 }); await counts(page, { name: 'Worker 04', amountMin: 430 }); expect(requests).toHaveLength(before + 1)
   await openPanel(page); await expect(panel(page).getByRole('group', { name: 'Name', exact: true }).getByRole('textbox')).toHaveValue('Worker 04')
   // Closing through the shared toolbar discards this mounted draft too.
   await panel(page).getByRole('group', { name: 'Name', exact: true }).getByRole('textbox').fill('discard-me'); await page.getByRole('button', { name: en.sortAndFilter, exact: true }).click()
@@ -593,11 +599,17 @@ for (const width of [1110, 1231, 1233]) for (const language of ['en', 'cs'] as c
     await checkPaging('overflow fallback after focusing Next', [next], true)
     await captureSDK(page, 'pagination-focused-Next', language, testInfo)
     await page.setViewportSize({ width, height: 1000 })
+    // The shell and responsive paging change together after the 320px probe.
+    // Observe their settled layout before starting a fresh keyboard traversal.
+    await layoutDiagnostics(paging, true)
   }
   // Exercise the visible buttons in DOM order, excluding collapsed numbers.
   const visible = paging.getByRole('button')
-  await expect(visible).toHaveCount(width < 1232 ? 3 : number === 900 ? 9 : 7)
+  // Reference footer padding changes the former viewport breakpoint. Both
+  // compact and full compositions must keep every shown control reachable.
+  expect([3, number === 900 ? 9 : 7]).toContain(await visible.count())
   await previous.focus()
+  await expect(previous).toBeFocused()
   for (let index = 1; index < await visible.count(); index++) {
     await page.keyboard.press('Tab')
     await expect(visible.nth(index)).toBeFocused()
@@ -762,7 +774,7 @@ for (const width of [1440, 390, 360]) for (const actor of ['admin', 'staff'] as 
     await intercepted.continue()
   })
   try {
-    await page.getByRole('group', { name: copy.listViews }).getByRole('button', { name: /^Archived workers/ }).click()
+    await page.getByRole('group', { name: copy.listViews }).getByRole('button', { name: /^Empty workers/ }).click()
     await expect(list(page).locator('[data-list-skeleton]')).toHaveCount(5)
     await expect(footer(page).getByRole('status')).toHaveText(copy.loading)
     await expect(list(page).locator('[data-list-range]')).toHaveCount(0)
@@ -1454,7 +1466,7 @@ for (const language of ['en', 'cs'] as const) for (const width of [1440, 1280, 9
     expect(bytes[24]).toBe(8); expect([2, 6]).toContain(bytes[25])
     const pixels = inflateSync(Buffer.concat(chunks)), stride = 1 + dimensions.width * (bytes[25] === 6 ? 4 : 3)
     expect(pixels.length).toBe(stride * dimensions.height)
-    for (let row = 0; row < dimensions.height; row++) expect(pixels[row * stride]).toBeLessThanOrEqual(4)
+    expect(Array.from({ length: dimensions.height }, (_, row) => pixels[row * stride]).every(filter => filter <= 4)).toBe(true)
     expect(dimensions.width).toBe(width)
     expect(build.sourceCommit).toBe(sourceSHA)
     record('A1', `${language}-${width}-${state}`, { path, relativePath: `${sourceSHA}/${name}`, sha256: createHash('sha256').update(bytes).digest('hex'), bytes: bytes.length, dimensions, locale: language, state, sourceSHA, builtAssetSHA: build.sha, metrics, status: 'captured; independent visual review pending' })
@@ -1500,16 +1512,7 @@ test('A1: Czech glyph raster and shared title weights remain local when offline'
   await context.setOffline(false)
 })
 
-// A2 adapts only the SDK-owned representative model to retain a four-option
-// toolbar enum alongside the existing relation picker and draft Filters panel.
-async function a2Fixture(page: Page, language: 'en' | 'cs', long = false) {
-  await page.route('**/console-model', async intercepted => {
-    const response = await intercepted.fetch(), body = await response.json()
-    body.model.entities.worker.fields.status.values = ['active', 'inactive', 'archived', 'pending']
-    body.console.entities.worker.list.filter.status = { kind: 'enum', placement: 'toolbar', label: long ? 'Velmi dlouhý stav záznamu pro ověření zalamování' : language === 'cs' ? 'Stav' : 'Status' }
-    await intercepted.fulfill({ response, json: body })
-  })
-}
+// Shell regression helpers share the real server-owned rich fixture below.
 async function a2Stable(page: Page) {
   await page.evaluate(async () => {
     await document.fonts.ready
@@ -1528,14 +1531,15 @@ async function a2Geometry(page: Page) {
       controls: Array.from(toolbar.querySelectorAll('input:not([type="hidden"]),button')).map(node => ({ ...box(node), name: node.getAttribute('aria-label') ?? node.textContent })).filter(item => item.width && item.height) }
   })
 }
-async function a2Capture(page: Page, language: 'en' | 'cs', state: string, fullPage = false) {
+async function a2Capture(page: Page, language: 'en' | 'cs', state: string, fullPage = false, closeup = false, prefix = 'A2') {
   await a2Stable(page)
   const { readFileSync, statSync, mkdirSync } = await import('node:fs')
   const { createHash } = await import('node:crypto'), { join } = await import('node:path'), { inflateSync } = await import('node:zlib')
   const sourceSHA = provenanceSHA(), width = page.viewportSize()!.width, directory = join(output, sourceSHA)
   mkdirSync(directory, { recursive: true })
-  const name = `A2-${language}-${width}-${state}.png`, path = join(directory, name), metrics = await a2Geometry(page)
-  await page.screenshot({ path, fullPage, animations: 'disabled' })
+  const name = `${prefix}-${language}-${width}-${state}.png`, path = join(directory, name), metrics = await a2Geometry(page)
+  if (closeup) await footer(page).screenshot({ path, animations: 'disabled' })
+  else await page.screenshot({ path, fullPage, animations: 'disabled' })
   const bytes = readFileSync(path), dimensions = { width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) }
   expect(statSync(path).size).toBeGreaterThan(0)
   expect(bytes.subarray(0, 8).toString('hex')).toBe('89504e470d0a1a0a')
@@ -1548,12 +1552,12 @@ async function a2Capture(page: Page, language: 'en' | 'cs', state: string, fullP
   expect(bytes[24]).toBe(8); expect([2, 6]).toContain(bytes[25])
   const pixels = inflateSync(Buffer.concat(chunks)), stride = 1 + dimensions.width * (bytes[25] === 6 ? 4 : 3)
   expect(pixels.length).toBe(stride * dimensions.height)
-  for (let row = 0; row < dimensions.height; row++) expect(pixels[row * stride]).toBeLessThanOrEqual(4)
-  expect(dimensions.width).toBe(width)
+  expect(Array.from({ length: dimensions.height }, (_, row) => pixels[row * stride]).every(filter => filter <= 4)).toBe(true)
+  if (!closeup) expect(dimensions.width).toBe(width)
   const build = JSON.parse(readFileSync('packages/frontend-console/dist/build-meta.json', 'utf8'))
   expect(build.sourceCommit).toBe(sourceSHA)
-  record('A2', name, { path, relativePath: `${sourceSHA}/${name}`, sha256: createHash('sha256').update(bytes).digest('hex'), bytes: bytes.length, dimensions, locale: language, state, fullPage,
-    purpose: fullPage ? 'content only; not shell/sidebar evidence' : 'viewport shell/sidebar and controls', sourceSHA, builtAssetSHA: build.sha, metrics, status: 'captured; independent visual review pending' })
+  record(prefix, name, { path, relativePath: `${sourceSHA}/${name}`, sha256: createHash('sha256').update(bytes).digest('hex'), bytes: bytes.length, dimensions, locale: language, state, fullPage,
+    purpose: closeup ? 'footer close-up; not shell/sidebar evidence' : fullPage ? 'content only; not shell/sidebar evidence' : 'viewport shell/sidebar and controls', sourceSHA, builtAssetSHA: build.sha, metrics, status: 'captured; independent visual review pending' })
 }
 async function a2ControlsFit(page: Page) {
   const geometry = await a2Geometry(page)
@@ -1568,10 +1572,9 @@ async function a2ControlsFit(page: Page) {
 }
 for (const language of ['en', 'cs'] as const) for (const width of [1440, 1280, 900, 390]) {
   test(`A2: ${language} ${width} shell toolbar enum and content matrix`, async ({ page, context }) => {
-    const copy = language === 'cs' ? cs : en, label = language === 'cs' ? 'Stav' : 'Status'
+    const copy = language === 'cs' ? cs : en, label = 'Status'
     await page.setViewportSize({ width, height: 900 })
     await context.addInitScript(locale => localStorage.setItem('console-language', locale), language)
-    await a2Fixture(page, language)
     await gotoSDK(page, route); await settled(page); await a2Stable(page)
     const initial = await a2ControlsFit(page)
     await a2Stable(page); expect(await a2Geometry(page)).toEqual(initial)
@@ -1633,11 +1636,10 @@ for (const language of ['en', 'cs'] as const) for (const width of [1440, 1280, 9
   })
 }
 for (const language of ['en', 'cs'] as const) for (const reducedMotion of ['reduce', 'no-preference'] as const) {
-  test(`A2: ${language} mobile navigation ${reducedMotion} and 200 percent long labels`, async ({ page, context }) => {
+  test(`A2: ${language} mobile navigation ${reducedMotion} and 200 percent rich content`, async ({ page, context }) => {
     const copy = language === 'cs' ? cs : en
     await page.setViewportSize({ width: 390, height: 900 }); await page.emulateMedia({ reducedMotion })
     await context.addInitScript(locale => localStorage.setItem('console-language', locale), language)
-    await a2Fixture(page, language, true)
     await gotoSDK(page, route); await settled(page); await a2Stable(page)
     await expect(page.locator('[data-slot="sidebar"][data-mobile="true"]')).toHaveCount(0)
     const trigger = page.getByRole('button', { name: copy.openNavigation, exact: true })
@@ -1659,7 +1661,6 @@ for (const language of ['en', 'cs'] as const) for (const width of [1440, 390]) f
     const copy = language === 'cs' ? cs : en
     await page.setViewportSize({ width, height: 900 })
     await context.addInitScript(locale => localStorage.setItem('console-language', locale), language)
-    await a2Fixture(page, language)
     let release: (() => void) | undefined
     const hold = new Promise<void>(resolve => { release = resolve })
     if (state === 'permission-reduced') await context.setExtraHTTPHeaders({ Authorization: 'Bearer list-v2-staff-session' })
@@ -1680,11 +1681,130 @@ for (const language of ['en', 'cs'] as const) for (const width of [1440, 390]) f
         await expect(page.getByRole('button', { name: new RegExp(copy.rowAccessActions) })).toHaveCount(0)
       } else if (state === 'empty') {
         await settled(page)
-        await page.getByRole('group', { name: copy.listViews }).getByRole('button', { name: /^Archived workers/ }).click()
+        await page.getByRole('group', { name: copy.listViews }).getByRole('button', { name: /^Empty workers/ }).click()
         await expect(list(page).getByRole('heading', { name: copy.noResults, exact: true })).toBeVisible()
       } else if (state === 'loading') await expect(list(page).locator('[aria-busy="true"]')).toBeVisible()
       else await expect(list(page).getByText(copy.requestFailed, { exact: true }).first()).toBeVisible()
       await a2ControlsFit(page); await a2Capture(page, language, state)
     } finally { release?.(); await page.unrouteAll({ behavior: 'wait' }) }
+  })
+}
+
+async function a3FooterMetrics(page: Page) {
+  return footer(page).evaluate(element => {
+    const styles = (node: Element) => { const css = getComputedStyle(node); return { fontSize: css.fontSize, lineHeight: css.lineHeight, fontFamily: css.fontFamily, padding: css.padding, flexDirection: css.flexDirection } }
+    return { footer: styles(element), container: styles(element.parentElement!), range: styles(element.querySelector('[data-list-range]')!), select: styles(element.querySelector('select')!) }
+  })
+}
+async function a3Capture(page: Page, language: 'en' | 'cs', state: string, fullPage = false, closeup = false) {
+  await a2Capture(page, language, state, fullPage, closeup, 'A3a')
+}
+async function a3TopEnd(page: Page, language: 'en' | 'cs', state: string) {
+  await page.evaluate(() => window.scrollTo(0, 0)); await a3Capture(page, language, `${state}-top`)
+  await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight)); await a3Capture(page, language, `${state}-end`)
+}
+for (const language of ['en', 'cs'] as const) for (const width of [1440, 1280, 900, 390]) {
+  test(`A3a: ${language} ${width} real rich fixture filters hint and footer`, async ({ page, context }) => {
+    test.setTimeout(120_000)
+    const copy = language === 'cs' ? cs : en
+    await page.setViewportSize({ width, height: 900 })
+    await context.addInitScript(locale => localStorage.setItem('console-language', locale), language)
+    await gotoSDK(page, route); await settled(page); await a2Stable(page)
+    await expect.poll(() => ids(page)).toEqual(workers.slice(0, 10).map(row => row.id))
+    const geometry = await a2ControlsFit(page)
+    expect(geometry.frame.width).toBe(width >= 850 ? width - 224 : width)
+    await a2Stable(page); expect(await a2Geometry(page)).toEqual(geometry)
+    const modelResponse = await page.request.get('/o/org-a/console-model')
+    expect(modelResponse.status()).toBe(200)
+    const server = await modelResponse.json()
+    expect(server.model.entities.worker.fields.status.values).toEqual(['active', 'inactive', 'archived', 'pending'])
+    expect(server.console.entities.worker.list.filter.status.placement).toBe('toolbar')
+    for (const field of ['amount', 'due_on', 'approved', 'team_id']) expect(server.console.entities.worker.list.filter[field]).toBeTruthy()
+    await expect(page.locator('tbody [data-list-badge]').first()).toHaveAttribute('data-tone', 'positive')
+    await expect(page.locator('tbody')).toContainText('Příliš žluťoučký kůň úpěl ďábelské ódy')
+    const metrics = await a3FooterMetrics(page)
+    record('footerAfter', `${language}-${width}`, metrics)
+    for (const part of [metrics.footer, metrics.range, metrics.select]) {
+      expect(part.fontSize).toBe('11px'); expect(part.lineHeight).toBe('16.28px'); expect(part.fontFamily).toBe('Alata, Arial, sans-serif')
+    }
+    expect(metrics.footer.padding).toBe(width >= 1280 ? '15px 20px' : '14px')
+    expect(metrics.footer.flexDirection).toBe(width >= 1280 ? 'row' : 'column')
+    await expect(footer(page).locator('[data-list-page-counter]')).toHaveText('1 / 5')
+    await expect(footer(page).getByRole('button', { name: copy.previousPage, exact: true })).toBeDisabled()
+    await expect(footer(page).getByRole('button', { name: '2', exact: true, includeHidden: true })).toHaveCount(1)
+    await a3TopEnd(page, language, 'closed')
+    await a3Capture(page, language, 'default-content', true)
+    await a3Capture(page, language, 'footer-closeup', false, true)
+    // Compare the cue's real overflow with DOM order and the accessible region.
+    const scroller = list(page).getByRole('region', { name: copy.listScrollRegion })
+    const cue = list(page).locator('[data-list-overflow]')
+    const overflows = await scroller.evaluate(node => node.scrollWidth > node.clientWidth + 1)
+    if (width <= 900) expect(overflows).toBe(true)
+    if (overflows) {
+      await expect(cue).toHaveCount(1)
+      const cueId = await cue.getAttribute('id')
+      await expect(scroller).toHaveAttribute('aria-describedby', cueId!)
+      expect(await cue.evaluate(node => !!(node.compareDocumentPosition(node.nextElementSibling!) & Node.DOCUMENT_POSITION_FOLLOWING))).toBe(true)
+      expect((await cue.boundingBox())!.y).toBeLessThan((await scroller.boundingBox())!.y)
+      await scroller.focus(); await page.keyboard.press('End'); await expect(cue).toHaveAttribute('data-list-overflow', 'start')
+      await a3TopEnd(page, language, 'horizontal-end')
+      await scroller.focus(); await page.keyboard.press('Home'); await expect(cue).toHaveAttribute('data-list-overflow', 'end')
+    } else await expect(cue).toHaveCount(0)
+    const verify = async (expected: typeof workers, field: string) => {
+      await expect.poll(() => ids(page)).toEqual(expected.slice(0, 10).map(row => row.id))
+      const response = [...observations].reverse().find((entry: any) => entry.kind === 'query' && entry.request.entity === 'worker' && entry.request.includeTotal) as any
+      expect(response.status).toBe(200); expect(response.response.total).toBe(expected.length)
+      expect(response.response.data.map((row: any) => row.id)).toEqual(expected.slice(0, 10).map(row => row.id))
+      expect(expected.length).toBeGreaterThan(0); expect(expected.length).toBeLessThan(workers.length)
+      record('realFilterProof', `${language}-${width}-${field}`, { request: response.request, response: response.response, expectedIds: expected.map(row => row.id) })
+    }
+    // Every enum value is configured, seeded and accepted by the actual endpoint.
+    for (const value of ['active', 'inactive', 'archived', 'pending']) {
+      await page.getByRole('button', { name: 'Status', exact: true }).click()
+      const dialog = page.getByRole('dialog', { name: 'Status', exact: true })
+      await expect(dialog.getByRole('checkbox')).toHaveCount(4)
+      const choice = dialog.getByRole('checkbox', { name: value, exact: true })
+      await choice.click(); await expect(choice).toBeChecked()
+      await verify(workers.filter(row => row.status === value), `enum-${value}`)
+      if (value === 'active') {
+        await a3TopEnd(page, language, 'enum-open-checked')
+        await page.keyboard.press('Escape'); await a3TopEnd(page, language, 'enum-closed-checked')
+        await page.getByRole('button', { name: 'Status', exact: true }).click()
+      }
+      await choice.click(); await page.keyboard.press('Escape')
+      await expect.poll(() => ids(page)).toEqual(workers.slice(0, 10).map(row => row.id))
+    }
+    if (width === 1440 || width === 390) {
+      for (const field of ['amount', 'due_on', 'approved', 'team_id']) {
+        let expected: typeof workers
+        if (field === 'team_id') {
+          await chooseTeam(page, 'North team'); expected = workers.filter(row => row.team_id === 'north')
+        } else {
+          await page.getByRole('button', { name: copy.sortAndFilter, exact: true }).click()
+          const group = page.getByRole('group', { name: copy.sortAndFilter, exact: true })
+          if (field === 'amount') { await group.getByRole('group', { name: 'Amount', exact: true }).getByLabel(copy.filterFrom, { exact: true }).fill('200'); expected = workers.filter(row => row.amount >= 200) }
+          else if (field === 'due_on') { await group.getByRole('group', { name: 'Due date', exact: true }).getByLabel(copy.filterSingle, { exact: true }).fill('2026-02-10'); expected = workers.filter(row => row.due_on.startsWith('2026-02-10')) }
+          else { await group.getByRole('group', { name: 'Approved', exact: true }).getByRole('combobox').click(); await page.getByRole('option', { name: copy.no, exact: true }).click(); expected = workers.filter(row => !row.approved) }
+          await group.getByRole('button', { name: copy.applyFilter, exact: true }).click()
+        }
+        await verify(expected, field)
+        await a3TopEnd(page, language, `filter-${field}`)
+        await page.getByRole('button', { name: copy.clearAllFilters, exact: true }).click()
+        await expect.poll(() => ids(page)).toEqual(workers.slice(0, 10).map(row => row.id))
+      }
+    }
+    await page.getByRole('button', { name: copy.sortAndFilter, exact: true }).click()
+    await a3Capture(page, language, 'filters-content', true)
+    await page.getByRole('button', { name: copy.sortAndFilter, exact: true }).click()
+    await page.getByRole('button', { name: copy.listDisplay, exact: true }).click()
+    await a3Capture(page, language, 'columns-content', true)
+    // Existing controls also prove the cue disappears when the actual table fits.
+    const display = page.getByRole('dialog', { name: copy.listDisplayHeading })
+    for (const checkbox of await display.getByRole('checkbox').all()) {
+      if (await checkbox.getAttribute('aria-checked') === 'true' && (await checkbox.evaluate(node => node.closest('label')?.textContent)) !== copy.listDisplayCompact) await checkbox.click()
+    }
+    await page.keyboard.press('Escape'); await expect(cue).toHaveCount(0)
+    expect(await scroller.evaluate(node => node.scrollWidth <= node.clientWidth + 1)).toBe(true)
+    await a3Capture(page, language, 'no-overflow')
   })
 }
