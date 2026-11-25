@@ -302,7 +302,9 @@ Targets reference exactly one existing navigation ID (including generated
 `entity.<navigation-item-id>` IDs), entity create operation, or declared,
 registered collection command. There are no URL, HTML, callback, expression,
 renderer, record-ID or query descriptors. Navigation uses its existing page,
-role, grant and authorized named-view destination. Row-bound and account-access
+role, grant and authorized named-view destination. Navigation targets are strings
+checked against that registry; the descriptor ID grammar and length limit do not
+apply to them (for example, `workspace/items` is valid when registered). Row-bound and account-access
 commands are not collection actions. Command forms must have a supported object
 input schema with fields understood by the existing form; unsupported root
 unions/references and row bindings fail configuration validation.
@@ -318,7 +320,7 @@ command at configuration load.
 
 Every response rechecks the current organization/actor's destination, readable
 entity identity, operation, command and additional permission grants. Required
-reference inputs need a readable destination; unavailable, sensitive or hidden
+reference inputs, including tuple elements and rest items, need a readable destination; unavailable, sensitive or hidden
 required command inputs suppress the action. CRUD create also requires its
 required user inputs to be available through the authorized form. Both the
 console provider and the final core projection sanitize actions, including

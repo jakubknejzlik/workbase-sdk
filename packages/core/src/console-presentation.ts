@@ -43,12 +43,36 @@ export function consoleCommandCreates(command: CommandDefinition<any>, entity: s
 export function consolePageActions(kernel: KernelRegistry, actions: readonly ConsolePageAction[], navigation: readonly ConsoleNavigation[], authority: ConsoleAuthorization): ConsolePageAction[] {
   const config = kernel.config
   const requiredInputs = (schema: Record<string, any>): boolean => {
-    const allowed = (node: Record<string, any>): boolean => authority.schema(node)
-      && !node.readOnly && !node['x-ui']?.hidden
-      && (!node.anyOf || node.anyOf.every((child: Record<string, any>) => allowed(child)))
-      && (!node.oneOf || node.oneOf.every((child: Record<string, any>) => allowed(child)))
-      && (!node.items || typeof node.items === 'object' && allowed(node.items))
-      && (node.required ?? []).every((name: string) => node.properties?.[name] && allowed(node.properties[name]))
+    const visited = new Set<object>()
+    const allowed = (node: any): boolean => {
+      if (typeof node === 'boolean') return node
+      if (!node || typeof node !== 'object') return false
+      if (Array.isArray(node)) return node.every(allowed)
+      if (visited.has(node)) return true
+      visited.add(node)
+      if (!authority.schema(node) || node.readOnly || node['x-ui']?.hidden) return false
+      if (node.$ref) {
+        // Zod accepts local JSON pointers, including recursive definitions.
+        if (typeof node.$ref !== 'string' || !node.$ref.startsWith('#')) return false
+        let target: any = schema
+        try {
+          const pointer = decodeURIComponent(node.$ref.slice(1))
+          if (pointer && !pointer.startsWith('/')) return false
+          for (const part of pointer ? pointer.slice(1).split('/') : []) {
+            if (/~[^01]|~$/.test(part)) return false
+            const key = part.replaceAll('~1', '/').replaceAll('~0', '~')
+            if (!target || !Object.hasOwn(target, key)) return false
+            target = target[key]
+          }
+        } catch { return false }
+        if (!allowed(target)) return false
+      }
+      // Inspect every accepted schema dependency, not literal/annotation objects.
+      return ['anyOf', 'oneOf', 'allOf', 'prefixItems', 'items', 'additionalItems', 'contains', 'additionalProperties', 'propertyNames']
+        .every(key => !node[key] || allowed(node[key]))
+        && Object.values(node.patternProperties ?? {}).every(allowed)
+        && (node.required ?? []).every((name: string) => node.properties?.[name] && allowed(node.properties[name]))
+    }
     return allowed(schema)
   }
   const commandAllowed = (command: CommandDefinition<any>, entity: string) => {

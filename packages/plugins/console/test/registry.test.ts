@@ -117,6 +117,15 @@ it.each([
 ])('E2 rejects malformed or unsupported actions at config load: %j', actions => {
   expect(() => new KernelRegistry(actionConfig(actions))).toThrow(/console action/i)
 })
+it.each(['workspace/items', '7' + 'x'.repeat(64)])('E2 accepts registered navigation IDs using the existing contract: %s', async id => {
+  const action = { ...primaryNavigation, target: { navigation: id } }
+  const config = actionConfig([action])
+  config.plugins = [...config.plugins!, { name: 'existing-navigation', version: '1', requires: { console: '^1' },
+    contributes: { console: { navigation: [{ id, placement: 'sidebar', page: 'core.overview', label: 'Items' }] } },
+  }]
+  expect((await providerRegistry(config)).pages.find(page => page.id === 'quick')?.actions).toEqual([action])
+  expect(() => new KernelRegistry(actionConfig([action]))).toThrow(/console action target/i)
+})
 it('E2 projects navigation against live roles, views and grants without promoting a denied primary', async () => {
   const config = actionConfig([primaryNavigation, { id: 'audit', label: 'auditKey', target: { navigation: 'audit.activity' } }])
   const owner = await providerRegistry(config)

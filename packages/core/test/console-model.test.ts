@@ -5,7 +5,7 @@ import { z } from 'zod'
 import { identity } from '@workbasehq/plugins/identity'
 import { localAuth } from '@workbasehq/plugins/local-auth'
 import { legacyPermissions } from '@workbasehq/plugins/permissions'
-import { consoleUI } from '@workbasehq/plugins/console'
+import { consoleUI, consoleRegistry } from '@workbasehq/plugins/console'
 import { createApp } from '../src/app'
 import { defineInstance, Fn, Q } from '../src/config'
 import { defineCommand } from '../src/commands'
@@ -875,6 +875,55 @@ it.each(['reference', 'sensitive', 'hidden'])('E2 omits actions with unavailable
   expect(JSON.stringify(body.console)).not.toContain(secret)
   expect(body.model.enumLabels?.en ?? {}).not.toHaveProperty('privateDescription')
   expect(body.model.enumLabels?.en ?? {}).not.toHaveProperty(secret)
+})
+
+// The same nested form must be checked before provider disclosure and after a raw provider.
+it.each([false, true].flatMap(raw => ['tuple', 'rest', 'nested', 'array', 'union', 'intersection', 'alias'].map((kind, index) => ({ raw, kind, index }))))('E2 checks required $kind reference edges and dictionaries, raw=$raw', ({ raw, index }) => {
+  const reference = z.string().meta({ referenceEntity: 'archives' })
+  const inputs = [
+    z.tuple([reference]),
+    z.tuple([z.string()], reference),
+    z.tuple([z.object({ destination: reference })]),
+    z.array(z.tuple([reference])),
+    z.union([z.tuple([reference]), z.string()]),
+    z.object({ details: z.intersection(z.object({ destination: reference }), z.object({ note: z.string() })) }),
+    // Local aliases must resolve against the same input document.
+    z.object({ first: reference, second: reference }).meta({ properties: { first: { $ref: '#/$defs/destination' }, second: { $ref: '#/$defs/destination' } } }),
+  ]
+  const input = inputs[index]
+  let masked = false
+  const base = fixture()
+  const command = defineCommand({ name: 'specimens/collect', input: z.object({ destinations: input }).meta({ $defs: { destination: { type: 'string', referenceEntity: 'archives' } } }),
+    permission: { entity: 'specimens', operation: 'update' }, plan: () => ({ rules: [], result: { status: 200, body: {} }, event: { operation: 'test', entity: 'specimens', entityId: 'synthetic' } }) })
+  const action = { id: 'collect', label: 'collectCaption', description: 'collectHelp', primary: true as const, target: { command: command.name } }
+  const page = { id: 'quick', path: '/quick', label: 'Quick', renderer: 'custom', actions: [action] }
+  const provider = raw ? { name: 'raw-console', version: '1', provides: { console: '1.x' as const }, validateConsole() {},
+    consoleRegistry: () => ({ navigation: [], pages: [page], entities: {} }) } : consoleUI()
+  const kernel = new KernelRegistry(defineInstance({ ...base, commands: [command.name],
+    entities: { ...base.entities, archives: { fields: { name: { type: 'string' } } } },
+    permissions: { ...base.permissions, owner: { ...base.permissions.owner, archives: ['read'] } },
+    policies: { ...base.policies, archives: { owner: 'all' } },
+    enumLabels: { en: { collectCaption: 'Collect', collectHelp: 'Collect records' }, cs: { collectCaption: 'Shromáždit', collectHelp: 'Shromáždit záznamy' } },
+    plugins: [...base.plugins!, provider, { name: 'tuple-inputs', version: '1',
+      fieldMask: entity => masked && entity === 'archives' ? ['name'] : entity === 'archives' ? ['id', 'version', 'name'] : fieldsFor(base, entity),
+      ...(raw ? {} : { requires: { console: '^1' as const }, contributes: { console: { pages: [page] } } }),
+    }],
+  }), { commands: new Map([[command.name, command]]) })
+  const current = (): Scope => {
+    const scope: Scope = { organizationId: 'org-a', role: 'owner', actor: { type: 'user', id: 'owner' }, correlationId: `tuple-${index}` }
+    scopeOperations.set(scope, { operations: null })
+    return scope
+  }
+  expect(consoleModel(kernel, current()).console?.pages.find(page => page.id === 'quick')?.actions, `allowed input ${index}`).toEqual([action])
+  masked = true
+  if (!raw) expect.soft(consoleRegistry(kernel.config, current()).pages.find(page => page.id === 'quick')?.actions, `provider input ${index}`).toEqual([])
+  const body = consoleModel(kernel, current())
+  expect(body.capabilities.entities.archives.readable).not.toContain('id')
+  expect.soft(body.console?.pages.find(page => page.id === 'quick')?.actions, `final input ${index}`).toEqual([])
+  for (const dictionary of Object.values(body.model.enumLabels ?? {})) {
+    expect.soft(dictionary, `caption input ${index}`).not.toHaveProperty('collectCaption')
+    expect.soft(dictionary, `description input ${index}`).not.toHaveProperty('collectHelp')
+  }
 })
 
 it('E2 refresh removes revoked navigation/actions/captions and unavailable required CRUD fields', async () => {

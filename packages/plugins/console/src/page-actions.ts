@@ -9,7 +9,7 @@ const caption = z.string().min(1).max(128).regex(/^[a-zA-Z0-9_.-]+$/)
 const actionSchema = z.strictObject({
   id: identifier, label: caption, description: caption.optional(),
   icon: z.enum(['LayoutDashboard', 'Users', 'MapPin', 'Coins', 'Wallet', 'ArrowLeftRight', 'Settings', 'Building2', 'Activity', 'Workflow', 'Database', 'Folder', 'History']).optional(), primary: z.literal(true).optional(),
-  target: z.union([z.strictObject({ navigation: identifier }), z.strictObject({ create: identifier }),
+  target: z.union([z.strictObject({ navigation: z.string() }), z.strictObject({ create: identifier }),
     z.strictObject({ command: z.string().min(1).max(128).regex(/^[a-z][a-z0-9_]*(\/[a-z][a-z0-9_]*)+$/) })]),
 })
 
