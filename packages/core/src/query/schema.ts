@@ -1,3 +1,4 @@
+import { listTotalReferenceCost } from './compiler'
 import { readableListViews, listPredicate } from './list-views'
 import { organizationPermission } from '../organization-permissions'
 import { userLinks } from '../user-link-fields'
@@ -29,6 +30,9 @@ function preflight(input: unknown) {
   visit(input, 0)
 }
 export function validateQuery(kernel: KernelRegistry, scope: Scope, input: unknown, legacyErrors = false): { query: QueryInput; cost: QueryCost; viewQueries: { id: string; query: QueryInput }[] } {
+  return validateListQuery(kernel, scope, input, legacyErrors)
+}
+function validateListQuery(kernel: KernelRegistry, scope: Scope, input: unknown, legacyErrors = false, total = false): ReturnType<typeof validateQuery> {
   preflight(input)
   if (!input || typeof input !== 'object' || Array.isArray(input)) invalid()
   const entity = (input as QueryInput).entity
@@ -89,6 +93,7 @@ export function validateQuery(kernel: KernelRegistry, scope: Scope, input: unkno
   // Every compiled client table source masks each readable FK once. Visibility
   // probes only test the target's scoped predicate, so do not recursively mask it.
   function foreignKeyCost(name: string) {
+    if (total) return // Count probes are measured from the demanded statement below.
     cost.exists += kernel.fieldMask(name, scope).filter(field => kernel.config.entities[name].fields[field]?.type === 'ref').length
   }
   // Charge expanded sources per evaluation context, including transitive computed fields.
@@ -185,20 +190,27 @@ export function validateQuery(kernel: KernelRegistry, scope: Scope, input: unkno
     }
   }
   selection(entity, listPredicate(kernel, query), 0, 1, [])
-  if (query.includeTotal) cost.statements++
+  function charge(count: QueryCost) {
+    for (const key of ['statements', 'relations', 'exists', 'fieldRows', 'nodes', 'expressionSources'] as const) {
+      if (count[key] !== undefined) cost[key] = (cost[key] ?? 0) + count[key]!
+    }
+    cost.depth = Math.max(cost.depth, count.depth)
+  }
+  if (total) cost.exists += listTotalReferenceCost(kernel, scope, query, cost)
+  if (query.includeTotal) {
+    cost.statements++
+    cost.exists += listTotalReferenceCost(kernel, scope, query, cost)
+  }
   const viewQueries: { id: string; query: QueryInput }[] = []
   if (query.includeViewTotals) for (const view of views) {
     // Count sources need conditions, not includes, labels or ordering. Validate
     // each variant independently, then charge the complete request before SQL.
-    const validated = validateQuery(kernel, scope, { entity, limit: 1, select: ['id'], view: view.id,
+    const validated = validateListQuery(kernel, scope, { entity, limit: 1, select: ['id'], view: view.id,
       ...(query.where ? { where: query.where } : {}), ...(query.rowAccess ? { rowAccess: query.rowAccess } : {}),
       ...(query.search ? { search: query.search } : {}), ...(query.labelWhere ? { labelWhere: query.labelWhere } : {}),
-    })
+    }, legacyErrors, true)
     viewQueries.push({ id: view.id, query: validated.query })
-    for (const key of ['statements', 'relations', 'exists', 'fieldRows', 'nodes', 'expressionSources'] as const) {
-      if (validated.cost[key] !== undefined) cost[key] = (cost[key] ?? 0) + validated.cost[key]!
-    }
-    cost.depth = Math.max(cost.depth, validated.cost.depth)
+    charge(validated.cost)
   }
   if (cost.statements > L.statements || cost.depth > L.relationDepth || cost.relations > L.relations || cost.exists > L.exists || cost.fieldRows > L.fieldRows || cost.nodes > L.nodes)
     throw new QueryError('query_too_expensive', [], cost)
