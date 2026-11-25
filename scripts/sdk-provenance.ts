@@ -1,3 +1,4 @@
+import { docNames } from '../packages/mcp/src/doc-manifest.ts'
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { existsSync, lstatSync, readFileSync, readdirSync, readlinkSync, writeFileSync } from 'node:fs'
@@ -17,6 +18,9 @@ export function sdkSource(root: string): SdkSource {
     'scripts/console-build-inputs.ts', 'scripts/sdk-pack.sh', 'scripts/sdk-provenance.ts', 'scripts/build-console.ts', 'scripts/check-terminology.ts', 'patches/',
     'scripts/stage-console-assets.ts', 'scripts/lib/stage-console-package.ts', 'scripts/lib/sdk-workspaces.ts', 'scripts/check-console-public.ts',
     ':(top,glob)examples/*/package.json', ':(top,glob)instances/*/package.json', ':(top,glob)apps/*/package.json']).split('\0').filter(Boolean))
+  for (const name of docNames) files.add(`docs/sdk/${name}`)
+  files.add('scripts/lib/stage-mcp-docs.ts')
+  files.add('packages/mcp/src/doc-manifest.ts')
   files.add('LICENSE') // The packer always copies the root license, including before it is staged.
   // Follow the producer build's current import graph rather than retaining an
   // inventory of historical private generator dependencies.

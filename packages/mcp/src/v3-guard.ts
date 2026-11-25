@@ -1,5 +1,6 @@
 import type { InstanceConfig } from '@workbasehq/core/config'
-import { fail, type Change } from './schemas.ts'
+import { type Change } from './schemas.ts'
+import { assertEligible, eligible, ineligible, type Eligibility } from './change-routing.ts'
 
 const replacements: Partial<Record<Change['kind'], string>> = {
   set_permissions: 'set_entity_access',
@@ -10,12 +11,17 @@ const replacements: Partial<Record<Change['kind'], string>> = {
   remove_role: 'set_roles with explicit access and account-link operations in one proposal',
 }
 
+/** Pure eligibility is also consumed by the capability matrix. */
+export function legacyWriteEligibility(baseline: string | undefined, operation: 'propose' | 'promote' | 'rollback' | 'apply', changes: readonly { kind: string }[] = []): Eligibility {
+  if (baseline !== 'workbase-sdk') return eligible
+  if (operation !== 'propose') return ineligible(`v3_${operation}_unsupported`, `Legacy ${operation} cannot write a V3 instance. Recreate legacy caption proposals using set_catalog_entries and the V3 keys from inspect_schema; V3 domain publication requires a separately reviewed capability.`)
+  for (const change of changes) {
+    const replacement = replacements[change.kind as Change['kind']]
+    if (replacement) return ineligible('v3_unsupported_change', `${change.kind} is unsupported on V3 instances; use ${replacement}.`)
+  }
+  return eligible
+}
 /** Legacy publication serializes defineInstance and would destroy V3 authored sources. */
 export function guardV3LegacyWrite(config: InstanceConfig, operation: 'propose' | 'promote' | 'rollback' | 'apply', changes: readonly Change[] = []) {
-  if (config.baseline !== 'workbase-sdk') return
-  if (operation !== 'propose') fail(`v3_${operation}_unsupported`, `Legacy ${operation} cannot write a V3 instance. Recreate legacy caption proposals using set_catalog_entries and the V3 keys from inspect_schema; V3 domain publication requires a separately reviewed capability.`, 409)
-  for (const change of changes) {
-    const replacement = replacements[change.kind]
-    if (replacement) fail('v3_unsupported_change', `${change.kind} is unsupported on V3 instances; use ${replacement}.`, 409)
-  }
+  assertEligible(legacyWriteEligibility(config.baseline, operation, changes))
 }

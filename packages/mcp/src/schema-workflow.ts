@@ -1,3 +1,4 @@
+import { assertEligible, schemaEligibility } from './change-routing.ts'
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { dirname, join, relative } from 'node:path'
 import { loadConfig, decodeSource, SourceError } from '@workbasehq/core/schema/load'
@@ -28,7 +29,7 @@ function revision(bundle: Bundle, expected: number) {
 async function load(store: Store, instance: string) {
   const root = await store.directory(instance)
   const loaded = await loadConfig(join(root, 'config.ts'))
-  if (loaded.config.baseline !== 'workbase-sdk') fail('schema_requires_v3', 'Constraint authoring requires authored V3 schema files', 409)
+  assertEligible(schemaEligibility(loaded.config.baseline))
   return store.load(instance, { canonicalRuntime: true })
 }
 /** Edit only authored constraint literals, then delegate lock/SQL identity to the

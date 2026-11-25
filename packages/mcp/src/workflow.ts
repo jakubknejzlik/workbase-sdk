@@ -1,3 +1,6 @@
+import { changeRoute, earlyChangeRoute } from './change-routing.ts'
+import { packagedDocs } from './docs.ts'
+import { capabilities, type SubmissionConfigured } from './capabilities.ts'
 import { executeSchema, proposeSchema } from './schema-workflow.ts'
 import { guardV3LegacyWrite } from './v3-guard.ts'
 import { SourceError } from '@workbasehq/core/schema/load'
@@ -10,7 +13,7 @@ import { appendFile, readFile, readdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { z } from 'zod'
 import { atomic, configSource, json, noLink, Store, type Bundle } from './storage.ts'
-import { schemas, compositionChangeSchema, isPresentationChange, WorkflowError, fail, type ToolName } from './schemas.ts'
+import { schemas, WorkflowError, fail, type ToolName } from './schemas.ts'
 import { guard, hash, prepare, prepareChanges } from './planning.ts'
 import { effectivePolicies } from './policies.ts'
 import { expectedSnapshot, instanceMeta } from './offline.ts'
@@ -40,7 +43,7 @@ export function errorResult(error: unknown): ToolResult {
   return { ok: false, error: { code: 'internal_error', status: 500, message: 'Configuration operation failed; no database was deployed' } }
 }
 export class Workflow {
-  constructor(public store: Store, private github?: GitHubConfiguration) {}
+  constructor(public store: Store, private github?: GitHubConfiguration, private submissionConfigured?: SubmissionConfigured) {}
   async call(name: string, raw: unknown, signal?: AbortSignal): Promise<ToolResult> {
     const callId = crypto.randomUUID()
     let proposalId: string | undefined = ['propose_change', 'propose_composition', 'propose_initial_composition', 'upgrade_sdk'].includes(name) ? crypto.randomUUID() : undefined
@@ -48,6 +51,13 @@ export class Workflow {
     let instance = this.store.allowed.values().next().value as string | undefined
     let sdk = name === 'upgrade_sdk' || Object.hasOwn(args, 'proposalId') && ['validate', 'preview_migration', 'apply_to_disposable', 'discard', 'promote', 'submit_change'].includes(name)
     try {
+      if (name === 'list_docs') { schemas.list_docs.parse(raw); return await packagedDocs.list() }
+      if (name === 'read_doc') return await packagedDocs.read(schemas.read_doc.parse(raw).name)
+      if (name === 'capabilities') {
+        const input = schemas.capabilities.parse(raw)
+        const bundle = await this.store.load(input.instance)
+        return capabilities(input.instance, bundle.config.baseline, this.submissionConfigured)
+      }
       // Bootstrap validates before any write, then audits accepted calls at the server root.
       if (name === 'bootstrap_instance') return await bootstrapInstance(this.store.root, raw)
       // Initialization preflight and preview must not audit, recover or create directories.
@@ -164,16 +174,10 @@ export class Workflow {
       return await this.store.locked(targetInstance, async () => {
         // Fresh selection precedes Store.load and its initialized-instance gate.
         if (name === 'propose_initial_composition') return proposeInitialComposition(this.store, targetInstance, input.composition, proposalId!)
-        if (name === 'propose_change' && input.changes.some((change: { kind: string }) => change.kind === 'set_constraints')) {
-          if (!input.changes.every((change: { kind: string }) => change.kind === 'set_constraints')) fail('mixed_change_kinds', 'Propose constraints separately from other changes')
-          return proposeSchema(this.store, targetInstance, input.baseRevision, input.changes, proposalId!)
-        }
+        const earlyRoute = name === 'propose_change' ? earlyChangeRoute(input.changes) : undefined
+        if (earlyRoute === 'schema') return proposeSchema(this.store, targetInstance, input.baseRevision, input.changes, proposalId!)
         if (name === 'upgrade_sdk') return proposeSdkUpgrade(this.store, targetInstance, input.baseRevision, input.targetVersion, proposalId!)
-        if (name === 'propose_composition') return proposeComposition(this.store, targetInstance, input.baseRevision, input.changes, proposalId!)
-        if (name === 'propose_change' && input.changes.some((change: { kind: string }) => !['set_locale', 'set_label'].includes(change.kind) && compositionChangeSchema.safeParse(change).success)) {
-          if (!input.changes.every((change: unknown) => compositionChangeSchema.safeParse(change).success)) fail('mixed_change_kinds', 'Composition and legacy config changes must be proposed separately')
-          return proposeComposition(this.store, targetInstance, input.baseRevision, input.changes, proposalId!)
-        }
+        if (name === 'propose_composition' || earlyRoute === 'composition') return proposeComposition(this.store, targetInstance, input.baseRevision, input.changes, proposalId!)
         if (name === 'submit_change') {
           const p = parseProposal((await this.store.find(input.proposalId)).proposal)
           if (p.instance !== targetInstance || p.proposalId !== input.proposalId) fail('invalid_proposal', 'Proposal identity mismatch', 409)
@@ -220,9 +224,7 @@ export class Workflow {
             indexes: bundle.indexes, pendingProposals: pending }
         }
         if (name === 'propose_change') {
-          if (bundle.config.baseline === 'workbase-sdk' && input.changes.some((change: { kind: string }) => isPresentationChange(change))
-            || input.changes.some((change: { kind: string }) => change.kind === 'set_catalog_entries')) {
-            if (!input.changes.every((change: { kind: string }) => isPresentationChange(change))) fail('mixed_change_kinds', 'Propose V3 language changes separately from legacy config changes')
+          if (changeRoute(bundle.config.baseline, input.changes) === 'composition') {
             return proposeComposition(this.store, targetInstance, input.baseRevision, input.changes, proposalId!)
           }
           guardV3LegacyWrite(bundle.config, 'propose', input.changes)

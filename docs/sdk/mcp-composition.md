@@ -8,6 +8,27 @@ environment variables. Data and ops keep separate credentials and responsibiliti
 only those remote servers need an app origin such as `https://app.example.test`.
 Existing Instances must merge the new entry manually: init preserves existing files.
 
+Call `list_docs({})`, then `read_doc({"name":"mcp-composition.md"})` (or another
+returned name) for the four guides shipped with the installed package. Responses
+include its version and raw-byte SHA256. Names are a closed enum; paths are not
+accepted. The first successful load snapshots all four guides, each capped at
+32 KiB, for the server lifetime. Restart to load changed packaged docs.
+
+Before choosing a change, call `capabilities({"instance":"my-instance"})`.
+It derives change kinds and routes from the schemas and baseline. `eligible` means
+kind-level stage support; `reachable` means reachability from a new proposal if
+prerequisites succeed. Stage errors and upstream `blockedBy` reasons are separate.
+Strict validation, canonical source, revision/history/dependencies, target role
+safety and disposable verification still apply. Constraint batches must be separate;
+V3 presentation batches cannot mix with runtime/access/domain edits.
+
+`submissionConfigured` is conservative per-instance operator metadata, false by
+default even with a global GitHub callback. Embedders may use
+`createServer({root, github, submissionConfigured: instance => configuredInstances.has(instance)})`.
+This synchronous resolver reads trusted local configuration only: no credential
+retrieval, network calls or target details. It does not prove credentials work.
+See Operator GitHub target below for stdio provisioning.
+
 For a fresh root, call `bootstrap_instance`, then `initialize_instance` with
 `{ "instance": "my-instance", "mode": "preview" }`. Review the five generated
 artifacts (schema lock, initial migration, OpenAPI and both access locks), their
@@ -282,9 +303,35 @@ Continue through these tools in order:
    Role proposals also return `roleDiff`, with ordered before/after roles and owner
    metadata and every removed role-indexed source row as an explicit removal.
 3. `apply_to_disposable` with `{proposalId}` verifies SDK/plugin migrations and
-   committed domain history on fresh local D1. Require successful verification.
+   committed domain history on fresh local D1. Require `ok: true, verified: true`.
 4. `promote` with `{proposalId, expectedRevision: 1}` publishes the verified files
-   locally. Replace `1` with the revision inspected for this proposal.
+   locally. Replace `1` with the revision inspected for this proposal. Promotion
+   is local publication, before GitHub submission or deployment.
+5. After successful promotion, call `submit_change` with
+   `{"instance":"my-instance","proposalId":"<returned proposalId>","expectedBaseSha":"<40-character SHA>"}`.
+   Obtain the current approved base SHA from the operator's review channel.
+   Repository, directory and credentials come only from operator configuration;
+   tool arguments cannot select them. The proposal must retain its matching
+   validation/verification, promoted-file snapshot and unchanged source/dependency
+   proofs. Submission opens or returns one PR on `workbase/change-<proposalId>`.
+   Inspect `ok: true`, `prUrl`, `headSha`, `checkState` and `previewState`; pending
+   checks are not success. A retry returns the same PR rather than opening another.
+   Without configuration, submission returns `github_not_configured` after its
+   earlier proof gates. Human review/CI, merge and deployment remain separate;
+   submission never merges, tags or deploys.
+
+For a V3 presentation/display-name change, the domain revision and history stay
+unchanged. If inspection started at revision 1, observable success requires:
+
+- `apply_to_disposable`: `{"ok":true,"verified":true}`.
+- `promote`: `{"ok":true,"status":"promoted","revision":1,"appliesToDatabase":false,"files":[...]}`.
+- Subsequent `inspect_schema`: the requested new `displayName` and `revision: 1`.
+
+The unchanged revision is expected for this flow. The operator separately reviews
+the persisted successful proposal proof and exact source diff. An audit line
+recording a tool call alone proves neither success nor exclusive provenance.
+An MCP-only consumer can use the outputs/readback above; it does not need filesystem
+tools to perform the operator's separate review.
 
 The stored proposal kind is `composition_change`. Any tracked input or dependency
 change requires validation and disposable verification again. Use `discard` to
@@ -305,7 +352,12 @@ Promotion returns `appliesToDatabase: false`; plugin migrations run through the
 normal SDK migration engine at deploy. Promotion does not install dependencies,
 configure infrastructure, send mail or apply a live database migration.
 
-Legacy V3 domain-change promotion is unsupported and returns `v3_promote_unsupported`.
+A physical V3 `add_field` can pass `propose_change` and be stored as a proposal;
+this is not publication support. Legacy V3 domain-change promotion is unsupported
+and returns `v3_promote_unsupported`, so that proposal cannot reach promoted or
+submittable state. Calling `submit_change` on it returns its own first prerequisite,
+`promotion_required`; the upstream blocker remains `v3_promote_unsupported`.
+Validation or disposable verification must not be inferred from proposal acceptance.
 The constraint-only flow below supports named unique, `ref_equality` and
 `ref_immutable` constraints through authored schema files and the bundle/lock planner. Other physical schema changes require
 reviewed source edits and migration generation.
@@ -407,6 +459,18 @@ INSERT OR REPLACE and upsert paths are guarded too. Violations return `409 ref_i
 with a localized console message and retained draft. When `ref_equality` also exists, both
 may be declared; the immutability trigger fires first, so the stricter `ref_immutable` error is
 reported. Constrained rebuilds and renames still require a manually reviewed migration.
+
+### Feedback while native feedback tools are pending
+
+Use the interim route: consumer → coordinator → anonymized issue packet → SDK
+owner reply → coordinator delivers the answer → consumer acknowledgment is recorded.
+Include the observed installed version (or explicitly unknown), goal, expected and
+actual behavior, bounded synthetic evidence and the concrete question. An agent
+report, source inspection, successful tool output and a consumer runtime retest are
+separate evidence states. The coordinator returns the reply to an MCP-only consumer;
+issue creation or delivery alone is not acknowledgment. SDK-native feedback tools
+are tracked separately in [#328](https://github.com/jakubknejzlik/workbase-sdk/issues/328).
+Physical-field publication and provenance redesign remain separate work.
 
 ### Operator GitHub target
 

@@ -1,3 +1,4 @@
+import { docNames } from './doc-manifest.ts'
 import { z } from 'zod'
 // Shared exact SemVer contract; keep CLI init schema dependencies self-contained.
 export const exactVersion = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$/
@@ -160,6 +161,9 @@ export const changeSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('add_index'), entity: identifier, name: identifier, fields: z.array(identifier).min(1).max(8) }),
 ])
 export const schemas = {
+  list_docs: z.strictObject({}),
+  read_doc: z.strictObject({ name: z.enum(docNames) }),
+  capabilities: z.strictObject({ instance }),
   create_local_target: z.strictObject({ instance, mode: z.enum(['preview', 'apply']).default('preview'), planHash: z.string().regex(/^[a-f0-9]{64}$/).optional() })
     .refine(input => input.mode !== 'apply' || input.planHash !== undefined, 'Apply requires the preview planHash'),
   initialize_instance: z.strictObject({ instance, mode: z.enum(['preview', 'apply']).default('preview'), planHash: z.string().regex(/^[a-f0-9]{64}$/).optional() })

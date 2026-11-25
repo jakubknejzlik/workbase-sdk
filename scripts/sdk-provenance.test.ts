@@ -2,7 +2,7 @@ import { registerTempDir, cleanupTempDir } from './lib/test-temp-dir.mjs'
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { assertSdkArchives, assertSdkPackageNames, sdkArchives, sdkSource, writeSdkProvenance } from './sdk-provenance'
@@ -154,4 +154,76 @@ test('packer archive assertion reads manifest identities and rejects extra, miss
     pack('2.tgz', '@workbasehq/ui')
     assert.throws(() => assertSdkArchives(directory), /expected exactly SDK packages/)
   } finally { cleanupTempDir(root) }
+})
+
+test('canonical MCP docs and copier inputs participate in the source fingerprint', () => {
+  withSourceRepository((root) => {
+    const paths = ['docs/sdk/getting-started.md', 'docs/sdk/mcp-composition.md', 'docs/sdk/migration-0.4.0.md', 'docs/sdk/onboarding.md',
+      'scripts/lib/stage-mcp-docs.ts', 'packages/mcp/src/doc-manifest.ts']
+    for (const file of paths) {
+      mkdirSync(join(root, file, '..'), { recursive: true })
+      writeFileSync(join(root, file), 'original\n')
+    }
+    const before = sdkSource(root)
+    for (const file of paths) {
+      assert.ok(before.inputFiles.includes(file), file)
+      writeFileSync(join(root, file), 'original!\n')
+      assert.notEqual(sdkSource(root).contentHash, before.contentHash, file)
+      writeFileSync(join(root, file), 'original\n')
+    }
+  })
+})
+
+test('MCP release copier and files policy pack exactly byte-identical allowlisted docs', async () => {
+  const { stageMcpDocs } = await import('./lib/stage-mcp-docs.ts')
+  withSourceRepository((root) => {
+    const destination = join(root, 'packages/mcp')
+    mkdirSync(destination, { recursive: true })
+    const canonical = join(import.meta.dirname, '../docs/sdk')
+    const names = ['getting-started.md', 'mcp-composition.md', 'migration-0.4.0.md', 'onboarding.md']
+    mkdirSync(join(root, 'docs/sdk'), { recursive: true })
+    for (const name of [...names, 'release.md']) writeFileSync(join(root, 'docs/sdk', name), readFileSync(join(canonical, name)))
+    // Staging replaces stale output instead of accidentally shipping an old document.
+    mkdirSync(join(destination, 'docs'))
+    writeFileSync(join(destination, 'docs/stale.md'), 'not allowlisted')
+    stageMcpDocs(root, destination)
+    cpSync(join(import.meta.dirname, '../packages/mcp/src'), join(destination, 'src'), { recursive: true })
+    const manifest = JSON.parse(readFileSync(join(import.meta.dirname, '../packages/mcp/package.json'), 'utf8'))
+    delete manifest.scripts; delete manifest.dependencies
+    writeFileSync(join(destination, 'package.json'), JSON.stringify(manifest))
+    execFileSync('npm', ['pack', '--pack-destination', join(root, 'dist-sdk'), '--ignore-scripts', '--offline', '--quiet'], { cwd: destination })
+    const archive = join(root, 'dist-sdk', sdkArchives(join(root, 'dist-sdk'))[0].name)
+    const docs = execFileSync('tar', ['-tzf', archive], { encoding: 'utf8' }).trim().split('\n').filter(path => path.startsWith('package/docs/'))
+    assert.deepEqual(docs.sort(), names.map(name => `package/docs/${name}`).sort())
+    for (const name of names) assert.deepEqual(execFileSync('tar', ['-xOf', archive, `package/docs/${name}`]), readFileSync(join(canonical, name)))
+    const extracted = join(root, 'extracted')
+    mkdirSync(extracted)
+    execFileSync('tar', ['-xzf', archive, '-C', extracted])
+    symlinkSync(join(import.meta.dirname, '../packages/mcp/node_modules'), join(extracted, 'package/node_modules'))
+    mkdirSync(join(root, 'empty-instance'))
+    const result = JSON.parse(execFileSync('bun', ['-e', `
+      const {createServer} = await import(${JSON.stringify(join(extracted, 'package/src/server.ts'))});
+      const {createRequire} = await import('node:module');
+      const require = createRequire(${JSON.stringify(join(extracted, 'package/package.json'))});
+      const {Client} = await import(require.resolve('@modelcontextprotocol/sdk/client/index.js'));
+      const {InMemoryTransport} = await import(require.resolve('@modelcontextprotocol/sdk/inMemory.js'));
+      const app = await createServer({root: ${JSON.stringify(join(root, 'empty-instance'))}});
+      const client = new Client({name:'example', version:'1'});
+      const [a,b] = InMemoryTransport.createLinkedPair();
+      try {
+        await app.server.connect(b); await client.connect(a);
+        const tools = (await client.listTools()).tools.map(tool => tool.name);
+        const list = (await client.callTool({name:'list_docs', arguments:{}})).structuredContent;
+        const read = (await client.callTool({name:'read_doc', arguments:{name:'mcp-composition.md'}})).structuredContent;
+        console.log(JSON.stringify({tools, list, read}));
+      } finally { await client.close(); await app.server.close() }
+    `], { encoding: 'utf8' }))
+    assert.ok(result.tools.includes('list_docs'))
+    assert.ok(result.tools.includes('read_doc'))
+    assert.equal(result.list.ok, true)
+    assert.equal(result.list.version, manifest.version)
+    assert.equal(result.list.docs.length, 4)
+    assert.equal(result.read.ok, true)
+    assert.equal(result.read.content, readFileSync(join(canonical, 'mcp-composition.md'), 'utf8'))
+  })
 })

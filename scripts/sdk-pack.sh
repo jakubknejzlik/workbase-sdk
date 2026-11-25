@@ -26,6 +26,7 @@ const stage = registerTempDir(mkdtempSync(join(tmpdir(), 'workbase-sdk-pack-')))
 const { assertSdkArchives, sdkPackageNames, sdkSource, writeSdkProvenance } = await import(pathToFileURL(join(root, 'scripts/sdk-provenance.ts')).href)
 const { sdkWorkspaceDirectories } = await import(pathToFileURL(join(root, 'scripts/lib/sdk-workspaces.ts')).href)
 const { stageConsolePackage } = await import(pathToFileURL(join(root, 'scripts/lib/stage-console-package.ts')).href)
+const { stageMcpDocs } = await import(pathToFileURL(join(root, 'scripts/lib/stage-mcp-docs.ts')).href)
 const source = sdkSource(root)
 // dist-sdk is a generated release set; remove stale archives from earlier layouts.
 for (const file of readdirSync(join(root, 'dist-sdk'))) if (file.endsWith('.tgz')) rmSync(join(root, 'dist-sdk', file))
@@ -65,6 +66,7 @@ for (const name of selected) {
     if (!['src', 'plugins', 'dist'].includes(entry) && !(name === '@workbasehq/mcp' && entry === 'templates') && !/^(config.*\.(ts|json)|readme.*|license.*|notice)$/i.test(entry)) continue
     cpSync(join(dir, entry === 'templates' ? 'templates/standalone' : entry), join(destination, entry === 'templates' ? 'templates/standalone' : entry), { recursive: true, filter: path => !/(^|\/)(node_modules|\.wrangler)(\/|$)/.test(path) })
   }
+  if (name === '@workbasehq/mcp') stageMcpDocs(root, destination)
   cpSync(join(root, 'LICENSE'), join(destination, 'LICENSE'))
   writeFileSync(join(destination, 'package.json'), JSON.stringify(packed, null, 2) + '\n')
   // Bun 1.4.3 emits a duplicate member when two bin aliases share a target.
