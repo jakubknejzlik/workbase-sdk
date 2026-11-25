@@ -2,12 +2,15 @@ import { useState } from 'react'
 import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { QueryClient, QueryClientProvider, QueryObserver } from '@tanstack/react-query'
 import { createMemoryHistory, createRootRoute, createRoute, createRouter, RouterProvider } from '@tanstack/react-router'
 import { I18nextProvider, initReactI18next } from 'react-i18next'
 import i18next from 'i18next'
 import type { ConsoleModelContract } from '@workbasehq/core/console-contract'
 import { adaptConsoleModel } from '../src/api/adapt-console-model'
+import { runtimeModelOptions } from '../src/api/runtime-model'
+import { api } from '../src/api/client'
+import { GeneratedListCell } from '../../console-generated/src/list-cell'
 import { GeneratedReadPage } from '../../console-generated/src/screens'
 import { defaultListState, toQueryDocument, validateListSearch } from '../../console-generated/src/list-model'
 import { detailPlan, detailReadableField } from '../../console-generated/src/detail-plan'
@@ -15,6 +18,8 @@ import { inlineEditableField, writeSchema } from '../../console-generated/src/wr
 import type { ReadQuery } from '../../console-generated/src/read'
 import en from '../src/locales/en.json'
 import cs from '../src/locales/cs.json'
+
+vi.mock('../src/api/client', () => ({ api: vi.fn() }))
 
 const metadata = ['id', 'organization_id', 'version', 'created_at', 'updated_at']
 const row = { id: '0000123456789', organization_id: 'org', version: 7, name: 'Synthetic row', created_at: '2026-10-24T22:30:00Z', updated_at: '2026-10-25T01:30:00Z' }
@@ -111,4 +116,35 @@ it('retains the null placeholder for server-masked metadata values', async () =>
   const { container } = await mount(document(), 'en', { ...row, updated_at: null as unknown as string })
   expect(within(container.querySelector('tbody')!).getByText('—')).toBeTruthy()
   expect(container.querySelector('tbody')!.textContent).not.toContain('2026')
+})
+
+// Exercise the production query's default structural sharing, not setQueryData
+// or a freshly adapted object passed directly to the renderer (review F1).
+it.each(['user-hidden', 'operators', 'JSON-equal'] as const)('renders refreshed metadata through the runtime query cache (%s)', async change => {
+  const next = document()
+  if (change !== 'JSON-equal') next.model.revision++
+  if (change === 'user-hidden') next.model.entities.entries.fields.updated_at.ui = { hidden: true }
+  if (change === 'operators') next.model.entities.entries.fields.updated_at.operators = ['eq']
+  vi.mocked(api).mockReset().mockResolvedValueOnce(document()).mockResolvedValueOnce(next)
+  client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  const options = runtimeModelOptions('org')
+  // runtimeModelOptions has gcTime:0; keep a real observer while refreshing.
+  const observer = new QueryObserver(client, { ...options, enabled: false })
+  const unsubscribe = observer.subscribe(() => {})
+  try {
+    const i18n = i18next.createInstance()
+    await i18n.use(initReactI18next).init({ lng: 'en', resources: { en: { translation: en } } })
+    const cell = (runtime: ReturnType<typeof adaptConsoleModel>) => <I18nextProvider i18n={i18n}><GeneratedListCell model={runtime.model} caps={runtime.capabilities} entity="entries" orgId="org" row={row} column={{ field: 'updated_at', cell: { kind: 'datetime' } }} primary={false} signed={() => null} /></I18nextProvider>
+    const formatted = new Intl.DateTimeFormat('en', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Europe/Prague' }).format(new Date(row.updated_at))
+    await client.fetchQuery(options)
+    const before = client.getQueryData<ReturnType<typeof adaptConsoleModel>>(options.queryKey)!
+    const view = render(cell(before))
+    expect(view.container.textContent).toBe(formatted)
+    await client.fetchQuery(options)
+    const after = client.getQueryData<ReturnType<typeof adaptConsoleModel>>(options.queryKey)!
+    if (change === 'JSON-equal') expect(after).toBe(before)
+    view.rerender(cell(after))
+    expect(view.container.textContent).toBe(change === 'user-hidden' ? '' : formatted)
+    expect(api).toHaveBeenCalledTimes(2)
+  } finally { unsubscribe() }
 })
