@@ -172,3 +172,21 @@ body:has([data-slot="list-page"]) [data-list-menu] :is(p, button),
 body:has([data-slot="list-page"]) [data-list-row-menu] :is([role="menuitem"], [data-slot="dropdown-menu-label"]) { font-size: inherit; }
 body:has([data-slot="list-page"]) [data-list-menu] { gap: .25rem; padding: .5rem; }
 body:has([data-slot="list-page"]) [data-list-row-menu] [role="menuitem"] { min-height: 2.0625rem; padding: .5625rem .625rem; }
+
+/* #318 E1 — existing dashboard widget composition and card presentation. */
+.dashboard-cards { display: grid; gap: 16px; min-width: 0; container-type: inline-size; }
+[data-dashboard-row] { display: grid; grid-template-columns: minmax(0, 1fr); align-items: start; gap: 16px; min-width: 0; }
+@container (min-width: 640px) {
+  [data-dashboard-columns="2"], [data-dashboard-columns="3"] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@container (min-width: 1040px) {
+  [data-dashboard-columns="3"] { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+.dashboard-card { max-width: 100%; padding-block: 0; gap: 0; box-shadow: none; }
+.dashboard-card > [data-slot="card-header"] { padding: 21px 22px; border-bottom: 1px solid var(--border); }
+.dashboard-card [data-slot="card-title"] { min-width: 0; font-size: 16px; line-height: 1.4; overflow-wrap: anywhere; }
+.dashboard-card > [data-slot="card-content"] { min-width: 0; padding: 22px; }
+@media (max-width: 680px) {
+  .dashboard-card > [data-slot="card-header"], .dashboard-card > [data-slot="card-content"] { padding: 18px; }
+}
+/* End #318 E1. */

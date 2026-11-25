@@ -20,12 +20,13 @@ for (const language of ['en', 'cs']) for (const width of [1440, 1280, 900, 390])
       const response = page.waitForResponse(response => response.url().endsWith('/console-pages/neutral.summary'))
       await page.goto('/o/org-a/summary')
       const result = await (await response).json()
-      expect(result.widgets.map((widget: { data: unknown[] }) => widget.data.length)).toEqual([3, 3])
+      expect(result.widgets.filter((widget: { kind: string }) => widget.kind !== 'stat').map((widget: { data: unknown[] }) => widget.data.length)).toEqual([3, 3])
+      expect(await page.locator('[data-widget]').evaluateAll(nodes => nodes.map(node => node.getAttribute('data-widget')))).toEqual(['bookings', 'clients', 'count'])
       await expect(page.locator('[data-widget="bookings"]').getByRole('link', { name: 'Alex Example', exact: true }).first()).toBeVisible()
       await page.evaluate(async () => { await document.fonts.ready })
       const name = `${revision}-${head}-${language}-${width}`
       await page.screenshot({ path: info.outputPath(`${name}-dashboard.png`), fullPage: true, animations: 'disabled' })
-      const geometry = await page.locator('[data-widget]').evaluateAll(widgets => widgets.map(widget => ({
+      const geometry = await page.locator('[data-widget]:has(table)').evaluateAll(widgets => widgets.map(widget => ({
         id: widget.getAttribute('data-widget'),
         tables: Array.from(widget.querySelectorAll('table')).map(table => {
           const cell = (node: Element) => {
@@ -36,6 +37,25 @@ for (const language of ['en', 'cs']) for (const width of [1440, 1280, 900, 390])
         }),
       })))
       writeFileSync(info.outputPath(`${name}.json`), JSON.stringify({ geometry, result, browser: browser.version(), build: JSON.parse(readFileSync(new URL('../dist/build-meta.json', import.meta.url), 'utf8')), errors }, null, 2))
+      const layout = await page.locator('[data-widget]').evaluateAll(nodes => nodes.map(node => {
+        const rect = node.getBoundingClientRect()
+        const header = node.querySelector('[data-slot="card-header"]')!
+        const title = node.querySelector('h2')!
+        return { id: node.getAttribute('data-widget'), x: rect.x, y: rect.y, width: rect.width, bottom: rect.bottom,
+          titleFits: title.scrollWidth <= title.clientWidth, headerPadding: getComputedStyle(header).padding }
+      }))
+      expect(layout[2].y).toBeGreaterThanOrEqual(Math.max(layout[0].bottom, layout[1].bottom))
+      expect(layout.every(card => card.titleFits)).toBe(true)
+      expect(layout[0].headerPadding).toBe(width <= 680 ? '18px' : '21px 22px')
+      expect(await page.evaluate(() => document.fonts.check('16px Alata', 'Příliš žluťoučký kůň'))).toBe(true)
+      const font = await page.locator('[data-widget] h2').first().evaluate(node => ({ family: getComputedStyle(node).fontFamily, weight: getComputedStyle(node).fontWeight, synthesis: getComputedStyle(node).fontSynthesis }))
+      expect(font.family).toContain('Alata')
+      expect(font.weight).toBe('400')
+      expect(font.synthesis).toBe('none')
+      const fontRequests = await page.evaluate(() => performance.getEntriesByType('resource').map(item => item.name).filter(name => /font|\.ttf|\.woff/i.test(name)))
+      expect(fontRequests.some(url => url.startsWith(origin) && /Alata.*\.ttf/.test(url))).toBe(true)
+      expect(fontRequests.some(url => /fonts\.(googleapis|gstatic)\.com/.test(url))).toBe(false)
+      writeFileSync(info.outputPath(`${name}-layout.json`), JSON.stringify({ layout, font, fontRequests, csp: (await page.request.get('/o/org-a/summary')).headers()['content-security-policy'] }, null, 2))
       // Baseline capture intentionally records the old renderer, including its mobile cards.
       if (revision !== 'base') {
         for (const widget of geometry) {
@@ -79,6 +99,25 @@ for (const language of ['en', 'cs']) for (const width of [1440, 1280, 900, 390])
         expect({ fontSize: cell.fontSize, lineHeight: cell.lineHeight, padding: cell.padding }).toEqual(reference)
       }
       await page.screenshot({ path: info.outputPath(`${name}-list.png`), fullPage: true, animations: 'disabled' })
+      for (const state of ['default', 'isolated']) {
+        const response = page.waitForResponse(response => response.url().endsWith(`/console-pages/neutral.${state}`))
+        await page.goto(`/o/org-a/${state}`)
+        const body = await (await response).json()
+        await expect(page.locator('[data-widget="count"]')).toContainText('3')
+        await expect(page.locator('[data-widget="bookings"] table tbody tr')).toHaveCount(3)
+        if (state === 'default') {
+          expect(await page.locator('[data-widget]').evaluateAll(nodes => nodes.map(node => node.getAttribute('data-widget')))).toEqual(['count', 'bookings', 'clients'])
+          await expect(page.getByRole('alert')).toHaveCount(0)
+        } else {
+          expect(body.widgets.find((widget: { id: string }) => widget.id === 'unavailable')).toMatchObject({ kind: 'error', code: 'widget_failed' })
+          await expect(page.locator('[data-widget="unavailable"]').getByRole('alert')).toBeVisible()
+          expect(await page.locator('[data-widget]').evaluateAll(nodes => nodes.map(node => node.getAttribute('data-widget')))).toEqual(['bookings', 'clients', 'count', 'unavailable'])
+        }
+        expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+        await page.evaluate(async () => { await document.fonts.ready })
+        await page.screenshot({ path: info.outputPath(`${name}-${state}-dashboard.png`), fullPage: true, animations: 'disabled' })
+        writeFileSync(info.outputPath(`${name}-${state}.json`), JSON.stringify(body, null, 2))
+      }
       expect(errors).toEqual([])
     } finally { await context.close() }
   })
