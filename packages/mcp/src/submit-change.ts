@@ -46,7 +46,7 @@ export async function submitChange(directory: string, p: Submission, expectedBas
   const roleSources = rolesChanged ? Object.keys(await replaySources(directory)).filter(path => /^schema\/[a-z][a-z0-9_]*\.ts$/.test(path)) : []
   const allowed = new Set(p.kind === 'schema_change' ? ['schema.lock.json', 'access.lock.json', 'access.lock.md', 'openapi.json', `migrations/${p.migration}`, ...p.changes.flatMap(change => change.kind === 'set_constraints' ? [`schema/${change.entity}.ts`] : [])] : p.kind === 'composition_change' ? [...(rolesChanged || p.changes.some(change => change.kind === 'set_locale' || change.kind === 'set_instance_display_name') ? ['config.ts'] : []), 'runtime.ts', 'access.lock.json', 'access.lock.md',
     ...(rolesChanged || accessChanges.length ? ['access.ts'] : []), ...roleSources,
-    ...p.changes.flatMap(change => change.kind === 'set_catalog_entries' ? [`locales/${change.language}/${change.namespace}.json`] : []),
+    ...p.changes.flatMap(change => change.kind === 'set_catalog_entries' ? [`locales/${change.language}/${change.namespace}.json`] : change.kind === 'set_label' ? [`locales/${change.language}/domain.json`] : []),
     ...(rolesChanged || accessChanges.length || p.changes.some(change => change.kind === 'set_locale' || change.kind === 'set_instance_display_name') ? ['openapi.json'] : []),
     ...accessChanges.flatMap(change => change.kind === 'set_entity_access' ? [`schema/${change.entity}.ts`] : [])] : ['config.ts', 'config.indexes.json', 'config.versions.json', `config.v${p.baseRevision}.ts`, `config.v${p.promotedRevision}.ts`, `migrations/${p.migration}`])
   const paths = new Set<string>()
