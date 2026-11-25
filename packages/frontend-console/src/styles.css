@@ -37,8 +37,6 @@
 .c5-actions { display: flex; flex-wrap: wrap; gap: 12px; margin: 24px 0; align-items: center; }
 .c5-audit-details { margin: 12px 0; }
 .c5-audit-details dd { margin: 0 0 12px; }
-.c5-audit-screen td { vertical-align: top; }
-.c5-audit-screen col:last-child { width: 36%; }
 .c5-audit-diff { display: grid; gap: 12px; margin: 16px 0; }
 .c5-audit-pair { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
 .c5-audit-pair > div { min-width: 0; width: 100%; }
@@ -266,3 +264,8 @@ body:has([data-slot="list-page"]) [data-list-row-menu] [role="menuitem"] { min-h
   [data-slot="detail-page"] h1 { font-size: 27px; }
 }
 /* End #316 C1 */
+
+/* #317 s5 audit — detail content only; list geometry uses shared primitives. */
+.c5-audit-screen summary { cursor: pointer; }
+.c5-audit-screen .c5-audit-details { overflow-wrap: anywhere; }
+/* End #317 s5 audit. */
