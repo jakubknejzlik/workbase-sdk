@@ -190,6 +190,7 @@ it('does not let a late list/count response replace the current confirmed signat
 it('validates a draft range without requests and commits only after correction', async () => {
   const test = await mount({ range: true }), panel = await openPanel(test.user)
   const before = test.request.mock.calls.length, url = test.router.state.location.href
+  await test.user.selectOptions(within(panel).getByRole('combobox', { name: en.filterOperator }), 'between')
   await test.user.type(within(panel).getByRole('spinbutton', { name: en.filterFrom }), '10')
   await test.user.type(within(panel).getByRole('spinbutton', { name: en.filterTo }), '5')
   expect(within(panel).getByRole('button', { name: en.applyFilter }).hasAttribute('disabled')).toBe(true)
@@ -198,6 +199,9 @@ it('validates a draft range without requests and commits only after correction',
   expect(test.router.state.location.href).toBe(url)
   await test.user.clear(within(panel).getByRole('spinbutton', { name: en.filterTo }))
   await test.user.type(within(panel).getByRole('spinbutton', { name: en.filterTo }), '15')
+  expect(within(panel).getByRole('button', { name: en.applyFilter }).hasAttribute('disabled')).toBe(false)
+  expect(test.request.mock.calls).toHaveLength(before)
+  expect(test.router.state.location.href).toBe(url)
   await test.user.click(within(panel).getByRole('button', { name: en.applyFilter }))
   await waitFor(() => expect(test.request.mock.calls).toHaveLength(before + 1))
   expect(test.request.mock.calls.at(-1)?.[0].where).toEqual({ and: [{ amount: { gte: 10, lte: 15 } }] })
@@ -206,12 +210,15 @@ it.each(['number', 'date'] as const)('keeps the shared %s range shape for gte-on
   const test = await mount({ lowerBound }), panel = await openPanel(test.user)
   const before = test.request.mock.calls.length
   const from = within(panel).getByLabelText(en.filterFrom) as HTMLInputElement
-  expect((within(panel).getByLabelText(en.filterSingle) as HTMLInputElement).disabled).toBe(true)
-  expect((within(panel).getByLabelText(en.filterTo) as HTMLInputElement).disabled).toBe(true)
+  const operator = within(panel).getByRole('combobox', { name: en.filterOperator }) as HTMLSelectElement
+  expect(operator.value).toBe('from')
+  expect([...operator.options].map(option => option.value)).toEqual(['from'])
+  expect(within(panel).queryByLabelText(en.filterSingle)).toBeNull()
+  expect(within(panel).queryByLabelText(en.filterTo)).toBeNull()
   expect(from.disabled).toBe(false)
   expect(from.type).toBe(lowerBound === 'date' ? 'text' : 'number')
   if (lowerBound === 'date') {
-    await test.user.click(within(panel).getByRole('button', { name: en.selectDateRange }))
+    await test.user.click(within(panel).getByRole('button', { name: `${en.selectDateRange}: ${en.filterFrom}` }))
     expect(screen.getByRole('grid')).toBeTruthy()
     await test.user.keyboard('{Escape}')
   }
