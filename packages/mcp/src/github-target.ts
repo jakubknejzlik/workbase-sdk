@@ -1,7 +1,7 @@
 import { createPrivateKey, sign } from 'node:crypto'
 import { constants } from 'node:fs'
-import { lstat, open } from 'node:fs/promises'
-import { isAbsolute, parse, sep } from 'node:path'
+import { lstat, open, realpath } from 'node:fs/promises'
+import { isAbsolute, parse, resolve, sep } from 'node:path'
 import { z } from 'zod'
 import { RestGitHub, type GitHubConfiguration, type GitHubCredentialProvider } from './github.ts'
 import { fail, WorkflowError } from './schemas.ts'
@@ -20,22 +20,35 @@ const schema = z.strictObject({
   ]),
 })
 
-/** Check every ancestor before opening, then inspect the opened file itself. Never expose paths or file bytes in errors. */
+async function inspectOperatorPath(path: string) {
+  let component = parse(path).root
+  const parts = path.slice(component.length).split(sep).filter(Boolean)
+  let stat = await lstat(component)
+  if (stat.isSymbolicLink() || !stat.isDirectory()) fail('unsafe_github_path', 'GitHub operator files must be regular files with no symlinked path components.')
+  for (const [index, part] of parts.entries()) {
+    component += (component.endsWith(sep) ? '' : sep) + part
+    stat = await lstat(component)
+    if (stat.isSymbolicLink() || (index === parts.length - 1 ? !stat.isFile() : !stat.isDirectory())) fail('unsafe_github_path', 'GitHub operator files must be regular files with no symlinked path components.')
+  }
+  return stat
+}
+
+/** Bind the opened file to the checked path before reading. Never expose paths or file bytes in errors. */
 async function readOperatorFile(path: string, secret = false) {
   let handle
   try {
-    let component = parse(path).root
-    const parts = path.slice(component.length).split(sep).filter(Boolean)
-    for (const [index, part] of parts.entries()) {
-      component += (component.endsWith(sep) ? '' : sep) + part
-      const stat = await lstat(component)
-      if (stat.isSymbolicLink() || (index === parts.length - 1 ? !stat.isFile() : !stat.isDirectory())) fail('unsafe_github_path', 'GitHub operator files must be regular files with no symlinked path components.')
-    }
+    await inspectOperatorPath(path)
     // NONBLOCK also prevents a substituted FIFO from blocking startup or a tool call.
     handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK)
     const stat = await handle.stat()
     if (!stat.isFile()) fail('unsafe_github_path', 'GitHub operator files must be regular files with no symlinked path components.')
     if (secret && (stat.mode & 0o044)) fail('insecure_github_credential_permissions', 'GitHub token/key files must not be group or world readable; use mode 0600.')
+    // O_NOFOLLOW only protects the leaf. Recheck ancestors and canonical spelling
+    // after open, then bind the pathname's device/inode to this same descriptor.
+    // Node has no openat: these separate checks are not atomic resolution and
+    // cannot exclude further concurrent mutations between checks or during read.
+    const pathStat = await inspectOperatorPath(path)
+    if (await realpath(path) !== resolve(path) || stat.dev !== pathStat.dev || stat.ino !== pathStat.ino) fail('unsafe_github_path', 'GitHub operator files must be regular files with no symlinked path components.')
     return await handle.readFile('utf8')
   } catch (error) {
     if (error instanceof WorkflowError) throw error
