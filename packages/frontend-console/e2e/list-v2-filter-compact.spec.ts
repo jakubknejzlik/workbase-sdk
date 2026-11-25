@@ -15,11 +15,11 @@ const root = process.env.A3C_OUTPUT!
 if (!root) throw new Error('A3C_OUTPUT is required for verified compact-filter evidence')
 const output = join(root, 'captures', head)
 let stop: (() => Promise<void>) | undefined
-const captures: unknown[] = [], queries: unknown[] = []
+const captures: unknown[] = [], queries: unknown[] = [], dateMeasurements: unknown[] = []
 test.beforeAll(async () => { expect(build.sourceCommit).toBe(head); mkdirSync(output, { recursive: true }); stop = await setup({ worker: 'list-v2-worker.ts', seed: 'list-v2-seed.ts' }) })
 test.afterAll(async () => {
   await stop?.()
-  writeFileSync(join(output, 'manifest.json'), JSON.stringify({ head, build, baselineManifest: process.env.A3C_BEFORE_MANIFEST ?? null, captures, queries }, null, 2) + '\n')
+  writeFileSync(join(output, 'manifest.json'), JSON.stringify({ head, build, baselineManifest: process.env.A3C_BEFORE_MANIFEST ?? null, captures, queries, dateMeasurements }, null, 2) + '\n')
 })
 const toolbar = (page: Page) => page.locator('[data-list-slot="toolbar"]')
 const panel = (page: Page, language: 'en' | 'cs') => page.getByRole('group', { name: (language === 'cs' ? cs : en).sortAndFilter, exact: true })
@@ -76,7 +76,7 @@ async function capture(page: Page, language: 'en' | 'cs', state: string, text = 
   const decoded = await page.evaluate(async base64 => { const image = new Image(); image.src = `data:image/png;base64,${base64}`; await image.decode(); return { width: image.naturalWidth, height: image.naturalHeight } }, bytes.toString('base64'))
   expect(decoded.width).toBe(page.viewportSize()!.width)
   expect(createHash('sha256').update(readFileSync(file)).digest('hex')).toBe(hash)
-  captures.push({ file, width: page.viewportSize()!.width, locale: language, state, text, head, sha256: hash, bytes: bytes.length, decoded, before, measuredHeights: heights })
+  captures.push({ file, width: page.viewportSize()!.width, locale: language, state, text, head, sourceSHA: head, builtAssetSHA: build.sha, sha256: hash, bytes: bytes.length, decoded, before, measuredHeights: heights })
 }
 for (const [language, width] of [['cs', 1440], ['cs', 900], ['cs', 390], ['en', 1440]] as const) test(`compact controls ${language} ${width}`, async ({ page }) => {
   const copy = language === 'cs' ? cs : en
@@ -116,8 +116,30 @@ for (const [language, width] of [['cs', 1440], ['cs', 900], ['cs', 390], ['en', 
     await date.getByRole('combobox', { name: copy.filterOperator }).selectOption(operator)
     const label = operator === 'equals' ? copy.filterSingle : copy.filterFrom
     await date.getByLabel(label, { exact: true }).fill('2026-02-10')
+    const legibility = async (state: string) => {
+      const bounds = date.locator('input')
+      await expect(bounds).toHaveCount(2)
+      const measurements = await bounds.evaluateAll(inputs => inputs.map(input => ({
+        value: (input as HTMLInputElement).value, clientWidth: input.clientWidth, scrollWidth: input.scrollWidth,
+      })))
+      for (const [bound, measurement] of measurements.entries()) {
+        dateMeasurements.push({ locale: language, width, state, bound, ...measurement })
+        expect(measurement.value).toBe('2026-02-10')
+        expect.soft(measurement.scrollWidth, `${language} ${width} ${state} bound ${bound}: full date legible`).toBeLessThanOrEqual(measurement.clientWidth)
+      }
+    }
+    if (operator === 'between') {
+      await date.getByLabel(copy.filterTo, { exact: true }).fill('2026-02-10')
+      await date.locator('input').evaluateAll(inputs => inputs.forEach(input => (input as HTMLInputElement).blur()))
+      await legibility('calendar-closed')
+      await capture(page, language, 'date-between-values-closed')
+    }
     await date.getByRole('button', { name: `${copy.selectDateRange}: ${label}`, exact: true }).click()
     await expect(page.getByRole('grid')).toBeVisible()
+    if (operator === 'between') {
+      await legibility('calendar-open')
+      await capture(page, language, 'date-between-values-calendar')
+    }
     await capture(page, language, `panel-date-${operator}-calendar`)
     await page.keyboard.press('Escape')
   }

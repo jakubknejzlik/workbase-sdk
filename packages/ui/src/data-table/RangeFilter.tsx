@@ -29,7 +29,8 @@ export function RangeFilter({ value, onChange, type, labels, locale = 'en', cale
     <label className="grid min-w-0 gap-1 text-sm"><span className="sr-only">{labels.operator ?? 'Operator'}</span><select className="min-h-9 min-w-0 max-w-full rounded-md border bg-background px-2 text-sm" aria-label={labels.operator ?? 'Operator'} value={active} onChange={event => { setOperator(event.target.value as Operator); onChange({}) }}>
       {modes.map(option => <option key={option} value={option}>{caption[option]}</option>)}
     </select></label>
-    <div className="grid min-w-0 gap-2" style={active === 'between' ? { gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 8rem), 1fr))' } : undefined}>{keys.map(key => {
+    {/* Date bounds need room for YYYY-MM-DD, padding and the calendar button; stack when narrower. */}
+    <div className="grid min-w-0 gap-2" style={active === 'between' ? { gridTemplateColumns: `repeat(auto-fit, minmax(min(100%, ${type === 'date' ? '11rem' : '8rem'}), 1fr))` } : undefined}>{keys.map(key => {
       const label = labels[key === 'value' ? 'single' : key]
       const change = (text?: string) => onChange(active === 'equals' ? { value: text } : active === 'between' ? { from: value.from, to: value.to, [key]: text } : { [key]: text })
       return <label key={key} className="grid min-w-0 gap-1 text-sm">{label}<span className="flex min-w-0 gap-1">
