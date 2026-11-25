@@ -6,6 +6,9 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { createMemoryHistory, createRootRoute, createRoute, createRouter, RouterProvider } from '@tanstack/react-router'
 import { I18nextProvider, initReactI18next } from 'react-i18next'
 import i18next from 'i18next'
+import { FilterPanel } from '../../console-generated/src/filter-panel'
+import { ToolbarFilter } from '../../console-generated/src/header-filter'
+import { filterMapping, type FilterDescriptor } from '../../console-generated/src/filter-kinds'
 import { GeneratedReadPage } from '../../console-generated/src/screens'
 import { validateListSearch } from '../../console-generated/src/list-model'
 import { changeSavedViews } from '../../console-generated/src/saved-views'
@@ -125,4 +128,95 @@ it('merges a panel Apply with a toolbar relation selection still awaiting fresh 
   await waitFor(() => expect(test.router.state.location.search.filters).toEqual([{ field: 'team_id', predicate: { in: ['team-a'] } }, { field: 'status', predicate: { in: ['active'] } }]))
   await act(async () => test.releaseVerification())
   await waitFor(() => expect(test.source().where).toEqual({ and: [{ team_id: { in: ['team-a'] } }, { status: { in: ['active'] } }] }))
+})
+
+async function editor(descriptor: FilterDescriptor, predicate?: Record<string, unknown>) {
+  const i18n = i18next.createInstance()
+  await i18n.use(initReactI18next).init({ lng: 'en', resources: { en: { translation: en } } })
+  const definition = structuredClone(model)
+  definition.timeZone = 'Europe/Prague'
+  definition.entities.entries.fields.amount = { type: 'int' }
+  const change = vi.fn()
+  render(<I18nextProvider i18n={i18n}><FilterPanel model={definition} caps={caps} orgId="org" entity="entries" request={vi.fn()} descriptors={[descriptor]} filters={predicate ? [{ field: descriptor.field, predicate }] : []} open onChange={change} /></I18nextProvider>)
+  return { user: userEvent.setup(), change, definition }
+}
+it.each(['equals', 'from', 'to', 'between'] as const)('number %s applies the identical mapping predicate and Cancel discards it', async operator => {
+  const { user, change } = await editor({ field: 'amount', label: 'Amount', kind: 'number', placement: 'panel', operators: ['eq', 'gte', 'lte'] })
+  await user.selectOptions(screen.getByRole('combobox', { name: en.filterOperator }), operator)
+  const value = operator === 'equals' ? { value: '10' } : operator === 'from' ? { from: '10' } : operator === 'to' ? { to: '20' } : { from: '10', to: '20' }
+  for (const [key, text] of Object.entries(value)) await user.type(screen.getByLabelText(key === 'value' ? en.filterSingle : key === 'from' ? en.filterFrom : en.filterTo, { exact: true }), text)
+  expect(change).not.toHaveBeenCalled()
+  await user.click(screen.getByRole('button', { name: en.cancel }))
+  expect(change).not.toHaveBeenCalled()
+  await user.click(screen.getByRole('button', { name: en.applyFilter }))
+  expect(change).toHaveBeenLastCalledWith([{ field: 'amount', predicate: filterMapping('number', { type: 'int' }).toPredicate(value) }], undefined)
+})
+it.each(['equals', 'from', 'to', 'between'] as const)('local-day date %s retains gte/lt and stages operator switches', async operator => {
+  const { user, change } = await editor({ field: 'created', label: 'Created', kind: 'date', placement: 'panel', operators: ['gte', 'lt'] })
+  await user.selectOptions(screen.getByRole('combobox', { name: en.filterOperator }), operator)
+  const value = operator === 'equals' ? { value: '2026-03-29' } : operator === 'from' ? { from: '2026-03-29' } : operator === 'to' ? { to: '2026-03-30' } : { from: '2026-03-29', to: '2026-03-30' }
+  for (const [key, text] of Object.entries(value)) await user.type(screen.getByLabelText(key === 'value' ? en.filterSingle : key === 'from' ? en.filterFrom : en.filterTo, { exact: true }), text)
+  expect(change).not.toHaveBeenCalled()
+  await user.click(screen.getByRole('button', { name: en.applyFilter }))
+  const applied = change.mock.calls[0][0][0].predicate
+  expect(applied).toEqual(filterMapping('date', { type: 'datetime' }, undefined, ['gte', 'lt'], 'Europe/Prague').toPredicate(value))
+  expect(filterMapping('date', { type: 'datetime' }, undefined, ['gte', 'lt'], 'Europe/Prague').toPredicate(value, true)).toEqual(operator === 'equals' ? { gte: '2026-03-28T23:00:00.000Z', lt: '2026-03-29T22:00:00.000Z' } : operator === 'from' ? { gte: '2026-03-28T23:00:00.000Z' } : operator === 'to' ? { lt: '2026-03-30T22:00:00.000Z' } : { gte: '2026-03-28T23:00:00.000Z', lt: '2026-03-30T22:00:00.000Z' })
+})
+it('rejects reversed bounds and unsafe integers, and clears stale values when switching operators', async () => {
+  const { user, change } = await editor({ field: 'amount', label: 'Amount', kind: 'number', placement: 'panel', operators: ['eq', 'gte', 'lte'] }, { eq: 12 })
+  await user.selectOptions(screen.getByRole('combobox', { name: en.filterOperator }), 'between')
+  expect(change).not.toHaveBeenCalled()
+  await user.type(screen.getByLabelText(en.filterFrom, { exact: true }), '20')
+  await user.type(screen.getByLabelText(en.filterTo, { exact: true }), '10')
+  expect(screen.getByRole('alert').textContent).toBe(en.filterInvalidValueRange)
+  expect((screen.getByRole('button', { name: en.applyFilter }) as HTMLButtonElement).disabled).toBe(true)
+  await user.selectOptions(screen.getByRole('combobox', { name: en.filterOperator }), 'equals')
+  expect((screen.getByLabelText(en.filterSingle) as HTMLInputElement).value).toBe('')
+  await user.type(screen.getByLabelText(en.filterSingle), '9007199254740992')
+  expect((screen.getByRole('button', { name: en.applyFilter }) as HTMLButtonElement).disabled).toBe(true)
+  expect(change).not.toHaveBeenCalled()
+})
+it('toolbar relation keeps selection and clear inside its popover with real search and immediate predicates', async () => {
+  const { user, request, source } = await mount({ toolbarRelation: true })
+  const trigger = screen.getByRole('combobox', { name: 'Team' })
+  expect(screen.queryByRole('listbox')).toBeNull()
+  await user.click(trigger)
+  const dialog = screen.getByRole('dialog', { name: 'Team' })
+  await user.type(within(dialog).getByRole('searchbox'), 'Same')
+  await waitFor(() => expect(request.mock.calls.some(([query]) => query.entity === 'teams' && JSON.stringify(query.where) === JSON.stringify({ name: { contains: 'Same' } }))).toBe(true))
+  await user.click(await within(dialog).findByRole('option', { name: 'Same label' }))
+  expect(screen.queryByRole('dialog', { name: 'Team' })).toBeNull()
+  await waitFor(() => expect(JSON.stringify(source().where)).toContain('"team_id":{"in":["team-a"]}'))
+  await user.keyboard('{Escape}')
+  expect(screen.queryByRole('listbox')).toBeNull()
+  expect(screen.queryByRole('button', { name: en.clearFilter })).toBeNull()
+  expect(screen.getByRole('button', { name: /Remove filter: Team/ })).toBeTruthy()
+  await user.click(trigger)
+  await user.click(within(screen.getByRole('dialog', { name: 'Team' })).getByRole('button', { name: en.clearFilter }))
+  await waitFor(() => expect(JSON.stringify(source().where ?? {})).not.toContain('team_id'))
+})
+
+it('compact relation pages remain searchable at the cap, hydrate unavailable IDs, and permit deselection', async () => {
+  const i18n = i18next.createInstance()
+  await i18n.use(initReactI18next).init({ lng: 'en', resources: { en: { translation: en } } })
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } }); clients.push(client)
+  const values = Array.from({ length: 20 }, (_, index) => `selected-${index}`)
+  const request = vi.fn(async (query: ReadQuery) => ({ data: query.where?.id ? [] : [{ id: query.cursor ? 'last' : 'extra', name: query.cursor ? 'Last team' : 'Extra team' }], next_cursor: query.where?.id || query.cursor ? null : 'next' }))
+  const change = vi.fn()
+  render(<I18nextProvider i18n={i18n}><QueryClientProvider client={client}><ToolbarFilter model={model} caps={caps} orgId="org" entity="entries" descriptor={{ field: 'team_id', kind: 'relation', placement: 'toolbar', operators: ['in'], label: 'Team' }} predicate={{ in: values }} request={request} onChange={change} /></QueryClientProvider></I18nextProvider>)
+  await userEvent.click(screen.getByRole('combobox', { name: 'Team' }))
+  const extra = await screen.findByRole('option', { name: 'Extra team' })
+  expect((extra as HTMLButtonElement).disabled).toBe(true)
+  expect(screen.getByRole('status').textContent).toBe(en.filterCap.replace('{{count}}', '20'))
+  await userEvent.click(screen.getByRole('button', { name: en.loadMore }))
+  await screen.findByRole('option', { name: 'Last team' })
+  expect(request.mock.calls.some(([query]) => query.cursor === 'next')).toBe(true)
+  await userEvent.click(screen.getAllByRole('option', { name: en.unavailableRecord })[0])
+  expect(change).toHaveBeenLastCalledWith({ in: values.slice(1) })
+})
+it('does not render a compact relation trigger or issue lookups when target read is denied', async () => {
+  const denied = structuredClone(caps); denied.entities.teams.operations = []
+  const { request } = await mount({ toolbarRelation: true, caps: denied })
+  expect(screen.queryByRole('combobox', { name: 'Team' })).toBeNull()
+  expect(request.mock.calls.some(([query]) => query.entity === 'teams')).toBe(false)
 })
