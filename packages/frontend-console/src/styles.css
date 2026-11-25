@@ -93,6 +93,26 @@
 .compact-data-table th button { min-width: 0; flex-shrink: 1; white-space: normal; }
 .compact-data-table th button > span { min-width: 0; }
 
+/* Begin #318 E1 dashboard section. */
+/* #318 E1 — existing dashboard widget composition and card presentation. */
+.dashboard-cards { display: grid; gap: 16px; min-width: 0; container-type: inline-size; }
+[data-dashboard-row] { display: grid; grid-template-columns: minmax(0, 1fr); align-items: start; gap: 16px; min-width: 0; }
+@container (min-width: 640px) {
+  [data-dashboard-columns="2"], [data-dashboard-columns="3"] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@container (min-width: 1040px) {
+  [data-dashboard-columns="3"] { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+.dashboard-card { max-width: 100%; padding-block: 0; gap: 0; box-shadow: none; }
+.dashboard-card > [data-slot="card-header"] { padding: 21px 22px; border-bottom: 1px solid var(--border); }
+.dashboard-card [data-slot="card-title"] { min-width: 0; font-size: 16px; line-height: 1.4; overflow-wrap: anywhere; }
+.dashboard-card > [data-slot="card-content"] { min-width: 0; padding: 22px; }
+@media (max-width: 680px) {
+  .dashboard-card > [data-slot="card-header"], .dashboard-card > [data-slot="card-content"] { padding: 18px; }
+}
+/* End #318 E1. */
+/* End #318 E1 dashboard section. */
+
 .compact-data-table th button[data-filter-trigger] { flex-shrink: 0; }
 @media (max-width: 767px) {
   .compact-data-table th > div { flex-direction: column; align-items: center; }
