@@ -1,4 +1,4 @@
-# Runtime console model contract (version 1)
+# Runtime console model contract (version 2)
 
 `GET /o/:org/console-model` returns the model needed by a generic browser console
 for the running instance. It uses the resolved kernel, including plugin entity,
@@ -31,19 +31,19 @@ import type { ConsoleModelContract } from '@workbasehq/core/console-contract'
 const response = await fetch(`/o/${encodeURIComponent(orgId)}/console-model`)
 if (!response.ok) throw new Error(`Console model: ${response.status}`)
 const document: ConsoleModelContract = await response.json()
-if (document.contractVersion !== 1) throw new Error('Unsupported console contract')
+if (document.contractVersion !== 2) throw new Error('Unsupported console contract')
 ```
 
 The response has four keys:
 
 | Key | Contents |
 | --- | --- |
-| `contractVersion` | Integer `1`, independent of the instance revision and npm version. |
+| `contractVersion` | Integer `2`, independent of the instance revision and npm version. |
 | `model` | `instance`, `revision`, optional `displayName`, `locale`, `timeZone`, optional `enumLabels` and `ui`, query `limits`, `entities`, executable `commands` and startable `workflows`. |
 | `capabilities` | The same live projection as `/o/:org/capabilities`: entity operations/readable/writable masks, command names, workflow actions, resource grants and organization role. |
 | `console` | The installed console provider's registry (navigation, pages and entity display overlays), further sanitized through live authorization, or `null` when no provider is installed. Core uses the provider port and imports no plugin implementation. |
 
-Clients must check `contractVersion` before adapting the response. Version 1 may
+Clients must check `contractVersion` before adapting the response. Version 2 may
 gain additive optional metadata; changes to existing semantics require a new
 contract version. `model.revision` identifies the instance configuration, not
 authority changes. Re-fetch on organization changes, role/token changes, denied
@@ -270,3 +270,68 @@ CRUD, schema-defined commands or configured views.
 Proof is in `packages/core/test/console-model.test.ts`: neutral fixtures only,
 real scoped authentication, real CRUD/constraint behavior, live membership changes,
 version/cache/auth checks, registry transport and command/workflow filtering.
+
+
+### Optional page action references
+
+`ConsolePage.actions` is optional metadata, with at most 12 descriptors per page.
+Omitting it preserves the previous wire shape and descriptor-free dashboard.
+This additive field uses contract version 2; it introduces no action UI or new
+execution endpoint. Existing clients can ignore it.
+
+```ts
+actions: [
+  { id: 'browse', label: 'browseItems', description: 'browseItemsHelp',
+    icon: 'Folder', primary: true, target: { navigation: 'entity.items' } },
+  { id: 'new', label: 'newItem', icon: 'Folder', target: { create: 'items' } },
+  { id: 'collect', label: 'collectItems', target: { command: 'items/collect' } },
+]
+```
+
+Each descriptor has a unique `id`, a `label` dictionary key, optional
+`description` dictionary key and existing navigation `icon` name. IDs use letters,
+digits, `_`, `.` and `-`, start with a letter and have at most 64 characters.
+Caption keys use the same characters (up to 128); command targets use an existing lowercase
+`namespace/name` (including nested segments, up to 128 characters). Unknown properties and destinations fail at kernel
+construction, including untyped configurations. Exactly one descriptor in a
+nonempty configured array must specify `primary: true`. This is the only primary
+selection rule: neither names nor roles determine it. If that action is denied,
+no surviving action is promoted. Empty arrays are valid.
+
+Targets reference exactly one existing navigation ID (including generated
+`entity.<navigation-item-id>` IDs), entity create operation, or declared,
+registered collection command. There are no URL, HTML, callback, expression,
+renderer, record-ID or query descriptors. Navigation uses its existing page,
+role, grant and authorized named-view destination. Navigation targets are strings
+checked against that registry; the descriptor ID grammar and length limit do not
+apply to them (for example, `workspace/items` is valid when registered). Row-bound and account-access
+commands are not collection actions. Command forms must have a supported object
+input schema with fields understood by the existing form; unsupported root
+unions/references and row bindings fail configuration validation.
+
+Create references follow the existing collection menu: authorized CRUD create
+wins; otherwise the first eligible create command in resolved registry order
+wins. A create command is identified by explicit create placement,
+`replacesCrud: 'create'`, or its create permission, never by its name. The runtime
+projects the chosen fallback as a command target. Explicit command references
+also respect this precedence; create commands do not become secondary actions.
+For commands-only entities, a create reference requires a supported create
+command at configuration load.
+
+Every response rechecks the current organization/actor's destination, readable
+entity identity, operation, command and additional permission grants. Required
+reference inputs, including tuple elements and rest items, need a readable destination; unavailable, sensitive or hidden
+required command inputs suppress the action. CRUD create also requires its
+required user inputs to be available through the authorized form. Both the
+console provider and the final core projection sanitize actions, including
+custom providers. Only surviving actions contribute label/description keys to
+`enumLabels`; denied captions remain server-side. Refresh and discard actions
+with the same live-authority lifecycle as the rest of the console model. Metadata
+never grants execution permission. Widget execution, queries and budgets are
+unchanged.
+
+The optional second `validateConsole(config, context?)` hook argument supplies a
+typed read-only `commands` registry with final runtime/plugin/builtin precedence,
+including generated command definitions. Existing one-argument hooks remain
+compatible. The kernel remains unbound until validation and authorization setup
+complete; this context supplies no execution or authorization bypass.
