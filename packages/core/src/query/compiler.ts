@@ -10,12 +10,11 @@ import type { Scope } from '../types'
 import { quote } from '../migrations/schema'
 import { QueryError } from './errors'
 import { enumLabel, valueLabel } from './search'
-import { fieldType } from './schema'
 import { labelPath, readableLabel, labelAlias, sortAlias, expressionColumns, expressionPath, readableDisplay } from './labels'
 import { QUERY_LIMITS as L, type QueryCost } from './limits'
 import type { Filter, Order, QueryInput, Scalar, Selection } from './schema'
 import { configuredViews, listPredicate } from './list-views'
-import { operandKind } from './input-schema'
+import { fieldType, operandKind } from './input-schema'
 
 type RenderOptions = NonNullable<Parameters<SelectQuery['toSQL']>[1]>
 type TableSource = Parameters<typeof Q.table>[0]
@@ -249,10 +248,10 @@ export function assertStatement(statement: Statement, cost?: QueryCost) {
   if (statement.bindings.length > L.bindings || statement.sql.length > L.sqlLength) throw new QueryError('query_too_expensive', [], cost)
   return statement
 }
-export function renderStatement(kernel: KernelRegistry, scope: Scope, ast: SelectQuery, cost?: QueryCost, requiredDisplays?: Set<string>): Statement {
+export function renderStatement(kernel: KernelRegistry, scope: Scope, ast: SelectQuery, cost?: QueryCost, requiredDisplays?: Set<string>, onReferenceVisibility?: () => void): Statement {
   let references = 0
   function scopedTable(entity: string, extra?: (alias: string) => Condition, maskForeignKeys = true, displayRequired = requiredDisplays?.has(entity) ?? true, demand?: ReadonlySet<string>): SelectQuery {
-    if (!maskForeignKeys) demand = new Set()
+    if (!maskForeignKeys) { demand = new Set(); onReferenceVisibility?.() }
     if (!Object.hasOwn(kernel.config.entities, entity)) throw new QueryError('query_invalid')
     // Bounds policy recursion too, before a future policy compiler can introduce cycles.
     if (++references > L.tableReferences) throw new QueryError('query_too_expensive', [], cost)
@@ -604,11 +603,32 @@ function buildListSource(kernel: KernelRegistry, scope: Scope, query: QueryInput
   if (query.search) ast = ast.where(Cond.or(query.search.fields.map(key => searchCondition(key, query.search!.text, query.search!.locale))))
   return { ast, required }
 }
-/** COUNT is outside the complete list source, preserving its row semantics. */
+/** Count demand retains every condition but drops display/assembly/page dependencies.
+ * The normal list builder and per-source demands still own visibility and policy.
+ */
+export function listTotalQuery(query: QueryInput): QueryInput {
+  return { entity: query.entity, limit: 1, select: ['id'],
+    ...(query.view ? { view: query.view } : {}), ...(query.where ? { where: query.where } : {}),
+    ...(query.rowAccess ? { rowAccess: query.rowAccess } : {}), ...(query.search ? { search: query.search } : {}),
+    ...(query.labelWhere ? { labelWhere: query.labelWhere } : {}),
+  }
+}
+/** Measure FK visibility sources through the same per-occurrence demand renderer.
+ * Mandatory policy expansion keeps its existing table-reference accounting.
+ */
+export function listTotalReferenceCost(kernel: KernelRegistry, scope: Scope, query: QueryInput, cost?: QueryCost) {
+  let references = 0
+  renderListTotal(kernel, scope, query, cost, () => { references++ })
+  return references
+}
+/** COUNT is outside the complete filtered list source, preserving row semantics. */
 export function compileListTotal(kernel: KernelRegistry, scope: Scope, query: QueryInput, cost?: QueryCost) {
-  const { ast: source, required } = buildListSource(kernel, scope, query)
+  return renderListTotal(kernel, scope, query, cost)
+}
+function renderListTotal(kernel: KernelRegistry, scope: Scope, query: QueryInput, cost?: QueryCost, onReferenceVisibility?: () => void) {
+  const { ast: source, required } = buildListSource(kernel, scope, listTotalQuery(query))
   const ast = Q.select().from(source, 'list_total').field(Fn.count('list_total.id'), 'total')
-  return renderStatement(kernel, scope, ast, cost, required)
+  return renderStatement(kernel, scope, ast, cost, required, onReferenceVisibility)
 }
 export function compileRoot(kernel: KernelRegistry, scope: Scope, query: QueryInput, keys?: Scalar[], cost?: QueryCost) {
   const source = buildListSource(kernel, scope, query)

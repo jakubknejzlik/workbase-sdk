@@ -1,8 +1,13 @@
 import { beforeEach, expect, it, vi } from 'vitest'
 import { env } from 'cloudflare:workers'
 import sample from './fixtures/sample/config'
+import { defineInstance } from '../src/config'
+import { identity } from '@workbasehq/plugins/identity'
+import { localAuth } from '@workbasehq/plugins/local-auth'
+import { tenancy } from '../src/kernel/adapters/tenancy'
+import { legacyPermissions } from '@workbasehq/plugins/permissions'
 import { KernelRegistry } from '../src/kernel/registry'
-import type { WorkbasePlugin } from '../src/kernel/plugin'
+import type { WorkbasePlugin, TableFilter } from '../src/kernel/plugin'
 import type { Scope } from '../src/types'
 import { executeQuery } from '../src/query/executor'
 import { validateQuery, querySchema } from '../src/query/schema'
@@ -177,4 +182,121 @@ it('keeps all cursor pages reachable with maxOffset zero', async () => {
     seen.push(...page.data.map(row => row.id)); cursor = page.next_cursor ?? undefined
   } while (cursor)
   expect(seen).toEqual(fixture.map(row => row.id))
+})
+
+// Generic wide lists: R is reference width, V includes the unfiltered all tab.
+function wideTotalsFixture(refs: number, viewCount: number, refViews = false) {
+  const fields = Object.fromEntries(Array.from({ length: refs }, (_, i) => [`ref_${i}`, { type: 'ref' as const, entity: 'people' }]))
+  const views = [{ id: 'all', label: 'All', where: {} }, ...Array.from({ length: viewCount - 1 }, (_, i) => ({
+    id: `stage_${i}`, label: `Stage ${i}`, where: refViews ? { ref_0: { isNull: false } } : { status: { eq: `stage_${i}` } },
+  }))]
+  const configured = defineInstance({ id: 'wide_totals', revision: 1, interactive: true,
+    plugins: [identity, localAuth, tenancy, legacyPermissions], roles: ['owner', 'viewer'],
+    entities: {
+      tasks: { fields: { title: { type: 'string' }, status: { type: 'string' }, ...fields } },
+      people: { displayField: 'name', fields: { name: { type: 'string' } } },
+    },
+    permissions: Object.fromEntries(['owner', 'viewer'].map(role => [role, { tasks: ['read'], people: ['read'] }])),
+    policies: { tasks: { owner: 'all', viewer: 'all' }, people: { owner: 'all', viewer: 'all' } },
+    ui: { entities: { tasks: { list: { views } } } },
+  })
+  return { configured, views, kernel: new KernelRegistry(configured) }
+}
+async function wideScope(current: KernelRegistry, role = 'owner') {
+  return requireScope(await resolveActor(new Request('http://localhost', { headers: { Authorization: `Bearer synthetic-${role}-a` } }), runtime(), current.config), 'org-a', current.config)
+}
+const wideInput = { entity: 'tasks', select: ['id', 'title'], limit: 100, includeTotal: true, includeViewTotals: true }
+it.each([[7, 5], [6, 6]])('wide totals R%i/V%i exclude unused ref projections under unchanged budgets', async (refs, viewCount) => {
+  const { configured, kernel: current } = wideTotalsFixture(refs, viewCount)
+  await setup(configured)
+  const actor = await wideScope(current)
+  for (const [id, status] of [['first', 'stage_0'], ['second', 'stage_1']]) {
+    await env.DB.prepare('INSERT INTO tasks(id,organization_id,title,status,created_at,updated_at) VALUES (?,?,?,?,?,?)').bind(id, 'org-a', id, status, 'now', 'now').run()
+  }
+  expect(L.exists).toBe(16); expect(L.statements).toBe(16); expect(L.tableReferences).toBe(64)
+  const { query, cost, viewQueries } = validateQuery(current, actor, wideInput)
+  expect(cost).toMatchObject({ exists: refs, statements: 2 + viewCount })
+  for (const variant of [query, ...viewQueries.map(view => view.query)]) {
+    expect(compileListTotal(current, actor, variant, cost).sql).not.toMatch(/\bEXISTS\s*\(/i)
+  }
+  expect(await run(wideInput, actor, current)).toMatchObject({ data: [{ id: 'first', title: 'first' }, { id: 'second', title: 'second' }], total: 2,
+    viewTotals: Object.fromEntries(viewQueries.map(view => [view.id, view.id === 'all' ? 2 : ['stage_0', 'stage_1'].includes(view.id) ? 1 : 0])),
+  })
+})
+it('wide totals preserve row/tenant policy, required ref visibility and exact filtered counts for every role', async () => {
+  const { configured } = wideTotalsFixture(7, 5)
+  // The last view reads a reference; the others read only scalar status.
+  configured.ui!.entities!.tasks.list!.views![4].where = { ref_0: { isNull: false } }
+  const restricted: WorkbasePlugin = { name: 'wide_total_policy', version: '1',
+    fieldMask(entity, actor) {
+      const fields = ['id', 'organization_id', 'created_at', 'updated_at', 'version', ...Object.keys(configured.entities[entity].fields)]
+      return actor.role === 'viewer' && entity === 'tasks' ? fields.filter(field => field !== 'ref_1') : fields
+    },
+    tableFilter(entity, actor): TableFilter {
+      if (actor.role === 'owner') return { kind: 'all' }
+      return entity === 'tasks' ? { kind: 'where', predicate: { all: [
+        { status: { ne: 'denied' } },
+        { exists: { entity: 'people', field: 'id', parentField: 'ref_1', predicate: { name: { eq: 'Allowed' } } } },
+      ] } } : { kind: 'where', predicate: { name: { ne: 'Hidden' } } }
+    },
+  }
+  const current = new KernelRegistry(configured, { plugins: [...configured.plugins!, restricted] })
+  await setup(configured)
+  // Deliberately model legacy data with a hostile cross-tenant reference.
+  await env.DB.exec('DROP TABLE tasks; CREATE TABLE tasks (id TEXT, organization_id TEXT, title TEXT, status TEXT, ref_0 TEXT, ref_1 TEXT, ref_2 TEXT, ref_3 TEXT, ref_4 TEXT, ref_5 TEXT, ref_6 TEXT, created_at TEXT, updated_at TEXT, version INTEGER DEFAULT 1)')
+  for (const [id, org, name] of [['allowed', 'org-a', 'Allowed'], ['hidden', 'org-a', 'Hidden'], ['foreign', 'org-b', 'Allowed']]) {
+    await env.DB.prepare('INSERT INTO people(id,organization_id,name,created_at,updated_at) VALUES (?,?,?,?,?)').bind(id, org, name, 'now', 'now').run()
+  }
+  const rows = [
+    ['a', 'org-a', 'stage_0', 'allowed', 'allowed'], ['b', 'org-a', 'stage_1', 'hidden', 'allowed'],
+    ['c', 'org-a', 'stage_2', 'foreign', 'allowed'], ['d', 'org-a', 'stage_2', null, 'allowed'],
+    ['row-denied', 'org-a', 'denied', 'allowed', 'allowed'], ['policy-denied', 'org-a', 'stage_0', 'allowed', 'hidden'],
+    ['tenant-denied', 'org-b', 'stage_0', 'foreign', 'foreign'],
+  ]
+  for (const [id, org, status, ref0, ref1] of rows) await env.DB.prepare('INSERT INTO tasks(id,organization_id,title,status,ref_0,ref_1,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)').bind(id, org, 'Match', status, ref0, ref1, 'now', 'now').run()
+  for (const role of ['owner', 'viewer']) {
+    const actor = await wideScope(current, role)
+    const page = await run(wideInput, actor, current)
+    expect(validateQuery(current, actor, wideInput).cost.exists).toBe(role === 'owner' ? 8 : 7)
+    expect(page.data.map(row => row.id)).toEqual(role === 'owner' ? ['a', 'b', 'c', 'd', 'policy-denied', 'row-denied'] : ['a', 'b', 'c', 'd'])
+    expect(page.viewTotals).toEqual(role === 'owner' ? { all: 6, stage_0: 2, stage_1: 1, stage_2: 2, stage_3: 4 } : { all: 4, stage_0: 1, stage_1: 1, stage_2: 2, stage_3: 1 })
+    for (const view of configured.ui!.entities!.tasks.list!.views!) {
+      const plain = await run({ ...wideInput, includeViewTotals: false, view: view.id }, actor, current)
+      expect(page.viewTotals![view.id]).toBe(plain.total)
+      expect(plain.total).toBe(plain.data.length)
+    }
+    // Output-only references, labels and order never become count dependencies.
+    const { query, cost } = validateQuery(current, actor, { ...wideInput, select: ['id', 'ref_0'], labels: ['ref_0'], orderBy: [{ field: 'ref_0', dir: 'asc' }] })
+    const total = compileListTotal(current, actor, query, cost)
+    expect(total.sql).not.toContain('label_join_')
+    expect(total.sql).not.toContain('AS `ref_0`')
+    // Request ref filters retain the visibility residual, including hidden and foreign targets.
+    for (const where of [{ ref_0: { eq: 'foreign' } }, { ref_0: { isNull: true } }, { not: { ref_0: { isNull: true } } }]) {
+      const input = { ...wideInput, where, includeViewTotals: false }
+      const baseline = await run(input, actor, current)
+      expect(baseline.total).toBe(baseline.data.length)
+      const counted = await run({ ...input, includeViewTotals: true }, actor, current)
+      expect(counted.total).toBe(baseline.total)
+      for (const view of configured.ui!.entities!.tasks.list!.views!) {
+        expect(counted.viewTotals![view.id]).toBe((await run({ ...input, view: view.id }, actor, current)).total)
+      }
+      expect(baseline.data.map(row => row.id)).toEqual('not' in where
+        ? role === 'owner' ? ['a', 'b', 'policy-denied', 'row-denied'] : ['a']
+        : where.ref_0?.eq ? [] : role === 'owner' ? ['c', 'd'] : ['b', 'c', 'd'])
+      const statement = compileListTotal(current, actor, validateQuery(current, actor, input).query)
+      expect(statement.sql).toMatch(/\bEXISTS\s*\(/i)
+    }
+  }
+  const denied = new KernelRegistry(configured, { plugins: [...configured.plugins!, { name: 'deny_totals', version: '1', tableFilter: () => ({ kind: 'none' as const }) }] })
+  expect(await run(wideInput, await wideScope(denied), denied)).toMatchObject({ data: [], total: 0, viewTotals: {} })
+})
+it('wide totals still reject a view filter that genuinely demands many ref probes', async () => {
+  const { configured } = wideTotalsFixture(7, 5, true)
+  for (const view of configured.ui!.entities!.tasks.list!.views!.slice(1)) view.where = {
+    and: Array.from({ length: 7 }, (_, i) => ({ [`ref_${i}`]: { isNull: false } })),
+  }
+  const current = new KernelRegistry(configured)
+  await setup(configured)
+  const actor = await wideScope(current)
+  expect(() => validateQuery(current, actor, wideInput)).toThrowError(expect.objectContaining({ code: 'query_too_expensive', cost: expect.objectContaining({ exists: 35, statements: 7 }) }))
 })
