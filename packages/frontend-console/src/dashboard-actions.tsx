@@ -8,7 +8,7 @@ import { GeneratedCreateDialog, GeneratedCollectionCommandDialog, type WriteRequ
 import type { ConsolePage, ConsolePageAction } from '../../core/src/console-contract'
 import { ReferenceAuthority } from '../../console-generated/src/reference-authority'
 import { api } from './api/client'
-import { useOrganization } from './api/queries'
+import { useOrganization, type Me } from './api/queries'
 import { refreshRuntimeModel, type RuntimeConsole, type useRuntimeModel } from './api/runtime-model'
 import { NavigationIconView } from './navigation-icons'
 
@@ -22,13 +22,13 @@ export function DashboardActions({ orgId, page, runtime, children }: {
   const actor = me.isSuccess ? me.data.user?.id : undefined
   if (!data || !actor) return children({})
   return <ReferenceAuthority.Provider value={{ actor, observedAt: runtime.dataUpdatedAt }}>
-    <ActionScope key={JSON.stringify([data.model.instance, actor, orgId, page.id])} orgId={orgId} pageId={page.id} data={data}
+    <ActionScope key={JSON.stringify([data.model.instance, actor, orgId, page.id])} actor={actor} orgId={orgId} pageId={page.id} data={data}
       blocked={runtime.isFetching || me.isFetching} children={children} />
   </ReferenceAuthority.Provider>
 }
 
-function ActionScope({ orgId, pageId, data, blocked, children }: {
-  orgId: string; pageId: string; data: RuntimeConsole; blocked: boolean; children: (slots: Slots) => ReactNode
+function ActionScope({ actor, orgId, pageId, data, blocked, children }: {
+  actor: string; orgId: string; pageId: string; data: RuntimeConsole; blocked: boolean; children: (slots: Slots) => ReactNode
 }) {
   const { t } = useTranslation()
   const client = useQueryClient()
@@ -43,7 +43,14 @@ function ActionScope({ orgId, pageId, data, blocked, children }: {
   const latest = useRef({ selection, blocked }); latest.current = { selection, blocked }
   const write: WriteRequest = async (...args) => {
     // Queued form work may outlive the removed action, dialog or organization.
-    if (!active.current || latest.current.blocked || !latest.current.selection || latest.current.selection.id !== selection?.id) throw { code: 'action_unavailable' }
+    if (!active.current || !selection || latest.current.blocked || !latest.current.selection || latest.current.selection.id !== selection.id) throw { code: 'action_unavailable' }
+    // Query notifications can precede the next React render. Re-read the E2
+    // projection at the write boundary instead of trusting an obsolete closure.
+    const authority = client.getQueryState<RuntimeConsole>(['console-model', orgId])
+    const organization = client.getQueryState<Me>(['organization', orgId])
+    const current = authority?.data?.console.pages.find(page => page.id === pageId)?.actions?.find(action => action.id === selection.id && JSON.stringify(action.target) === JSON.stringify(selection.target))
+    if (authority?.status !== 'success' || authority.fetchStatus !== 'idle' || organization?.status !== 'success' || organization.fetchStatus !== 'idle'
+      || authority.data.model.instance !== data.model.instance || organization.data.user?.id !== actor || !current) throw { code: 'action_unavailable' }
     const [path, method, body, idempotencyKey] = args
     const result = await api(path, { method, body, orgId, idempotencyKey })
     await client.invalidateQueries({ queryKey: ['console-page', orgId] })
