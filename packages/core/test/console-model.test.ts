@@ -832,3 +832,78 @@ it.each(['provider', 'link', 'id-mask', 'entity-read', 'resource-read', 'organiz
   for (const input of [{ rowAccess: 'signed_in' }, { view: 'linked' }]) expect(() => validateQuery(kernel, current, { entity: 'worker', select: ['id'], ...input })).toThrow()
   vi.restoreAllMocks()
 })
+
+it('E2 redacts action destinations and caption dictionaries through the final core projection', () => {
+  const config = fixture()
+  const navigation = [
+    { id: 'open', placement: 'sidebar' as const, label: 'open', entity: 'specimens' },
+    { id: 'owner', placement: 'sidebar' as const, label: 'owner', entity: 'specimens', roles: ['owner'] },
+    { id: 'private-view', placement: 'sidebar' as const, label: secret, entity: 'specimens', view: 'private' },
+  ]
+  const actions = [
+    { id: 'open', label: 'openAction', description: 'openDescription', primary: true as const, target: { navigation: 'open' } },
+    { id: 'owner', label: secret, description: 'deniedDescription', target: { navigation: 'owner' } },
+    { id: 'private-view', label: secret, target: { navigation: 'private-view' } },
+    { id: 'create', label: 'createAction', target: { create: 'specimens' } },
+    { id: 'command', label: 'commandAction', target: { command: 'specimens/collect' } },
+  ]
+  const collect = defineCommand({ name: 'specimens/collect', input: z.object({ parent: z.string().meta({ referenceEntity: 'hidden' }) }),
+    permission: { entity: 'specimens', operation: 'update' }, plan: () => ({ rules: [], result: { status: 200, body: {} }, event: { operation: 'test', entity: 'clients', entityId: 'synthetic' } }) })
+  const provider = { name: 'external-console', version: '1', provides: { console: '1.x' as const }, validateConsole() {}, consoleRegistry: () => ({ navigation,
+    pages: [{ id: 'quick', label: 'Quick', path: '/quick', renderer: 'custom', actions }], entities: { specimens: { list: { views: [{ id: 'private', label: secret, where: { secret: { eq: secret } } }] } } },
+  }) }
+  const kernel = new KernelRegistry({ ...config, commands: ['specimens/collect'], enumLabels: { en: { openAction: 'Open', openDescription: 'Browse', [secret]: secret, deniedDescription: secret, createAction: 'Create', commandAction: secret } }, plugins: [...config.plugins!, provider] }, { commands: new Map([[collect.name, collect]]) })
+  const scope: Scope = { organizationId: 'org-a', role: 'viewer', actor: { type: 'user', id: 'viewer' }, correlationId: 'actions' }
+  scopeOperations.set(scope, { operations: null })
+  const body = consoleModel(kernel, scope)
+  expect(body.console?.pages[0].actions).toEqual([actions[0]])
+  expect(body.model.enumLabels?.en).toMatchObject({ openAction: 'Open', openDescription: 'Browse' })
+  expect(JSON.stringify(body)).not.toContain(secret)
+  expect(body.model.enumLabels?.en ?? {}).not.toHaveProperty('createAction')
+})
+
+it.each(['reference', 'sensitive', 'hidden'])('E2 omits actions with unavailable required %s command inputs and their captions', async kind => {
+  const input = kind === 'reference' ? z.string().meta({ referenceEntity: 'hidden' }) : kind === 'sensitive' ? z.string().meta({ sensitive: true }) : z.string().meta({ 'x-ui': { hidden: true } })
+  const command = defineCommand({ name: 'specimens/collect', input: z.object({ value: input }), permission: { entity: 'specimens', operation: 'update' }, plan: () => ({ rules: [], result: { status: 200, body: {} }, event: { operation: 'test', entity: 'clients', entityId: 'synthetic' } }) })
+  const base = fixture()
+  const action = { id: 'collect', label: secret, description: 'privateDescription', primary: true as const, target: { command: command.name } }
+  await start(defineInstance({ ...base, commands: [command.name], enumLabels: { en: { [secret]: secret, privateDescription: secret } }, plugins: [...base.plugins!, consoleUI(), {
+    name: 'actions', version: '1', requires: { console: '^1' }, contributes: { console: { pages: [{ id: 'quick', path: '/quick', label: 'Quick', renderer: 'custom', actions: [action] }] } },
+  }] }), { commands: new Map([[command.name, command]]) })
+  const body = await contract()
+  expect(body.console?.pages.find(page => page.id === 'quick')?.actions).toEqual([])
+  expect(JSON.stringify(body.console)).not.toContain(secret)
+  expect(body.model.enumLabels?.en ?? {}).not.toHaveProperty('privateDescription')
+  expect(body.model.enumLabels?.en ?? {}).not.toHaveProperty(secret)
+})
+
+it('E2 refresh removes revoked navigation/actions/captions and unavailable required CRUD fields', async () => {
+  let denied = false
+  const base = fixture()
+  const actions = [
+    { id: 'new', label: 'newAction', description: 'newDescription', primary: true as const, target: { create: 'specimens' } },
+    { id: 'browse', label: 'browseAction', target: { navigation: 'entity.specimens' } },
+  ]
+  await start(defineInstance({ ...base, enumLabels: { cs: { newAction: 'Nový', newDescription: 'Vytvořit záznam', browseAction: 'Procházet' } }, plugins: [...base.plugins!, consoleUI(), {
+    name: 'actions', version: '1', requires: { console: '^1' }, contributes: { console: { pages: [{ id: 'quick', path: '/quick', label: 'Quick', renderer: 'custom', actions }] } },
+    commandGuard: () => denied ? { allow: false, code: 'permission_denied' } : { allow: true },
+  }] }))
+  const allowed = await contract()
+  expect(allowed.console?.pages.find(page => page.id === 'quick')?.actions).toEqual(actions)
+  expect(allowed.model.enumLabels?.cs).toMatchObject({ newAction: 'Nový', newDescription: 'Vytvořit záznam', browseAction: 'Procházet' })
+  denied = true
+  const revoked = await contract()
+  expect(revoked.console?.pages.find(page => page.id === 'quick')?.actions).toEqual([])
+  for (const key of ['newAction', 'newDescription', 'browseAction']) expect(revoked.model.enumLabels?.cs ?? {}).not.toHaveProperty(key)
+  denied = false
+  expect((await contract()).console?.pages.find(page => page.id === 'quick')?.actions).toEqual(actions)
+
+  // A required reference cannot be supplied when its destination is unreadable.
+  const config = defineInstance({ ...base, entities: { ...base.entities, archives: { fields: { title: { type: 'string' } } }, specimens: { ...base.entities.specimens, fields: { ...base.entities.specimens.fields, required_archive: { type: 'ref', entity: 'archives', required: true } } } }, ui: { entities: { specimens: { form: { create: { fields: ['name', 'required_archive'] } } } } }, plugins: [...base.plugins!, consoleUI(), {
+    name: 'restricted-create', version: '1', requires: { console: '^1' }, contributes: { console: { pages: [{ id: 'quick', path: '/quick', label: 'Quick', renderer: 'custom', actions }] } },
+  }] })
+  const kernel = new KernelRegistry(config)
+  const scope: Scope = { organizationId: 'org-a', role: 'owner', actor: { type: 'user', id: 'owner' }, correlationId: 'required-fields' }
+  scopeOperations.set(scope, { operations: null })
+  expect(consoleModel(kernel, scope).console?.pages.find(page => page.id === 'quick')?.actions).toEqual([actions[1]])
+})

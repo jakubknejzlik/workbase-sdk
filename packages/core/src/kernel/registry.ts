@@ -85,12 +85,14 @@ export class KernelRegistry {
     this.config = normalize({ ...config, plugins: this.plugins, entities, commands: commandNames,
       ...(config.pluginConfig || Object.keys(pluginConfig).length ? { pluginConfig } : {}) })
     if (config.effectiveAccess) { this.config.effectiveAccess = config.effectiveAccess; validatePolicies(this.config) }
-    this.providers.get('console')?.[0]?.validateConsole?.(this.config)
-    for (const command of [...userLinkCommands(this.config), ...workerAccessCommands(this.config, env)]) {
+    const generatedCommands = [...userLinkCommands(this.config), ...workerAccessCommands(this.config, env)]
+    const validationContext = Object.freeze({ commands: createCommandRegistry([...commands, ...generatedCommands]) })
+    this.providers.get('console')?.[0]?.validateConsole?.(this.config, validationContext)
+    for (const command of generatedCommands) {
       commands.push(command)
       if (!this.config.commands.includes(command.name)) this.config.commands.push(command.name)
     }
-    this.commands = createCommandRegistry(commands)
+    this.commands = validationContext.commands
     this.workflows = createWorkflowRegistry(workflows)
     this.workflowRegistrations = workflowRegistrations
     if (this.config.effectiveAccess) this.config.effectiveAccess = accessGuards(this.config.effectiveAccess, this.config.commands, [...this.commands.values()], this.plugins)

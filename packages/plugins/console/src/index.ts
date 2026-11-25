@@ -1,7 +1,7 @@
 import { versionHistory, type ConfigVersion } from '@workbasehq/core/migrations/versions'
 import { validateQuery } from '@workbasehq/core/query/schema'
 import { QueryError } from '../../../core/src/query/errors'
-import type { WorkbasePlugin } from '@workbasehq/core/kernel/plugin'
+import type { ConsoleValidationContext, WorkbasePlugin } from '@workbasehq/core/kernel/plugin'
 import { builtinPlugin } from '@workbasehq/core/kernel/builtin-source'
 import { kernelFor } from '@workbasehq/core/kernel/registry'
 import { scopeMiddleware } from '../../../core/src/authorization'
@@ -10,6 +10,9 @@ import { coreConsoleContribution } from '../../../core/src/console-contribution'
 import { validateCalendarViews } from '../../../core/src/calendar-display'
 import { validateFormDisplay } from '../../../core/src/form-display'
 import { validateDetailDisplay } from '../../../core/src/detail-display'
+import { validatePageActions } from './page-actions'
+import { consolePageActions, consolePresentation } from '../../../core/src/console-presentation'
+import { consoleAuthorization } from '../../../core/src/console-authorization'
 import { ApiError } from '../../../core/src/errors'
 import { executeWidgets, validateWidgets, visibleWidgets } from './widgets'
 import { normalizeListConfig, type InstanceConfig } from '@workbasehq/core/config'
@@ -29,7 +32,7 @@ const contributions = (config: InstanceConfig): ConsoleContribution[] => {
 const ordered = (a: { order?: number }, b: { order?: number }) => (a.order ?? Number.MAX_SAFE_INTEGER) - (b.order ?? Number.MAX_SAFE_INTEGER)
 
 /** Reject collisions and bad destinations before mounting any HTTP surface. */
-export function validateConsole(config: InstanceConfig) {
+export function validateConsole(config: InstanceConfig, context?: ConsoleValidationContext) {
   const parts = contributions(config)
   const pages = parts.flatMap(part => part.pages ?? [])
   const unique = (values: string[], kind: string) => { const seen = new Set<string>(); for (const id of values) { if (seen.has(id)) throw new Error(`Duplicate console ${kind}: ${id}`); seen.add(id) } }
@@ -44,6 +47,7 @@ export function validateConsole(config: InstanceConfig) {
   for (const item of navigation) {
     if (!!item.page === !!item.entity || item.page && !pages.some(page => page.id === item.page) || item.entity && !config.entities[item.entity]) throw new Error(`Invalid console destination: ${item.id}`)
   }
+  validatePageActions(config, pages, navigation, context)
   const entities = new Set<string>()
   for (const part of parts) for (const entity of Object.keys(part.entities ?? {})) {
     if (!config.entities[entity]) throw new Error(`Unknown console entity: ${entity}`)
@@ -89,7 +93,10 @@ export function consoleRegistry(config: InstanceConfig, scope: Scope): ConsoleRe
     ...config.ui?.entities?.[name], fields: Object.fromEntries(Object.entries(entity.fields).flatMap(([field, definition]) => definition.ui ? [[field, definition.ui]] : [])),
   }]))
   for (const part of parts) for (const [entity, { list, ...display }] of Object.entries(part.entities ?? {})) entities[entity] = { ...entities[entity], ...display, ...(list ? { list: normalizeListConfig(config, entity, list) } : {}) }
-  return { navigation: navigation.sort(ordered), pages, entities, modelUi: config.ui }
+  const authority = consoleAuthorization(kernelFor(config), scope, caps)
+  const actionNavigation = pages.some(page => page.actions !== undefined)
+    ? consolePresentation(kernelFor(config), scope, authority).registry({ pages, navigation, entities }).navigation : navigation
+  return { navigation: navigation.sort(ordered), pages: pages.map(page => page.actions === undefined ? page : { ...page, actions: consolePageActions(kernelFor(config), page.actions, actionNavigation, authority) }), entities, modelUi: config.ui }
 }
 
 /** Console metadata and widget execution share the live scoped kernel. */

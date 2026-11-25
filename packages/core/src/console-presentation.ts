@@ -1,3 +1,8 @@
+import { z } from 'zod'
+import type { InstanceConfig } from './config'
+import type { CommandDefinition } from './commands'
+import type { ConsoleNavigation, ConsolePageAction } from './console-contract'
+import { isAccountAccessCommand } from './account-command'
 import type { KernelRegistry } from './kernel/registry'
 import type { Scope } from './types'
 import type { ConsoleWidget, ConsoleDetailItem, ConsoleEntityDisplay, ConsoleFieldDisplay, ConsoleGrant, ConsoleModelUI, ConsoleRegistry } from './console-contract'
@@ -7,6 +12,82 @@ const safeGrant = (grant: ConsoleGrant): ConsoleGrant => typeof grant === 'strin
 
 function pick<T, K extends keyof T>(source: T, keys: readonly K[]): Pick<T, K> {
   return Object.fromEntries(keys.filter(key => source[key] !== undefined).map(key => [key, source[key]])) as Pick<T, K>
+}
+
+
+/** Match the existing collection menu's placement and row-binding rules. */
+export function consoleCollectionCommand(config: InstanceConfig, command: CommandDefinition<any>, entity?: string): Record<string, any> | undefined {
+  if ('system' in command.permission || isAccountAccessCommand(config, command.name)) return undefined
+  const destination = entity ?? command.ui?.placement?.entity ?? command.permission.entity
+  if (!config.entities[destination] || command.ui?.placement?.entity !== destination && command.permission.entity !== destination) return undefined
+  // Legacy account actions also belong exclusively to Application access.
+  if (Object.values(config.entities[destination].fields).some(field => field.userLink)
+    && ['link_account', 'remove_access'].some(action => command.name === `${destination}/${action}`)) return undefined
+  let schema: Record<string, any>
+  try { schema = z.toJSONSchema(command.input, { io: 'input' }); z.fromJSONSchema(schema as any) } catch { return undefined }
+  if (schema.type !== 'object' || !schema.properties || typeof schema.properties !== 'object'
+    || schema.anyOf || schema.oneOf || schema.allOf || schema.$ref || schema.patternProperties) return undefined
+  const fields = Object.values(schema.properties) as Record<string, any>[]
+  const spec = (field: Record<string, any>) => field.anyOf?.find((item: Record<string, any>) => item.type !== 'null') ?? field
+  if (fields.some(field => !['string', 'number', 'integer', 'boolean', 'object', 'array', 'null'].includes(
+    Array.isArray(spec(field).type) ? spec(field).type.find((type: string) => type !== 'null') : spec(field).type))) return undefined
+  if (fields.filter(field => field.type === 'string' && field.referenceEntity === destination).length === 1) return undefined
+  return schema
+}
+export function consoleCommandCreates(command: CommandDefinition<any>, entity: string) {
+  return command.ui?.placement?.entity === entity && command.ui.placement.action === 'create'
+    || command.ui?.replacesCrud === 'create' || !('system' in command.permission) && command.permission.operation === 'create'
+}
+
+/** Reused by the provider and the final core boundary; captions follow this result only. */
+export function consolePageActions(kernel: KernelRegistry, actions: readonly ConsolePageAction[], navigation: readonly ConsoleNavigation[], authority: ConsoleAuthorization): ConsolePageAction[] {
+  const config = kernel.config
+  const requiredInputs = (schema: Record<string, any>): boolean => {
+    const allowed = (node: Record<string, any>): boolean => authority.schema(node)
+      && !node.readOnly && !node['x-ui']?.hidden
+      && (!node.anyOf || node.anyOf.every((child: Record<string, any>) => allowed(child)))
+      && (!node.oneOf || node.oneOf.every((child: Record<string, any>) => allowed(child)))
+      && (!node.items || typeof node.items === 'object' && allowed(node.items))
+      && (node.required ?? []).every((name: string) => node.properties?.[name] && allowed(node.properties[name]))
+    return allowed(schema)
+  }
+  const commandAllowed = (command: CommandDefinition<any>, entity: string) => {
+    const schema = consoleCollectionCommand(config, command, entity)
+    return config.commands.includes(command.name) && authority.canRead(entity) && authority.command(command.name)
+      && !!schema && requiredInputs(schema) && !(command.ui?.replacesCrud && authority.operation(entity, command.ui.replacesCrud))
+  }
+  const creates = (entity: string) => [...kernel.commands.values()].find(command => commandAllowed(command, entity) && consoleCommandCreates(command, entity))
+  return actions.flatMap(action => {
+    if (!action || !action.target) return []
+    let target: ConsolePageAction['target'] | undefined
+    const reference = action.target
+    if ('navigation' in reference && navigation.some(item => item.id === reference.navigation)) target = { navigation: reference.navigation }
+    if ('create' in action.target) {
+      const entity = action.target.create
+      if (authority.canRead(entity)) {
+        if (authority.operation(entity, 'create')) {
+          const definition = config.entities[entity]
+          const explicit = config.ui?.entities?.[entity]?.form?.create?.fields
+          const available = Object.entries(definition.fields).every(([field, spec]) => !spec.required || spec.readOnly || spec.default !== undefined
+            || authority.write(entity, field, 'create') && !spec.ui?.hidden && (!explicit || explicit.includes(field))
+              && (spec.type !== 'ref' || !!spec.entity && authority.canRead(spec.entity)))
+          if (available) target = { create: entity }
+        } else {
+          const command = creates(entity)
+          if (command) target = { command: command.name }
+        }
+      }
+    }
+    if ('command' in action.target) {
+      const command = kernel.commands.get(action.target.command)
+      if (command && !('system' in command.permission)) {
+        const entity = command.ui?.placement?.entity ?? command.permission.entity
+        if (commandAllowed(command, entity) && (!consoleCommandCreates(command, entity)
+          || !authority.operation(entity, 'create') && creates(entity)?.name === command.name)) target = { command: command.name }
+      }
+    }
+    return target ? [{ ...pick(action, ['id', 'label', 'description', 'icon', 'primary']), target }] : []
+  })
 }
 
 /** Project every copy of presentation data through the same live authority.
@@ -134,7 +215,7 @@ export function consolePresentation(kernel: KernelRegistry, scope: Scope, author
       })
       return widgets.length ? [{ ...safePage, widgets, ...(page.sections ? { sections: page.sections.map(section => ({ row: section.row.filter(id => widgets.some(widget => widget.id === id)) })).filter(section => section.row.length) } : {}) }] : []
     })
-    return {
+    const result: ConsoleRegistry = {
       entities, pages,
       navigation: source.navigation.filter(item => (scope.role !== 'member' || item.placement === 'sidebar' && !!item.entity) && !!item.page !== !!item.entity && permits(item.grant) && (!item.roles || item.roles.includes(scope.role)) && (!item.page || pages.some(page => page.id === item.page))
         && (!item.entity || canRead(item.entity) && (!item.view || entities[item.entity]?.list?.views?.some(view => view.id === item.view)))).map(item => ({ ...pick(item, ['id', 'placement', 'label', 'icon', 'order', 'roles', 'page', 'entity', 'view']),
@@ -142,6 +223,11 @@ export function consolePresentation(kernel: KernelRegistry, scope: Scope, author
           ...(item.group ? { group: pick(item.group, ['id', 'label', 'order', 'icon']) } : {}) })),
       ...(source.modelUi ? { modelUi: modelUI(source.modelUi) } : {}),
     }
+    result.pages = result.pages.map(page => {
+      const sourcePage = source.pages.find(candidate => candidate.id === page.id)!
+      return sourcePage.actions === undefined ? page : { ...page, actions: consolePageActions(kernel, sourcePage.actions, result.navigation, authority) }
+    })
+    return result
   }
   return { fieldUI, display, modelUI, registry }
 }

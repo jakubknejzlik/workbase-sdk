@@ -207,3 +207,25 @@ it.each(['INSERT INTO seen SELECT new.end;', 'INSERT INTO seen SELECT end FROM s
   ` }] })]).applyMigrations(env.DB)
   expect((await env.DB.prepare('SELECT value FROM seen ORDER BY rowid').all()).results).toEqual([{ value: 'first' }, { value: 'second' }])
 })
+
+it('E2 console validation receives the final resolved commands without binding the kernel early', async () => {
+  const { z } = await import('zod')
+  const { defineCommand } = await import('../src/commands')
+  const { builtinPlugin } = await import('../src/kernel/builtin-source')
+  const make = (name: string) => defineCommand({ name, input: z.object({}), permission: { entity: 'clients', operation: 'update' }, plan: () => ({ rules: [], result: { status: 200, body: {} }, event: { operation: 'test', entity: 'clients', entityId: 'synthetic' } }) })
+  const runtimeCommand = make('clients/runtime')
+  const builtin = make('clients/runtime')
+  const contributed = make('clients/plugin')
+  let observed: import('../src/kernel/plugin').ConsoleValidationContext | undefined
+  const provider = plugin('test-console', { provides: { console: '1.x' }, consoleRegistry: () => ({ pages: [], navigation: [], entities: {} }), validateConsole(config: typeof sample, context?: import('../src/kernel/plugin').ConsoleValidationContext) {
+    observed = context
+    expect(() => kernelFor(config)).toThrow('Unbound instance config')
+  } })
+  const kernel = new KernelRegistry({ ...sample, interactive: false }, { commands: new Map([[runtimeCommand.name, runtimeCommand]]), plugins: [provider,
+    builtinPlugin(plugin('builtin-commands', { commands: [builtin] })), plugin('domain-commands', { commands: [contributed] }),
+  ] })
+  expect(observed?.commands).toBe(kernel.commands)
+  expect(observed?.commands.get(runtimeCommand.name)).toBe(runtimeCommand)
+  expect(observed?.commands.get(contributed.name)).toBe(contributed)
+  expect([...observed!.commands.keys()]).toEqual([...kernel.commands.keys()])
+})
