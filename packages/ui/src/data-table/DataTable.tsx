@@ -8,6 +8,7 @@ import { TablePresentationContext } from './presentation'
 import { DataTableSearch } from './DataTableSearch'
 import { CursorPagination, type PaginationLabels } from './cursor-pagination'
 import { Button } from '../components/ui/button'
+import { AlertCircle } from 'lucide-react'
 export interface DataTableState { search: string; sort: { key: string; direction: 'asc' | 'desc' } | null; limit: number }
 export interface ServerColumn<T> { id: string; label: string; align?: 'left' | 'right' | 'center'; keepOnNarrow?: boolean; wrap?: boolean; sortable?: boolean; filter?: ReactNode; cell: (row: T) => ReactNode }
 interface ServerMeta<T> { compact?: boolean; widthClass?: string; serverColumn: ServerColumn<T>; labelId: string; sortLabel: string }
@@ -26,11 +27,13 @@ function ServerCell<T>({ column, row }: CellContext<T, unknown>) {
   return column.id === '_actions' ? config.cell(row.original) : <div className={((column.columnDef.meta as ServerMeta<T>).compact || config.wrap) ? "whitespace-normal break-words" : "truncate"} ref={node => { if (node) node.title = node.textContent ?? '' }}>{config.cell(row.original)}</div>
 }
 /** Workbase owns server state; the source provider renders it without local filtering/paging. */
-export function DataTable<T extends { id?: unknown }>({ rows, columns, state, onStateChange, page, range, onPage, nextCursor, isFetching, label, labels, onRowClick, searchDescription, searchAvailable = true, pendingSearch = false, staleLabel, clearFilters, onClearFilters, error, onRetry, compact = false, mobileCards = false, hideFooter = false, scrollOnNarrow = false, listV2 = false, fixedDensity = false }: {
+export function DataTable<T extends { id?: unknown }>({ rows, columns, state, onStateChange, page, range, onPage, nextCursor, isFetching, label, labels, onRowClick, searchDescription, searchAvailable = true, pendingSearch = false, staleLabel, clearFilters, onClearFilters, emptyContent, error, onRetry, compact = false, mobileCards = false, hideFooter = false, scrollOnNarrow = false, listV2 = false, fixedDensity = false }: {
   fixedDensity?: boolean; listV2?: boolean; hideFooter?: boolean; scrollOnNarrow?: boolean; compact?: boolean; mobileCards?: boolean
   rows: T[]; columns: ServerColumn<T>[]; state: DataTableState; onStateChange: (state: DataTableState, change: 'search' | 'sort' | 'limit') => void
   page: number; range?: { page: number; limit: number }; onPage: (direction: 'previous' | 'next') => void; nextCursor?: string | null; isFetching: boolean; label: string
   labels: PaginationLabels & { search: string; clearSearch: string; noResults: string; emptyDescription?: string; scrollRegion?: string; scrollHint?: string; sort: (column: string) => string; sortAndFilter?: string; sortStates?: { asc: string; desc: string; none: string }; error?: string; errorDescription?: string; retry?: string }
+  /** Shared feedback composition; the caller supplies translated text and authorized actions. */
+  emptyContent?: ReactNode
   onRowClick: (row: T) => void; searchDescription?: string; searchAvailable?: boolean; pendingSearch?: boolean; staleLabel?: string; clearFilters?: string; onClearFilters?: () => void; error?: Error | null; onRetry?: () => void
 }) {
   const narrow = useSyncExternalStore(callback => {
@@ -58,6 +61,7 @@ export function DataTable<T extends { id?: unknown }>({ rows, columns, state, on
     onSortingChange: updater => { const next = typeof updater === 'function' ? updater(table.getState().sorting) : updater; onStateChange({ ...state, sort: next[0] ? { key: next[0].id, direction: next[0].desc ? 'desc' : 'asc' } : null }, 'sort') },
     onPaginationChange: updater => { const next = typeof updater === 'function' ? updater(table.getState().pagination) : updater; if (next.pageSize !== state.limit) onStateChange({ ...state, limit: next.pageSize }, 'limit') },
   })
+  const composedEmptyContent = emptyContent === undefined ? <div className="space-y-2 p-6 text-center text-muted-foreground">{listV2 ? <><h2 className="text-lg font-medium text-foreground">{labels.noResults}</h2><p>{labels.emptyDescription}</p></> : <p>{labels.noResults}</p>}{onClearFilters && <Button type="button" variant="outline" onClick={onClearFilters}>{clearFilters}</Button>}</div> : emptyContent
   const visibleCount = table.getVisibleLeafColumns().length
   // Keep the W44 primary + Actions layout without removing the other columns'
   // server sort/filter operations. Only authorized, configured columns reach here.
@@ -65,7 +69,7 @@ export function DataTable<T extends { id?: unknown }>({ rows, columns, state, on
   return <TablePresentationContext.Provider value={{ tableClass: narrow || scrollOnNarrow ? 'w-full' : compact ? 'w-full min-w-[900px] md:min-w-0' : visibleCount <= 2 ? 'min-w-[320px]' : visibleCount <= 3 ? 'min-w-[600px]' : visibleCount <= 5 ? 'min-w-[900px]' : visibleCount <= 8 ? 'min-w-[1400px]' : 'min-w-[2200px]', label, headerId: id => `${labelPrefix}-${id}`, stale, busy: stale,
     listV2, scrollRegion: labels.scrollRegion, scrollHint: labels.scrollHint,
     errorDescription: labels.errorDescription, retryLabel: labels.retry, onRetry,
-    errorLabel: labels.error ?? 'Failed to load data', emptyContent: <div className="space-y-2 p-6 text-center text-muted-foreground">{listV2 ? <><h2 className="text-lg font-medium text-foreground">{labels.noResults}</h2><p>{labels.emptyDescription}</p></> : <p>{labels.noResults}</p>}{onClearFilters && <Button type="button" variant="outline" onClick={onClearFilters}>{clearFilters}</Button>}</div>,
+    errorLabel: labels.error ?? 'Failed to load data', emptyContent: composedEmptyContent,
     pageSizeLabel: labels.pageSize, pageSizes: [10, 20, 30, 50, 100], pageSizeOption: size => labels.pageSizeOption?.(size) ?? String(size),
     pagination: <CursorPagination range={range} page={page} limit={state.limit} length={rows.length} hasNext={!!nextCursor} busy={stale} labels={labels} onPage={onPage} />,
   }}><DataTableProvider table={table} isLoading={isFetching} error={error} onRowClick={onRowClick}>
@@ -93,8 +97,14 @@ export function DataTable<T extends { id?: unknown }>({ rows, columns, state, on
       {staleLabel && <p role="status" className="py-2 text-sm">{staleLabel}</p>}
       <div data-stale={stale} aria-busy={stale} className={`min-w-0 max-w-full rounded-md border ${mobileCards ? 'hidden md:block' : ''}`}><DataTableContent /></div>
       {mobileCards && <div className="md:hidden" aria-busy={stale}>
-        {error && <p role="alert">{labels.error}</p>}
-        {!rows.length && <p className="p-4">{labels.noResults}</p>}
+        {error && !isFetching && <div role="alert" className="flex min-h-32 w-full flex-col items-center justify-center gap-2 p-4 text-center text-destructive">
+          <AlertCircle aria-hidden="true" className="h-8 w-8" />
+          <p className="font-medium">{labels.error ?? 'Failed to load data'}</p>
+          {error.message !== (labels.error ?? 'Failed to load data') && <p className="max-w-md text-sm text-muted-foreground">{error.message}</p>}
+          {labels.errorDescription && <p className="max-w-md text-sm text-muted-foreground">{labels.errorDescription}</p>}
+          {onRetry && labels.retry && <Button type="button" variant="outline" onClick={onRetry}>{labels.retry}</Button>}
+        </div>}
+        {!rows.length && !isFetching && !error && <div className="min-h-24 w-full text-center">{composedEmptyContent}</div>}
         <ul className="grid gap-3">{rows.map((row, index) => <li key={String(row.id ?? index)} className="rounded-md border p-4"><dl className="grid grid-cols-2 gap-3">{table.getVisibleLeafColumns().map(column => {
           const config = (column.columnDef.meta as ServerMeta<T>).serverColumn
           return <div key={column.id} className={`min-w-0 ${config.align === 'right' ? 'text-right' : config.align === 'center' ? 'text-center' : 'text-left'} ${column.id === columns[0]?.id || column.id === columns.at(-1)?.id ? 'col-span-2' : ''}`}><dt className="text-xs text-muted-foreground">{column.getCanSort() ? <button type="button" className="inline-flex min-h-8 items-center gap-1" aria-label={labels.sort(config.label)} onClick={() => column.toggleSorting(column.getIsSorted() === 'asc')}>{config.label}{column.getIsSorted() === 'asc' ? ' ↑' : column.getIsSorted() === 'desc' ? ' ↓' : ' ↕'}</button> : config.label}</dt><dd className="whitespace-normal break-words">{config.cell(row)}</dd></div>
