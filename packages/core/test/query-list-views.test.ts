@@ -12,6 +12,7 @@ import { executeQuery, type QueryResult } from '../src/query/executor'
 import { fieldsFor, validateQuery } from '../src/query/schema'
 import { resolveActor, requireScope } from '../src/authorization'
 import { sha256 } from '../src/crypto'
+import { createApp } from '../src/app'
 import { consoleModel } from '../src/console-model'
 
 const budget = vi.hoisted(() => ({ statements: 16, exists: 16 }))
@@ -188,4 +189,65 @@ it('can request only tab counts without the main total', async () => {
   expect(page).not.toHaveProperty('total')
   expect(page.viewTotals).toMatchObject({ all: 16, invited: 4 })
   expect(prepare.mock.calls.filter(([sql]) => /COUNT\(/i.test(sql))).toHaveLength(views.length)
+})
+
+// The role names and rows are synthetic; read-only status access needs no member role.
+it.each(['ordinary', 'create-denied', 'invite-create-denied'] as const)('admin/staff-only HTTP read parity: %s', async denial => {
+  const source = workerAccessFixture()
+  source.plugins = [...source.plugins!, consoleUI(), { name: 'readable-fields', version: '1', fieldMask: entity => entity === 'worker' ? ['id', 'name'] : fieldsFor(source, entity) }]
+  source.effectiveAccess = { ...source.effectiveAccess!,
+    entities: source.effectiveAccess!.entities.map(rule => denial === 'create-denied' && rule.role === 'admin' && rule.entity === 'worker' && rule.operation === 'create' ? { ...rule, decision: 'deny' } : rule),
+    system: source.effectiveAccess!.system.map(rule => denial === 'invite-create-denied' && rule.role === 'admin' && rule.action === 'invitations.create' ? { ...rule, decision: 'deny' } : rule),
+  }
+  const list = { rowAccess: { placement: 'panel' as const }, views: [
+    { id: 'all', label: 'All', where: {} }, { id: 'linked', label: 'Linked', where: {}, rowAccess: 'signed_in' as const },
+    { id: 'hidden', label: 'Hidden', where: { or: [{ name: { eq: 'Other draft' } }, { user: { eq: 'staff' } }] } },
+  ] }
+  source.ui = { entities: { worker: { list } }, navigation: { groups: [], items: [{ id: 'linked', entity: 'worker', view: 'linked' }, { id: 'hidden', entity: 'worker', view: 'hidden' }] } }
+  // Exercise plugin precedence and whole-predicate pruning as well as model hints.
+  source.plugins = [...source.plugins, { name: 'read-views', version: '1', requires: { console: '^1' }, contributes: { console: { entities: { worker: { list } }, navigation: [{ id: 'plugin.linked', entity: 'worker', view: 'linked', placement: 'sidebar', label: 'Linked' }, { id: 'plugin.hidden', entity: 'worker', view: 'hidden', placement: 'sidebar', label: 'Hidden' }] } } }]
+  expect(source.roles).toEqual(['admin', 'staff'])
+  for (const role of ['admin', 'staff']) {
+    await env.DB.prepare('INSERT INTO users(id,email,organization_id,name,role,created_at,updated_at) VALUES (?,?,?,?,?,?,?)').bind(role, `${role}@example.test`, 'org-a', role, role, 'now', 'now').run()
+    await env.DB.prepare('INSERT INTO "user" (id,name,email,"emailVerified","createdAt","updatedAt") VALUES (?,?,?,1,?,?)').bind(role, role, `${role}@example.test`, 'now', 'now').run()
+    await env.DB.prepare("INSERT INTO identities VALUES (?,'local','local',?,'now')").bind(role, role).run()
+    await env.DB.prepare('INSERT INTO memberships VALUES (?,?,?)').bind(role, 'org-a', role).run()
+    await env.DB.prepare('INSERT INTO sessions VALUES (?,?,?)').bind(await sha256(`read-${role}`), role, '2099-01-01T00:00:00.000Z').run()
+  }
+  await env.DB.exec("UPDATE worker SET user='staff' WHERE id='row-3-0'")
+  const app = createApp(source, runtime())
+  const request = (path: string, role: string, body?: object) => app.request(`http://localhost${path}`, { method: body ? 'POST' : 'GET', headers: { Authorization: `Bearer read-${role}`, 'X-Organization-Id': 'org-a', 'Content-Type': 'application/json' }, ...(body ? { body: JSON.stringify(body) } : {}) })
+  for (const role of ['admin', 'staff']) {
+    const response = await request('/o/org-a/console-model', role)
+    expect(response.status).toBe(200)
+    const body = await response.json() as any
+    if (role === 'admin') {
+      expect(body.capabilities.entities.worker.operations.includes('create')).toBe(denial !== 'create-denied')
+      expect(body.capabilities.resources['invitations.create']).toBe(denial !== 'invite-create-denied')
+    }
+    expect(body.model.entities.worker.rowAccess).toBe(role === 'admin')
+    expect(body.model.entities.worker.rowInvitations).not.toBe(true)
+    expect(body.model.entities.worker.list.views.map((view: any) => view.id)).toEqual(role === 'admin' ? ['all', 'linked'] : ['all'])
+    for (const navigation of [body.model.ui.navigation.items, body.console.modelUi.navigation.items, body.console.navigation]) {
+      expect(navigation.some((item: any) => item.view === 'linked')).toBe(role === 'admin')
+      expect(navigation.some((item: any) => item.view === 'hidden')).toBe(false)
+    }
+    const query = { entity: 'worker', select: ['id'], limit: 100, includeTotal: true, includeViewTotals: true }
+    const plain = await request('/query', role, query)
+    expect(plain.status).toBe(200)
+    const rows = await plain.json() as any
+    expect(rows.total).toBe(role === 'admin' ? 16 : 1)
+    expect(Object.keys(rows.viewTotals)).toEqual(role === 'admin' ? ['all', 'linked'] : ['all'])
+    if (role === 'staff') expect(rows.data.map((row: any) => row.id)).toEqual(['row-3-0'])
+    for (const filter of [{ rowAccess: 'signed_in' }, { view: 'linked' }]) {
+      const result = await request('/query', role, { ...query, ...filter })
+      expect(result.status).toBe(role === 'admin' ? 200 : 'rowAccess' in filter ? 403 : 400)
+      if (role === 'admin') {
+        const page = await result.json() as any
+        expect(page.total).toBe(4)
+        expect(page.data.map((row: any) => row.id)).toEqual(fixture.filter(row => row.state === 'signed_in').map(row => row.id))
+      }
+    }
+    expect((await request('/query', role, { ...query, view: 'hidden' })).status).toBe(400)
+  }
 })

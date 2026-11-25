@@ -16,11 +16,11 @@ const caps: Capabilities = { revision: 1, entities: { entries: { readable: Objec
 let client: QueryClient
 beforeEach(() => { vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} }); vi.spyOn(window, 'scrollTo').mockImplementation(() => {}) })
 afterEach(() => { client?.clear(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
-async function mount(options: { access?: boolean; accessPlacement?: 'toolbar' | 'column'; missingTotals?: boolean; empty?: boolean; range?: boolean; lowerBound?: 'number' | 'date' } = {}) {
+async function mount(options: { access?: boolean; invitations?: boolean; readAccess?: boolean; accessPlacement?: 'toolbar' | 'column'; missingTotals?: boolean; empty?: boolean; range?: boolean; lowerBound?: 'number' | 'date' } = {}) {
   const definition = structuredClone(model), permissions = structuredClone(caps)
   if (options.range) { definition.entities.entries.fields.amount = { type: 'number' }; definition.entities.entries.list!.filter!.amount = { kind: 'number', placement: 'panel', operators: ['eq', 'gte', 'lte'] }; permissions.entities.entries.readable.push('amount') }
   if (options.lowerBound) { definition.entities.entries.fields.amount = { type: options.lowerBound === 'date' ? 'datetime' : 'number' }; definition.entities.entries.list!.filter!.amount = { kind: options.lowerBound, placement: 'panel', operators: ['gte'] }; permissions.entities.entries.readable.push('amount') }
-  if (options.access) { definition.entities.entries.rowInvitations = true; definition.entities.entries.list!.rowAccess = options.accessPlacement === 'column' ? { column: true } : { placement: options.accessPlacement ?? 'panel' }; permissions.resources = { 'invitations.read': true } }
+  if (options.access) { definition.entities.entries.rowInvitations = options.invitations ?? true; definition.entities.entries.rowAccess = options.readAccess ?? true; definition.entities.entries.list!.views!.push({ id: 'linked', label: 'Linked view', where: {}, rowAccess: 'signed_in' }); definition.entities.entries.list!.rowAccess = options.accessPlacement === 'column' ? { column: true } : { placement: options.accessPlacement ?? 'panel' }; permissions.resources = { 'invitations.read': true } }
   let mode = 'success', release: (() => void) | undefined
   let gate: Promise<void> | undefined
   const request = vi.fn(async (query: ReadQuery) => {
@@ -285,4 +285,22 @@ it('renders inert visible-column skeletons on a new query and one loading announ
   await act(async () => test.release())
   expect(await screen.findByText('Current')).toBeTruthy()
   expect(document.querySelector('[data-list-skeleton]')).toBeNull()
+})
+
+it.each(['panel', 'toolbar'] as const)('shows read-only access tabs and %s filter without invitation-create controls', async placement => {
+  const test = await mount({ access: true, invitations: false, ...(placement === 'toolbar' ? { accessPlacement: placement } : {}) })
+  await test.user.click(screen.getByRole('button', { name: /Linked view/ }))
+  await waitFor(() => expect(test.request.mock.calls.at(-1)?.[0].view).toBe('linked'))
+  const region = placement === 'panel' ? await openPanel(test.user) : document.body
+  await test.user.selectOptions(within(region).getByRole('combobox', { name: en.rowAccessFilter }), 'signed_in')
+  if (placement === 'panel') await test.user.click(within(region).getByRole('button', { name: en.applyFilter }))
+  await waitFor(() => expect(test.request.mock.calls.at(-1)?.[0]).toMatchObject({ rowAccess: 'signed_in', view: 'linked' }))
+  expect(screen.queryByRole('columnheader', { name: en.rowAccess })).toBeNull()
+  expect(screen.queryByRole('button', { name: /Invite|Send invitation/ })).toBeNull()
+})
+it('hides access tabs and status controls when the model denies read, even with invitation-create capability', async () => {
+  const test = await mount({ access: true, readAccess: false })
+  expect(screen.queryByRole('button', { name: /Linked view/ })).toBeNull()
+  const panel = await openPanel(test.user)
+  expect(within(panel).queryByRole('combobox', { name: en.rowAccessFilter })).toBeNull()
 })

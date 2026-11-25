@@ -43,19 +43,19 @@ for (const override of [false, true]) for (const create of [false, true]) for (c
     const body = consoleModel(new KernelRegistry(source), scope)
     expect(body.contractVersion).toBe(2)
     expect(body.model.entities.workers.rowInvitations === true).toBe(create)
-    // Query eligibility is independent of the stricter list presentation gate.
+    // Read-only list presentation follows the same read capability as queries.
     expect(body.model.entities.workers.rowAccess).toBe(invitationsRead)
     const displays = [body.model.entities.workers, body.model.ui!.entities!.workers, body.console!.entities.workers, body.console!.modelUi!.entities!.workers]
     for (const hints of displays) {
       expect(hints.list!.columns).toEqual(source.ui!.entities.workers.list!.columns)
       expect(hints.list!.filter!.team_id).toMatchObject({ kind: 'relation', placement: 'toolbar', operators: ['in'] })
       expect(hints.list!.filter!.team_location).toMatchObject({ kind: 'text', operators: ['contains'] })
-      expect(hints.list!.rowAccess !== undefined).toBe(create && invitationsRead)
-      expect(hints.list!.views!.some(view => view.id === 'invited')).toBe(create && invitationsRead)
+      expect(hints.list!.rowAccess !== undefined).toBe(invitationsRead)
+      expect(hints.list!.views!.some(view => view.id === 'invited')).toBe(invitationsRead)
     }
     expect(body.model.entities.workers.listColumns).toEqual(workerList.columns!.map(column => typeof column === 'string' ? column : column.field))
     for (const navigation of [body.model.ui!.navigation!.items, body.console!.modelUi!.navigation!.items, body.console!.navigation]) {
-      expect(navigation.some(item => item.view === 'invited')).toBe(create && invitationsRead)
+      expect(navigation.some(item => item.view === 'invited')).toBe(invitationsRead)
       expect(navigation.some(item => item.view === 'all')).toBe(true)
     }
     expect(JSON.stringify(source.ui)).toBe(before)
