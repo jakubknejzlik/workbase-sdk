@@ -484,7 +484,7 @@ rejected):
   "owner": "example",
   "repository": "example",
   "baseBranch": "integration/preview",
-  "directory": "instances/example",
+  "directory": "projects/example",
   "credential": {
     "type": "token-file",
     "path": "/private/operator/github-token"
