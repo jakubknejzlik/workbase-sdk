@@ -4,6 +4,9 @@ const command = process.argv[2]
 if (command === 'data') {
   process.argv.splice(2, 1)
   await import('./data/stdio.ts')
+} else if (command === 'feedback') {
+  process.argv.splice(2, 1)
+  await import('./feedback/stdio.ts')
 } else if (command === 'ops') {
   process.argv.splice(2, 1)
   if (process.argv[2] === 'bootstrap-instance-owner') {
