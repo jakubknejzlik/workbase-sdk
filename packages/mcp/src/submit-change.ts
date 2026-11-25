@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { z } from 'zod'
 import { hash } from './planning.ts'
-import { fail, type Change, type SchemaChange, type CompositionChange } from './schemas.ts'
+import { exactVersion, fail, type Change, type SchemaChange, type CompositionChange } from './schemas.ts'
 import { noLink } from './storage.ts'
 import { replaySources } from './replay-sources.ts'
 import type { GitHubConfiguration, CheckRun } from './github.ts'
@@ -11,6 +11,37 @@ import type { GitHubConfiguration, CheckRun } from './github.ts'
 export const promotedFilesSchema = z.array(z.strictObject({ path: z.string(), data: z.string() })).min(1)
 export type PromotedFiles = z.infer<typeof promotedFilesSchema>
 export const migrationPreviewSchema = z.strictObject({ sql: z.string(), configDiff: z.unknown(), revision: z.number().int() })
+const receiptSha256 = z.string().regex(/^[a-f0-9]{64}$/)
+const receiptPath = z.string().regex(/^[a-zA-Z0-9_.-]+(?:\/[a-zA-Z0-9_.-]+)*$/)
+  .refine(path => !path.split('/').some(part => part === '.' || part === '..'), 'Expected a repository-relative file path')
+const verifiedSchemaObject = z.strictObject({ table: z.string().min(1), name: z.string().min(1) })
+// Evidence contract only: parsing does not verify evidence or establish who wrote it.
+// submitChange does not emit .workbase/receipts/<proposalId>.json yet.
+export const changeReceiptSchema = z.strictObject({
+  version: z.literal(1),
+  guarantee: z.literal('consistency'),
+  proposalId: z.uuid(),
+  instance: z.string().max(100).regex(/^[a-z][a-z0-9-]*$/),
+  kind: z.enum(['config_change', 'composition_change', 'schema_change']),
+  baseRevision: z.number().int().positive(),
+  promotedRevision: z.number().int().positive(),
+  expectedBaseSha: z.string().regex(/^[a-f0-9]{40}$/),
+  planHash: receiptSha256,
+  promotionHash: receiptSha256,
+  validationFingerprint: receiptSha256,
+  verificationFingerprint: receiptSha256,
+  dependencyDigest: receiptSha256,
+  sdkVersion: z.string().regex(exactVersion),
+  promotedFiles: z.array(z.strictObject({ path: receiptPath, sha256: receiptSha256 })).min(1),
+  allowlist: z.array(receiptPath).min(1),
+  disposableApply: z.strictObject({
+    verified: z.literal(true),
+    tables: z.array(z.string().min(1)),
+    columns: z.array(verifiedSchemaObject),
+    indexes: z.array(verifiedSchemaObject),
+  }),
+})
+export type ChangeReceipt = z.infer<typeof changeReceiptSchema>
 type Submission = {
   kind?: 'config_change' | 'composition_change' | 'schema_change'; proposalId: string; instance: string; createdAt: string; baseRevision: number; promotedRevision?: number; migration?: string
   changes: (Change | CompositionChange | SchemaChange)[]; status: string; validation?: { fingerprint: string; planHash: string; dependencyDigest?: string }; verification?: { fingerprint: string; planHash: string; dependencyDigest?: string }
