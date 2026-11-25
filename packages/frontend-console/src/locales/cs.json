@@ -669,5 +669,12 @@
   "listEmptyViewDescription": "V tomto pohledu zatím nejsou žádné záznamy.",
   "listScrollRegion": "Posuvné sloupce seznamu",
   "listScrollHint": "Další sloupce zobrazíte vodorovným posunutím.",
-  "listLookupPlaceholder": "Vybrat…"
+  "listLookupPlaceholder": "Vybrat…",
+  "listS3NoMatchesHeading": "Žádné odpovídající záznamy",
+  "listS3EmptyHeading": "Zatím žádné záznamy",
+  "listS3EmptyViewHeading": "V tomto pohledu nejsou žádné záznamy",
+  "listS3EmptyPageHeading": "Na této stránce nejsou žádné záznamy",
+  "listS3EmptyPageHelp": "Na jiných stránkách mohou být záznamy. Pomocí stránkování se vraťte na předchozí stránku.",
+  "listS3CreateHelp": "Začněte vytvořením záznamu.",
+  "listS3EmptyViewHelp": "V tomto pohledu nejsou žádné záznamy. Mohou být dostupné v jiném pohledu."
 }

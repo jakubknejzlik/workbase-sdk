@@ -9,6 +9,7 @@ import { GeneratedReadPage } from '../../console-generated/src/screens'
 import { validateListSearch } from '../../console-generated/src/list-model'
 import type { Model, Capabilities, ReadQuery } from '../../console-generated/src/read'
 import en from '../src/locales/en.json'
+import { saveListPreferences, loadListPreferences } from '../../console-generated/src/list-preferences'
 const model: Model = { instance: 'composition', revision: 1, timeZone: 'Europe/Prague', limits: { root: 100, maxOffset: 40, children: 20, relations: 4, exists: 4 }, entities: {
   entries: { displayField: 'name', fields: { id: { type: 'string' }, name: { type: 'string' }, status: { type: 'enum', values: ['active', 'inactive'] }, quick: { type: 'bool' } }, columns: ['name', 'status'], relations: {}, routes: { list: '', detail: '' }, list: { pageSize: 10, columns: [{ field: 'name' }, { field: 'status' }], filter: { status: { kind: 'enum', placement: 'panel', operators: ['in'] }, quick: { kind: 'boolean', placement: 'toolbar', operators: ['eq'] } }, views: [{ id: 'active', label: 'Active view', where: { status: { eq: 'active' } } }] } },
 } }
@@ -16,27 +17,31 @@ const caps: Capabilities = { revision: 1, entities: { entries: { readable: Objec
 let client: QueryClient
 beforeEach(() => { vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} }); vi.spyOn(window, 'scrollTo').mockImplementation(() => {}) })
 afterEach(() => { client?.clear(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
-async function mount(options: { enumToolbar?: boolean; access?: boolean; invitations?: boolean; readAccess?: boolean; accessPlacement?: 'toolbar' | 'column'; missingTotals?: boolean; empty?: boolean; range?: boolean; lowerBound?: 'number' | 'date' } = {}) {
+async function mount(options: { enumToolbar?: boolean; access?: boolean; invitations?: boolean; readAccess?: boolean; accessPlacement?: 'toolbar' | 'column'; missingTotals?: boolean; empty?: boolean; create?: boolean; context?: boolean; initial?: string; total?: number; range?: boolean; lowerBound?: 'number' | 'date' } = {}) {
   const definition = structuredClone(model), permissions = structuredClone(caps)
   if (options.enumToolbar) { definition.entities.entries.fields.status.values = ['active', 'inactive', 'pending', 'archived']; definition.entities.entries.list!.filter!.status = { kind: 'enum', placement: 'toolbar', operators: ['in'] } }
   if (options.range) { definition.entities.entries.fields.amount = { type: 'number' }; definition.entities.entries.list!.filter!.amount = { kind: 'number', placement: 'panel', operators: ['eq', 'gte', 'lte'] }; permissions.entities.entries.readable.push('amount') }
   if (options.lowerBound) { definition.entities.entries.fields.amount = { type: options.lowerBound === 'date' ? 'datetime' : 'number' }; definition.entities.entries.list!.filter!.amount = { kind: options.lowerBound, placement: 'panel', operators: ['gte'] }; permissions.entities.entries.readable.push('amount') }
   if (options.access) { definition.entities.entries.rowInvitations = options.invitations ?? true; definition.entities.entries.rowAccess = options.readAccess ?? true; definition.entities.entries.list!.views!.push({ id: 'linked', label: 'Linked view', where: {}, rowAccess: 'signed_in' }); definition.entities.entries.list!.rowAccess = options.accessPlacement === 'column' ? { column: true } : { placement: options.accessPlacement ?? 'panel' }; permissions.resources = { 'invitations.read': true } }
+  const create = vi.fn()
+  if (options.create) permissions.entities.entries.operations.push('create')
+  const preferenceScope = { instance: model.instance, userId: 'composition-user', orgId: 'org' }
+  saveListPreferences(preferenceScope, 'entries', { visible: ['name'], density: 'compact' })
   let mode = 'success', release: (() => void) | undefined
   let gate: Promise<void> | undefined
   const request = vi.fn(async (query: ReadQuery) => {
     await gate
     if (mode !== 'success') throw Object.assign(new Error(mode), { code: mode, status: mode === 'denied' ? 403 : 400 })
-    return { data: options.empty ? [] : [{ id: String(query.offset ?? 0), name: `Current ${query.search?.text ?? ''}`, status: 'active' }], next_cursor: null, offset: query.offset, limit: query.limit, ...(!options.missingTotals ? { total: options.empty ? 0 : query.where ? 7 : query.view ? 42 : 73, viewTotals: { all: options.empty ? 0 : query.where ? 19 : 73, active: options.empty ? 0 : query.where ? 7 : 42 } } : {}) }
+    return { data: options.empty ? [] : [{ id: String(query.offset ?? 0), name: `Current ${query.search?.text ?? ''}`, status: 'active' }], next_cursor: null, offset: query.offset, limit: query.limit, ...(!options.missingTotals ? { total: options.total ?? (options.empty ? 0 : query.where ? 7 : query.view ? 42 : 73), viewTotals: { all: options.empty ? 0 : query.where ? 19 : 73, active: options.empty ? 0 : query.where ? 7 : 42 } } : {}) }
   })
   client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } })
-  const root = createRootRoute(), route = createRoute({ getParentRoute: () => root, path: '/o/$orgId/e/$entity', validateSearch: validateListSearch, component: () => <GeneratedReadPage model={definition} caps={permissions} orgId="org" entity="entries" request={request} /> })
-  const router = createRouter({ routeTree: root.addChildren([route]), history: createMemoryHistory({ initialEntries: ['/o/org/e/entries'] }) }); await router.load()
+  const root = createRootRoute(), route = createRoute({ getParentRoute: () => root, path: '/o/$orgId/e/$entity', validateSearch: validateListSearch, component: () => <GeneratedReadPage model={definition} caps={permissions} orgId="org" entity="entries" request={request} savedViewsScope={preferenceScope} primaryAction={options.create ? { label: "Create entry", onAction: create } : undefined} contextList={options.context ? { entity: "parents", id: "parent", list: "entries" } : undefined} /> })
+  const router = createRouter({ routeTree: root.addChildren([route]), history: createMemoryHistory({ initialEntries: [options.initial ?? '/o/org/e/entries'] }) }); await router.load()
   const i18n = i18next.createInstance(); await i18n.use(initReactI18next).init({ lng: 'en', resources: { en: { translation: { ...en, field_name: 'Name', field_status: 'Status', field_quick: 'Quick', value_active: 'Active', value_inactive: 'Inactive' } } } })
   render(<I18nextProvider i18n={i18n}><QueryClientProvider client={client}><RouterProvider router={router} /></QueryClientProvider></I18nextProvider>)
   await waitFor(() => expect(request).toHaveBeenCalled())
   if (!options.empty) await screen.findByText('Current')
-  return { router, request, user: userEvent.setup(), hold: () => { gate = new Promise(resolve => { release = resolve }) }, release: () => { release?.(); gate = undefined }, fail: (value: string) => { mode = value } }
+  return { router, request, create, preferenceScope, user: userEvent.setup(), hold: () => { gate = new Promise(resolve => { release = resolve }) }, release: () => { release?.(); gate = undefined }, fail: (value: string) => { mode = value } }
 }
 const openPanel = async (user: ReturnType<typeof userEvent.setup>) => { await user.click(screen.getByText(en.sortAndFilter)); return screen.getByRole('group', { name: en.sortAndFilter }) }
 it('keeps draft edits out of rows/counts, URL and chips; Cancel retains an immediate toolbar change', async () => {
@@ -160,9 +165,9 @@ it('resets the numbered page after a page size change', async () => {
   await waitFor(() => expect(test.request.mock.calls.at(-1)?.[0]).toMatchObject({ offset: 0, limit: 20 }))
   expect(test.router.state.location.search.pageSize).toBe(20)
 })
-it.each([false, true])('distinguishes a missing total from an exact empty total (empty=%s)', async empty => {
-  await mount({ empty, missingTotals: !empty })
-  if (empty) {
+it.each([false, true])('distinguishes a missing total from an exact empty total (missing=%s)', async missingTotals => {
+  await mount({ empty: true, missingTotals })
+  if (!missingTotals) {
     expect(await screen.findByText('0–0 of 0')).toBeTruthy()
     expect(screen.getByRole('button', { name: /Active view.*0/ })).toBeTruthy()
   } else {
@@ -185,6 +190,7 @@ it('does not let a late list/count response replace the current confirmed signat
 it('validates a draft range without requests and commits only after correction', async () => {
   const test = await mount({ range: true }), panel = await openPanel(test.user)
   const before = test.request.mock.calls.length, url = test.router.state.location.href
+  await test.user.selectOptions(within(panel).getByRole('combobox', { name: en.filterOperator }), 'between')
   await test.user.type(within(panel).getByRole('spinbutton', { name: en.filterFrom }), '10')
   await test.user.type(within(panel).getByRole('spinbutton', { name: en.filterTo }), '5')
   expect(within(panel).getByRole('button', { name: en.applyFilter }).hasAttribute('disabled')).toBe(true)
@@ -193,6 +199,9 @@ it('validates a draft range without requests and commits only after correction',
   expect(test.router.state.location.href).toBe(url)
   await test.user.clear(within(panel).getByRole('spinbutton', { name: en.filterTo }))
   await test.user.type(within(panel).getByRole('spinbutton', { name: en.filterTo }), '15')
+  expect(within(panel).getByRole('button', { name: en.applyFilter }).hasAttribute('disabled')).toBe(false)
+  expect(test.request.mock.calls).toHaveLength(before)
+  expect(test.router.state.location.href).toBe(url)
   await test.user.click(within(panel).getByRole('button', { name: en.applyFilter }))
   await waitFor(() => expect(test.request.mock.calls).toHaveLength(before + 1))
   expect(test.request.mock.calls.at(-1)?.[0].where).toEqual({ and: [{ amount: { gte: 10, lte: 15 } }] })
@@ -201,12 +210,15 @@ it.each(['number', 'date'] as const)('keeps the shared %s range shape for gte-on
   const test = await mount({ lowerBound }), panel = await openPanel(test.user)
   const before = test.request.mock.calls.length
   const from = within(panel).getByLabelText(en.filterFrom) as HTMLInputElement
-  expect((within(panel).getByLabelText(en.filterSingle) as HTMLInputElement).disabled).toBe(true)
-  expect((within(panel).getByLabelText(en.filterTo) as HTMLInputElement).disabled).toBe(true)
+  const operator = within(panel).getByRole('combobox', { name: en.filterOperator }) as HTMLSelectElement
+  expect(operator.value).toBe('from')
+  expect([...operator.options].map(option => option.value)).toEqual(['from'])
+  expect(within(panel).queryByLabelText(en.filterSingle)).toBeNull()
+  expect(within(panel).queryByLabelText(en.filterTo)).toBeNull()
   expect(from.disabled).toBe(false)
   expect(from.type).toBe(lowerBound === 'date' ? 'text' : 'number')
   if (lowerBound === 'date') {
-    await test.user.click(within(panel).getByRole('button', { name: en.selectDateRange }))
+    await test.user.click(within(panel).getByRole('button', { name: `${en.selectDateRange}: ${en.filterFrom}` }))
     expect(screen.getByRole('grid')).toBeTruthy()
     await test.user.keyboard('{Escape}')
   }
@@ -260,8 +272,8 @@ it('copies the numbered page in the URL, restores it without history state, and 
 it('explains a genuinely empty configured view without an ineffective clear action', async () => {
   const test = await mount({ empty: true })
   await test.user.click(screen.getByRole('button', { name: /Active view/ }))
-  expect(await screen.findByRole('heading', { name: en.noResults })).toBeTruthy()
-  expect(screen.getByText('There are no records in this view yet.')).toBeTruthy()
+  expect(await screen.findByRole('heading', { name: en.listS3EmptyViewHeading })).toBeTruthy()
+  expect(screen.getByText(en.listS3EmptyViewHelp)).toBeTruthy()
   expect(screen.queryByRole('button', { name: en.clearSearchFilters })).toBeNull()
   await test.user.type(screen.getByRole('searchbox', { name: en.search }), 'missing')
   expect(await screen.findByText('Try changing or clearing your search and filters.')).toBeTruthy()
@@ -328,4 +340,41 @@ it('keeps four toolbar enum choices in the existing popover and applies selectio
   await test.user.keyboard('{Escape}')
   expect(screen.queryByRole('dialog', { name: 'Status' })).toBeNull()
   expect(document.activeElement).toBe(trigger)
+})
+
+
+it.each([false, true])('uses only the host-authorized create action for exact empty results (create=%s)', async create => {
+  const test = await mount({ empty: true, create })
+  const heading = await screen.findByRole('heading', { name: en.listS3EmptyHeading })
+  const feedback = heading.parentElement!
+  expect(within(feedback).queryByRole('button', { name: en.clearSearchFilters })).toBeNull()
+  if (create) {
+    await test.user.click(within(feedback).getByRole('button', { name: 'Create entry' }))
+    expect(test.create).toHaveBeenCalledTimes(1)
+    await test.user.click(screen.getAllByRole('button', { name: 'Create entry' }).find(button => !feedback.contains(button))!)
+    expect(test.create).toHaveBeenCalledTimes(2)
+  } else expect(screen.queryByRole('button', { name: 'Create entry' })).toBeNull()
+})
+it.each(['context', 'preset', 'missing', 'page', 'positive-total'] as const)('never makes a first-record claim for %s emptiness', async scope => {
+  await mount({ empty: true, create: true, context: scope === 'context', missingTotals: scope === 'missing', initial: scope === 'preset' ? '/o/org/e/entries?view=active' : scope === 'page' ? '/o/org/e/entries?page=2' : undefined, total: scope === 'positive-total' ? 23 : undefined })
+  const page = scope === 'page' || scope === 'positive-total'
+  const heading = await screen.findByRole('heading', { name: page ? en.listS3EmptyPageHeading : en.listS3EmptyViewHeading })
+  expect(screen.queryByText(en.listS3CreateHelp)).toBeNull()
+  expect(within(heading.parentElement!).queryByRole('button', { name: en.clearSearchFilters })).toBeNull()
+  if (page) expect(within(heading.parentElement!).queryByRole('button', { name: 'Create entry' })).toBeNull()
+})
+it.each(['search', 'filters', 'row-access', 'combined'] as const)('clears %s empty results through the existing transition and retains view/sort/display', async kind => {
+  const search = kind === 'search' || kind === 'combined', filters = kind === 'filters' || kind === 'combined', access = kind === 'row-access' || kind === 'combined'
+  const initial = '/o/org/e/entries?view=active&sort=name&direction=desc&page=2' + (search ? '&search=missing' : '') + (access ? '&rowAccess=invited' : '')
+  const test = await mount({ empty: true, create: true, access, initial })
+  if (filters) await act(async () => { await test.router.navigate({ to: '.', search: { ...test.router.state.location.search, filters: [{ field: 'status', predicate: { in: ['inactive'] } }], page: 2 } as any }) })
+  const heading = await screen.findByRole('heading', { name: en.listS3NoMatchesHeading })
+  expect(within(heading.parentElement!).queryByRole('button', { name: 'Create entry' })).toBeNull()
+  const display = loadListPreferences(test.preferenceScope, 'entries', { columns: [{ id: 'name' }, { id: 'status' }], primary: 'name', compact: false }).preferences
+  await test.user.click(within(heading.parentElement!).getByRole('button', { name: en.clearSearchFilters }))
+  await waitFor(() => expect(test.router.state.location.search).toMatchObject({ view: 'active', sort: 'name', direction: 'desc' }))
+  await screen.findByRole('heading', { name: en.listS3EmptyViewHeading })
+  for (const key of ['search', 'filters', 'rowAccess', 'page'] as const) expect(test.router.state.location.search[key]).toBeUndefined()
+  expect(test.request.mock.calls.at(-1)?.[0]).toMatchObject({ view: 'active', offset: 0, orderBy: [{ field: 'name', dir: 'desc' }] })
+  expect(loadListPreferences(test.preferenceScope, 'entries', { columns: [{ id: 'name' }, { id: 'status' }], primary: 'name', compact: false }).preferences).toEqual(display)
 })

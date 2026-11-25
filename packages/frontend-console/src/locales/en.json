@@ -649,5 +649,12 @@
   "listEmptyViewDescription": "There are no records in this view yet.",
   "listScrollRegion": "Scrollable list columns",
   "listScrollHint": "Scroll horizontally for more columns.",
-  "listLookupPlaceholder": "Choose…"
+  "listLookupPlaceholder": "Choose…",
+  "listS3NoMatchesHeading": "No matching records",
+  "listS3EmptyHeading": "No records yet",
+  "listS3EmptyViewHeading": "No records in this view",
+  "listS3EmptyPageHeading": "No records on this page",
+  "listS3EmptyPageHelp": "Other pages may contain records. Use the page controls to return to a previous page.",
+  "listS3CreateHelp": "Create a record to get started.",
+  "listS3EmptyViewHelp": "There are no records in this view. Records may be available in another view."
 }

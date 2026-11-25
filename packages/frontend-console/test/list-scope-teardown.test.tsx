@@ -30,10 +30,11 @@ afterEach(() => { client?.clear(); vi.restoreAllMocks(); vi.unstubAllGlobals() }
 // Row text, totals and counts identify exactly which scope produced them.
 const totals: Record<string, number> = { 'A@org': 71, 'B@org': 12, 'A@other': 33 }
 async function mount(options: { actor?: string; search?: Record<string, unknown>; access?: boolean } = {}) {
-  const world = { actor: options.actor, sessionActor: options.actor, org: 'org' }; let gate: Promise<void> | undefined, release: (() => void) | undefined
+  const world = { actor: options.actor, sessionActor: options.actor, org: 'org', denied: false }; let gate: Promise<void> | undefined, release: (() => void) | undefined
   const owner = () => `${world.actor ?? (options.access ? `unknown-${world.sessionActor}` : 'anon')}@${world.org}`
   const request = vi.fn(async (query: ReadQuery) => {
     const who = owner(); await gate
+    if (world.denied) throw Object.assign(new Error('permission_denied'), { status: 403 })
     const total = totals[who] ?? 5
     return { data: [{ id: '1', name: `Row of ${who}`, status: 'active' }], next_cursor: null, offset: query.offset, limit: query.limit, total, viewTotals: { all: total, active: total - 1 } }
   })
@@ -90,6 +91,8 @@ it('replaces the actor with identical capabilities without any render of the pre
   expect(stale(test.snapshots, 'Row of A@org', 'B@org')).toEqual([]); expect(stale(test.snapshots, '71', 'B@org')).toEqual([])
   expect(test.snapshots.some(snapshot => snapshot.scope === 'B@org')).toBe(true)
   expect(screen.queryByText('Row of A@org')).toBeNull(); expect(screen.queryByText(/of 71/)).toBeNull(); expect(screen.queryByRole('button', { name: /Active view.*70/ })).toBeNull()
+  expect(screen.queryByRole('heading', { name: en.listS3EmptyHeading })).toBeNull()
+  expect(screen.queryByRole('heading', { name: en.listS3EmptyViewHeading })).toBeNull()
   // Confirmed state, draft, saved-view selection are gone; B's first reads carry none of A's conditions.
   await waitFor(() => expect(test.router.state.location.search.filters).toBeUndefined())
   expect(test.router.state.location.search.view).toBeUndefined(); expect(test.router.state.location.search.pageSize).toBeUndefined()
@@ -197,4 +200,21 @@ it('discards every outgoing verified and unknown cache owner while preserving th
   await test.switchTo({ actor: 'B' })
   expect(outgoing.every(queryKey => client.getQueryData(queryKey) === undefined)).toBe(true)
   expect(preserved.every(queryKey => client.getQueryData(queryKey) !== undefined)).toBe(true)
+})
+
+
+it('removes refused rows/counts from the outgoing scope cache after a 403 and actor teardown', async () => {
+  const test = await mount({ actor: 'A' })
+  test.world.denied = true
+  await act(async () => { await client.invalidateQueries({ queryKey: ['data-table'] }) })
+  await screen.findByText(en.resourceForbidden.replace('{{resource}}', 'entity_entries'))
+  expect(screen.queryByText('Row of A@org')).toBeNull()
+  expect(screen.queryByRole('button', { name: en.listRetry })).toBeNull()
+  expect(screen.queryByRole('heading', { name: en.listS3EmptyHeading })).toBeNull()
+  test.world.denied = false; test.hold()
+  await test.switchTo({ actor: 'B' })
+  expect(client.getQueryCache().findAll({ queryKey: ['data-table'] }).filter(query => JSON.parse(String(query.queryKey.at(-1)))[2] === 'A')).toEqual([])
+  await test.release()
+  await screen.findByText('Row of B@org')
+  expect(screen.queryByText('Row of A@org')).toBeNull()
 })
