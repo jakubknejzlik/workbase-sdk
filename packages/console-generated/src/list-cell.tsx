@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from 'react'
 import { Link } from '@tanstack/react-router'
+import { Button } from '@workbasehq/ui/components/ui/button'
 import type { ListColumn, ListTone } from '../../core/src/list-contract'
 import type { Model, Capabilities } from './read'
 import { formatValue, recordLabel, shortRecordId } from './labels'
@@ -31,7 +32,7 @@ export function GeneratedListCell({ model, entity, caps, row, column, orgId, pri
       return !primary && !secondary ? <Link to="/o/$orgId/e/$entity/$id" params={{ orgId, entity: target.entity, id: String(target.row.id) }}>{label}</Link> : label
     }
     if (row[field] == null) return secondary ? null : '—'
-    if (!secondary && cell?.kind === 'identifier') return <span className="font-mono tabular-nums [overflow-wrap:anywhere]">{String(row[field])}</span>
+    if (!secondary && cell?.kind === 'identifier') return <span title={String(row[field])} className="block min-w-0 max-w-[16rem] truncate font-mono tabular-nums">{String(row[field])}</span>
     if (!secondary && cell?.kind === 'badge') {
       const configured = cell.tones?.[String(row[field])]
       const tone = configured && Object.hasOwn(tones, configured) ? configured : 'neutral'
@@ -47,15 +48,15 @@ export function GeneratedListCell({ model, entity, caps, row, column, orgId, pri
   const secondary = column.secondary ? value(column.secondary, true) : null
   const copy = cell?.kind === 'identifier' && cell.copy === true && row[field] != null && readableListField(model, entity, caps, field)
   return <span className="inline-grid min-w-0 max-w-full gap-0.5">
-    <span className="inline-flex min-w-0 items-center gap-1">{primary ? <Link data-row-name="" title={String(row.id)} to="/o/$orgId/e/$entity/$id" params={{ orgId, entity, id: String(row.id) }}>{content}</Link> : content}
-      {copy && <button type="button" className="rounded px-1 text-xs underline focus-visible:outline" aria-label={t('listIdentifierCopy')} onClick={async event => {
+    <span className="inline-flex min-w-0 items-center gap-1">{primary ? <Link className={cell?.kind === 'identifier' ? 'min-w-0 truncate' : undefined} data-row-name="" title={String(row.id)} to="/o/$orgId/e/$entity/$id" params={{ orgId, entity, id: String(row.id) }}>{content}</Link> : content}
+      {copy && <Button type="button" variant="ghost" size="icon-sm" className="shrink-0" title={t('listIdentifierCopy')} aria-label={t('listIdentifierCopy')} onClick={async event => {
         event.preventDefault(); event.stopPropagation()
         if (!readableListField(model, entity, caps, field)) return
         try { if (!navigator.clipboard?.writeText) throw new Error('Clipboard unavailable'); await navigator.clipboard.writeText(String(row[field])); setFeedback('listIdentifierCopied') }
         catch { setFeedback('listIdentifierCopyFailed') }
-      }}>{t('listIdentifierCopy')}</button>}
+      }}><svg aria-hidden="true" className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">{feedback === 'listIdentifierCopied' ? <path d="m5 12 4 4L19 6" /> : feedback === 'listIdentifierCopyFailed' ? <path d="m6 6 12 12M6 18 18 6" /> : <><rect x="9" y="9" width="13" height="13" rx="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></>}</svg></Button>}
     </span>
     {secondary != null && <span data-list-secondary="" className="block text-xs text-muted-foreground">{secondary}</span>}
-    {feedback && <span role="status" className="text-xs text-muted-foreground">{t(feedback)}</span>}
+    {copy && <span role="status" className="sr-only">{feedback ? t(feedback) : ''}</span>}
   </span>
 }

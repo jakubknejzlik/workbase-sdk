@@ -31,7 +31,7 @@ async function mount(columns: ListColumn[], options: { language?: 'en' | 'cs'; d
   const rendered = render(<I18nextProvider i18n={i18n}><QueryClientProvider client={client}><RouterProvider router={router} /></QueryClientProvider></I18nextProvider>)
   await waitFor(() => expect(request).toHaveBeenCalled())
   await screen.findAllByRole('link')
-  return { request, router, user: userEvent.setup(), ...rendered }
+  return { request, router, caps, user: userEvent.setup(), ...rendered }
 }
 it.each(['neutral', 'positive', 'warning', 'negative'] as const)('localizes badges and uses the raw enum key for %s', async tone => {
   const { container } = await mount([{ field: 'status', cell: { kind: 'badge', tones: { active: tone } } }], { language: 'cs' })
@@ -126,4 +126,54 @@ it.each([false, true])('aligns synthetic field cells and headers, retaining sort
   await user.click(sort)
   await waitFor(() => expect(request.mock.calls.at(-1)![0].orderBy).toContainEqual({ field: 'amount', dir: 'asc' }))
   expect(headers[1].getAttribute('aria-sort')).toBe('ascending')
+})
+
+
+it.each(['en', 'cs'] as const)('renders an accessible icon-only identifier action and copies the full truncated value (%s)', async language => {
+  const id = '0000123456789-abcdefghijklmnopqrstuvwxyz-0123456789'
+  const labels = language === 'cs' ? cs : en
+  const { user, container, router } = await mount([{ field: 'id', cell: { kind: 'identifier', copy: true } }], { language, row: { id } })
+  const write = vi.fn().mockResolvedValue(undefined)
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: write } })
+  const buttons = screen.getAllByRole('button', { name: labels.listIdentifierCopy })
+  for (const button of buttons) {
+    expect(button.textContent).toBe('')
+    expect(button.getAttribute('title')).toBe(labels.listIdentifierCopy)
+    expect(button.querySelector('svg[aria-hidden="true"]')).toBeTruthy()
+  }
+  expect(screen.queryByText(labels.listIdentifierCopy)).toBeNull()
+  for (const text of screen.getAllByText(id)) {
+    expect(text.getAttribute('title')).toBe(id)
+    expect(text.classList.contains('truncate')).toBe(true)
+  }
+  expect(container.querySelector('a button')).toBeNull()
+  await user.click(buttons[0])
+  expect(write).toHaveBeenCalledWith(id)
+  const status = await screen.findByText(labels.listIdentifierCopied)
+  expect(status.getAttribute('role')).toBe('status')
+  expect(status.classList.contains('sr-only')).toBe(true)
+  expect(router.state.location.pathname).toBe('/o/org/e/entries')
+})
+it.each(['reject', 'unavailable'])('announces identifier failure outside the cell layout (%s)', async mode => {
+  const { user } = await mount([{ field: 'name' }, { field: 'id', cell: { kind: 'identifier', copy: true } }])
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: mode === 'reject' ? { writeText: vi.fn().mockRejectedValue(new Error('denied')) } : undefined })
+  const button = screen.getAllByRole('button', { name: en.listIdentifierCopy })[0]
+  const cell = button.closest('td')!
+  const childCount = cell.childElementCount
+  const statusCount = cell.querySelectorAll('[role="status"]').length
+  await user.click(button)
+  const status = await screen.findByText(en.listIdentifierCopyFailed)
+  expect(status.getAttribute('role')).toBe('status')
+  expect(status.classList.contains('sr-only')).toBe(true)
+  expect(cell.childElementCount).toBe(childCount)
+  expect(cell.querySelectorAll('[role="status"]').length).toBe(statusCount)
+})
+it('rechecks identifier read grants when the copy action is clicked', async () => {
+  const { user, caps } = await mount([{ field: 'name' }, { field: 'id', cell: { kind: 'identifier', copy: true } }])
+  const write = vi.fn().mockResolvedValue(undefined)
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: write } })
+  const button = screen.getAllByRole('button', { name: en.listIdentifierCopy })[0]
+  caps.entities.entries.readable = ['name']
+  await user.click(button)
+  expect(write).not.toHaveBeenCalled()
 })
