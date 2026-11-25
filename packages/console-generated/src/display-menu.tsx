@@ -20,7 +20,7 @@ export function DisplayMenu({ columns, compact, labels, onToggle, onMove, onComp
     moved.current = null
   }, [columns])
   return <Popover>
-    <PopoverTrigger asChild><Button type="button" title={labels.trigger} variant="outline"><ColumnsIcon aria-hidden="true" className="size-4" />{labels.trigger}</Button></PopoverTrigger>
+    <PopoverTrigger asChild><Button type="button" title={labels.trigger} variant="ghost"><ColumnsIcon aria-hidden="true" className="size-4" />{labels.trigger}</Button></PopoverTrigger>
     <PopoverContent data-list-display="" role="dialog" aria-label={labels.heading} align="end" className="flex max-h-[min(75dvh,var(--radix-popover-content-available-height))] w-72 max-w-[calc(100vw-1.5rem)] flex-col gap-2 overflow-hidden">
       <div className="shrink-0"><p className="text-sm font-semibold">{labels.heading}</p><p className="text-xs text-muted-foreground">{labels.hint}</p></div>
       <div data-list-display-columns="" className="grid max-h-[37dvh] min-h-0 gap-2 overflow-y-auto">
