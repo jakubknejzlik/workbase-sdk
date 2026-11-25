@@ -1,11 +1,24 @@
-import { type PropsWithChildren, type ReactNode } from 'react'
+import { useLayoutEffect, useRef, type PropsWithChildren, type ReactNode } from 'react'
 
-/** Source settings columns; host supplies authorized links and translations. */
-export const SettingsLayout = ({ children, title, navigation }: PropsWithChildren<{ title: string; navigation: ReactNode }>) => (
-  <div className="flex h-full flex-1 min-w-0 flex-col md:flex-row">
-    <div className="w-full shrink-0 border-b md:border-b-0 md:border-r md:w-64 bg-muted/40 p-6">
-      <div className="space-y-6"><h2 className="text-lg font-semibold mb-3">{title}</h2><nav aria-label={title} className="flex flex-col space-y-1">{navigation}</nav></div>
+/** Shared settings surface; host supplies authorized native links and translations. */
+export const SettingsLayout = ({ children, title, navigation }: PropsWithChildren<{ title: string; navigation: ReactNode }>) => {
+  const nav = useRef<HTMLElement>(null)
+  useLayoutEffect(() => {
+    const element = nav.current
+    const active = element?.querySelector<HTMLElement>('[aria-current="page"]')
+    if (!element || !active) return
+    const viewport = element.getBoundingClientRect(); const link = active.getBoundingClientRect()
+    // Reveal selection within this scroller without moving the page or focus.
+    if (link.left < viewport.left) element.scrollLeft += link.left - viewport.left - 8
+    else if (link.right > viewport.right) element.scrollLeft += link.right - viewport.right + 8
+  }, [navigation])
+  return (
+  <div data-slot="settings-layout" className="min-w-0 flex-1 space-y-6">
+    <h1 tabIndex={-1} className="text-[32px] font-normal">{title}</h1>
+    <div data-slot="settings-navigation" className="min-w-0 rounded-[var(--radius-panel)] border bg-card">
+      <nav ref={nav} aria-label={title} className="flex min-w-0 overflow-x-auto">{navigation}</nav>
     </div>
-    <div className="min-w-0 flex-1 px-4 md:px-8 py-6">{children}</div>
+    <div data-slot="settings-content" className="min-w-0">{children}</div>
   </div>
-)
+  )
+}
