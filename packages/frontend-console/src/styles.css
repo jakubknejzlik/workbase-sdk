@@ -236,6 +236,25 @@ body:has([data-slot="list-page"]) [data-list-row-menu] [role="menuitem"] { min-h
 }
 /* #317 settings hierarchy and secondary navigation — end */
 
+/* #315 A3c compact filter captions: size draft columns by available text space. */
+[data-list-slot="panel"] > form[role="group"] > .grid:first-child {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, max(9rem, calc((100% - 3rem) / 4))), 1fr));
+}
+[data-list-slot="panel"] > form[role="group"] :is(legend, label, p) {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+/* Field dictionaries also caption the corresponding sortable columns. */
+[data-slot="list-page"] th :is(button, button > span) { min-width: 0; max-width: 100%; }
+[data-slot="list-page"] th [id] {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* End #315 A3c compact filter captions. */
+
 /* #316 C1 — detail heading and secondary identity */
 [data-slot="detail-page"] h1 { font-size: 32px; line-height: 1.17; letter-spacing: -.95px; }
 .generated-detail-identity { display: flex; align-items: baseline; gap: 8px; min-width: 0; color: var(--muted-foreground); font-size: 12px; }

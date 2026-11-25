@@ -615,9 +615,11 @@ it('demanded label projection preserves policy dependencies, masks, tenant denia
 it('demanded projection still rejects actual over-budget sources with query_too_expensive', async () => {
   const { kernel } = demandedProjectionFixture(11)
   const current = await demandedScope(kernel, 'dispatcher')
-  // Here all six refs are explicitly demanded by the client, so their visibility
-  // and mandatory relations cannot be pruned even though id alone is cheap.
-  const { query, cost } = validateQuery(kernel, current, { entity: 'customers', limit: 1 })
+  // All six refs are filter operands, so root and count both need their
+  // visibility and mandatory relations even though id alone is cheap.
+  const { query, cost } = validateQuery(kernel, current, { entity: 'customers', limit: 1,
+    where: { and: Array.from({ length: 6 }, (_, i) => ({ [`extra_${i}`]: { isNull: false } })) },
+  })
   for (const compile of [() => compileRoot(kernel, current, query, undefined, cost), () => compileListTotal(kernel, current, query, cost)]) {
     expect(compile).toThrowError(expect.objectContaining({ code: 'query_too_expensive' }))
   }
