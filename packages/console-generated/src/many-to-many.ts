@@ -6,14 +6,16 @@ export function editableManyRelations(model: Model, entity: string, caps: Capabi
   return readableRelations(model, entity, caps).filter(([, relation]) => relation.through && [relation.through.createCommand, relation.through.deleteCommand].every(command => caps.commands?.includes(command)))
 }
 export function manyRelationSchema<T extends Record<string, any>>(schema: T, relations: [string, Relation][]) {
-  return { ...schema, properties: { ...schema.properties, ...Object.fromEntries(relations.map(([name]) => [name, { type: 'array', items: { type: 'string', minLength: 1 }, uniqueItems: true, default: [], 'x-ui': { span: 'full' } }])) } }
+  return { ...schema, properties: { ...schema.properties, ...Object.fromEntries(relations.map(([name]) => [name, { type: 'array', items: { type: 'string', minLength: 1 }, uniqueItems: true, default: [], 'x-ui': { span: 'full', valueSet: true } }])) } }
 }
 /** Follow every join cursor before diffing; a detail preview is never a complete set. */
 export async function memberships(model: Model, relation: Relation, id: string, request: Request): Promise<Row[]> {
-  const rows: Row[] = []; let cursor: string | undefined
+  const rows: Row[] = []; const cursors = new Set<string>(); let cursor: string | undefined
   do {
     const page = await request({ entity: relation.entity, select: ['id', relation.field, relation.through!.field], limit: model.limits.root, where: { [relation.field]: { eq: id } }, orderBy: [{ field: 'id', dir: 'asc' }], ...(cursor ? { cursor } : {}) })
+    if (!Object.hasOwn(page, 'next_cursor') || page.next_cursor !== null && (typeof page.next_cursor !== 'string' || !page.next_cursor || cursors.has(page.next_cursor)) || !Array.isArray(page.data) || page.data.some(row => typeof row.id !== 'string' || !row.id || typeof row[relation.through!.field] !== 'string' || !row[relation.through!.field] || row[relation.field] !== id)) throw new Error('incomplete_membership_read')
     rows.push(...page.data); cursor = page.next_cursor ?? undefined
+    if (cursor) cursors.add(cursor)
   } while (cursor)
   return rows
 }

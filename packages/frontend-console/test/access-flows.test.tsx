@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 import { expect, it, vi } from 'vitest'
-import { act, render, screen, waitFor, within } from '@testing-library/react'
+import { act, render, screen, waitFor, within, fireEvent } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { I18nextProvider, initReactI18next } from 'react-i18next'
@@ -47,10 +47,11 @@ async function mount(surface: 'detail' | 'menu' | 'row' | 'create' | 'edit', opt
   if (options.grouped) model.entities.entries.detail = { groups: [{ id: 'main', label: 'Main', fields: ['name', 'email'] }] }
   const onDenied = vi.fn()
   const props = { disabled: options.disabled, model, caps, onDenied, orgId: 'org', entity: 'entries', write, request }
-  render(<I18nextProvider i18n={i18n}><QueryClientProvider client={client}>{surface === 'create' ? <GeneratedCreateDialog {...props} open onOpenChange={vi.fn()} /> : surface === 'row' ? <GeneratedRowInvitation {...props} row={row} /> : surface === 'menu' ? <><ApplicationAccessCard {...props} row={row} /><GeneratedRowActions {...props} row={row} /></> : <>{surface === 'detail' && <ApplicationAccessCard {...props} row={row} />}<GeneratedActions {...props} row={row} /></>}</QueryClientProvider></I18nextProvider>)
+  const renderSurface = () => <I18nextProvider i18n={i18n}><QueryClientProvider client={client}>{surface === 'create' ? <GeneratedCreateDialog {...props} open onOpenChange={vi.fn()} /> : surface === 'row' ? <GeneratedRowInvitation {...props} row={row} /> : surface === 'menu' ? <><ApplicationAccessCard {...props} row={row} /><GeneratedRowActions {...props} row={row} /></> : <>{surface === 'detail' && <ApplicationAccessCard {...props} row={row} />}<GeneratedActions {...props} row={row} /></>}</QueryClientProvider></I18nextProvider>
+  const view = render(renderSurface())
   const user = userEvent.setup()
   if (surface === 'edit') await user.click(screen.getByRole('button', { name: 'Edit' }))
-  return { write, request, user, client, onDenied }
+  return { write, request, user, client, onDenied, model, caps, view, renderSurface }
 }
 async function accessMenu(state?: string) {
   if (screen.queryByRole('menu')) return screen.getByRole('menu')
@@ -385,15 +386,16 @@ for (const surface of ['detail', 'menu', 'edit', 'create'] as const) {
     if (state === 'expired') expect(screen.queryByRole('menuitem', { name: 'Copy link' })).toBeNull()
   })
 }
-it('grouped edit preserves its cached form and unsaved fields when an access refresh read fails', async () => {
+it('A8 grouped edit fails closed when an access refresh read fails despite cached data', async () => {
   const { user, request, write } = await mount('edit', { grouped: true })
   await user.type(await screen.findByLabelText('Name'), ' draft')
+  const form = screen.getByLabelText('Name').closest('form')!
   request.mockRejectedValueOnce({ status: 500 })
   await confirmAction(user, 'Invite to application', ['Email', 'recipient@example.test'])
-  await waitFor(() => expect(screen.getAllByRole('dialog')).toHaveLength(1))
-  expect((screen.getByLabelText('Name') as HTMLInputElement).value).toBe('Original draft')
-  await user.click(screen.getByRole('button', { name: 'Save' }))
-  await waitFor(() => expect(write).toHaveBeenCalledWith('/api/entries/one', 'PATCH', { name: 'Original draft', version: 2 }, undefined))
+  await waitFor(() => expect(screen.queryByLabelText('Name')).toBeNull())
+  fireEvent.submit(form)
+  await act(async () => {})
+  expect(write.mock.calls.filter(([path, method]) => path === '/api/entries/one' && method === 'PATCH')).toEqual([])
 })
 it('edit changes an expired invitation directly after verifying live invite availability', async () => {
   const { user, write } = await mount('edit', { state: 'expired' })
@@ -746,3 +748,32 @@ for (const language of ['en', 'cs'] as const) for (const v3 of [true, false]) {
     })
   }
 }
+
+// Port of review wr-ffb38ad8's held-read invitation probe.
+it.each([true, false])('A8 create invitation continuation rechecks a revoked invite grant v3=%s', async v3 => {
+  const test = await mount('create', { v3 })
+  const read = test.write.getMockImplementation()!
+  let release!: () => void
+  const gate = new Promise<void>(resolve => { release = resolve })
+  test.write.mockImplementation(async (path, method, ...args) => {
+    if (method === 'GET' && (path === '/api/entries/created' || path.endsWith('/row-access/entries/created'))) await gate
+    return read(path, method, ...args)
+  })
+  try {
+    await test.user.type(screen.getByLabelText('Name'), 'Draft')
+    await test.user.type(screen.getByLabelText('Contact email'), 'invite@example.test')
+    await test.user.click(screen.getByRole('checkbox', { name: 'Invite now' }))
+    await test.user.click(screen.getByRole('button', { name: 'Create' }))
+    await waitFor(() => expect(test.write.mock.calls.some(([path, method]) => method === 'GET' && path.includes('created'))).toBe(true))
+    // Keep CRUD create authorized; only invitation authority disappears.
+    test.caps.revision = 2
+    if (v3) test.caps.commands = []
+    else test.model.entities.entries.rowInvitations = false
+    test.view.rerender(test.renderSurface())
+    expect(screen.queryByRole('checkbox', { name: 'Invite now' })).toBeNull()
+    await act(async () => release())
+    await waitFor(() => expect(test.client.isMutating()).toBe(0))
+    expect(test.write.mock.calls.filter(([path, method]) => method === 'POST' && (path.endsWith('/actions/invite') || path.endsWith('/invitations')))).toHaveLength(0)
+    expect(test.write.mock.calls.filter(([path, method]) => path === '/api/entries' && method === 'POST')).toHaveLength(1)
+  } finally { release(); test.view.unmount(); test.client.clear() }
+})

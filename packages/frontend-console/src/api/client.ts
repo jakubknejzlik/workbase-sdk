@@ -1,5 +1,7 @@
+import { clearListPreferences } from '@workbasehq/console-generated/list-preferences'
 import { clearSavedViews } from '@workbasehq/console-generated/saved-views'
 import type { Me } from './queries'
+import type { RuntimeConsole } from './runtime-model'
 import type { QueryClient } from '@tanstack/react-query'
 
 export class ApiError extends Error {
@@ -21,11 +23,15 @@ export function signInLocation(returnTo = window.location.pathname + window.loca
 }
 // Keep this set until the document unloads: late reads can finish after assign().
 let loggingOut = false
-export async function logoutSession(client: QueryClient): Promise<void> {
+export async function logoutSession(client: QueryClient, orgId?: string): Promise<void> {
   loggingOut = true
-  // Capture only verified in-memory projections, before cancellation/cache teardown.
-  const userId = client.getQueryData<Me>(['me'])?.user?.id
-  const instance = client.getQueryData<{ instance: string }>(['instance'])?.instance
+  // ReadPage uses these scoped projections, not the indefinitely cached global /me.
+  // Capture before cache teardown; an absent/failed projection cannot widen cleanup.
+  const me = orgId ? client.getQueryState<Me>(['organization', orgId]) : undefined
+  const runtime = orgId ? client.getQueryState<RuntimeConsole>(['console-model', orgId]) : undefined
+  const userId = me?.status === 'success' ? me.data?.user?.id : undefined
+  const instance = runtime?.status === 'success' ? runtime.data?.model.instance : undefined
+  const account = userId && instance && me?.data?.memberships.some(item => item.organization_id === orgId) ? { instance, userId } : undefined
   try {
     await client.cancelQueries()
     try {
@@ -34,7 +40,10 @@ export async function logoutSession(client: QueryClient): Promise<void> {
       // An expired session is already signed out; finish the same cache/navigation cleanup.
       if (!(error instanceof ApiError && error.status === 401)) throw error
     }
-    clearSavedViews(userId && instance ? { instance, userId } : undefined)
+    if (account) {
+      clearSavedViews(account)
+      clearListPreferences(account)
+    }
     window.location.assign('/sign-in')
     client.clear()
   } catch (error) {

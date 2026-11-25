@@ -38,7 +38,7 @@
     },
     "packages/core": {
       "name": "@workbasehq/core",
-      "version": "0.4.1",
+      "version": "0.4.2",
       "bin": {
         "workbase-migrate": "src/infra/bin.mjs"
       },
@@ -98,7 +98,7 @@
     },
     "packages/mcp": {
       "name": "@workbasehq/mcp",
-      "version": "0.4.1",
+      "version": "0.4.2",
       "bin": {
         "workbase-mcp": "src/bin.ts",
         "workbase": "src/bin.ts"
@@ -115,7 +115,7 @@
     },
     "packages/plugins": {
       "name": "@workbasehq/plugins",
-      "version": "0.4.1",
+      "version": "0.4.2",
       "dependencies": {
         "better-auth": "1.7.1",
         "zod": "4.6.7"
@@ -140,7 +140,7 @@
         "@tanstack/react-query": "^5.90.21",
         "@tanstack/react-router": "^1.170.41",
         "@tanstack/router-generator": "^1.146.2",
-        "@workbasehq/core": "0.4.1",
+        "@workbasehq/core": "0.4.2",
         "es-module-lexer": "^2.3.2",
         "react": "^19.2.8",
         "typescript": ">=5.7.2 <7",

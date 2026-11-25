@@ -89,7 +89,10 @@ export function consoleAuthorization(kernel: KernelRegistry, scope: Scope, caps:
       return canGrantRole(config, scope.role, 'member')
     } catch { return false }
   }
-  const listRowAccess = (entity: string) => rowInvitations(entity) && grant('invitations.read')
+  // Match the direct-query read gate. Resource capabilities already combine
+  // the resource and organization grants; read includes entity read and ID masks.
+  const listRowAccess = (entity: string) => kernel.providers.has('members') && read(entity, 'id')
+    && Object.values(config.entities[entity].fields).some(field => field.userLink) && grant('invitations.read')
   const schema = (node: Record<string, unknown>) => node.sensitive !== true
     && (node.referenceEntity === undefined || typeof node.referenceEntity === 'string' && canRead(node.referenceEntity))
   return { operation, command, grant, canRead, read, write, literals, defaults, relation, label, query, predicate, schema, rowInvitations, listRowAccess }

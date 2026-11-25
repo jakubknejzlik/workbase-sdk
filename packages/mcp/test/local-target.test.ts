@@ -1,3 +1,4 @@
+import { provisionLocalSdk } from './fixtures/local-sdk.ts'
 import fs from 'node:fs/promises'
 import { syncBuiltinESMExports } from 'node:module'
 import { DatabaseSync } from 'node:sqlite'
@@ -37,7 +38,7 @@ async function empty() {
   const root = await fs.realpath(await fs.mkdtemp(join(tmpdir(), 'local-target-')))
   roots.push(root)
   // Dependencies are available before bootstrap; no target setup or mapping.
-  await fs.symlink(resolve('node_modules'), join(root, 'node_modules'))
+  await provisionLocalSdk(root)
   return root
 }
 async function initialize(call: Call, custom = true) {

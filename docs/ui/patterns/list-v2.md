@@ -76,8 +76,28 @@ for verified-scope and cleanup integration.
   remains separate. Generated-console delivery does not implement the V3 adapter;
   that work must reuse this approved menu and retain its adapter acceptance
   requirements.
-- [#236 Q2 — column-visibility/density persistence](https://github.com/jakubknejzlik/workbase-sdk/issues/236#issuecomment-6995234699)
-  remains separate. These controls currently hold session-local React state.
-  The approved browser-local persistence and explicit-logout cleanup contract is
-  still required, scoped by verified org/instance/user/entity and separate from
-  D7 and URL/query state. The #233 ACCEPT verdict does not waive that requirement.
+
+## Display-preference storage
+
+[#236 Q2](https://github.com/jakubknejzlik/workbase-sdk/issues/236#issuecomment-6995234699)
+uses generated-console browser `localStorage` separately from D7 and URL/query
+state. The versioned `workbase:list-prefs:v1:` namespace encodes verified instance,
+user, organization and entity and stores `{ visible: string[], density }`. The
+authenticated host supplies the same verified scope as personal views; unknown
+or mismatched scope never reads or writes a persisted namespace.
+
+Defaults follow `columns[].defaultVisible` and configured compact density. Reset
+removes the preference and restores those defaults. Stored IDs are revalidated
+against the current configured, readable columns; unknown IDs are discarded and
+the primary column stays visible. Presentation preferences never affect selected
+fields, search, filters, sort, requests or counts. Storage failure retains choices
+in memory for the current document, including list remounts.
+
+Explicit generated-console logout clears that account's display preferences
+across organizations and entities and invalidates mounted callbacks. Cleanup uses
+the active organization's verified user and runtime model instance, matching the
+list's persistence scope rather than the global identity cache. Missing or failed
+projections remove nothing; cleanup never falls back to the whole feature prefix.
+The same generated-console logout path scopes D7 cleanup to this account. Ordinary
+session expiry does not clear preferences, and storage failure cannot block sign-out.
+V3 wiring remains separate.

@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process'
-import { mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises'
+import { cp, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
@@ -11,6 +11,7 @@ import { parseProposal } from '../src/proposals.ts'
 import { parseRuntimeSource } from '../src/composition/runtime-source.ts'
 import { initializationPaths } from '../src/initialization.ts'
 import { hash } from '../src/planning.ts'
+import { provisionLocalSdk, provisionProbeSdk } from './fixtures/local-sdk.ts'
 
 const composition = { interactive: false, plugins: [
   { plugin: 'identity' }, { plugin: 'permissions' }, { plugin: 'members' },
@@ -32,7 +33,7 @@ async function fixture() {
   const root = await empty(), app = await createServer({ root }); closers.push(() => app.server.close())
   const call = (name: string, input: Record<string, unknown>) => app.workflow.call(name, input) as Promise<any>
   expect(await call('bootstrap_instance', bootstrap)).toMatchObject({ ok: true })
-  await symlink(resolve('node_modules'), join(root, 'node_modules'))
+  await provisionLocalSdk(root)
   const original = await readFile(join(root, 'runtime.ts'), 'utf8')
   const propose = async (selection = composition) => {
     const result = await call('propose_initial_composition', { instance, composition: selection })
@@ -186,21 +187,27 @@ await app.workflow.call('promote', ${JSON.stringify({ ...args, expectedRevision:
   expect((await restarted.store.find(args.proposalId)).proposal.status).toBe('verified')
   expect(await promote()).toMatchObject({ ok: true, status: 'promoted' })
 })
-it.each(['source', 'dependencies', 'requirements'])('rolls back runtime and all artifacts when %s change during publication', async change => {
+it.each(['source', 'dependencies', 'requirements', 'internal origin', 'outside origin'])('rolls back runtime and all artifacts when %s change during publication', async change => {
   const { root, app, original, verify, promote, args } = await fixture()
   await verify()
   const commit = app.store.commit.bind(app.store)
   app.store.commit = (id, files, guards, verifyInputs) => commit(id, files, guards, async () => {
-    if (change === 'dependencies') await rm(join(root, 'node_modules'))
-    else {
+    if (change === 'dependencies') await rm(join(root, 'node_modules'), { recursive: true })
+    else if (change === 'internal origin' || change === 'outside origin') {
+      const target = change === 'internal origin' ? join(root, 'node_modules/.sdk/plugins-next') : join(await empty(), 'plugins')
+      await cp(join(root, 'node_modules/.sdk/plugins'), target, { recursive: true })
+      await rm(join(root, 'node_modules/@workbasehq/plugins'))
+      await symlink(target, join(root, 'node_modules/@workbasehq/plugins'))
+    } else {
       const path = change === 'source' ? 'config.ts' : 'wrangler.jsonc'
       await writeFile(join(root, path), await readFile(join(root, path), 'utf8') + '\n ')
     }
     await verifyInputs?.()
   })
-  expect(await promote()).toMatchObject({ ok: false, error: { code: change === 'dependencies' ? 'dependencies_missing' : 'concurrent_modification' } })
+  expect(await promote()).toMatchObject({ ok: false, error: { code: change === 'dependencies' || change === 'outside origin' ? 'dependencies_missing' : change === 'internal origin' ? 'stale_plan' : 'concurrent_modification' } })
   await unpublished(root, original)
   expect((await app.store.find(args.proposalId)).proposal.status).toBe('verified')
+  expect(await readdir(join(root, 'proposals'))).not.toContain('.promotion.json')
 })
 it('refuses a changed persisted selection and clears old proofs when revalidation fails', async () => {
   const { root, call, args, verify, promote, proposal, original } = await fixture()
@@ -262,7 +269,7 @@ it.each(['bun', 'node'])('runs the exact seven-plugin fresh flow through real %s
     const tool = (await session.client.listTools()).tools.find(t => t.name === 'propose_initial_composition')
     expect(tool?.description).toContain('fresh')
     expect(await session.call('bootstrap_instance', bootstrap)).toMatchObject({ ok: true })
-    await symlink(resolve('node_modules'), join(root, 'node_modules'))
+    await provisionLocalSdk(root)
     const proposed = await session.call('propose_initial_composition', { instance, composition })
     expect(proposed, JSON.stringify(proposed)).toMatchObject({ ok: true, kind: 'initial_composition' })
     const args = { proposalId: proposed.proposalId }
@@ -284,4 +291,31 @@ it.each(['bun', 'node'])('runs the exact seven-plugin fresh flow through real %s
     expect(await session.call('promote', { ...args, expectedRevision: 1 })).toEqual(receipt)
     expect(await session.call('inspect_schema', { instance })).toMatchObject({ ok: true, revision: 1, validation: { ok: true } })
   } finally { await session.close() }
+})
+
+it('rejects outside origins at proposal creation without leaving initialization artifacts, proposals or lock metadata', async () => {
+  const root = await empty(), outside = await empty(), marker = join(outside, 'selected-imports')
+  const app = await createServer({ root }); closers.push(() => app.server.close())
+  expect(await app.workflow.call('bootstrap_instance', bootstrap)).toMatchObject({ ok: true })
+  await provisionProbeSdk(outside, marker)
+  await symlink(join(outside, 'node_modules'), join(root, 'node_modules'))
+  const original = await readFile(join(root, 'runtime.ts'), 'utf8')
+  const entries = await readdir(root), proposals = await readdir(join(root, 'proposals'))
+  expect(await app.workflow.call('propose_initial_composition', { instance, composition })).toMatchObject({ ok: false,
+    error: { code: 'dependencies_missing', status: 422, details: { remedy: expect.stringContaining('locally') } } })
+  await unpublished(root, original)
+  await expect(readFile(marker)).rejects.toMatchObject({ code: 'ENOENT' })
+  expect(await readdir(root)).toEqual(entries)
+  expect(await readdir(join(root, 'proposals'))).toEqual(proposals)
+})
+it.each(['internal', 'outside'])('requires a new proposal and proofs after a same-byte %s origin swap before promotion', async origin => {
+  const { root, original, verify, promote } = await fixture()
+  await verify()
+  const target = origin === 'internal' ? join(root, 'node_modules/.sdk/plugins-next') : join(await empty(), 'plugins')
+  await cp(join(root, 'node_modules/.sdk/plugins'), target, { recursive: true })
+  await rm(join(root, 'node_modules/@workbasehq/plugins'))
+  await symlink(target, join(root, 'node_modules/@workbasehq/plugins'))
+  expect(await promote()).toMatchObject({ ok: false, error: { code: origin === 'internal' ? 'stale_plan' : 'dependencies_missing' } })
+  await unpublished(root, original)
+  expect(await readdir(join(root, 'proposals'))).not.toContain('.promotion.json')
 })

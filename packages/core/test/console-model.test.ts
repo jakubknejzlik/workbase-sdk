@@ -1,4 +1,4 @@
-import { beforeEach, expect, it } from 'vitest'
+import { beforeEach, expect, it, vi } from 'vitest'
 import { env } from 'cloudflare:workers'
 import { reset } from 'cloudflare:test'
 import { z } from 'zod'
@@ -14,6 +14,11 @@ import { initialSchema } from '../src/migrations/schema'
 import { KernelRegistry } from '../src/kernel/registry'
 import { tenancy } from '../src/kernel/adapters/tenancy'
 import { publicConsoleResponse } from '../src/console'
+import { workerAccessFixture } from './fixtures/worker-access'
+import { loadActorProjection } from '../src/policies'
+import { scopeOperations } from '../src/scope-operations'
+import { validateQuery, fieldsFor } from '../src/query/schema'
+import type { Scope } from '../src/types'
 import { consoleModel } from '../src/console-model'
 import type { RuntimeOptions } from '../src/types'
 import type { WorkflowDefinition } from '../src/execution/workflow'
@@ -798,4 +803,32 @@ it('explicit entity and field captions survive computed display synthesis and au
   const owner = await contract('owner')
   expect(owner.model.enumLabels?.cs).toMatchObject({ field_computed_display_specimens: 'Popis vzorku', listField_computed_display_specimens: 'Popis vzorku' })
   expect(JSON.stringify(owner.model.enumLabels)).not.toContain(secret)
+})
+
+it.each(['provider', 'link', 'id-mask', 'entity-read', 'resource-read', 'organization-read'] as const)('rowAccess read authority stays fail-closed for %s denial', async denial => {
+  const source = workerAccessFixture()
+  source.plugins = [...source.plugins!, consoleUI(), {
+    name: 'status-read-denials', version: '1',
+    fieldMask: entity => entity === 'worker' && denial === 'id-mask' ? ['name'] : fieldsFor(source, entity),
+    commandGuard: command => denial === 'resource-read' && 'system' in command.permission && command.permission.system === 'invitations.read'
+      || denial === 'entity-read' && 'entity' in command.permission && command.permission.entity === 'worker' && command.permission.operation === 'read'
+      ? { allow: false, code: 'permission_denied' } : { allow: true },
+  }]
+  source.ui = { entities: { worker: { list: { rowAccess: { placement: 'toolbar' }, views: [{ id: 'linked', label: 'Linked', where: {}, rowAccess: 'signed_in' }] } } } }
+  if (denial === 'organization-read') source.effectiveAccess = { ...source.effectiveAccess!, system: source.effectiveAccess!.system.map(rule => rule.role === 'admin' && rule.action === 'invitations.read' ? { ...rule, decision: 'deny' } : rule) }
+  const current: Scope = { role: 'admin', organizationId: 'org-a', correlationId: 'synthetic-read-denial', actor: { type: 'user', id: 'admin' } }
+  scopeOperations.set(current, { operations: null })
+  await loadActorProjection(source, current, async <T>() => ({ id: 'admin', name: 'Admin', user_id: 'admin', organization_id: 'org-a', role: 'admin' }) as T)
+  const kernel = new KernelRegistry(source)
+  const hasProvider = kernel.providers.has.bind(kernel.providers)
+  if (denial === 'provider') vi.spyOn(kernel.providers, 'has').mockImplementation(name => name !== 'members' && hasProvider(name))
+  if (denial === 'link') kernel.config.entities.worker.fields.user.userLink = false
+  // Isolate the organization grant from the independently tested resource guard.
+  if (denial === 'organization-read') vi.spyOn(kernel, 'resourcePermission').mockImplementation(() => {})
+  const body = consoleModel(kernel, current)
+  expect(body.model.entities.worker?.rowAccess).not.toBe(true)
+  expect(body.model.entities.worker?.list?.rowAccess).toBeUndefined()
+  expect(body.model.entities.worker?.list?.views?.some(view => view.id === 'linked')).not.toBe(true)
+  for (const input of [{ rowAccess: 'signed_in' }, { view: 'linked' }]) expect(() => validateQuery(kernel, current, { entity: 'worker', select: ['id'], ...input })).toThrow()
+  vi.restoreAllMocks()
 })
