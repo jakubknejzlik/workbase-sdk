@@ -1,5 +1,7 @@
+import { StrictMode, useLayoutEffect } from 'react'
+import { useFormContext, type UseFormReturn } from 'react-hook-form'
 import { beforeAll, expect, it, vi } from 'vitest'
-import { render, screen, fireEvent } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { RegistryForm } from '../src'
 beforeAll(() => { HTMLElement.prototype.scrollIntoView = vi.fn() })
@@ -67,7 +69,7 @@ it('SR-37 declared field order preserves sections, appends unspecified fields an
     hidden: { type: 'string', 'x-ui': { hidden: true } }, readonly: { type: 'string', readOnly: true },
   } }} label={name => name} submitLabel="Save" invalidLabel="Invalid" onSubmit={() => {}} />)
   expect([...result.container.querySelectorAll('[data-write-field]')].map(node => node.getAttribute('data-write-field'))).toEqual(['name', 'street', 'city', 'members', 'extra'])
-  expect(screen.getByRole('group', { name: 'Address' }).querySelectorAll('[data-write-field]')).toHaveLength(2)
+  expect(screen.getByRole('group', { name: 'Address' }).getAttribute('aria-owns')!.split(' ').map(id => document.getElementById(id)?.getAttribute('data-write-field'))).toEqual(['street', 'city'])
 })
 it('metadata pairs short fields and keeps long/section fields full width without hiding business ids', () => {
   const result = render(<RegistryForm schema={{ type: 'object', properties: {
@@ -168,4 +170,198 @@ it('partial edits never apply create defaults to absent untouched values', async
   expect((screen.getByLabelText('count') as HTMLInputElement).value).toBe('')
   await user.type(screen.getByLabelText('name'), ' Lovelace'); await user.click(screen.getByRole('button', { name: 'Save' }))
   expect(submit).toHaveBeenCalledExactlyOnceWith({ name: 'Ada Lovelace' })
+})
+
+// #162: real RHF observations, shared by ordinary and custom renderers.
+let observed: UseFormReturn<Record<string, any>>
+function ObservedField({ name, value, change }: { name: string; value: string; change: (value: string) => void }) {
+  observed = useFormContext()
+  // Subscribe to dirty/default/touched/error state, as mutation safety does.
+  void observed.formState.isDirty; void observed.formState.dirtyFields; void observed.formState.defaultValues
+  return <input aria-label={name} value={value} onBlur={() => observed.setValue(name, value, { shouldTouch: true })} onChange={event => change(event.target.value)} />
+}
+const lifecycleProps = { partial: true, requireDirty: true, label: (name: string) => name, submitLabel: 'Save', invalidLabel: 'Invalid', onSubmit: vi.fn(), relation: (name: string, value: string, change: (value: string) => void) => name === 'probe' || name === 'note' || name === 'members' ? <ObservedField name={name} value={value} change={change} /> : undefined }
+const initialSchema = { type: 'object', properties: { name: { type: 'string' }, probe: { type: 'string' } } }
+it.each(['note', 'members'])('A1/A2 shared registration installs a late %s default and reversion is clean', async name => {
+  const raw = name === 'members' ? { type: 'array', items: { type: 'string' }, 'x-ui': { valueSet: true } } : { type: ['string', 'null'] }
+  const seed = name === 'members' ? ['b', 'a', 'a'] : 'tag'
+  const normalized = name === 'members' ? '["a","b"]' : 'tag'
+  const view = render(<RegistryForm {...lifecycleProps} schema={initialSchema} values={{ name: 'Ada', probe: '' }} />)
+  const input = screen.getByLabelText('name'); fireEvent.change(input, { target: { value: 'Grace' } })
+  view.rerender(<RegistryForm {...lifecycleProps} schema={{ ...initialSchema, properties: { ...initialSchema.properties, [name]: raw } }} values={{ name: 'Replacement', probe: '', [name]: seed }} />)
+  await waitFor(() => expect(screen.getByLabelText(name)).toHaveProperty('value', normalized))
+  expect(screen.getByLabelText('name')).toBe(input); expect(input).toHaveProperty('value', 'Grace')
+  expect(observed.formState.defaultValues?.[name]).toBe(normalized); expect(observed.getFieldState(name).isDirty).toBe(false)
+  fireEvent.change(screen.getByLabelText(name), { target: { value: name === 'members' ? '["b"]' : '' } })
+  fireEvent.change(screen.getByLabelText(name), { target: { value: name === 'members' ? '["b","a"]' : 'tag' } })
+  fireEvent.change(input, { target: { value: 'Ada' } })
+  await waitFor(() => expect(observed.formState.isDirty).toBe(false))
+  expect(observed.getFieldState(name).isDirty).toBe(false)
+})
+it('A4 first seed owns its baseline through clean refresh, masking and reauthorization', async () => {
+  const schema = { ...initialSchema, properties: { ...initialSchema.properties, note: { type: 'string' } } }
+  const view = render(<RegistryForm {...lifecycleProps} schema={schema} values={{ name: 'Ada', note: 'Original' }} />)
+  view.rerender(<RegistryForm {...lifecycleProps} schema={initialSchema} values={{ name: 'Other' }} />)
+  view.rerender(<RegistryForm {...lifecycleProps} schema={schema} values={{ name: 'Other', note: 'Replacement' }} />)
+  expect(screen.getByLabelText('note')).toHaveProperty('value', 'Original')
+  fireEvent.change(screen.getByLabelText('note'), { target: { value: 'Draft' } })
+  view.rerender(<RegistryForm {...lifecycleProps} schema={schema} values={{ note: 'Latest' }} />)
+  expect(screen.getByLabelText('note')).toHaveProperty('value', 'Draft'); expect(observed.formState.defaultValues?.note).toBe('Original')
+})
+
+const knownSeeds = { name: { state: 'known' as const, value: 'Ada' }, probe: { state: 'known' as const, value: '' } }
+const kinds = [
+  ['text', { type: 'string' }, 'Original', 'Original', 'Changed'],
+  ['enum', { type: 'string', enum: ['low', 'high'] }, 'high', 'high', 'low'],
+  ['number', { type: 'number' }, 2.5, '2.5', '3.5'],
+  ['zero', { type: 'integer' }, 0, '0', '1'],
+  ['false', { type: 'boolean' }, false, false, true],
+  ['nullable boolean', { type: ['boolean', 'null'] }, false, false, true],
+  ['date', { type: 'string', format: 'date' }, '2026-10-24', '2026-10-24', '2026-10-25'],
+  ['datetime', { type: 'string', format: 'date-time' }, '2026-10-24T12:00:00.000Z', '2026-10-24T12:00:00.000Z', '2026-10-25T12:00:00.000Z'],
+  ['null', { type: ['string', 'null'] }, null, '', 'Changed'],
+  ['object', { type: 'object', properties: { nested: { type: 'integer' } } }, { nested: 1 }, '{"nested":1}', '{"nested":2}'],
+  ['array', { type: 'array', items: { type: 'integer' } }, [2, 1], '[2,1]', '[1,2]'],
+] as const
+it.each(kinds.flatMap(kind => ['same render', 'delayed'].map(timing => [...kind, timing] as const)))('A5 %s seed (%s / %s / %s / %s / %s) installs once under StrictMode', async (_kind, raw, seed, encoded, changed, timing) => {
+  const submit = vi.fn(); const ready = vi.fn()
+  const props = { ...lifecycleProps, onSubmit: submit, onReadyChange: ready }
+  const view = render(<StrictMode><RegistryForm {...props} schema={initialSchema} values={{ name: 'Ada', probe: '' }} seeds={knownSeeds} /></StrictMode>)
+  const input = screen.getByLabelText('name'); input.focus(); fireEvent.change(input, { target: { value: 'Grace' } }); fireEvent.blur(input)
+  act(() => { observed.setError('name', { type: 'server', message: 'Keep error' }); observed.setValue('probe', '', { shouldTouch: true }) })
+  const schema = { ...initialSchema, properties: { ...initialSchema.properties, late: raw } }
+  const update = (state: 'known' | 'pending', value: unknown = seed) => view.rerender(<StrictMode><RegistryForm {...props} schema={schema} values={{ name: 'Replacement' }} seeds={{ ...knownSeeds, late: state === 'known' ? { state, value } : { state } }} /></StrictMode>)
+  if (timing === 'delayed') {
+    update('pending'); expect(screen.getByRole('button', { name: 'Save' })).toHaveProperty('disabled', true)
+    fireEvent.submit(input.closest('form')!); await act(async () => {})
+    expect(submit).not.toHaveBeenCalled()
+  }
+  update('known')
+  await waitFor(() => expect(observed.formState.defaultValues?.late).toEqual(encoded))
+  expect(observed.getValues('late')).toEqual(encoded); expect(observed.getFieldState('late').isDirty).toBe(false)
+  expect(screen.getByLabelText('name')).toBe(input); expect(input).toHaveProperty('value', 'Grace')
+  expect(observed.getFieldState('name').isTouched).toBe(true); expect(observed.getFieldState('probe').isTouched).toBe(true); expect(observed.getFieldState('name').error?.message).toBe('Keep error')
+  act(() => observed.setValue('late', changed, { shouldDirty: true, shouldTouch: true }))
+  expect(observed.getFieldState('late').isDirty).toBe(true)
+  update('known', seed); expect(observed.getValues('late')).toEqual(changed)
+  act(() => { observed.setValue('late', encoded, { shouldDirty: true }); observed.clearErrors('name') })
+  expect(observed.getFieldState('late').isDirty).toBe(false)
+  fireEvent.submit(input.closest('form')!); await waitFor(() => expect(submit).toHaveBeenCalledWith({ name: 'Grace' }))
+  submit.mockClear()
+  act(() => observed.setValue('late', changed, { shouldDirty: true }))
+  fireEvent.submit(input.closest('form')!); await waitFor(() => expect(submit).toHaveBeenCalled())
+  const expected = ['number', 'zero'].includes(_kind) ? Number(changed) : _kind === 'object' || _kind === 'array' ? JSON.parse(String(changed)) : changed
+  expect(submit.mock.lastCall![0].late).toEqual(expected)
+})
+it.each([false, true])('A6 unknown field read grant preserves explicit draft=%s and local baseline', async edited => {
+  const submit = vi.fn(); const schema = { ...initialSchema, properties: { ...initialSchema.properties, note: { type: ['string', 'null'], default: 'Create default' } } }
+  const props = { ...lifecycleProps, onSubmit: submit, schema }
+  const view = render(<RegistryForm {...props} values={{ name: 'Ada', probe: '' }} seeds={{ ...knownSeeds, note: { state: 'unknown' } }} />)
+  expect(screen.getByLabelText('note')).toHaveProperty('value', '')
+  if (edited) fireEvent.change(screen.getByLabelText('note'), { target: { value: 'Unknown draft' } })
+  view.rerender(<RegistryForm {...props} seeds={{ ...knownSeeds, note: { state: 'known', value: 'Authorized' } }} />)
+  await waitFor(() => expect(screen.getByLabelText('note')).toHaveProperty('value', edited ? 'Unknown draft' : 'Authorized'))
+  expect(observed.formState.defaultValues?.note).toBe(edited ? '' : 'Authorized')
+  fireEvent.submit(screen.getByLabelText('note').closest('form')!)
+  await waitFor(() => expect(submit).toHaveBeenCalledWith(edited ? { note: 'Unknown draft' } : {}))
+})
+function RacingField() {
+  const form = useFormContext()
+  useLayoutEffect(() => { form.setValue('note', 'Programmatic draft') }, [])
+  return null
+}
+it('A6 a programmatic pre-seed edit never acknowledges readiness or overwrites the draft', async () => {
+  const submit = vi.fn(); const schema = { ...initialSchema, properties: { ...initialSchema.properties, note: { type: 'string' } } }
+  const relation = (name: string, value: string, change: (value: string) => void) => name === 'note' ? <><ObservedField name={name} value={value} change={change} /><RacingField /></> : lifecycleProps.relation(name, value, change)
+  const props = { ...lifecycleProps, schema, onSubmit: submit, relation }
+  const view = render(<RegistryForm {...props} values={{ name: 'Ada', probe: '' }} seeds={{ ...knownSeeds, note: { state: 'pending' } }} />)
+  view.rerender(<RegistryForm {...props} seeds={{ ...knownSeeds, note: { state: 'known', value: 'Server' } }} />)
+  expect(observed.getValues('note')).toBe('Programmatic draft'); expect(observed.formState.defaultValues?.note).toBe('')
+  expect(screen.getByRole('button', { name: 'Save' })).toHaveProperty('disabled', true)
+  fireEvent.submit(screen.getByLabelText('note').closest('form')!); await act(async () => {})
+  expect(submit).not.toHaveBeenCalled()
+})
+it.each(['pending', 'blocked'] as const)('A8 %s seed and disabled form block native submissions and masked payloads', async state => {
+  const submit = vi.fn(); const schema = { ...initialSchema, properties: { ...initialSchema.properties, note: { type: ['string', 'null'] } } }
+  const props = { ...lifecycleProps, onSubmit: submit }
+  const view = render(<RegistryForm {...props} schema={schema} values={{ name: 'Ada', note: 'Tag' }} />)
+  fireEvent.change(screen.getByLabelText('note'), { target: { value: 'Private draft' } })
+  view.rerender(<RegistryForm {...props} schema={schema} seeds={{ ...knownSeeds, note: { state } }} />)
+  fireEvent.submit(screen.getByLabelText('name').closest('form')!); await act(async () => {})
+  expect(submit).not.toHaveBeenCalled()
+  view.rerender(<RegistryForm {...props} disabled schema={initialSchema} />)
+  fireEvent.submit(screen.getByLabelText('name').closest('form')!); await act(async () => {})
+  expect(submit).not.toHaveBeenCalled()
+  view.rerender(<RegistryForm {...props} schema={initialSchema} />)
+  fireEvent.change(screen.getByLabelText('name'), { target: { value: 'Grace' } })
+  fireEvent.submit(screen.getByLabelText('name').closest('form')!); await waitFor(() => expect(submit).toHaveBeenCalledWith({ name: 'Grace' }))
+})
+it('A1 registration-to-seed gap blocks native submit before the installation effect', async () => {
+  const submit = vi.fn()
+  function Gap() { useLayoutEffect(() => { fireEvent.submit(screen.getByLabelText('name').closest('form')!) }, []); return null }
+  const view = render(<RegistryForm {...lifecycleProps} onSubmit={submit} schema={initialSchema} values={{ name: 'Ada', probe: '' }} />)
+  fireEvent.change(screen.getByLabelText('name'), { target: { value: 'Grace' } })
+  view.rerender(<RegistryForm {...lifecycleProps} onSubmit={submit} schema={{ ...initialSchema, properties: { ...initialSchema.properties, note: { type: 'string' } } }} values={{ note: 'Seed' }} relation={(name, value, change) => name === 'note' ? <><ObservedField name={name} value={value} change={change} /><Gap /></> : lifecycleProps.relation(name, value, change)} />)
+  await act(async () => {}); expect(submit).not.toHaveBeenCalled(); expect(observed.formState.defaultValues?.note).toBe('Seed')
+})
+
+it('A10 inline submission stays inside an ancestor form and honors locked create defaults', async () => {
+  const submit = vi.fn(), ancestor = vi.fn(), user = userEvent.setup()
+  render(<form onSubmit={event => { event.preventDefault(); ancestor() }}><RegistryForm inline schema={{ type: 'object', properties: { name: { type: 'string', default: 'New' }, parent: { type: 'string' } } }} lockedValues={{ parent: 'locked' }} label={name => name} submitLabel="Create" invalidLabel="Invalid" onSubmit={submit} /></form>)
+  expect(document.querySelectorAll('form')).toHaveLength(1)
+  expect(screen.getByLabelText('parent').matches(':disabled')).toBe(true)
+  await user.type(screen.getByLabelText('name'), ' draft'); fireEvent.keyDown(screen.getByLabelText('name'), { key: 'Enter' })
+  await waitFor(() => expect(submit).toHaveBeenCalledWith({ name: 'New draft', parent: 'locked' }))
+  expect(ancestor).not.toHaveBeenCalled()
+})
+it('A6 unknown-to-known grant waits for the default installation before accepting native submit', async () => {
+  const submit = vi.fn()
+  function SubmitGap() { useLayoutEffect(() => { fireEvent.submit(screen.getByLabelText('name').closest('form')!) }, []); return null }
+  const schema = { ...initialSchema, properties: { ...initialSchema.properties, note: { type: 'string' } } }
+  const view = render(<RegistryForm {...lifecycleProps} onSubmit={submit} schema={schema} values={{ name: 'Ada', probe: '' }} seeds={{ ...knownSeeds, note: { state: 'unknown' } }} />)
+  fireEvent.change(screen.getByLabelText('name'), { target: { value: 'Grace' } })
+  view.rerender(<RegistryForm {...lifecycleProps} onSubmit={submit} schema={schema} seeds={{ ...knownSeeds, note: { state: 'known', value: 'Server' } }} relation={(name, value, change) => name === 'note' ? <><ObservedField name={name} value={value} change={change} /><SubmitGap /></> : lifecycleProps.relation(name, value, change)} />)
+  await act(async () => {}); expect(submit).not.toHaveBeenCalled()
+  expect(observed.getValues('note')).toBe('Server'); expect(observed.formState.defaultValues?.note).toBe('Server')
+})
+
+it('A10 custom registered controls expose RHF focus, touched state and server-error clearing', async () => {
+  render(<RegistryForm {...lifecycleProps} schema={{ type: 'object', properties: { note: { type: 'string' } } }} values={{ note: 'Seed' }} serverErrors={{ note: 'Server error' }} />)
+  act(() => observed.setFocus('note'))
+  expect(document.activeElement).toBe(screen.getByLabelText('note'))
+  fireEvent.blur(screen.getByLabelText('note')); expect(observed.getFieldState('note').isTouched).toBe(true)
+  expect(observed.getFieldState('note').error?.type).toBe('server')
+  fireEvent.change(screen.getByLabelText('note'), { target: { value: 'Changed' } })
+  await waitFor(() => expect(observed.getFieldState('note').error).toBeUndefined())
+})
+
+// Port of review wr-ffb38ad8's preceding-section grant probe.
+it.each(['Earlier', 'Basics'])('A5/A7 a late grant in preceding %s section retains existing input DOM and focus', async section => {
+  const name = { type: 'string', 'x-ui': { section: 'Basics' } }
+  const late = { type: 'string', 'x-ui': { section } }
+  const props = { label: (name: string) => name, submitLabel: 'Save', invalidLabel: 'Invalid', onSubmit: vi.fn(), values: { name: 'Ada' } }
+  const view = render(<RegistryForm {...props} schema={{ type: 'object', 'x-ui': { fieldOrder: ['late', 'name'] }, properties: { name } }} seeds={{ name: { state: 'known', value: 'Ada' } }} />)
+  const input = screen.getByLabelText('name')
+  input.focus(); fireEvent.change(input, { target: { value: 'Grace' } })
+  view.rerender(<RegistryForm {...props} schema={{ type: 'object', 'x-ui': { fieldOrder: ['late', 'name'] }, properties: { late, name } }} seeds={{ name: { state: 'known', value: 'Ada' }, late: { state: 'known', value: 'Seed' } }} />)
+  await waitFor(() => expect(screen.getByLabelText('late')).toHaveProperty('value', 'Seed'))
+  expect(screen.getByLabelText('name')).toHaveProperty('value', 'Grace')
+  expect(screen.getByLabelText('name')).toBe(input)
+  expect(document.activeElement).toBe(input)
+})
+
+it('A5/A7 repeated section labels retain both existing runs when an earlier run is granted', async () => {
+  const field = (section: string) => ({ type: 'string', 'x-ui': { section } })
+  const props = { label: (name: string) => name, submitLabel: 'Save', invalidLabel: 'Invalid', onSubmit: vi.fn(), values: { name: 'Ada', tail: 'Tail' } }
+  const order = ['late', 'separator', 'name', 'middle', 'tail']
+  const properties = { name: field('Basics'), middle: field('Middle'), tail: field('Basics') }
+  const view = render(<RegistryForm {...props} schema={{ type: 'object', 'x-ui': { fieldOrder: order }, properties }} />)
+  const input = screen.getByLabelText('name'), tail = screen.getByLabelText('tail')
+  input.focus(); fireEvent.change(input, { target: { value: 'Grace' } })
+  view.rerender(<RegistryForm {...props} schema={{ type: 'object', 'x-ui': { fieldOrder: order }, properties: { late: field('Basics'), separator: field('Separator'), ...properties } }} />)
+  expect(screen.getAllByRole('group', { name: 'Basics' })).toHaveLength(3)
+  expect(screen.getByLabelText('name')).toHaveProperty('value', 'Grace')
+  expect(screen.getByLabelText('name')).toBe(input)
+  expect(screen.getByLabelText('tail')).toBe(tail)
+  expect(document.activeElement).toBe(input)
 })

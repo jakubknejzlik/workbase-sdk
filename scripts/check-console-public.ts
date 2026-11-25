@@ -1,3 +1,4 @@
+import { assertAlataIntegrity } from './lib/sdk-export-scan'
 import { consolePrivateTerms } from './lib/public-vocabulary'
 import { existsSync, lstatSync, readdirSync, readFileSync } from 'node:fs'
 import { resolve, relative } from 'node:path'
@@ -39,7 +40,15 @@ export function checkConsolePublic(directory = resolve(repo, 'packages/frontend-
     const name = relative(root, path)
     if (lstatSync(path).isSymbolicLink()) return [`${name}: symlink in public assets`]
     if (/\.map$/i.test(name)) return [`${name}: source maps are not public console assets`]
-    const content = consolePublicContent(name, readFileSync(path, 'utf8'))
+    const bytes = readFileSync(path)
+    if (name === 'assets/Alata-Regular.ttf') {
+      // Exact upstream name/copyright/version/license metadata is integrity pinned.
+      assertAlataIntegrity(bytes)
+      return []
+    }
+    const text = bytes.toString('utf8')
+    if (bytes.includes(0) || !Buffer.from(text).equals(bytes)) return [`${name}: unreviewed binary asset`]
+    const content = consolePublicContent(name, text)
     if (/sourceMappingURL\s*=/.test(content)) return [`${name}: source map reference in public assets`]
     if (forbidden.test(name)) return [`${name}: forbidden public asset path`]
     let match = forbidden.exec(content) ?? domainKey?.exec(content)

@@ -12,8 +12,10 @@ export function listLabelEntity(model: Model, entity: string, field: string): st
 }
 /** Recheck every hop and display dependency before using labels from a cached response. */
 export function readableListField(model: Model, entity: string, caps: Capabilities, field: string): boolean {
-  const related = model.entities[entity].list?.relatedColumns?.[field]
-  if (!related) return detailReadableField(model, entity, caps, field)
+  const definition = model.entities[entity]
+  const related = definition.list?.relatedColumns?.[field]
+  const explicit = definition.list?.columns?.some(column => column.field === field || column.secondary === field) ?? definition.listColumns?.includes(field) ?? false
+  if (!related) return detailReadableField(model, entity, caps, field, true, explicit)
   const target = model.entities[entity].fields[related.via]?.entity
   return !!target && detailReadableField(model, entity, caps, related.via) && detailReadableField(model, target, caps, related.field)
 }

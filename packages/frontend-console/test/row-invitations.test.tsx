@@ -78,7 +78,7 @@ it('176b pending row copies a link only on demand without caching the credential
 
 it.each(['no_account', 'invited', 'expired', 'signed_in'])('176b access filter %s round-trips URL state into the server query', async rowAccess => {
   const { validateListSearch, stateFromSearch, searchFromState, toQueryDocument } = await import('../../console-generated/src/list-model')
-  const listModel = { instance: 'test', limits: { root: 100 }, entities: { people: { rowInvitations: true, fields: { id: { type: 'string' } }, columns: ['id'], relations: {} } } } as unknown as Model
+  const listModel = { instance: 'test', limits: { root: 100 }, entities: { people: { rowAccess: true, rowInvitations: false, fields: { id: { type: 'string' } }, columns: ['id'], relations: {} } } } as unknown as Model
   const listCaps = { resources: { 'invitations.read': true }, revision: 1, entities: { people: { readable: ['id'], writable: [], operations: ['read'] } } } as Capabilities
   const { state, dropped } = stateFromSearch(validateListSearch({ rowAccess }), listModel, 'people', listCaps)
   expect(dropped).toBe(false)
@@ -89,7 +89,7 @@ it.each(['no_account', 'invited', 'expired', 'signed_in'])('176b access filter %
   expect(unreadable.dropped).toBe(true)
   expect(toQueryDocument({ ...state, rowAccess: rowAccess as any }, listModel, 'people', listCaps).rowAccess).toBeUndefined()
   listCaps.resources!['invitations.read'] = true
-  listModel.entities.people.rowInvitations = false
+  listModel.entities.people.rowAccess = false
   const denied = stateFromSearch(validateListSearch({ rowAccess }), listModel, 'people', listCaps)
   expect(denied.dropped).toBe(true)
   expect(toQueryDocument(denied.state, listModel, 'people', listCaps).rowAccess).toBeUndefined()

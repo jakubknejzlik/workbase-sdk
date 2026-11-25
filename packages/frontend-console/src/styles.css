@@ -1,4 +1,4 @@
-.c1-card { max-width: 640px; padding: 24px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--card); }
+.c1-card { max-width: 640px; padding: 24px; border: 1px solid var(--border); border-radius: var(--radius-panel); background: var(--card); }
 .c1-card form { display: flex; flex-direction: column; align-items: flex-start; gap: 12px; margin-bottom: 24px; }
 .c1-card input { width: 100%; }
 /* Finish Radix Presence cleanup as soon as a menu closes, before another
@@ -67,7 +67,7 @@
 .c5-screen.c1-card > select { width: 100%; min-width: 0; margin-bottom: 20px; }
 
 .generated-metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin-bottom: 24px; }
-.generated-metrics > div { border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; }
+.generated-metrics > div { border: 1px solid var(--border); border-radius: var(--radius-panel); padding: 20px; }
 .generated-metrics dt { font-size: .875rem; color: var(--muted-foreground); }
 .generated-metrics dd { font-size: 2rem; font-weight: 600; margin-top: 8px; font-variant-numeric: tabular-nums; }
 .generated-metric-unit { font-size: 1rem; font-weight: 400; }
@@ -98,13 +98,12 @@
   .compact-data-table th > div { flex-direction: column; align-items: center; }
 }
 
-/* List-v2 presentation only. Reference: approved workers HTML; system font is D1. */
+/* List presentation geometry; shared typography and surface roles live in UI. */
 [data-slot="sidebar-wrapper"]:has([data-slot="list-page"]) { --sidebar-width: 206px; }
-[data-slot="sidebar-inset"]:has([data-slot="list-page"]),
-main:has([data-slot="list-page"]) { background-color: #f7f8fc; }
+main:has([data-slot="list-page"]) { background-color: var(--canvas); }
 main:has([data-slot="list-page"]) h1 { font-weight: 400; }
 @media (min-width: 768px) {
-  main:has([data-slot="list-page"]) h1 { font-size: 1.8125rem; line-height: 1.2; }
+  main:has([data-slot="list-page"]) h1 { font-size: 2rem; line-height: 1.17; letter-spacing: -.95px; }
   [data-slot="sidebar-wrapper"]:has([data-slot="list-page"]) [data-slot="sidebar-menu"] { gap: .25rem; }
   [data-slot="sidebar-wrapper"]:has([data-slot="list-page"]) [data-slot="sidebar-menu-button"] { min-height: 2.5rem; height: auto; padding: .625rem .75rem; font-size: .75rem; }
 }
@@ -115,14 +114,32 @@ main:has([data-slot="list-page"]) h1 { font-weight: 400; }
 .list-v2-lookup-panel > button { flex: 0 0 auto; }
 .list-v2-lookup-panel .list-toolbar-filter { flex: 1 1 9rem; min-width: min(100%, 8rem); max-width: 20rem; }
 .list-v2-lookup-panel .wb-picker { min-width: 0; }
-[data-list-density] { --list-row-height: 61px; }
-[data-list-density="compact"] { --list-row-height: 45px; }
-[data-list-density][data-list-access="true"] { --list-row-height: 53px; }
-/* Use the shared text-sm tokens for values and sortable/plain headers alike. */
-[data-list-density] :is(table, td, th, th button, td button) { font-size: var(--text-sm); line-height: var(--text-sm--line-height); }
-[data-list-density] :is(th, td) { padding: .5rem .6875rem; }
+[data-slot="list-page"] { background-color: var(--card); border-radius: var(--radius-panel); }
+[data-list-density] table { background-color: var(--card); }
+[data-list-density] td.sticky { background-color: var(--card); }
+[data-list-density] tr:hover td.sticky { background-color: var(--muted); }
+[data-list-density] :is(th, th button) { color: var(--quiet-foreground); }
+[data-list-density] { --list-row-height: 66px; }
+[data-list-density="compact"] { --list-row-height: 54px; }
+/* Reference body metrics apply to sortable/plain headers and values alike. */
+[data-list-density] :is(table, td, th, th button, td button) { font-size: 12px; line-height: 17.76px; }
+[data-list-density] :is(th, td) { padding: 12px 11px; border-color: #eef1f7; }
+/* The measured first-cell inset is distinct from ordinary and action columns. */
+[data-list-density] :is(th, td):first-child { padding-left: 9px; }
+[data-list-density] :is(th, td).sticky { padding-right: 14px; }
+[data-list-density] td { color: #2a2f4f; }
+[data-list-density] tbody tr { border-color: #eef1f7; }
+@media (max-width: 1023px) {
+  [data-list-density] :is(th, td) { padding-inline: 15px; }
+  [data-list-density] :is(th, td):first-child { padding-left: 11px; }
+  [data-list-density] :is(th, td).sticky { padding-right: 14px; }
+}
+@media (max-width: 767px) {
+  main:has([data-slot="list-page"]) h1 { font-size: 27px; line-height: 1.17; letter-spacing: -.95px; }
+}
 [data-list-density] td { height: var(--list-row-height); }
-[data-list-density] th { font-weight: 400; background-color: #f7f9fd; }
+[data-list-density] th { height: 45px; font-weight: 400; background-color: var(--muted); }
+[data-slot="list-page"] [data-list-density] th { padding-block: 0; }
 [data-list-density] td [data-slot="badge"] { font-size: inherit; }
 [data-list-density] [data-slot="table-container"]:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
 [data-list-density] [data-overflow-edge="end"], [data-list-density] [data-overflow-edge="both"] { border-right: 3px solid var(--border); }

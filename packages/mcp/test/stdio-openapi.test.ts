@@ -1,4 +1,5 @@
-import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises'
+import { provisionLocalSdk } from './fixtures/local-sdk.ts'
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { createHash } from 'node:crypto'
@@ -47,7 +48,7 @@ it.each([true, false])('keeps access and locale lifecycles strictly JSON-RPC ove
   try {
     await client.connect(transport)
     await call('bootstrap_instance', { id: 'stdio_fixture', target: 'cloudflare-github' })
-    await symlink(resolve('node_modules'), join(root, 'node_modules'))
+    await provisionLocalSdk(root)
     const initial = await call('initialize_instance', { instance: 'stdio-fixture', mode: 'preview' })
     const rejected = await call('initialize_instance', { instance: 'stdio-fixture', mode: 'apply', planHash: '0'.repeat(64) }, false)
     expect(rejected.error.code).toBe('stale_plan')

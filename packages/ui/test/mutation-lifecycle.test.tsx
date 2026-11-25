@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
 import { afterEach, expect, it, vi } from 'vitest'
 import { toast } from 'sonner'
-import { ActionDialog, DeleteActionDialog, RegistryForm, MutationErrorAlert, MutationSubmitButton, useMutationSubmit, blockMutationNavigation, hasUnsavedMutation } from '../src'
+import { ActionDialog, DeleteActionDialog, RegistryForm, MutationErrorAlert, MutationSubmitButton, useMutationSubmit, blockMutationNavigation, hasUnsavedMutation, getMutationSafetySnapshot } from '../src'
 const schema = { type: 'object', properties: { name: { type: 'string', minLength: 1 } }, required: ['name'] }
 const deferred = () => { let resolve!: () => void; let reject!: (error: Error) => void; const promise = new Promise<void>((yes, no) => { resolve = yes; reject = no }); return { promise, resolve, reject } }
 afterEach(() => vi.restoreAllMocks())
@@ -101,4 +101,20 @@ it('numeric and nullable relation reversions compare with normalized RHF default
   await user.clear(screen.getByLabelText('count')); await user.type(screen.getByLabelText('count'), '3'); expect(save.disabled).toBe(true)
   await user.selectOptions(screen.getByLabelText('owner'), 'ada'); expect(save.disabled).toBe(false)
   await user.selectOptions(screen.getByLabelText('owner'), ''); expect(save.disabled).toBe(true)
+})
+
+it.each(['resolve', 'reject'] as const)('A7 standalone submission stays tracked after unmount until %s', async settlement => {
+  const pending = deferred()
+  const save = vi.fn(() => pending.promise)
+  const view = render(<RegistryForm inline schema={schema} values={{ name: 'Ada' }} label={name => name} submitLabel="Save" invalidLabel="Invalid" onSubmit={save} />)
+  try {
+    fireEvent.change(screen.getByLabelText('name'), { target: { value: 'Grace' } })
+    fireEvent.keyDown(screen.getByLabelText('name'), { key: 'Enter' })
+    await waitFor(() => expect(save).toHaveBeenCalledOnce())
+    expect(getMutationSafetySnapshot()).toEqual({ dirty: true, submitting: true })
+    view.unmount()
+    expect(getMutationSafetySnapshot()).toEqual({ dirty: false, submitting: true })
+    await act(async () => { if (settlement === 'resolve') pending.resolve(); else pending.reject(new Error('save failed')) })
+    await waitFor(() => expect(getMutationSafetySnapshot()).toEqual({ dirty: false, submitting: false }))
+  } finally { await act(async () => pending.resolve()); view.unmount() }
 })

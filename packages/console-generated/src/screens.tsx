@@ -4,7 +4,7 @@ import { accountLinkField, accountLinkRelation } from './account-link'
 import { EntityCalendar } from './calendar'
 import { availableCalendar } from './calendar-model'
 import { relationEmptyKey } from './many-to-many'
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useQuery, useInfiniteQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useNavigate } from '@tanstack/react-router'
 import { useEntityTranslation } from './entity-translation'
@@ -20,6 +20,7 @@ import { HeaderFilter, ToolbarFilter } from './header-filter'
 import { readableWhere, searchFromState, sortableFields } from './list-model'
 import { SavedViewsControls } from './saved-views-controls'
 import { DisplayMenu } from './display-menu'
+import { useListPreferences } from './use-list-preferences'
 import { restoreSavedView, savedFingerprint, type SavedViewsScope } from './saved-views'
 import { hasRowActions } from './write'
 import { breadcrumbRecordLabel, usePublishRecordBreadcrumb } from './breadcrumbs'
@@ -40,22 +41,27 @@ export function signedValue(row: Record<string, any>, field: Field, value: React
   const delta = row[field.ui.signedBy.field] === field.ui.signedBy.negativeValue ? -Math.abs(amount) : amount
   return <span className={delta < 0 ? 'text-red-700 tabular-nums font-medium' : 'text-green-700 tabular-nums font-medium'}>{new Intl.NumberFormat(locale, { signDisplay: 'always' }).format(delta)}</span>
 }
-interface ReadPageProps { unavailable?: ReactNode; savedViewsScope?: SavedViewsScope; calendarCreate?: (values: Record<string, string>) => void; write?: WriteRequest; onDenied?: () => void; contextList?: ReadQuery['contextList']; title?: string; embeddedCreate?: (entity: string, values: Record<string, string>) => ReactNode; model: Model; caps: Capabilities; orgId: string; entity: string; id?: string; request: (input: ReadQuery) => Promise<Result>; primaryAction?: { label: string; onAction: () => void }; actions?: (row?: Record<string, any>) => ReactNode; rowActions?: (row: Record<string, any>, disabled: boolean) => ReactNode }
+interface ReadPageProps { unavailable?: ReactNode; savedViewsScope?: SavedViewsScope; calendarCreate?: (values: Record<string, string>) => void; write?: WriteRequest; onDenied?: () => void; contextList?: ReadQuery['contextList']; title?: string; embeddedCreate?: (entity: string, values: Record<string, string>) => ReactNode; model: Model; caps: Capabilities; orgId: string; entity: string; id?: string; request: (input: ReadQuery) => Promise<Result>; primaryAction?: { label: string; onAction: () => void }; actions?: (row?: Record<string, any>, blocked?: boolean) => ReactNode; rowActions?: (row: Record<string, any>, disabled: boolean) => ReactNode }
 export function GeneratedReadPage(props: ReadPageProps) {
   const authority = useReferenceAuthority()
   // An unknown host actor has no verified namespace for identity-bearing reads.
   if (props.id && props.unavailable !== undefined) return props.unavailable
   if (props.id && authority && authority.actor === undefined) return null
-  return props.id ? <GeneratedDetailPage {...props} /> : <GeneratedListPage {...props} />
+  return props.id ? <GeneratedDetailPage key={JSON.stringify([props.model.instance, authority?.actor, props.orgId, props.entity, props.id])} {...props} /> : <GeneratedListPage {...props} />
 }
 function GeneratedDetailPage({ model, caps, orgId, entity, id, request, actions, embeddedCreate, write, onDenied }: ReadPageProps) {
   const home = useScopeHome()
+  const authority = useReferenceAuthority()
   const { t, i18n } = useEntityTranslation(entity); const definition = model.entities[entity]
   const plan = detailPlan(model, entity, caps)
   const allowed = visibleEntities(model, caps).includes(entity)
   const query = allowed ? readQuery(model, entity, caps, { id }) : { entity, limit: 1, select: ['id'], where: { id: { eq: id } } }
-  const result = useQuery({ queryKey: ['read', model.instance, orgId, caps.revision, entity, query, caps], queryFn: () => request(query), enabled: true })
+  const result = useQuery({ queryKey: ['read', model.instance, authority?.actor, authority?.observedAt, orgId, caps.revision, entity, query, caps], queryFn: () => request(query), enabled: true })
+  const retained = useRef<Record<string, any> | undefined>(undefined)
   const record = result.data?.data[0]
+  if (!result.isFetching && !result.error && record?.id === id) retained.current = record
+  const blocked = result.isPending || result.isFetching || !!result.error || !allowed || record?.id !== id
+  const actionRow = !result.error && allowed ? record ?? retained.current : undefined
   const breadcrumbStatus = !allowed || result.error ? 'unavailable' : result.isPending || result.isFetching ? 'pending' : record?.id === id ? 'ready' : 'unavailable'
   usePublishRecordBreadcrumb({ orgId, entity, id: id!, status: breadcrumbStatus, label: breadcrumbStatus === 'ready' ? breadcrumbRecordLabel(model, entity, record!, caps, i18n.language, t) : undefined })
   const includedFields = Object.keys(query.include ?? {}).map(name => definition.relations[name].field)
@@ -82,29 +88,31 @@ function GeneratedDetailPage({ model, caps, orgId, entity, id, request, actions,
     return formatValue(row[field], definition.fields[field], i18n.language, t('yes'), t('no'), t('nullValue'), model.timeZone)
   }
   const notFound = () => <ResourcePage title={t('notFound')}><p>{t('notFoundDescription')}</p><Link to={home}>{t(home === '/organizations' ? 'organizations' : 'overview')}</Link></ResourcePage>
+  if (!allowed) return <ResourcePage title={t('forbidden')}>{t('forbiddenDescription')}</ResourcePage>
   if ((result.error as { status?: number } | null)?.status === 403) return <ResourcePage title={t('forbidden')}><p>{t('resourceForbidden', { resource: t(`entity_${entity}`).toLocaleLowerCase(i18n.language) })}</p></ResourcePage>
   if (id && result.data && !result.data.data.length) return notFound()
   const code = (result.error as { code?: string } | null)?.code
   const error = result.error ? new Error(t(queryCodes.includes(code as any) ? `query_${code}` : 'requestFailed')) : null
   const readable = projection(model, entity, caps).filter(field => !accountLinkField(model, entity, field))
+  if (result.error) return <ResourcePage title={t('requestFailed')}><p role="alert">{error?.message}</p></ResourcePage>
   if (id) {
-    const row = result.data?.data[0]
-    const edit = (field: string, content: ReactNode, label: string) => row && write ? <GeneratedInlineEdit key={field} model={model} caps={caps} orgId={orgId} entity={entity} request={request} write={write} onDenied={onDenied} row={row} field={field} label={label} value={content} refresh={async () => {
+    const row = actionRow
+    const edit = (field: string, content: ReactNode, label: string) => row && write ? <GeneratedInlineEdit key={field} model={model} caps={caps} orgId={orgId} entity={entity} request={request} write={write} onDenied={onDenied} readBlocked={blocked} row={row} field={field} label={label} value={content} refresh={async () => {
       const fresh = await result.refetch()
       if (fresh.error) throw fresh.error
       return fresh.data!
     }}>{content}</GeneratedInlineEdit> : content
     const informationTitle = t('detailInformation', { defaultValue: '', fallbackLng: false })
     const information = row && (plan ? <DetailGroups plan={plan} row={row} label={fieldLabel} value={field => value(row, field)} edit={edit} translate={key => t(key, { defaultValue: key })} /> : <DetailFields className="c2-detail border-0 p-0" fields={(definition.detail?.fields ?? readable.filter(field => !definition.fields[field].ui?.hidden)).filter(field => readable.includes(field) && !['id', 'organization_id'].includes(field)).map(field => ({ name: field, label: fieldLabel(field), value: edit(field, value(row, field), fieldLabel(field)) }))} />)
-    return <DetailPage title={row ? rowName(entity, row) : t('loading')} backLink={<Button asChild variant="ghost" size="sm"><Link to="/o/$orgId/e/$entity" params={{ orgId, entity }}><svg aria-hidden="true" className="mr-2 size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m12 19-7-7 7-7M5 12h14" /></svg>{t('backToList')}</Link></Button>} actions={row && actions?.(row)}>
-      <QueryBoundary pending={result.isPending} error={error} loadingLabel={t('loading')}>{row && <>
+    return <DetailPage title={row ? rowName(entity, row) : t('loading')} backLink={<Button asChild variant="ghost" size="sm"><Link to="/o/$orgId/e/$entity" params={{ orgId, entity }}><svg aria-hidden="true" className="mr-2 size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m12 19-7-7 7-7M5 12h14" /></svg>{t('backToList')}</Link></Button>} actions={row && actions?.(row, blocked)}>
+      <QueryBoundary pending={result.isPending && !row} error={error} loadingLabel={t('loading')}>{row && <>
         {readable.includes('id') && <dl className="generated-technical mb-4 text-sm text-muted-foreground"><dt>{fieldLabel('id')}</dt><dd className="break-all font-mono">{String(row.id)}</dd></dl>}
         {definition.detail?.metrics && <dl className="generated-metrics">{(plan?.metrics ?? definition.detail.metrics.filter(metric => readable.includes(metric.field))).map(metric => <div key={metric.field}>
           <dt>{fieldLabel(metric.field)}</dt><dd className={metric.tone === 'positive' ? 'text-green-700' : metric.tone === 'negative' ? 'text-red-700' : ''}>{value(row, metric.field)}{metric.unitField && readable.includes(metric.unitField) && <span className="generated-metric-unit"> {row[metric.unitField]}</span>}</dd>
         </div>)}</dl>}
         <DetailCards sections={definition.detail?.sections} cards={[
           { key: 'info', content: <Card className="min-w-0">{informationTitle && <CardHeader><CardTitle>{informationTitle}</CardTitle></CardHeader>}<CardContent>{information}</CardContent></Card> },
-          ...(definition.accountLink && canReadApplicationAccess(caps) ? [{ key: '_row_access', content: <ApplicationAccessCard model={model} caps={caps} orgId={orgId} entity={entity} request={request} write={write} onDenied={onDenied} row={row} /> }] : []),
+          ...(definition.accountLink && canReadApplicationAccess(caps) ? [{ key: '_row_access', content: <ApplicationAccessCard readBlocked={blocked} model={model} caps={caps} orgId={orgId} entity={entity} request={request} write={write} onDenied={onDenied} row={row} /> }] : []),
           ...(plan?.relations ?? readableRelations(model, entity, caps).filter(([, relation]) => relation.cardinality === '1:n' || (separateRelations(model) || definition.detail || Object.values(definition.relations).some(relation => relation.through)) && !(definition.detail?.fields ?? readable).includes(relation.field))).filter(([name, relation]) => !accountLinkRelation(model, entity, relation) && !definition.detail?.lists?.[name]).map(([name, relation]) => ({ key: name, content: <SeparateRelation model={model} caps={caps} orgId={orgId} entity={entity} name={name} row={row} request={request} link={related => rowLink(relation.entity, related)} /> })),
           ...Object.entries(definition.detail?.lists ?? {}).filter(([, list]) => caps.entities[list.entity]?.operations.includes('read') && caps.entities[list.entity]?.readable.includes('id') && caps.entities[list.entity]?.readable.includes(list.bind.field)).map(([name, list]) => ({ key: name, content: <ContextList key={`${entity}/${row.id}/${name}`} model={model} caps={caps} orgId={orgId} entity={entity} id={String(row.id)} name={name} request={request} create={embeddedCreate} /> })),
           ...Object.entries(query.include ?? {}).filter(([name]) => !accountLinkRelation(model, entity, definition.relations[name])).map(([name, selection]) => { const relation = definition.relations[name]; const rows = row[name] ? Array.isArray(row[name]) ? row[name] : [row[name]] : []
@@ -149,10 +157,8 @@ function ListPageBody({ discard, onDiscarded, savedViewsScope, model, caps, orgI
   const definition = model.entities[entity]
   const [searchPending, setSearchPending] = useState(false)
   const [filterOpen, setFilterOpen] = useState(false)
-  // Session-local display preference: separate from the query, counts, URL and personal views.
-  const [visibility, setVisibility] = useState<Record<string, boolean>>({})
+  // Session-local column order: separate from the persisted visibility and density.
   const [columnOrder, setColumnOrder] = useState<string[]>([])
-  const [compactPreference, setCompactPreference] = useState<boolean>()
   const list = useGeneratedList({ model, caps, orgId, entity, request, contextList, discard, onDiscarded })
   const readable = projection(model, entity, caps)
   const display = caps.entities[entity]?.displayField ?? definition.displayField
@@ -161,6 +167,12 @@ function ListPageBody({ discard, onDiscarded, savedViewsScope, model, caps, orgI
   // Explicit columns own the order; only automatically derived columns promote the display field.
   const listFields = [...new Set(configured ?? [defaultPrimary, ...definition.columns])].filter(field => readable.includes(field) || !!definition.list?.relatedColumns?.[field] && readable.includes(definition.list.relatedColumns[field].via))
   const primary = listFields[0]
+  const accessColumn = !!((definition.accountLink || definition.rowInvitations) && (definition.list?.rowAccess === undefined || !!definition.list.rowAccess && definition.list.rowAccess.column) && write && canReadApplicationAccess(caps))
+  const displayScope = !contextList && savedViewsScope?.instance === model.instance && savedViewsScope.orgId === orgId && savedViewsScope.userId ? savedViewsScope : undefined
+  const displayPrefs = useListPreferences(displayScope, entity, {
+    columns: [...listFields.map(id => ({ id, defaultVisible: definition.list?.columns?.find(column => column.field === id)?.defaultVisible })), ...(accessColumn ? [{ id: '_access' }] : [])],
+    primary, compact: !!definition.list?.compact,
+  })
   const rows = list.data?.data ?? []
   const setFilter = (field: string, predicate?: Record<string, unknown>) => list.onStateChange({ ...list.state, userFilters: [...list.confirmedState.userFilters.filter(filter => filter.field !== field), ...(predicate ? [{ field, predicate }] : [])] }, 'filter')
   const relationFilters = list.filters.filter(filter => filter.kind === 'relation')
@@ -182,13 +194,13 @@ function ListPageBody({ discard, onDiscarded, savedViewsScope, model, caps, orgI
     const column = t('rowAccessFilter'), value = t(`rowAccess_${list.state.rowAccess}`)
     chips.push({ id: '_rowAccess', column, value, removeLabel: t('removeFilter', { column, value }), onRemove: () => list.onStateChange({ ...list.confirmedState, rowAccess: undefined }, 'filter') })
   }
-  const views = definition.list?.views?.filter(view => readableWhere(view.where, model, entity, caps) && (!view.rowAccess || definition.rowInvitations && caps.resources?.['invitations.read'] === true)) ?? []
+  const views = definition.list?.views?.filter(view => readableWhere(view.where, model, entity, caps) && (!view.rowAccess || definition.rowAccess && caps.resources?.['invitations.read'] === true)) ?? []
 
   const sortable = sortableFields(model, entity, caps)
   const error = list.result.error as { status?: number; code?: string } | null
   const Page = contextList ? EmbeddedListCard : ResourcePage
   if (error?.status === 403) return <Page title={title ?? t('forbidden')}><p>{t('resourceForbidden', { resource: t(`entity_${entity}`).toLocaleLowerCase(i18n.language) })}</p></Page>
-  const accessAllowed = definition.rowInvitations && canReadApplicationAccess(caps) && (definition.list?.rowAccess === undefined || !!definition.list.rowAccess && !!definition.list.rowAccess.placement)
+  const accessAllowed = definition.rowAccess && canReadApplicationAccess(caps) && (definition.list?.rowAccess === undefined || !!definition.list.rowAccess && !!definition.list.rowAccess.placement)
   const panelAccess = accessAllowed && definition.list?.rowAccess !== false && definition.list?.rowAccess?.placement === 'panel'
   const accessInput = (value: ReadQuery['rowAccess'], onChange: (value: ReadQuery['rowAccess']) => void) => <label className="grid min-w-0 max-w-full gap-2 text-sm">{t('rowAccessFilter')}<select aria-label={t('rowAccessFilter')} className="rounded-md border bg-background p-2" value={value ?? ''} onChange={event => onChange((event.target.value || undefined) as ReadQuery['rowAccess'])}><option value="">{t('rowAccessAll')}</option>{(['no_account', 'invited', 'expired', 'signed_in'] as const).map(state => <option key={state} value={state}>{t(`rowAccess_${state}`)}</option>)}</select></label>
   const search = listSearchableFields(model, entity, caps, contextList && list.state.presentation !== 'calendar' ? 'embedded' : list.state.presentation).length > 0 && <DataTableSearch value={list.state.search} onChange={search => list.onStateChange({ ...list.state, search }, 'search')} label={t('search')} clearLabel={t('clearSearch')} onPendingChange={setSearchPending} description={definition.list?.search && list.offsetPaging ? t('searchConfiguredFields', { fields: listSearchableFields(model, entity, caps, contextList && list.state.presentation !== 'calendar' ? 'embedded' : list.state.presentation).map(field => t(`field_${field}`)).join(', ') }) : t('searchAllColumns')} />
@@ -202,11 +214,10 @@ function ListPageBody({ discard, onDiscarded, savedViewsScope, model, caps, orgI
   const presentation = availableCalendar(model, entity, caps) && <div role="group" aria-label={t('listPresentation')} className="flex flex-wrap gap-2 py-2">{(['table', 'calendar'] as const).map(presentation => <PrimitiveButton key={presentation} variant={list.state.presentation === presentation ? 'secondary' : 'ghost'} aria-pressed={list.state.presentation === presentation} onClick={() => list.onStateChange({ ...list.state, presentation }, 'view')}>{t(`${presentation}View`)}</PrimitiveButton>)}</div>
   const tableColumns = [
       ...listFields.map((field, index) => ({ id: field, align: listColumnAlignment(model, entity, field), label: field === 'id' || field === primary ? t(`field_${field}`) : t(`listField_${field}`, { defaultValue: t(`field_${field}`) }), sortable: sortable.includes(field), filter: !list.offsetPaging && list.filters.some(filter => filter.field === field) ? <HeaderFilter model={model} caps={caps} orgId={orgId} entity={entity} descriptor={list.filters.find(filter => filter.field === field)!} request={request} predicate={list.state.userFilters.find(filter => filter.field === field)?.predicate} onChange={predicate => setFilter(field, predicate)} /> : undefined, cell: (row: Record<string, any>) => <GeneratedListCell model={model} entity={entity} caps={caps} row={row} column={definition.list?.columns?.find(column => column.field === field) ?? { field }} orgId={orgId} primary={index === 0} signed={signedValue} /> })),
-      ...((definition.accountLink || definition.rowInvitations) && (definition.list?.rowAccess === undefined || !!definition.list.rowAccess && definition.list.rowAccess.column) && write && canReadApplicationAccess(caps) ? [{ id: '_access', keepOnNarrow: true, wrap: true, label: t('rowAccess'), cell: (row: Record<string, any>) => <GeneratedRowInvitation model={model} caps={caps} orgId={orgId} entity={entity} request={request} write={write} onDenied={onDenied} row={row} disabled={list.stale || list.result.isFetching || searchPending} /> }] : []),
+      ...(accessColumn ? [{ id: '_access', keepOnNarrow: true, wrap: true, label: t('rowAccess'), cell: (row: Record<string, any>) => <GeneratedRowInvitation model={model} caps={caps} orgId={orgId} entity={entity} request={request} write={write} onDenied={onDenied} row={row} disabled={list.stale || list.result.isFetching || searchPending} /> }] : []),
       ...(rowActions && hasRowActions(model, entity, caps) ? [{ id: '_actions', label: t('actions'), cell: (row: Record<string, any>) => <>{rowActions!(row, list.stale || list.result.isFetching || searchPending)}</> }] : []),
     ]
-  const columnConfig = new Map((definition.list?.columns ?? []).map(column => [column.field, column]))
-  const shown = (id: string) => visibility[id] ?? (columnConfig.get(id)?.defaultVisible !== false)
+  const shown = displayPrefs.visible
   // The first column is the record link and stays; hiding only drops presentation, never a selected field, filter, sort or count.
   const displayable = list.offsetPaging ? tableColumns.filter(column => column.id !== primary && column.id !== '_actions') : []
   // Reconcile the session preference with currently available columns; primary and Actions stay anchored.
@@ -222,7 +233,7 @@ function ListPageBody({ discard, onDiscarded, savedViewsScope, model, caps, orgI
   const columns = list.offsetPaging ? [...tableColumns.filter(column => column.id === primary), ...ordered.filter(column => shown(column.id)), ...tableColumns.filter(column => column.id === '_actions')] : tableColumns
   const content = list.state.presentation === 'calendar' ? <>
       <EntityCalendar model={model} entity={entity} caps={caps} orgId={orgId} state={list.state} data={list.data} pending={list.result.isFetching} error={error ? t(queryCodes.includes(error.code as any) ? `query_${error.code}` : 'requestFailed') : undefined} onChange={state => list.onStateChange(state, 'view')} onCreate={calendarCreate} onPage={list.onPage} previous={list.page > 0} />
-    </> : <div className="caption-bottom"><DataTable fixedDensity={tableColumns.some(column => column.id === '_access')} listV2={list.offsetPaging} hideFooter={list.offsetPaging} scrollOnNarrow={list.offsetPaging} compact={compactPreference ?? definition.list?.compact} mobileCards={definition.list?.mobileCards} rows={rows} columns={columns} state={list.state} onStateChange={list.onStateChange} page={list.page} range={list.range} onPage={list.onPage} nextCursor={error ? null : list.data?.next_cursor} isFetching={list.result.isFetching} onRetry={() => { void list.result.refetch() }} error={error ? new Error(t(queryCodes.includes(error.code as any) ? `query_${error.code}` : 'requestFailed')) : null}
+    </> : <div className="caption-bottom"><DataTable fixedDensity={tableColumns.some(column => column.id === '_access')} listV2={list.offsetPaging} hideFooter={list.offsetPaging} scrollOnNarrow={list.offsetPaging} compact={displayPrefs.compact} mobileCards={definition.list?.mobileCards} rows={rows} columns={columns} state={list.state} onStateChange={list.onStateChange} page={list.page} range={list.range} onPage={list.onPage} nextCursor={error ? null : list.data?.next_cursor} isFetching={list.result.isFetching} onRetry={() => { void list.result.refetch() }} error={error ? new Error(t(queryCodes.includes(error.code as any) ? `query_${error.code}` : 'requestFailed')) : null}
       label={t(`entity_${entity}`)} labels={{ error: t('requestFailed'), errorDescription: t('listRequestFailedDescription'), retry: t('listRetry'), search: t('search'), clearSearch: t('clearSearch'), noResults: list.result.isPending ? t('loading') : t('noResults'), emptyDescription: t(list.state.search || chips.length ? 'listEmptyFilteredDescription' : 'listEmptyViewDescription'), scrollRegion: t('listScrollRegion'), scrollHint: t('listScrollHint'), previous: t('previousPage'), next: t('nextPage'), previousText: t('paginationPrevious'), nextText: t('paginationNext'), pageSizeOption: size => t('paginationSize', { count: size }), pageSize: t('rowsPerPage'), sort: column => t('sortColumn', { column }), sortAndFilter: t('sortAndFilter'), sortStates: { asc: t('sortAscending'), desc: t('sortDescending'), none: t('sortNone') }, range: (start, end) => t('listRange', { start: new Intl.NumberFormat(i18n.language).format(start), end: new Intl.NumberFormat(i18n.language).format(end) }) }}
       staleLabel={list.stale ? t('listRowsStale') : undefined}
       clearFilters={t('clearSearchFilters')} onClearFilters={list.state.search || chips.length ? () => list.onStateChange({ ...list.state, search: '', userFilters: [], rowAccess: undefined }, 'filter') : undefined}
@@ -235,7 +246,7 @@ function ListPageBody({ discard, onDiscarded, savedViewsScope, model, caps, orgI
     {error?.code === 'query_too_expensive' && list.undo && <PrimitiveButton variant="outline" onClick={list.undo}>{t('undoLastChange')}</PrimitiveButton>}
     {list.offsetPaging ? <ListPageComposition tabs={tabs} toolbar={<>
       {search && <div className="list-v2-search">{search}</div>}{(immediateFilters.length > 0 || access || hasPanel) && <div className="list-v2-lookup-panel">{immediateFilters}{access}{hasPanel && <PrimitiveButton variant="outline" title={t('sortAndFilter')} aria-expanded={filterOpen} onClick={() => setFilterOpen(value => !value)}>{t('sortAndFilter')}</PrimitiveButton>}</div>}
-      <div className="ml-auto flex min-w-0 max-w-full flex-wrap items-center justify-end gap-2">{savedViews}{displayable.length > 0 && list.state.presentation !== 'calendar' && <DisplayMenu columns={ordered.map(column => ({ id: column.id, label: column.label, visible: shown(column.id) }))} compact={compactPreference ?? !!definition.list?.compact} labels={{ trigger: t('listDisplay'), heading: t('listDisplayHeading'), hint: t('listDisplayHint'), compact: t('listDisplayCompact'), reset: t('listDisplayReset'), moveUp: column => t('listDisplayMoveUp', { column }), moveDown: column => t('listDisplayMoveDown', { column }) }} onMove={moveColumn} onToggle={(id, visible) => setVisibility(old => ({ ...old, [id]: visible }))} onCompact={setCompactPreference} onReset={() => { setVisibility({}); setColumnOrder([]); setCompactPreference(undefined) }} />}{presentation}</div>
+      <div className="ml-auto flex min-w-0 max-w-full flex-wrap items-center justify-end gap-2">{savedViews}{displayable.length > 0 && list.state.presentation !== 'calendar' && <DisplayMenu columns={ordered.map(column => ({ id: column.id, label: column.label, visible: shown(column.id) }))} compact={displayPrefs.compact} labels={{ trigger: t('listDisplay'), heading: t('listDisplayHeading'), hint: t('listDisplayHint'), compact: t('listDisplayCompact'), reset: t('listDisplayReset'), moveUp: column => t('listDisplayMoveUp', { column }), moveDown: column => t('listDisplayMoveDown', { column }) }} onMove={moveColumn} onToggle={displayPrefs.toggle} onCompact={displayPrefs.setCompact} onReset={() => { displayPrefs.reset(); setColumnOrder([]) }} />}{presentation}</div>
     </>} panel={filterOpen && hasPanel ? panel : undefined} chips={activeChips} footer={<ListPageFooter total={list.data?.total} page={list.page} limit={list.document.limit} pageSize={list.state.limit} maxOffset={model.limits.maxOffset ?? 10_000} busy={list.result.isFetching || searchPending} onPage={list.onPage} onPageSize={limit => list.onStateChange({ ...list.state, limit }, 'limit')} labels={{ loading: t('loading'), previous: t('previousPage'), next: t('nextPage'), pageSize: t('rowsPerPage'), pageSizeOption: size => t('paginationSize', { count: size }), range: (start, end, total) => t('listRangeTotal', { start: new Intl.NumberFormat(i18n.language).format(start), end: new Intl.NumberFormat(i18n.language).format(end), total: new Intl.NumberFormat(i18n.language).format(total) }) }} />}>{content}</ListPageComposition> : <>{savedViews}{tabs}{presentation}{immediateFilters}{panel}{activeChips}{content}</>}
 
   </Page>

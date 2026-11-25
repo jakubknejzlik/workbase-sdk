@@ -8,6 +8,7 @@
     "./read": "./src/read.ts",
     "./screens": "./src/screens.tsx",
     "./writes": "./src/write-screens.tsx",
+    "./list-preferences": "./src/list-preferences.ts",
     "./saved-views": "./src/saved-views.ts",
     "./list-model": "./src/list-model.ts",
     "./picker-search": "./src/use-picker-search.ts"

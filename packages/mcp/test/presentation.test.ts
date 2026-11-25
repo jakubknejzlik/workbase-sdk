@@ -1,3 +1,4 @@
+import { provisionLocalSdk } from './fixtures/local-sdk.ts'
 import { afterEach, expect, it, vi } from 'vitest'
 import fs from 'node:fs/promises'
 import { syncBuiltinESMExports } from 'node:module'
@@ -32,7 +33,7 @@ async function fixture() {
   const session = await stdio(root)
   try {
     expect(await session.call('bootstrap_instance', { id: 'demo', target: 'cloudflare-github' })).toMatchObject({ ok: true })
-    await fs.mkdir(join(root, 'node_modules'))
+    await provisionLocalSdk(root)
     // Provision the scaffold's explicit UI peers, which live in separate
     // workspace node_modules directories in this repository.
     for (const directory of ['node_modules', 'packages/plugins/node_modules', 'packages/frontend-console/node_modules']) {

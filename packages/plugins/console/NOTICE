@@ -10,3 +10,11 @@ Workbase includes adapted component rendering and host integration.
 Existing upstream license and notice headers are retained where present.
 This attribution describes component provenance, not bundled instance models,
 customer data, branding, or domain workflows.
+
+Alata Regular v1.005 (unmodified TrueType font, font/ttf)
+Copyright 2019 The Alata Project Authors (https://github.com/SorkinType/Alata)
+Licensed under the SIL Open Font License, Version 1.1; see licenses/alata/OFL.txt.
+Source: https://github.com/google/fonts/blob/d96b7183a2649df3c2f145627c33c279daf8726d/ofl/alata/Alata-Regular.ttf
+Revision: d96b7183a2649df3c2f145627c33c279daf8726d
+SHA256: 7b71432a5e2e2409a3583553bc5ce703209a8bce9b2f136ca257ac4c2d3addc4
+Size: 349132 bytes

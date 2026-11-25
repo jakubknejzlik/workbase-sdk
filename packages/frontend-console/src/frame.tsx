@@ -74,7 +74,7 @@ function FrameContent() {
   const [reloaded] = useState(() => { const value = sessionStorage.getItem('console-schema-reloaded'); sessionStorage.removeItem('console-schema-reloaded'); return !!value })
   const membership = me.data?.memberships.find(org => org.organization_id === orgId)
   const submit = useMutationSubmit()
-  const logout = useMutation({ mutationFn: () => logoutSession(client) })
+  const logout = useMutation({ mutationFn: () => logoutSession(client, orgId ? decodeURIComponent(orgId) : undefined) })
   useEffect(() => {
     let heading: HTMLElement | null = null
     const focus = () => { const next = document.querySelector<HTMLElement>('h1'); if (next && next !== heading) { heading = next; next.focus() } }

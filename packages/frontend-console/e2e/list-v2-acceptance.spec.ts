@@ -73,6 +73,40 @@ async function save(page: Page, name: string) {
   await expect(savedMenu(page).getByRole('button', { name, exact: true })).toHaveAttribute('aria-pressed', 'true')
   await page.keyboard.press('Escape')
 }
+test('Q2: display preferences survive reload without changing queries, counts, URL or personal views', async ({ page }) => {
+  const requests: unknown[] = []
+  page.on('request', request => { if (new URL(request.url()).pathname === '/query') requests.push(request.postDataJSON()) })
+  await gotoSDK(page, route); await settled(page)
+  await rows(page); await counts(page)
+  const url = page.url(), before = structuredClone(requests), summary = await footer(page).textContent(), tabs = await list(page).locator('[data-list-slot="tabs"]').textContent()
+  const table = list(page).locator('[data-slot="data-table"]')
+  await page.getByRole('button', { name: en.listDisplay, exact: true }).click()
+  const display = page.getByRole('dialog', { name: en.listDisplayHeading })
+  await expect(display.getByRole('checkbox', { name: 'Name', exact: true })).toHaveCount(0)
+  await display.getByRole('checkbox', { name: 'Code', exact: true }).click()
+  await display.getByRole('checkbox', { name: en.listDisplayCompact, exact: true }).click()
+  await expect(table).toHaveAttribute('data-list-density', 'compact')
+  await page.keyboard.press('Escape')
+  await expect(table.getByRole('columnheader', { name: /Code/ })).toHaveCount(0)
+  await expect(table.getByRole('columnheader', { name: /Name/ })).toHaveCount(1)
+  expect(requests).toEqual(before); expect(page.url()).toBe(url)
+  expect(await footer(page).textContent()).toBe(summary)
+  expect(await list(page).locator('[data-list-slot="tabs"]').textContent()).toBe(tabs)
+  expect(await page.evaluate(() => Object.keys(localStorage).filter(key => key.startsWith('workbase:saved-views:')))).toEqual([])
+  await reloadSDK(page); await settled(page); await rows(page); await counts(page)
+  await expect(table).toHaveAttribute('data-list-density', 'compact')
+  await expect(table.getByRole('columnheader', { name: /Code/ })).toHaveCount(0)
+  expect(page.url()).toBe(url)
+  expect(await footer(page).textContent()).toBe(summary)
+  expect(await list(page).locator('[data-list-slot="tabs"]').textContent()).toBe(tabs)
+  await page.getByRole('button', { name: en.listDisplay, exact: true }).click()
+  await display.getByRole('button', { name: en.listDisplayReset, exact: true }).click()
+  await page.keyboard.press('Escape')
+  await expect(table).toHaveAttribute('data-list-density', 'comfortable')
+  await expect(table.getByRole('columnheader', { name: /Code/ })).toHaveCount(1)
+  expect(await page.evaluate(() => Object.keys(localStorage).filter(key => key.startsWith('workbase:list-prefs:')))).toEqual([])
+})
+
 const scenarios = ['populated-admin', 'populated-restricted-staff', 'expanded-filters', 'view-menu', 'access-menu', 'personal-views', 'empty', 'error', 'loading'] as const
 for (const language of ['en', 'cs'] as const) {
   const copy = language === 'cs' ? cs : en
@@ -1333,4 +1367,131 @@ for (const width of [1440, 900, 390]) for (const language of ['en', 'cs'] as con
   await expect.poll(() => ids(page)).toEqual(expectedIds)
   await insideViewport(menu)
   await page.keyboard.press('Escape'); await expect(trigger).toBeFocused()
+})
+
+// A1 uses the production asset tree and real neutral Worker; later slices own shell/toolbar parity.
+for (const language of ['en', 'cs'] as const) for (const width of [1440, 1280, 900, 390]) {
+  for (const state of ['default', 'filters', 'columns'] as const) test(`A1: ${language} ${width} ${state} local font and measured base`, async ({ page, context }) => {
+    const copy = language === 'cs' ? cs : en
+    const violations: string[] = [], external: string[] = []
+    await page.exposeFunction('a1Violation', (directive: string) => violations.push(directive))
+    await page.addInitScript(() => document.addEventListener('securitypolicyviolation', event => (window as any).a1Violation(event.violatedDirective)))
+    page.on('request', request => { if (new URL(request.url()).origin !== new URL(page.url()).origin && !request.isNavigationRequest()) external.push(request.url()) })
+    await context.addInitScript(locale => localStorage.setItem('console-language', locale), language)
+    await page.setViewportSize({ width, height: 900 })
+    const fontResponse = page.waitForResponse(response => new URL(response.url()).pathname === '/assets/Alata-Regular.ttf')
+    const response = await gotoSDK(page, route)
+    await expect(list(page).locator('tbody tr').first()).toBeVisible()
+    await expect(list(page).getByText(copy.loading, { exact: true })).toHaveCount(0)
+    const font = await fontResponse
+    expect(font.status()).toBe(200)
+    expect(font.headers()['content-type']).toMatch(/^(?:font\/ttf|application\/x-font-ttf)/)
+    expect(response!.headers()['content-security-policy']).toContain("default-src 'self'")
+    await page.evaluate(async () => { await document.fonts.ready; await Promise.all(document.getAnimations().filter(animation => animation.effect?.getComputedTiming().iterations !== Infinity).map(animation => animation.finished.catch(() => {}))) })
+    if (state === 'filters') await page.getByRole('button', { name: copy.sortAndFilter, exact: true }).click()
+    if (state === 'columns') await page.getByRole('button', { name: copy.listDisplay, exact: true }).click()
+    if (state === 'filters') await expect(page.getByRole('group', { name: copy.sortAndFilter, exact: true })).toBeVisible()
+    if (state === 'columns') await expect(page.getByRole('dialog', { name: copy.listDisplayHeading, exact: true })).toBeVisible()
+    const measure = () => page.evaluate(async () => {
+      await document.fonts.ready
+      await Promise.all(document.getAnimations().filter(animation => animation.effect?.getComputedTiming().iterations !== Infinity).map(animation => animation.finished.catch(() => {})))
+      const table = document.querySelector('[data-list-density]')!, cell = table.querySelector('td')!, header = table.querySelector('thead tr')!, row = table.querySelector('tbody tr')!
+      const style = getComputedStyle(cell)
+      // Transparent slots inherit the first painted ancestor surface.
+      const surface = (selector: string) => {
+        for (let node = document.querySelector(selector); node; node = node.parentElement) {
+          const color = getComputedStyle(node).backgroundColor
+          if (color !== 'rgba(0, 0, 0, 0)' && color !== 'transparent') return color
+        }
+        return 'transparent'
+      }
+      const surfaces = { appHeader: surface('[data-slot="sidebar-inset"] > header'), canvas: surface('[data-slot="sidebar-inset"]'), tabs: surface('[data-list-slot="tabs"]'), toolbar: surface('[data-list-slot="toolbar"]') }
+      const sidebar = document.querySelector('[data-slot="sidebar"]')?.getBoundingClientRect()
+      return { fontReady: document.fonts.check('12px Alata'), family: style.fontFamily, fontSize: parseFloat(style.fontSize), lineHeight: parseFloat(style.lineHeight), headerHeight: header.getBoundingClientRect().height, rowHeight: row.getBoundingClientRect().height,
+        rowBorder: getComputedStyle(row).borderBottomColor, surfaces, surface: getComputedStyle(table.querySelector('table') ?? table).backgroundColor, panelRadius: getComputedStyle(document.querySelector('[data-slot="list-page"]')!).borderRadius,
+        padding: Array.from(row.children).map(cell => { const s = getComputedStyle(cell); return [s.paddingTop, s.paddingRight, s.paddingBottom, s.paddingLeft] }),
+        weights: Array.from(document.querySelectorAll('h1,h2,h3,strong,b,[data-slot="card-title"],[data-slot="dialog-title"]')).map(node => getComputedStyle(node).fontWeight),
+        sidebar: sidebar ? { x: sidebar.x, width: sidebar.width } : null, pageWidth: document.documentElement.scrollWidth, viewport: innerWidth }
+    })
+    const metrics = await measure()
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
+    expect(await measure()).toEqual(metrics)
+    expect(metrics.fontReady).toBe(true); expect(metrics.family).toMatch(/^Alata/)
+    for (const role of ['appHeader', 'tabs', 'toolbar'] as const) expect(['rgb(255, 255, 255)', 'oklch(1 0 0)'], `${role} stays white`).toContain(metrics.surfaces[role])
+    expect(metrics.surfaces.canvas).toBe('oklch(0.976984 0.00397074 286.326)')
+    expect(['rgb(255, 255, 255)', 'oklch(1 0 0)']).toContain(metrics.surface); expect(metrics.panelRadius).toBe('14px'); expect(metrics.rowBorder).toBe('rgb(238, 241, 247)')
+    expect(metrics.fontSize).toBe(12); expect(metrics.lineHeight).toBeCloseTo(17.76, 2)
+    expect(metrics.headerHeight).toBe(45); expect(metrics.rowHeight).toBe(66)
+    expect(metrics.padding[0]).toEqual(width >= 1024 ? ['12px', '11px', '12px', '9px'] : ['12px', '15px', '12px', '11px'])
+    expect(metrics.weights.every(weight => weight === '400')).toBe(true)
+    expect(metrics.pageWidth).toBeLessThanOrEqual(width)
+    // Assert the current final shell geometry; 224px/900px parity belongs to A2.
+    if (width >= 1024) expect(metrics.sidebar?.width).toBe(206)
+    else expect(metrics.sidebar).toBeNull()
+    expect(violations).toEqual([]); expect(external).toEqual([])
+    const { readFileSync, statSync, mkdirSync } = await import('node:fs')
+    const { createHash } = await import('node:crypto')
+    const { join } = await import('node:path')
+    const sourceSHA = provenanceSHA(), build = JSON.parse(readFileSync('packages/frontend-console/dist/build-meta.json', 'utf8'))
+    const directory = join(output, sourceSHA); mkdirSync(directory, { recursive: true })
+    const name = `A1-${language}-${width}-${state}.png`, path = join(directory, name)
+    await page.screenshot({ path, fullPage: true, animations: 'disabled' })
+    const bytes = readFileSync(path)
+    expect(statSync(path).size).toBeGreaterThan(0)
+    expect(bytes.subarray(0, 8).toString('hex')).toBe('89504e470d0a1a0a')
+    const dimensions = { width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) }
+    const { inflateSync } = await import('node:zlib')
+    const chunks: Buffer[] = []
+    for (let offset = 8; offset < bytes.length;) {
+      const size = bytes.readUInt32BE(offset), type = bytes.toString('ascii', offset + 4, offset + 8)
+      if (type === 'IDAT') chunks.push(bytes.subarray(offset + 8, offset + 8 + size))
+      offset += size + 12
+    }
+    expect(bytes[24]).toBe(8); expect([2, 6]).toContain(bytes[25])
+    const pixels = inflateSync(Buffer.concat(chunks)), stride = 1 + dimensions.width * (bytes[25] === 6 ? 4 : 3)
+    expect(pixels.length).toBe(stride * dimensions.height)
+    for (let row = 0; row < dimensions.height; row++) expect(pixels[row * stride]).toBeLessThanOrEqual(4)
+    expect(dimensions.width).toBe(width)
+    expect(build.sourceCommit).toBe(sourceSHA)
+    record('A1', `${language}-${width}-${state}`, { path, relativePath: `${sourceSHA}/${name}`, sha256: createHash('sha256').update(bytes).digest('hex'), bytes: bytes.length, dimensions, locale: language, state, sourceSHA, builtAssetSHA: build.sha, metrics, status: 'captured; independent visual review pending' })
+  })
+}
+
+test('A1: failed local font keeps Czech fallback readable; title utilities cannot synthesize bold', async ({ page }) => {
+  await page.route('**/Alata-Regular.ttf', route => route.abort())
+  await gotoSDK(page, route)
+  await expect(list(page).locator('tbody tr').first()).toBeVisible()
+  const values = await page.evaluate(async () => {
+    await document.fonts.ready
+    const probe = document.createElement('section')
+    probe.innerHTML = '<h1 class="font-bold">Příliš žluťoučký kůň</h1><h2 class="font-semibold">Účet</h2><h3>Řešení</h3><strong>Český</strong><b>Ďábel</b><div data-slot="card-title" class="font-semibold">Title</div><div data-slot="dialog-title" class="font-bold">Dialog</div>'
+    document.body.append(probe)
+    const result = { loaded: document.fonts.check('12px Alata'), nodes: Array.from(probe.children).map(node => ({ weight: getComputedStyle(node).fontWeight, family: getComputedStyle(node).fontFamily, width: node.getBoundingClientRect().width, height: node.getBoundingClientRect().height })) }
+    probe.remove(); return result
+  })
+  expect(values.loaded).toBe(false)
+  expect(values.nodes.every(node => node.weight === '400' && node.family.includes('Arial') && node.width > 0 && node.height > 0)).toBe(true)
+  await expect(list(page).locator('tbody tr').first()).toBeVisible()
+})
+
+test('A1: Czech glyph raster and shared title weights remain local when offline', async ({ page, context }) => {
+  await gotoSDK(page, route)
+  await expect(list(page).locator('tbody tr').first()).toBeVisible()
+  await page.evaluate(async () => {
+    await document.fonts.ready
+    const probe = document.createElement('section'); probe.id = 'a1-glyph-sample'
+    probe.innerHTML = '<h1 class="font-bold">Příliš žluťoučký kůň úpěl ďábelské ódy.</h1><h2 class="font-semibold">ÁČĎÉĚÍŇÓŘŠŤÚŮÝŽ áčďéěíňóřšťúůýž</h2><h3>Řešení</h3><strong>Český</strong><b>Ďábel</b><div data-slot="card-title" class="font-semibold">Title</div><div data-slot="dialog-title" class="font-bold">Dialog</div>'
+    document.querySelector('main')!.append(probe)
+  })
+  await context.setOffline(true)
+  const metrics = await page.locator('#a1-glyph-sample').evaluate(node => ({ fontReady: document.fonts.check('12px Alata'), elements: Array.from(node.children).map(element => ({ weight: getComputedStyle(element).fontWeight, family: getComputedStyle(element).fontFamily, width: element.getBoundingClientRect().width, height: element.getBoundingClientRect().height })) }))
+  expect(metrics.fontReady).toBe(true)
+  expect(metrics.elements.every(element => element.weight === '400' && element.family.startsWith('Alata') && element.width > 0 && element.height > 0)).toBe(true)
+  const { mkdirSync, readFileSync } = await import('node:fs'), { join } = await import('node:path'), { createHash } = await import('node:crypto')
+  const sourceSHA = provenanceSHA(), directory = join(output, sourceSHA); mkdirSync(directory, { recursive: true })
+  const path = join(directory, 'A1-cs-glyphs-offline.png')
+  await page.screenshot({ path, fullPage: true, animations: 'disabled' })
+  const bytes = readFileSync(path), build = JSON.parse(readFileSync('packages/frontend-console/dist/build-meta.json', 'utf8'))
+  record('A1', 'cs-glyphs-offline', { path, relativePath: `${sourceSHA}/A1-cs-glyphs-offline.png`, sha256: createHash('sha256').update(bytes).digest('hex'), bytes: bytes.length, dimensions: { width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) }, locale: 'cs', state: 'glyphs-offline', sourceSHA, builtAssetSHA: build.sha, metrics })
+  await context.setOffline(false)
 })

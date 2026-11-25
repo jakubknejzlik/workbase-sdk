@@ -407,3 +407,73 @@ INSERT OR REPLACE and upsert paths are guarded too. Violations return `409 ref_i
 with a localized console message and retained draft. When `ref_equality` also exists, both
 may be declared; the immutability trigger fires first, so the stricter `ref_immutable` error is
 reported. Constrained rebuilds and renames still require a manually reviewed migration.
+
+### Operator GitHub target
+
+The stdio config server can submit a verified, promoted change as a GitHub PR.
+Before starting the server, the operator sets `WORKBASE_GITHUB_TARGET` to an
+absolute path to a JSON file with this strict schema (unknown properties are
+rejected):
+
+```json
+{
+  "owner": "example",
+  "repository": "example",
+  "baseBranch": "integration/preview",
+  "directory": "instances/example",
+  "credential": {
+    "type": "token-file",
+    "path": "/private/operator/github-token"
+  }
+}
+```
+
+`directory` defaults to `""` (the repository root). Otherwise it is a
+repository-relative prefix: slash-separated components containing only letters,
+digits, `_`, `-` and `.`, with no empty, `.` or `..` components. The target applies
+only to the instance allowed by this stdio server; unknown instances have no
+GitHub target. Repository, branch, prefix and credentials cannot be selected or
+overridden by tool arguments.
+
+For a GitHub App, replace `credential` with:
+
+```json
+{
+  "type": "github-app",
+  "appId": "123",
+  "installationId": "456",
+  "privateKeyPath": "/private/operator/github-app.pem"
+}
+```
+
+App and installation IDs accept positive integer numbers or decimal strings.
+The key must be an RSA private key. The server signs a short-lived RS256 JWT,
+requests an installation token from GitHub, and caches it in memory until five
+minutes before expiry. Concurrent requests share one token request. The token-file
+provider reads the trimmed token on each request, allowing operator rotation.
+Grant access only to the intended repository, including the contents and pull
+request permissions needed to create the branch, commit and PR.
+
+The target JSON, token file and private key must be regular files at absolute
+filesystem paths. Every path component must be free of symlinks; use resolved
+paths (for example `/private/tmp/...` rather than `/tmp/...` on macOS). Parent
+traversal is rejected. Token and key files must not be readable by group or
+others (`chmod 600`); violations refuse startup with
+`insecure_github_credential_permissions`. Unsafe paths return
+`unsafe_github_path`, unreadable files `github_config_unreadable`, malformed
+configuration `invalid_github_config`, and invalid token/key contents
+`invalid_github_credential`. Credential reads are checked again when needed.
+
+The agent never receives the credential, private key or App JWT. They are never
+written into proposals or audit logs, and provider, transport and remote error
+text is suppressed. Tokens echoed in GitHub responses are redacted. Keep the
+operator files outside the agent's accessible workspace.
+
+After `validate` → `apply_to_disposable` → `promote`, call `submit_change` with
+only `{ "instance": "example", "proposalId": "<proposal UUID>",
+"expectedBaseSha": "<current base branch SHA>" }`. It creates
+`workbase/change-<proposal UUID>`, a commit of the promoted allowlisted files and
+one PR into the operator's base branch. The existing REST adapter exposes no
+merge, tag, release or deployment API. Without `WORKBASE_GITHUB_TARGET`, a valid
+promoted submission still returns `github_not_configured`; earlier validation
+errors retain their existing behavior.

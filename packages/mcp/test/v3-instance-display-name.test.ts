@@ -1,5 +1,6 @@
+import { provisionLocalSdk } from './fixtures/local-sdk.ts'
 import { afterEach, expect, it } from 'vitest'
-import { mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { execFileSync } from 'node:child_process'
@@ -42,7 +43,7 @@ async function fixture(displayName?: string) {
     expect(tools.find(tool => tool.name === 'bootstrap_instance')?.inputSchema.properties).toHaveProperty('displayName')
     expect(JSON.stringify(tools.find(tool => tool.name === 'propose_change')?.inputSchema)).toContain('set_instance_display_name')
     expect(await connection.call('bootstrap_instance', { id: 'fieldops', target: 'cloudflare-github', ...(displayName === undefined ? {} : { displayName }) })).toMatchObject({ ok: true })
-    await symlink(resolve('node_modules'), join(root, 'node_modules'))
+    await provisionLocalSdk(root)
     const preview = await connection.call('initialize_instance', { instance: 'fieldops', mode: 'preview' })
     expect(preview, JSON.stringify(preview)).toMatchObject({ ok: true })
     expect(await connection.call('initialize_instance', { instance: 'fieldops', mode: 'apply', planHash: preview.planHash })).toMatchObject({ ok: true })
@@ -219,7 +220,7 @@ it('forwards the optional CLI bootstrap name with safe serialization', async () 
   const root = await empty(), name = '  Úklid " \\ ${value} {{INSTANCE_ID}} $&  '
   const output = execFileSync('bun', ['--no-install', resolve('packages/mcp/src/bin.ts'), 'init', '--root', root, '--id', 'fieldops', '--target', 'cloudflare-github', '--display-name', name], { encoding: 'utf8' })
   expect(JSON.parse(output)).toMatchObject({ ok: true })
-  await symlink(resolve('node_modules'), join(root, 'node_modules'))
+  await provisionLocalSdk(root)
   expect((await loadConfig(join(root, 'config.ts'))).config).toMatchObject({ id: 'fieldops', displayName: name.trim() })
   expect(schemas.bootstrap_instance.safeParse({ id: 'fieldops', displayName: 'Field Ops', extra: true, target: 'cloudflare-github' }).success).toBe(false)
 })

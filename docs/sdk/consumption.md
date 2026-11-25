@@ -92,6 +92,23 @@ For a fresh scaffold, call `initialize_instance` with the Instance selector and
 `planHash`. Preview writes nothing; apply publishes the initial schema, migration,
 OpenAPI and access artifacts locally. Shell generation remains an alternative.
 
+Initialization and fresh composition require a local SDK install: the canonical
+(realpath) Instance root must contain every selected core/plugins entrypoint and
+its matching package manifest. Links whose targets remain inside that root are
+supported. Ancestor-only dependencies, outside-root workspace hoisting, and links
+escaping the root (including a linked `node_modules`) are unsupported; there is
+no trusted-root allowlist. On `dependencies_missing` / 422, install the matching
+SDK version locally in the Instance, then preview again. All selected origins are
+checked before any selected consumer entrypoint is imported. This establishes
+entrypoint and manifest provenance, not containment of the transitive graph.
+
+Previews bind canonical origin identity as well as dependency bytes. Moving an
+entrypoint or manifest to a different canonical location, even inside the Instance
+with identical bytes, requires a new preview before apply. Fresh composition
+requires a new proposal and validation/disposable verification before promotion.
+Origins are rechecked in the fresh child before imports and again during guarded
+publication; a rejected initial dependency check creates no initialization outputs.
+
 Call `inspect_schema` with the Instance selector, then `propose_composition` with
 `instance`, the inspected `baseRevision` and `changes`. Use `set_plugin` to add or
 configure a built-in plugin (plugin `console` enables the console),

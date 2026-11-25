@@ -1,14 +1,15 @@
 import type { ConsoleDetailItem } from '../../plugins/console/src/contract'
 import type { Capabilities, Model } from './read'
 import { accountLinkField, accountLinkRelation } from './account-link'
+import { hiddenField } from './default-hidden-fields'
 
-export function detailReadableField(model: Model, name: string, caps: Capabilities, field: string, allowLabel = true): boolean {
+export function detailReadableField(model: Model, name: string, caps: Capabilities, field: string, allowLabel = true, explicitListColumn = false): boolean {
   const target = model.entities[name]
   if (!caps.entities[name]?.operations.includes('read') || !caps.entities[name]?.readable.includes(field)) return false
   const reference = target.fields[field]?.entity
   if (reference && (!caps.entities[reference]?.operations.includes('read') || !caps.entities[reference]?.readable.includes('id'))) return false
   if (allowLabel && target.labelDependencies && field === target.displayField) return target.labelDependencies.every(dependency => detailReadableField(model, dependency.entity, caps, dependency.field, false))
-  return !target.fields[field]?.ui?.hidden || field === target.displayField && !!target.labelDependencies
+  return !hiddenField(target.fields[field], explicitListColumn) || field === target.displayField && !!target.labelDependencies
 }
 
 export const detailItem = (item: ConsoleDetailItem) => typeof item === 'string' ? { field: item } : item
