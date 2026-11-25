@@ -2,11 +2,23 @@ import { FeedbackError } from './schemas.ts'
 
 // Conservative pilot refusal, not a general confidentiality classifier. Operators
 // must review summaries; ambiguous source material needs a public-safe rewrite.
-const sensitive = /(?:slack\.com|slack:\/\/|(?:\+\d[\d ()-]{7,}\d|\(\d{3}\)\s*\d{3}[- ]\d{4})|\b(?:\d{1,3}\.){3}\d{1,3}\b|bearer\s+\S+|(?:password|secret|api[_-]?key|access[_-]?token|token|credential|session|authorization|cookie)["']?\s*[:=]\s*["']?\S+|github_pat_[\w]+|gh[pousr]_[\w]+|sk-[a-zA-Z0-9_-]{12,}|-----BEGIN [\w ]*PRIVATE KEY|eyJ[\w-]+\.[\w-]+\.[\w-]+|(?:raw|private)\s+(?:logs?|data)|stack\s*trace|customer\s+(?:data|name|email)|personal\s+(?:data|name|email)|attachments?\s*[:=]|(?:\bat\s+\S+\([^\n]+:\d+:\d+\))|[a-zA-Z0-9+/]{100,}={0,2})/i
+// One list drives outbound refusal and inbound redaction for known formats.
+const credentialPatterns = [
+  /github_pat_[\w]+|gh[pousr]_[\w]+/i,
+  /bearer\s+\S+/i,
+  /sk-[a-zA-Z0-9_-]{12,}/i,
+  /\bxox[abposr]-[a-zA-Z0-9-]+/i,
+  /\bnpm_[a-zA-Z0-9]+/i,
+  /\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/i,
+  /-----BEGIN [\w ]*PRIVATE KEY(?:-----[\s\S]*?(?:-----END [\w ]*PRIVATE KEY-----|$))?/i,
+  /eyJ[\w-]+\.[\w-]+\.[\w-]+/i,
+  /(?:password|secret|api[_-]?key|access[_-]?token|token|credential|session|authorization|cookie)["']?\s*[:=]\s*["']?\S+/i,
+]
+const sensitive = /(?:slack\.com|slack:\/\/|(?:\+\d[\d ()-]{7,}\d|\(\d{3}\)\s*\d{3}[- ]\d{4})|\b(?:\d{1,3}\.){3}\d{1,3}\b|(?:raw|private)\s+(?:logs?|data)|stack\s*trace|customer\s+(?:data|name|email)|personal\s+(?:data|name|email)|attachments?\s*[:=]|(?:\bat\s+\S+\([^\n]+:\d+:\d+\))|[a-zA-Z0-9+/]{100,}={0,2})/i
 const emails = /[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]{1,64}@[a-zA-Z0-9.-]{1,253}\.[a-zA-Z]{2,63}/g
 const urls = /https?:\/\/[^\s<>"\\)]+/gi
 function unsafe(text: string, token: string) {
-  if (text.includes(token) || sensitive.test(text)) return true
+  if (text.includes(token) || credentialPatterns.some(pattern => pattern.test(text)) || sensitive.test(text)) return true
   if ([...text.matchAll(emails)].some(m => !m[0].toLowerCase().endsWith('@example.test'))) return true
   return [...text.matchAll(urls)].some(m => !/^https:\/\/github\.com\/[a-zA-Z0-9-]+\/[a-zA-Z0-9_.-]+\/(?:issues|pull|releases)\//.test(m[0]) || /\.(?:png|jpe?g|pdf|zip|txt|log)(?:[?#]|$)/i.test(m[0]))
 }
@@ -23,8 +35,8 @@ export function redactText(value: string, token: string, limit = 8000) {
   // Remove the known credential over the full bounded API body before clipping;
   // earlier replacements can shift a later credential across the output edge.
   // Bound the remaining prose regex work, with lookahead before final truncation.
-  return value.replaceAll(token, '[REDACTED]').slice(0, limit + 8192).replace(/(?:github_pat_|gh[pousr]_)[\w]+|Bearer\s+\S+|sk-[a-zA-Z0-9_-]{12,}|-----BEGIN [\w ]*PRIVATE KEY-----[\s\S]*?(?:-----END [\w ]*PRIVATE KEY-----|$)|eyJ[\w-]+\.[\w-]+\.[\w-]+/gi, '[REDACTED]')
-    .replace(/(?:password|secret|api[_-]?key|access[_-]?token|token|credential|session|authorization|cookie)["']?\s*[:=]\s*["']?\S+/gi, '[REDACTED]')
+  const bounded = value.replaceAll(token, '[REDACTED]').slice(0, limit + 8192)
+  return credentialPatterns.reduce((text, pattern) => text.replace(new RegExp(pattern.source, 'gi'), '[REDACTED]'), bounded)
     .replace(/\+\d[\d ()-]{7,}\d|\(\d{3}\)\s*\d{3}[- ]\d{4}|\b(?:\d{1,3}\.){3}\d{1,3}\b|[a-zA-Z0-9+/]{100,}={0,2}/g, '[REDACTED]')
     .replace(emails, match => match.toLowerCase().endsWith('@example.test') ? match : '[REDACTED]')
     .replace(urls, match => /^https:\/\/github\.com\//.test(match) ? match : '[REDACTED URL]')

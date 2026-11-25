@@ -16,7 +16,7 @@ function parseOwner(body: string): OwnerEvent | undefined {
   try { const result = ownerSchema.safeParse(JSON.parse(match[1])); return result.success ? result.data : undefined } catch { return }
 }
 function repliesFor(comments: Comment[], config: Configuration, token: string, packet_id: string) {
-  let state: State = 'reported'; let currentReply: OwnerReply | undefined; let missing_fact: string | undefined; let canonical_issue: string | undefined
+  let state: State = 'reported'; let currentReply: { reply_id: string; updated_at: string; claim: OwnerEvent } | undefined; let missing_fact: string | undefined; let canonical_issue: string | undefined
   const replies: OwnerReply[] = []; const acknowledgeable = new Set<string>()
   const allowlist = new Set(config.replierLogins.map(login => login.toLowerCase()))
   for (const c of [...comments].sort((a, b) => a.updated_at.localeCompare(b.updated_at) || a.id - b.id)) {
@@ -28,7 +28,10 @@ function repliesFor(comments: Comment[], config: Configuration, token: string, p
     if (event?.packet_id === packet_id) {
       const next: State = event.disposition === 'needs_info' ? 'reported' : event.disposition === 'duplicate' ? 'answered' : event.disposition
       if (next === state || event.disposition === 'needs_info' || event.disposition === 'duplicate' || transitions[state].includes(next)) {
-        reply.parsed_owner_event = redact(event, token); state = next; currentReply = reply
+        // Retain raw validated identity only internally; the returned reply is a
+        // separate redacted projection and must never drive verification.
+        currentReply = { reply_id: reply.reply_id, updated_at: reply.updated_at, claim: event }
+        reply.parsed_owner_event = redact(event, token); state = next
         missing_fact = event.disposition === 'needs_info' ? redactText(event.missing_fact!, token) : undefined
         canonical_issue = event.disposition === 'duplicate' ? event.canonical_issue : undefined
       }
@@ -39,7 +42,7 @@ function repliesFor(comments: Comment[], config: Configuration, token: string, p
 }
 function verified(event: AgentEvent, owner: ReturnType<typeof repliesFor>) {
   if (event.type !== 'agent_verified' || owner.state !== 'ready_for_retest' || owner.currentReply?.reply_id !== event.reply_id) return false
-  const claim = owner.currentReply.parsed_owner_event!
+  const claim = owner.currentReply.claim
   const at = Date.parse(event.retest.observed_at)
   return event.installed_release === claim.release && (!claim.artifact || event.installed_artifact === claim.artifact) && at >= Date.parse(owner.currentReply.updated_at) && at <= Date.now() + 300000
 }
