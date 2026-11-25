@@ -8,6 +8,9 @@ environment variables. Data and ops keep separate credentials and responsibiliti
 only those remote servers need an app origin such as `https://app.example.test`.
 Existing Instances must merge the new entry manually: init preserves existing files.
 
+`WORKBASE_MCP_STATE_ROOT` defaults to `/tmp/codex/mcp-state`; relative values resolve
+once at startup against the launch cwd, independently of `--root` or `.mcp.json`.
+
 Call `list_docs({})`, then `read_doc({"name":"mcp-composition.md"})` (or another
 returned name) for the four guides shipped with the installed package. Responses
 include its version and raw-byte SHA256. Names are a closed enum; paths are not

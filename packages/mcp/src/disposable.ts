@@ -1,5 +1,5 @@
 import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
-import { join, dirname } from 'node:path'
+import { join, dirname, resolve } from 'node:path'
 import { createRequire } from 'node:module'
 import { spawn } from 'node:child_process'
 import { DatabaseSync } from 'node:sqlite'
@@ -13,7 +13,7 @@ import { noLink } from './storage.ts'
 import type { PluginMigrationRow } from '@workbasehq/core/kernel/migrations'
 
 // Trusted operator setting, never accepted through MCP tool arguments.
-export const stateRoot = process.env.WORKBASE_MCP_STATE_ROOT ?? '/tmp/codex/mcp-state'
+export const stateRoot = resolve(process.env.WORKBASE_MCP_STATE_ROOT ?? '/tmp/codex/mcp-state')
 export type Verification = { verified: boolean; diffs: unknown[]; directory?: string }
 export type Prepared = { target: Bundle['config']; indexes: Index[]; sql: string; composition?: { statements: { sql: string; name: string }[]; ledger: PluginMigrationRow[] } }
 const require = createRequire(import.meta.url)
