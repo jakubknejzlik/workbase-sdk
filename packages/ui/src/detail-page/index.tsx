@@ -6,5 +6,5 @@ export function DetailPage({ title, secondary, backLink, actions, children }: { 
   return <div data-slot="detail-page" className="space-y-6 p-4 min-w-0"><DetailPageHeader title={title} secondary={secondary} backLink={backLink} extraActions={actions} />{children}</div>
 }
 export function DetailFields({ fields, className }: { fields: { name?: string; label: string; value: ReactNode }[]; className?: string }) {
-  return <dl className={cn('grid gap-4 rounded-lg border p-6 sm:grid-cols-2', className)}>{fields.map(({ name, label, value }) => <div className="min-w-0 space-y-1" key={name ?? label} data-detail-field={name}><dt className="text-sm font-medium text-muted-foreground">{label}</dt><dd className="text-sm whitespace-pre-wrap [overflow-wrap:anywhere]">{value}</dd></div>)}</dl>
+  return <dl data-detail-grid="metadata" className={cn('detail-fields detail-field-grid rounded-lg border p-6', className)}>{fields.map(({ name, label, value }) => <div className="detail-field" key={name ?? label} data-detail-field={name}><dt className="detail-field-label">{label}</dt><dd className="detail-field-value">{value}</dd></div>)}</dl>
 }

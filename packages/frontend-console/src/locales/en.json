@@ -409,6 +409,8 @@
   "colourSwatch": "{{label}} swatch",
   "record": "record",
   "detailInformation": "Detail Information",
+  "detailInformationHelp": "Available information for this record.",
+  "detailConditionalHelp": "This value is shown only when it applies to this record.",
   "createEntity": "Add {{entity}}",
   "pickDate": "Pick a date",
   "createEntityDescription": "Enter the details for a new {{entity}}.",

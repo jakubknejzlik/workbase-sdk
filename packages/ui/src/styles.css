@@ -306,3 +306,30 @@ h1, h2, h3, strong, b,
 
 /* Route headings receive programmatic focus without a control focus ring. */
 h1[tabindex="-1"] { outline: none; }
+
+/* #316 C3 — shared detail summary and metadata hierarchy */
+.detail-information, .detail-fields { container: detail-information / inline-size; min-width: 0; }
+.detail-field-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 16px; row-gap: 0; }
+.detail-field { min-width: 0; padding-block: 12px; border-top: 1px solid var(--separator); overflow-wrap: anywhere; }
+.detail-field-label { margin-bottom: 6px; color: var(--muted-foreground); font-size: 11px; line-height: 1.5; }
+.detail-field-value { margin: 0; color: var(--foreground); font-size: 13px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+.detail-field-help, .detail-group-heading > p { margin: 6px 0 0; color: var(--muted-foreground); font-size: 11px; line-height: 1.6; white-space: normal; }
+.detail-group-heading { margin-bottom: 16px; overflow-wrap: anywhere; }
+.detail-group-heading > h2 { font-size: 15px; line-height: 1.5; }
+.detail-information > * + * { margin-top: 22px; }
+/* Only the information card receives this rhythm; related cards keep their composition. */
+[data-slot="card"]:has(> [data-slot="card-content"] > :is(.detail-information, .detail-fields)) { gap: 0; padding-block: 0; box-shadow: none; }
+[data-slot="card"]:has(> [data-slot="card-content"] > :is(.detail-information, .detail-fields)) > [data-slot="card-header"] { padding: 21px 22px; border-bottom: 1px solid var(--separator); }
+[data-slot="card"]:has(> [data-slot="card-content"] > :is(.detail-information, .detail-fields)) > [data-slot="card-content"] { padding: 22px; }
+@container detail-information (max-width: 530px) {
+  [data-detail-grid="metadata"] { grid-template-columns: minmax(0, 1fr); }
+}
+/* A fallback dl is itself the container, so its children perform the stacking. */
+@container detail-information (max-width: 530px) {
+  .detail-fields > .detail-field { grid-column: 1 / -1; }
+}
+@media (max-width: 530px) {
+  [data-slot="card"]:has(> [data-slot="card-content"] > :is(.detail-information, .detail-fields)) > [data-slot="card-content"],
+  [data-slot="card"]:has(> [data-slot="card-content"] > :is(.detail-information, .detail-fields)) > [data-slot="card-header"] { padding: 18px; }
+}
+/* End #316 C3 */
