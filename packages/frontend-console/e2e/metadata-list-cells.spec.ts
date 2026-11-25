@@ -40,9 +40,9 @@ test('identifier icon copy keeps seeded table/cards geometry at 1440/390 in EN/C
       const errors: string[] = []; page.on('pageerror', error => errors.push(error.message))
       const documentResponse = await context.request.get('/o/org-a/console-model')
       expect(documentResponse.ok()).toBe(true)
-      const document = await documentResponse.json()
-      expect(document.capabilities.entities.worker.readable).toEqual(expect.arrayContaining(['id', 'updated_at']))
-      expect(document.model.entities.worker.fields.updated_at.readOnly).toBe(true)
+      const consoleDocument = await documentResponse.json()
+      expect(consoleDocument.capabilities.entities.worker.readable).toEqual(expect.arrayContaining(['id', 'updated_at']))
+      expect(consoleDocument.model.entities.worker.fields.updated_at.readOnly).toBe(true)
       const query = page.waitForResponse(response => new URL(response.url()).pathname === '/query' && response.request().postDataJSON()?.entity === 'worker' && response.request().postDataJSON()?.includeTotal === true)
       await gotoSDK(page, '/o/org-a/e/worker')
       const queryResponse = await query; expect(queryResponse.status()).toBe(200)
@@ -61,7 +61,6 @@ test('identifier icon copy keeps seeded table/cards geometry at 1440/390 in EN/C
         const { x, y, width, height } = element.getBoundingClientRect()
         return { x, y, width, height }
       }))
-      const before = await geometry()
       const measurements = []
       for (const id of [first.id, longId]) {
         const row = rows.filter({ has: page.getByText(id, { exact: true }) })
@@ -83,10 +82,58 @@ test('identifier icon copy keeps seeded table/cards geometry at 1440/390 in EN/C
         await expect(button).toHaveAttribute('title', copyLabel)
         await expect(button).toHaveText('')
         await expect(button).toHaveAttribute('data-slot', 'button')
+        // Reach the action through real keyboard navigation, then let all transitions settle.
+        for (let tabs = 0; tabs < 100 && !await button.evaluate(element => element === document.activeElement); tabs++) await page.keyboard.press('Tab')
+        await expect(button).toBeFocused()
+        await page.waitForFunction(() => document.getAnimations().every(animation => animation.playState !== 'running' && !animation.pending))
         const rowBefore = await row.boundingBox()
-        // Exercise keyboard reachability and the shared Button's visible focus ring.
-        await page.keyboard.press('Tab'); await button.focus()
+        const before = await geometry()
         expect(await button.evaluate(element => element.matches(':focus-visible') && getComputedStyle(element).boxShadow !== 'none')).toBe(true)
+        const focusGeometry = await button.evaluate(element => {
+          const rect = element.getBoundingClientRect()
+          const style = getComputedStyle(element)
+          const extent = { left: 0, right: 0, top: 0, bottom: 0 }
+          // Include every outer shadow (including Tailwind's ring), and the outline.
+          for (const shadow of style.boxShadow.split(/,(?![^(]*\))/)) {
+            if (shadow.includes('inset')) continue
+            const lengths = shadow.replace(/(?:rgba?|hsla?|color)\([^)]*\)/g, '').match(/-?[\d.]+px/g)?.map(parseFloat) ?? []
+            if (lengths.length < 2) continue
+            const [x, y, blur = 0, spread = 0] = lengths
+            const reach = spread + blur
+            extent.left = Math.max(extent.left, reach - x); extent.right = Math.max(extent.right, reach + x)
+            extent.top = Math.max(extent.top, reach - y); extent.bottom = Math.max(extent.bottom, reach + y)
+          }
+          const outline = style.outlineStyle === 'none' ? 0 : Math.max(0, parseFloat(style.outlineWidth) + parseFloat(style.outlineOffset))
+          for (const side of ['left', 'right', 'top', 'bottom'] as const) extent[side] = Math.max(extent[side], outline)
+          const ring = { left: rect.left - extent.left, right: rect.right + extent.right, top: rect.top - extent.top, bottom: rect.bottom + extent.bottom }
+          const clips = []
+          for (let ancestor = element.parentElement; ancestor; ancestor = ancestor.parentElement) {
+            const css = getComputedStyle(ancestor)
+            if (css.overflowX === 'visible' && css.overflowY === 'visible') continue
+            const bounds = ancestor.getBoundingClientRect()
+            const left = bounds.left + ancestor.clientLeft; const top = bounds.top + ancestor.clientTop
+            const clip = { left, right: left + ancestor.clientWidth, top, bottom: top + ancestor.clientHeight }
+            clips.push({ tag: ancestor.tagName, className: ancestor.className, overflowX: css.overflowX, overflowY: css.overflowY, clip,
+              clearance: { left: css.overflowX === 'visible' ? null : ring.left - clip.left, right: css.overflowX === 'visible' ? null : clip.right - ring.right,
+                top: css.overflowY === 'visible' ? null : ring.top - clip.top, bottom: css.overflowY === 'visible' ? null : clip.bottom - ring.bottom } })
+          }
+          clips.push({ tag: 'VIEWPORT', className: '', overflowX: 'clip', overflowY: 'clip', clip: { left: 0, top: 0, right: innerWidth, bottom: innerHeight },
+            clearance: { left: ring.left, right: innerWidth - ring.right, top: ring.top, bottom: innerHeight - ring.bottom } })
+          return { button: { x: rect.x, y: rect.y, width: rect.width, height: rect.height }, boxShadow: style.boxShadow, outline: style.outline, extent, ring, clips,
+            runningAnimations: document.getAnimations().filter(animation => animation.playState === 'running' || animation.pending).length }
+        })
+        expect(focusGeometry.extent.top).toBeGreaterThan(0)
+        expect(focusGeometry.runningAnimations).toBe(0)
+        for (const clip of focusGeometry.clips) for (const [side, clearance] of Object.entries(clip.clearance)) {
+          if (clearance !== null) expect.soft(clearance, `${language}/${width}/${id} ${clip.tag}.${clip.className} ${side} ring clearance`).toBeGreaterThanOrEqual(0)
+        }
+        let focusedCapture
+        if (id === longId) {
+          const path = join(output, `identifier-copy-${language}-${width}-focused.png`)
+          await page.screenshot({ path })
+          const bytes = readFileSync(path)
+          focusedCapture = { path, bytes: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') }
+        }
         await page.keyboard.press('Enter')
         expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(id)
         await expect(row.getByRole('status')).toHaveText(language === 'cs' ? cs.listIdentifierCopied : en.listIdentifierCopied)
@@ -94,10 +141,11 @@ test('identifier icon copy keeps seeded table/cards geometry at 1440/390 in EN/C
         const rowAfter = await row.boundingBox()
         expect(rowAfter).toEqual(rowBefore)
         expect(await geometry()).toEqual(before)
-        measurements.push({ id, textMetrics, rowBefore, rowAfter })
+        measurements.push({ id, textMetrics, rowBefore, rowAfter, rowsBefore: before, rowsAfter: await geometry(), focusGeometry, focusedCapture })
       }
       expect(errors).toEqual([])
       const path = join(output, `identifier-copy-${language}-${width}.png`)
+      await page.waitForFunction(() => document.getAnimations().every(animation => animation.playState !== 'running' && !animation.pending))
       await page.screenshot({ path, fullPage: true })
       const bytes = readFileSync(path)
       expect(statSync(path).size).toBeGreaterThan(1000)
@@ -108,7 +156,7 @@ test('identifier icon copy keeps seeded table/cards geometry at 1440/390 in EN/C
         const dimensions = { width: bitmap.width, height: bitmap.height }; bitmap.close(); return dimensions
       }, bytes.toString('base64'))
       expect(decoded.width).toBe(width); expect(decoded.height).toBeGreaterThanOrEqual(1000)
-      captures.push({ path, bytes: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex'), decoded, language, viewport: { width, height: 1000 }, mode: width === 1440 ? 'table' : 'cards', measurements, rowsBefore: before, rowsAfter: await geometry(), firstRow: { id: first.id, updated_at: first.updated_at, formatted }, status: queryResponse.status() })
+      captures.push({ path, bytes: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex'), decoded, language, viewport: { width, height: 1000 }, mode: width === 1440 ? 'table' : 'cards', measurements, firstRow: { id: first.id, updated_at: first.updated_at, formatted }, status: queryResponse.status() })
     } finally { await context.close() }
   }
   expect(captures).toHaveLength(4)

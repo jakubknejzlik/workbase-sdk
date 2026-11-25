@@ -47,7 +47,9 @@ export function GeneratedListCell({ model, entity, caps, row, column, orgId, pri
   const content = value(field)
   const secondary = column.secondary ? value(column.secondary, true) : null
   const copy = cell?.kind === 'identifier' && cell.copy === true && row[field] != null && readableListField(model, entity, caps, field)
-  return <span className="inline-grid min-w-0 max-w-full gap-0.5">
+  // The table's generic truncating wrapper must not clip the copy button's focus ring.
+  // Identifier text keeps its own ellipsis; this only opens the wrapper containing the action.
+  return <span className={`inline-grid min-w-0 max-w-full gap-0.5${copy ? ' [div.truncate:has(>&)]:overflow-visible' : ''}`}>
     <span className="inline-flex min-w-0 items-center gap-1">{primary ? <Link className={cell?.kind === 'identifier' ? 'min-w-0 truncate' : undefined} data-row-name="" title={String(row.id)} to="/o/$orgId/e/$entity/$id" params={{ orgId, entity, id: String(row.id) }}>{content}</Link> : content}
       {copy && <Button type="button" variant="ghost" size="icon-sm" className="shrink-0" title={t('listIdentifierCopy')} aria-label={t('listIdentifierCopy')} onClick={async event => {
         event.preventDefault(); event.stopPropagation()
