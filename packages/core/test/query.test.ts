@@ -503,3 +503,18 @@ it('SR-57/58 ref search and header filters match translated enum display labels 
   expect(ids(await execute({ ...base, search: { text: 'PŘIPS', fields: ['client_id'], locale: 'cs' } }, k))).toEqual(['job-org-a'])
   expect(ids(await execute({ ...base, labelWhere: { client_id: { contains: 'přips', locale: 'cs' } } }, k))).toEqual(['job-org-a'])
 })
+
+it('collision scalar at the relation-depth limit consumes no extra hop; real relations still overrun', async () => {
+  const collision = new KernelRegistry({ ...config, entities: { ...config.entities,
+    jobs: { ...config.entities.jobs, relations: { ...config.entities.jobs.relations, client_id: { entity: 'clients', field: 'client_id', many: false } } },
+  } }, { plugins: [identity, localAuth, tenancy, rbac, policy] })
+  const scalar = { entity: 'jobs', select: ['id'], limit: 10, where: { client: { jobs: { some: { client_id: { in: ['client-org-a'] } } } } } }
+  const { cost } = validateQuery(collision, scope, scalar)
+  expect(cost.depth).toBe(L.relationDepth)
+  expect(cost.relations).toBe(2)
+  expect(ids(await execute(scalar, collision))).toEqual(['job-org-a'])
+  const relation = { ...scalar, where: { client: { jobs: { some: { client_id: { id: { in: ['client-org-a'] } } } } } } }
+  expect(() => validateQuery(collision, scope, relation)).toThrowError(expect.objectContaining({ code: 'query_too_expensive' }))
+  // Includes always consume a relation hop, even if their name also names a field.
+  expect(() => validateQuery(collision, scope, { entity: 'jobs', limit: 1, include: { client_id: { select: ['id'], include: { jobs: { include: { client_id: {} } } } } } })).toThrowError(expect.objectContaining({ code: 'query_too_expensive' }))
+})

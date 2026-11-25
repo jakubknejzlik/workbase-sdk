@@ -23,12 +23,13 @@ const filters = [{ field: 'status', predicate: { in: ['active'] } }, { field: 't
 const clients: QueryClient[] = []
 beforeEach(() => { vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} }); const values = new Map<string, string>(); vi.stubGlobal('localStorage', { getItem: (key: string) => values.get(key) ?? null, setItem: (key: string, value: string) => values.set(key, value), removeItem: (key: string) => values.delete(key), key: (index: number) => [...values.keys()][index], get length() { return values.size } }); vi.spyOn(window, 'scrollTo').mockImplementation(() => {}) })
 afterEach(() => { clients.splice(0).forEach(client => client.clear()); vi.restoreAllMocks(); vi.unstubAllGlobals() })
-async function mount(options: { toolbarRelation?: boolean; narrow?: boolean; calendar?: boolean; embedded?: boolean; filters?: typeof filters; caps?: Capabilities } = {}) {
+async function mount(options: { toolbarRelation?: boolean; collision?: boolean; narrow?: boolean; calendar?: boolean; embedded?: boolean; filters?: typeof filters; caps?: Capabilities } = {}) {
   vi.spyOn(window, 'matchMedia').mockImplementation(query => ({ matches: !!options.narrow, media: query, onchange: null, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {}, dispatchEvent() { return true } }))
   const i18n = i18next.createInstance()
   await i18n.use(initReactI18next).init({ lng: 'en', resources: { en: { translation: { ...en, field_name: 'Name', field_status: 'Status', field_team_id: 'Team', value_active: 'Active', value_inactive: 'Inactive' } } } })
   const definition = structuredClone(model)
   if (options.toolbarRelation) definition.entities.entries.list!.filter!.team_id = { kind: 'relation', placement: 'toolbar', operators: ['in'], label: 'Team' }
+  if (options.collision) definition.entities.entries.relations.team_id = { entity: 'teams', field: 'team_id', cardinality: 'n:1' }
   let release: (() => void) | undefined, verificationGate: Promise<void> | undefined
   const request = vi.fn(async (query: ReadQuery) => {
     if (query.entity === 'teams') {
@@ -53,7 +54,7 @@ async function mount(options: { toolbarRelation?: boolean; narrow?: boolean; cal
   await waitFor(() => expect(request).toHaveBeenCalled())
   return { holdVerification: () => { verificationGate = new Promise(resolve => { release = resolve }) }, releaseVerification: () => { release?.(); verificationGate = undefined }, router, request, update, user: userEvent.setup(), source: () => request.mock.calls.map(([query]) => query).filter(query => query.entity === 'entries').at(-1)! }
 }
-it.each([{ narrow: false }, { narrow: true }, { calendar: true }, { narrow: true, calendar: true }, { embedded: true }])('stages hidden scalar and exact-ID relation filters independently of columns: %j', async options => {
+it.each([{ narrow: false }, { narrow: true }, { calendar: true }, { narrow: true, calendar: true }, { embedded: true }, { collision: true }])('stages hidden scalar and exact-ID relation filters independently of columns: %j', async options => {
   const { user, source, request } = await mount(options)
   await user.click(screen.getByText(en.sortAndFilter))
   const panel = screen.getByRole('group', { name: en.sortAndFilter })

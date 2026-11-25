@@ -6,6 +6,7 @@ import type { ConsoleGrant, ConsoleModelCapabilities } from './console-contract'
 import { labelDependencies, labelPath } from './query/labels'
 import { fieldsFor, validateQuery, type QueryInput, type Selection } from './query/schema'
 import { QueryError } from './query/errors'
+import { operandKind } from './query/input-schema'
 
 /** One fail-closed authority for every disclosed field, literal and presentation dependency. */
 export function consoleAuthorization(kernel: KernelRegistry, scope: Scope, caps: ConsoleModelCapabilities) {
@@ -55,7 +56,9 @@ export function consoleAuthorization(kernel: KernelRegistry, scope: Scope, caps:
       if (key === 'and' || key === 'or') return Array.isArray(value) && value.every(child => predicateFields(entity, child))
       if (key === 'not') return !!value && typeof value === 'object' && predicateFields(entity, value as Record<string, unknown>)
       const r = config.entities[entity]?.relations[key]
-      if (!r) return literals(entity, key)
+      const kind = operandKind(config, entity, key, value)
+      if (kind === 'invalid') return false
+      if (kind === 'scalar') return literals(entity, key)
       return !!relation(entity, key) && literals(r.many ? r.entity : entity, r.field)
         && predicateFields(r.entity, (r.many ? Object.values(value as object)[0] : value) as Record<string, unknown>)
     })

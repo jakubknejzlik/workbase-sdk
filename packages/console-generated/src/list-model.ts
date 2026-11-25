@@ -1,4 +1,5 @@
 import { listColumnFields, readableListField } from './list-presentation'
+import { filterOperand } from '../../core/src/query/filter-operand'
 import { availableCalendar, calendarQuery, dayKey, validDay, type CalendarMode } from './calendar-model'
 import { filterDescriptors, filterMapping, selectionCap, type FilterDescriptor } from './filter-kinds'
 import { projection, listSearchableFields, type Model, type Capabilities, type ReadQuery, type RowAccessState } from './read'
@@ -172,16 +173,19 @@ export function relationHydrationQueries(model: Model, entity: string, caps: Cap
 }
 
 export function readableWhere(where: Record<string, unknown>, model: Model, entity: string, caps: Capabilities): boolean {
-  return Object.entries(where).every(([key, value]) => key === 'and' || key === 'or'
-    ? Array.isArray(value) && value.every(child => readableWhere(child, model, entity, caps))
-    : key === 'not' ? readableWhere(value as Record<string, unknown>, model, entity, caps)
-    : Object.hasOwn(model.entities[entity].fields, key) ? !!caps.entities[entity]?.readable.includes(key)
-    : (() => {
-      const relation = model.entities[entity].relations[key]
-      if (!relation || !caps.entities[relation.entity]?.operations.includes('read')) return false
-      const fk = relation.cardinality === '1:n' ? relation.entity : entity
-      if (!caps.entities[fk]?.readable.includes(relation.field)) return false
-      const child = relation.cardinality === '1:n' ? Object.values(value as Record<string, Record<string, unknown>>)[0] : value
-      return readableWhere(child as Record<string, unknown>, model, relation.entity, caps)
-    })())
+  if (!where || typeof where !== 'object' || Array.isArray(where)) return false
+  return Object.entries(where).every(([key, value]) => {
+    if (key === 'and' || key === 'or') return Array.isArray(value) && value.every(child => readableWhere(child, model, entity, caps))
+    if (key === 'not') return readableWhere(value as Record<string, unknown>, model, entity, caps)
+    const definition = model.entities[entity]
+    const kind = filterOperand(Object.hasOwn(definition.fields, key), Object.hasOwn(definition.relations, key), value)
+    if (kind === 'scalar') return !!caps.entities[entity]?.readable.includes(key)
+    if (kind === 'invalid') return false
+    const relation = definition.relations[key]
+    if (!caps.entities[relation.entity]?.operations.includes('read') || !caps.entities[relation.entity]?.readable.includes('id')) return false
+    const fk = relation.cardinality === '1:n' ? relation.entity : entity
+    if (!caps.entities[fk]?.readable.includes(relation.field)) return false
+    const child = relation.cardinality === '1:n' ? Object.values(value as Record<string, Record<string, unknown>>)[0] : value
+    return readableWhere(child as Record<string, unknown>, model, relation.entity, caps)
+  })
 }

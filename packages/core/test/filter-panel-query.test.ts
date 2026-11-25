@@ -1,7 +1,12 @@
 import { env } from 'cloudflare:workers'
 import { beforeEach, expect, it } from 'vitest'
 import { setup, policyGraph, runtime } from './fixtures/policy-graph/setup'
+import { defineInstance, baseFields } from '../src/config'
 import { createApp } from '../src/app'
+import { KernelRegistry } from '../src/kernel/registry'
+import { requireScope, resolveActor } from '../src/authorization'
+import { validateQuery } from '../src/query/schema'
+import { compileRoot } from '../src/query/compiler'
 import { request, json } from '@workbasehq/test-support/helpers'
 import { stateFromSearch, toQueryDocument } from '../../console-generated/src/list-model'
 import { pickerQuery } from '../../console-generated/src/write'
@@ -42,4 +47,171 @@ it.each([{}, { search: 'CANARY_TEAM' }, { ids: ['team-a', 'team-b', 'team-canary
   expect(body.data).toBeUndefined()
   expect(JSON.stringify(body)).not.toContain('CANARY_TEAM')
   expect(JSON.stringify(body)).not.toContain('CANARY_ORG')
+})
+
+// Same public scalar payload as the picker, with a deliberately colliding relation.
+async function collisionApp(options: { field?: boolean; target?: boolean; targetName?: boolean; targetId?: boolean; views?: boolean } = {}) {
+  await env.DB.exec("ALTER TABLE records ADD COLUMN client TEXT; UPDATE records SET client=team_id;")
+  const source = defineInstance({ ...policyGraph,
+    plugins: [...policyGraph.plugins!, ...(options.targetId === false ? [{ name: 'mask-target-id', version: '1',
+      fieldMask: (entity: string) => entity === 'teams' ? ['name'] : [...baseFields, ...Object.keys(policyGraph.entities[entity].fields), ...(entity === 'records' ? ['client'] : [])],
+    }] : [])], entities: { ...policyGraph.entities,
+    records: { ...policyGraph.entities.records, fields: { ...policyGraph.entities.records.fields, client: { type: 'ref', entity: 'teams' } },
+      relations: { ...policyGraph.entities.records.relations, client: { entity: 'teams', field: 'client' } } },
+  }, policies: { ...policyGraph.policies,
+    records: { ...policyGraph.policies!.records, ...(options.field === false ? { administrator: { where: {}, fields: ['id', 'name', 'team_id'] } } : {}) },
+    teams: { ...policyGraph.policies!.teams, ...(options.targetName === false ? { administrator: { where: {}, fields: ['id'] } } : {}) },
+  }, permissions: { ...policyGraph.permissions, ...(options.target === false ? { administrator: { ...policyGraph.permissions.administrator, teams: [] } } : {}) },
+    ui: { entities: { records: { list: { columns: ['name'], filter: { client: { kind: 'relation', placement: 'panel', operators: ['in'] } }, views: options.views ? [
+      { id: 'scalar', label: 'Scalar', where: { client: { in: ['team-a'] } } },
+      { id: 'relation', label: 'Relation', where: { client: { name: { eq: 'A' } } } },
+    ] : [] } } } },
+  })
+  return createApp(source, runtime())
+}
+it.each([
+  [{ client: { in: ['team-a'] } }, ['record-colleague', 'record-own']],
+  [{ client: { id: { in: ['team-a'] } } }, ['record-colleague', 'record-own']],
+  [{ client: { eq: null } }, []], [{ client: { isNull: true } }, []],
+  [{ client: { ne: null } }, ['record-CANARY_ROW', 'record-colleague', 'record-own']],
+  [{ not: { client: { in: ['team-a'] } } }, ['record-CANARY_ROW']],
+  [{ and: [{ client: { ne: 'team-b' } }, { client: { id: { eq: 'team-a' } } }] }, ['record-colleague', 'record-own']],
+  [{ or: [{ client: { in: [] } }, { client: { in: ['team-b'] } }] }, ['record-CANARY_ROW']],
+])('collision HTTP scalar/relation contract: %j', async (where, expected) => {
+  const collision = await collisionApp()
+  const response = await request(collision, '/query', 'POST', { entity: 'records', select: ['id'], limit: 100, includeTotal: true, where }, 'administrator')
+  expect(response.status).toBe(200)
+  const body = await json(response)
+  expect(body.data.map((row: any) => row.id)).toEqual(expected)
+  expect(body.total).toBe(expected.length)
+})
+it.each([{ client: { in: ['team-a'] } }, { client: { id: { in: ['team-a'] } } }])('collision HTTP preserves tenant and row scope: %j', async where => {
+  const collision = await collisionApp()
+  await env.DB.exec("UPDATE records SET client='team-b' WHERE id='record-colleague'")
+  const response = await request(collision, '/query', 'POST', { entity: 'records', select: ['id'], limit: 100, where }, 'reviewer')
+  expect(response.status).toBe(200)
+  expect((await json(response)).data.map((row: any) => row.id)).toEqual(['record-own'])
+  for (const id of ['team-b', 'team-canary']) {
+    const deniedWhere = 'in' in where.client ? { client: { in: [id] } } : { client: { id: { in: [id] } } }
+    const denied = await request(collision, '/query', 'POST', { entity: 'records', select: ['id'], limit: 100, where: deniedWhere }, 'reviewer')
+    expect(denied.status).toBe(200); expect((await json(denied)).data).toEqual([])
+  }
+})
+it.each([{ field: false }, { target: false }, { targetName: false }, { targetId: false }])('collision projection prunes whole hidden predicates: %j', async options => {
+  const collision = await collisionApp({ ...options, views: true })
+  const response = await request(collision, '/o/org-a/console-model', 'GET', undefined, 'administrator')
+  expect(response.status).toBe(200)
+  const body = await json(response)
+  const views = body.model.entities.records.list?.views ?? []
+  expect(views.some((view: any) => view.id === 'relation')).toBe(false)
+  expect(views.some((view: any) => view.id === 'scalar')).toBe(options.targetName === false)
+  if (options.field === false || options.target === false || options.targetId === false) expect(body.model.entities.records.list?.filter?.client).toBeUndefined()
+  if (options.field === false) for (const client of [{ in: ['team-a'] }, { id: { in: ['team-a'] } }]) {
+    const denied = await request(collision, '/query', 'POST', { entity: 'records', select: ['id'], limit: 1, where: { client } }, 'administrator')
+    expect(denied.status).toBe(403)
+  }
+  if (options.targetName === false) {
+    const denied = await request(collision, '/query', 'POST', { entity: 'records', select: ['id'], limit: 1, where: { client: { name: { eq: 'A' } } } }, 'administrator')
+    expect(denied.status).toBe(403)
+  }
+  const hiddenView = await request(collision, '/query', 'POST', { entity: 'records', select: ['id'], limit: 1, view: 'relation' }, 'administrator')
+  expect(hiddenView.status).toBe(400)
+  expect(await json(hiddenView)).toEqual({ error: 'query_invalid', path: ['view'] })
+  if (options.target === false || options.targetId === false) {
+    const denied = await request(collision, '/query', 'POST', { entity: 'records', select: ['id'], limit: 1, where: { client: { id: { in: ['team-a'] } } } }, 'administrator')
+    expect(denied.status).toBe(403)
+    const scalar = await request(collision, '/query', 'POST', { entity: 'records', select: ['id'], limit: 1, where: { client: { in: ['team-a'] } } }, 'administrator')
+    expect(scalar.status).toBe(200); expect((await json(scalar)).data).toEqual([])
+  }
+})
+it('collision mixed scalar/relation operand fails closed with the existing documented query_invalid error', async () => {
+  const collision = await collisionApp()
+  const response = await request(collision, '/query', 'POST', { entity: 'records', limit: 1, where: { client: { in: ['team-a'], id: { eq: 'team-a' } } } }, 'administrator')
+  expect(response.status).toBe(400)
+  expect(await json(response)).toEqual({ error: 'query_invalid', path: ['where', 'client'] })
+})
+
+it.each([
+  [true, true], [false, true], [true, false], [false, false],
+])('collision empty-in stays scalar with operator-named target relation: collision=%s, target relation=%s', async (collision, operatorRelation) => {
+  await env.DB.exec('ALTER TABLE records ADD COLUMN client TEXT; UPDATE records SET client=team_id;')
+  const source = defineInstance({ ...policyGraph, entities: { ...policyGraph.entities,
+    records: { ...policyGraph.entities.records,
+      fields: { ...policyGraph.entities.records.fields, client: { type: 'ref', entity: 'teams' } },
+      relations: { ...policyGraph.entities.records.relations, ...(collision ? { client: { entity: 'teams', field: 'client' } } : {}) } },
+    teams: { ...policyGraph.entities.teams,
+      relations: { ...policyGraph.entities.teams.relations, ...(operatorRelation ? { in: { entity: 'records', field: 'client', many: true } } : {}) } },
+  } })
+  const kernel = new KernelRegistry(source)
+  const actor = await resolveActor(new Request('http://localhost', { headers: { Authorization: 'Bearer synthetic-administrator' } }), runtime(), kernel.config)
+  const scope = await requireScope(actor, 'org-a', kernel.config)
+  const input = { entity: 'records', select: ['id'], limit: 100, where: { client: { in: [] } } }
+  const { query, cost } = validateQuery(kernel, scope, input)
+  expect(cost).toMatchObject({ depth: 0, relations: 0, exists: 2 })
+  // Check both boundaries even if compilation regresses before HTTP execution.
+  expect.soft(() => compileRoot(kernel, scope, query, undefined, cost)).not.toThrow()
+  const response = await request(createApp(source, runtime()), '/query', 'POST', input, 'administrator')
+  expect.soft(response.status).toBe(200)
+  expect((await json(response)).data).toEqual([])
+  const statement = compileRoot(kernel, scope, query, undefined, cost)
+  const rows = await env.DB.prepare(statement.sql).bind(...statement.bindings).all()
+  expect(rows.results).toEqual([])
+})
+
+it('collision picker selection produces the unchanged scalar payload and correct HTTP rows', async () => {
+  const collision = await collisionApp()
+  const definition = structuredClone(model), grant = structuredClone(caps)
+  definition.entities.records.fields.client = { type: 'ref', entity: 'teams' }
+  definition.entities.records.relations.client = { entity: 'teams', field: 'client', cardinality: 'n:1' }
+  definition.entities.records.list!.filter = { client: { kind: 'relation', placement: 'panel', operators: ['in'] } }
+  grant.entities.records.readable.push('client')
+  const lookup = await request(collision, '/query', 'POST', pickerQuery(definition, 'teams', grant), 'administrator')
+  expect(lookup.status).toBe(200)
+  const selected = (await json(lookup)).data[0].id
+  const { state, dropped } = stateFromSearch({ filters: [{ field: 'client', predicate: { in: [selected] } }] }, definition, 'records', grant)
+  expect(dropped).toBe(false)
+  const query = toQueryDocument(state, definition, 'records', grant)
+  expect(query.where).toEqual({ and: [{ client: { in: [selected] } }] })
+  const response = await request(collision, '/query', 'POST', query, 'administrator')
+  expect(response.status).toBe(200)
+  expect((await json(response)).data.map((row: any) => row.id)).toEqual(['record-colleague', 'record-own'])
+})
+it.each([
+  [{ client: { eq: null } }, ['record-colleague']],
+  [{ client: { in: [null, 'team-a'] } }, ['record-colleague', 'record-own']],
+  [{ client: { ne: null } }, ['record-own']],
+  [{ client: { ne: 'team-a' } }, []],
+  [{ not: { client: { in: ['team-a'] } } }, []],
+  [{ or: [{ client: { isNull: true } }, { client: { id: { eq: 'team-a' } } }] }, ['record-colleague', 'record-own']],
+])('collision nullable scalar semantics remain scoped under reviewer: %j', async (where, expected) => {
+  const collision = await collisionApp()
+  await env.DB.exec("UPDATE records SET client=NULL WHERE id='record-colleague'")
+  const response = await request(collision, '/query', 'POST', { entity: 'records', select: ['id'], limit: 100, where }, 'reviewer')
+  expect(response.status).toBe(200)
+  expect((await json(response)).data.map((row: any) => row.id)).toEqual(expected)
+})
+
+it.each([false, true])('review2 policy collision=%s rejects unsupported scalar shape or enforces deny-all', async collision => {
+  await env.DB.exec('ALTER TABLE records ADD COLUMN client TEXT; UPDATE records SET client=team_id;')
+  let source: ReturnType<typeof defineInstance>
+  try {
+    source = defineInstance({ ...policyGraph, entities: { ...policyGraph.entities,
+      records: { ...policyGraph.entities.records,
+        fields: { ...policyGraph.entities.records.fields, client: { type: 'ref', entity: 'teams' } },
+        relations: { ...policyGraph.entities.records.relations, ...(collision ? { client: { entity: 'teams', field: 'client' } } : {}) } },
+    }, policies: { ...policyGraph.policies, records: { ...policyGraph.policies.records,
+      administrator: { where: { client: { in: [] } } }
+    } } })
+  } catch (error) {
+    console.log(JSON.stringify({ name: 'policy-scalar-empty-in', collision, phase: 'config', rejected: true }))
+    if (!collision) throw error
+    return
+  }
+  console.log(JSON.stringify({ name: 'policy-scalar-empty-in', collision, phase: 'config', accepted: true }))
+  const app = createApp(source, runtime())
+  const response = await request(app, '/query', 'POST', { entity: 'records', select: ['id'], limit: 100 }, 'administrator')
+  const body = await json(response)
+  console.log(JSON.stringify({ name: 'policy-scalar-empty-in', collision, phase: 'HTTP', status: response.status, body }))
+  expect(response.status).toBe(200)
+  expect(body.data).toEqual([])
 })
