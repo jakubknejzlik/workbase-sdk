@@ -231,12 +231,26 @@ function ListPageBody({ discard, onDiscarded, savedViewsScope, model, caps, orgI
     setColumnOrder(order)
   }
   const columns = list.offsetPaging ? [...tableColumns.filter(column => column.id === primary), ...ordered.filter(column => shown(column.id)), ...tableColumns.filter(column => column.id === '_actions')] : tableColumns
+  const filteredEmpty = !!(list.state.search || chips.length)
+  const clearEmptyFilters = filteredEmpty ? () => list.onStateChange({ ...list.state, search: '', userFilters: [], rowAccess: undefined }, 'filter') : undefined
+  // An empty page is not proof of an empty collection, especially inside a preset or a context list.
+  const emptyPage = list.page > 0 || (list.data?.total ?? 0) > 0
+  const emptyCollection = !contextList && !list.state.presetFilters.length && (!list.state.view || list.state.view === 'all') && !emptyPage && list.data?.total === 0
+  const emptyAction = !filteredEmpty && !emptyPage ? primaryAction : undefined
+  const emptyContent = <div className="flex flex-col items-center px-6 py-[68px] text-center">
+    <span aria-hidden="true" className="mb-[18px] flex size-14 items-center justify-center rounded-[18px] bg-primary/10 text-foreground">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">{filteredEmpty ? <><circle cx="10.5" cy="10.5" r="6.5" /><path d="m16 16 4 4" /></> : <><rect x="4" y="3" width="16" height="18" rx="2" /><path d="M8 8h8M8 12h8M8 16h4" /></>}</svg>
+    </span>
+    <h2 className="mb-3 text-lg font-normal text-foreground">{t(filteredEmpty ? 'listS3NoMatchesHeading' : emptyPage ? 'listS3EmptyPageHeading' : emptyCollection ? 'listS3EmptyHeading' : 'listS3EmptyViewHeading')}</h2>
+    <p className="mb-[22px] max-w-[390px] text-xs leading-[1.7] text-muted-foreground">{t(filteredEmpty ? 'listEmptyFilteredDescription' : emptyPage ? 'listS3EmptyPageHelp' : emptyCollection && emptyAction ? 'listS3CreateHelp' : 'listS3EmptyViewHelp')}</p>
+    {clearEmptyFilters ? <PrimitiveButton type="button" variant="outline" onClick={clearEmptyFilters}>{t('clearSearchFilters')}</PrimitiveButton> : emptyAction && <PrimitiveButton type="button" onClick={emptyAction.onAction}>{emptyAction.label}</PrimitiveButton>}
+  </div>
   const content = list.state.presentation === 'calendar' ? <>
       <EntityCalendar model={model} entity={entity} caps={caps} orgId={orgId} state={list.state} data={list.data} pending={list.result.isFetching} error={error ? t(queryCodes.includes(error.code as any) ? `query_${error.code}` : 'requestFailed') : undefined} onChange={state => list.onStateChange(state, 'view')} onCreate={calendarCreate} onPage={list.onPage} previous={list.page > 0} />
     </> : <div className="caption-bottom"><DataTable fixedDensity={tableColumns.some(column => column.id === '_access')} listV2={list.offsetPaging} hideFooter={list.offsetPaging} scrollOnNarrow={list.offsetPaging} compact={displayPrefs.compact} mobileCards={definition.list?.mobileCards} rows={rows} columns={columns} state={list.state} onStateChange={list.onStateChange} page={list.page} range={list.range} onPage={list.onPage} nextCursor={error ? null : list.data?.next_cursor} isFetching={list.result.isFetching} onRetry={() => { void list.result.refetch() }} error={error ? new Error(t(queryCodes.includes(error.code as any) ? `query_${error.code}` : 'requestFailed')) : null}
       label={t(`entity_${entity}`)} labels={{ error: t('requestFailed'), errorDescription: t('listRequestFailedDescription'), retry: t('listRetry'), search: t('search'), clearSearch: t('clearSearch'), noResults: list.result.isPending ? t('loading') : t('noResults'), emptyDescription: t(list.state.search || chips.length ? 'listEmptyFilteredDescription' : 'listEmptyViewDescription'), scrollRegion: t('listScrollRegion'), scrollHint: t('listScrollHint'), previous: t('previousPage'), next: t('nextPage'), previousText: t('paginationPrevious'), nextText: t('paginationNext'), pageSizeOption: size => t('paginationSize', { count: size }), pageSize: t('rowsPerPage'), sort: column => t('sortColumn', { column }), sortAndFilter: t('sortAndFilter'), sortStates: { asc: t('sortAscending'), desc: t('sortDescending'), none: t('sortNone') }, range: (start, end) => t('listRange', { start: new Intl.NumberFormat(i18n.language).format(start), end: new Intl.NumberFormat(i18n.language).format(end) }) }}
       staleLabel={list.stale ? t('listRowsStale') : undefined}
-      clearFilters={t('clearSearchFilters')} onClearFilters={list.state.search || chips.length ? () => list.onStateChange({ ...list.state, search: '', userFilters: [], rowAccess: undefined }, 'filter') : undefined}
+      emptyContent={emptyContent} clearFilters={t('clearSearchFilters')} onClearFilters={clearEmptyFilters}
       searchAvailable={false} pendingSearch={searchPending}
       searchDescription={t('searchAllColumns')}
       onRowClick={row => { void navigate({ to: '/o/$orgId/e/$entity/$id', params: { orgId, entity, id: String(row.id) } }) }} /></div>
