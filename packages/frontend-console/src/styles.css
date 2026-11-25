@@ -100,8 +100,7 @@
 
 /* List presentation geometry; shared typography and surface roles live in UI. */
 [data-slot="sidebar-wrapper"]:has([data-slot="list-page"]) { --sidebar-width: 206px; }
-[data-slot="sidebar-inset"]:has([data-slot="list-page"]),
-main:has([data-slot="list-page"]) { background-color: var(--background); }
+main:has([data-slot="list-page"]) { background-color: var(--canvas); }
 main:has([data-slot="list-page"]) h1 { font-weight: 400; }
 @media (min-width: 768px) {
   main:has([data-slot="list-page"]) h1 { font-size: 2rem; line-height: 1.17; letter-spacing: -.95px; }

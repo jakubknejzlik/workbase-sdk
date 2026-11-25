@@ -1397,9 +1397,18 @@ for (const language of ['en', 'cs'] as const) for (const width of [1440, 1280, 9
       await Promise.all(document.getAnimations().filter(animation => animation.effect?.getComputedTiming().iterations !== Infinity).map(animation => animation.finished.catch(() => {})))
       const table = document.querySelector('[data-list-density]')!, cell = table.querySelector('td')!, header = table.querySelector('thead tr')!, row = table.querySelector('tbody tr')!
       const style = getComputedStyle(cell)
+      // Transparent slots inherit the first painted ancestor surface.
+      const surface = (selector: string) => {
+        for (let node = document.querySelector(selector); node; node = node.parentElement) {
+          const color = getComputedStyle(node).backgroundColor
+          if (color !== 'rgba(0, 0, 0, 0)' && color !== 'transparent') return color
+        }
+        return 'transparent'
+      }
+      const surfaces = { appHeader: surface('[data-slot="sidebar-inset"] > header'), canvas: surface('[data-slot="sidebar-inset"]'), tabs: surface('[data-list-slot="tabs"]'), toolbar: surface('[data-list-slot="toolbar"]') }
       const sidebar = document.querySelector('[data-slot="sidebar"]')?.getBoundingClientRect()
       return { fontReady: document.fonts.check('12px Alata'), family: style.fontFamily, fontSize: parseFloat(style.fontSize), lineHeight: parseFloat(style.lineHeight), headerHeight: header.getBoundingClientRect().height, rowHeight: row.getBoundingClientRect().height,
-        rowBorder: getComputedStyle(row).borderBottomColor, surface: getComputedStyle(table.querySelector('table') ?? table).backgroundColor, panelRadius: getComputedStyle(document.querySelector('[data-slot="list-page"]')!).borderRadius,
+        rowBorder: getComputedStyle(row).borderBottomColor, surfaces, surface: getComputedStyle(table.querySelector('table') ?? table).backgroundColor, panelRadius: getComputedStyle(document.querySelector('[data-slot="list-page"]')!).borderRadius,
         padding: Array.from(row.children).map(cell => { const s = getComputedStyle(cell); return [s.paddingTop, s.paddingRight, s.paddingBottom, s.paddingLeft] }),
         weights: Array.from(document.querySelectorAll('h1,h2,h3,strong,b,[data-slot="card-title"],[data-slot="dialog-title"]')).map(node => getComputedStyle(node).fontWeight),
         sidebar: sidebar ? { x: sidebar.x, width: sidebar.width } : null, pageWidth: document.documentElement.scrollWidth, viewport: innerWidth }
@@ -1408,6 +1417,8 @@ for (const language of ['en', 'cs'] as const) for (const width of [1440, 1280, 9
     await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
     expect(await measure()).toEqual(metrics)
     expect(metrics.fontReady).toBe(true); expect(metrics.family).toMatch(/^Alata/)
+    for (const role of ['appHeader', 'tabs', 'toolbar'] as const) expect(['rgb(255, 255, 255)', 'oklch(1 0 0)'], `${role} stays white`).toContain(metrics.surfaces[role])
+    expect(metrics.surfaces.canvas).toBe('oklch(0.976984 0.00397074 286.326)')
     expect(['rgb(255, 255, 255)', 'oklch(1 0 0)']).toContain(metrics.surface); expect(metrics.panelRadius).toBe('14px'); expect(metrics.rowBorder).toBe('rgb(238, 241, 247)')
     expect(metrics.fontSize).toBe(12); expect(metrics.lineHeight).toBeCloseTo(17.76, 2)
     expect(metrics.headerHeight).toBe(45); expect(metrics.rowHeight).toBe(66)
