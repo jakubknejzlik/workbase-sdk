@@ -211,7 +211,8 @@ it.each([403, 404, 500])('status error %s never becomes no access', async error 
 })
 it('loading never becomes no access', async () => {
   await mount({ loading: true })
-  expect(screen.getByRole('status').textContent).toContain('Loading')
+  const card = screen.getByText('Application access').closest('[data-application-access]') as HTMLElement
+  expect(within(card).getByRole('status').textContent).toContain('Loading')
   expect(screen.queryByText('No access')).toBeNull()
 })
 it.each([{ available: false }, { transport: false }])('unavailable access retains one read-only card: %o', async options => {

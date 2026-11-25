@@ -1,5 +1,5 @@
 // Dev-only proof composition; never linked from the console frame or shipped in production.
-import { ActionDialog, RegistryForm, DataTableFilterDropdown, TextFilter } from '@workbasehq/ui'
+import { ActionDialog, RegistryForm, DataTable, DataTableFilterDropdown, TextFilter } from '@workbasehq/ui'
 import { useRef, useState } from 'react'
 import { Button } from '@workbasehq/ui/components/ui/button'
 import { Dialog, DialogTrigger, DialogContent, DialogTitle, DialogDescription, DialogClose } from '@workbasehq/ui/components/ui/dialog'
@@ -33,11 +33,46 @@ function DisabledButtonsProof() {
     <output aria-label="Example activations">{activations}</output>
   </fieldset>
 }
+// Begin custom-slot DataTable proof: local state only, shared desktop/table and mobile/card rendering.
+const tableProofStates = ['populated', 'empty', 'error', 'pending', 'pending+error'] as const
+type TableProofState = typeof tableProofStates[number]
+const tableProofRows = [{ id: 'one', name: 'Sample entry', status: 'Ready' }, { id: 'two', name: 'Another entry', status: 'Draft' }]
+function DataTableEmptyContentProof() {
+  const [proofState, setProofState] = useState<TableProofState>('populated')
+  const pending = proofState === 'pending' || proofState === 'pending+error'
+  const failed = proofState === 'error' || proofState === 'pending+error'
+  return <section aria-labelledby="custom-slot-proof-title" data-proof="DataTable custom emptyContent" className="relative left-1/2 w-[calc(100vw-2rem)] max-w-6xl -translate-x-1/2 space-y-4 rounded-md border p-4">
+    <h2 id="custom-slot-proof-title" className="text-lg font-medium">DataTable custom empty content</h2>
+    <p>Static local rows with shared table and mobile card feedback.</p>
+    <label htmlFor="custom-slot-proof-state">DataTable proof state</label>
+    <NativeSelect id="custom-slot-proof-state" value={proofState} onChange={event => setProofState(event.target.value as TableProofState)}>
+      {tableProofStates.map(value => <option key={value} value={value}>{value}</option>)}
+    </NativeSelect>
+    {pending && <p role="status">Loading proof rows…</p>}
+    <DataTable rows={proofState === 'populated' ? tableProofRows : []}
+      columns={[{ id: 'name', label: 'Name', cell: row => row.name }, { id: 'status', label: 'Status', cell: row => row.status }]}
+      state={{ search: '', sort: null, limit: 10 }} onStateChange={() => {}} page={0} onPage={() => {}}
+      isFetching={pending} error={failed ? new Error('The sample rows could not be loaded. Please try again.') : null}
+      onRetry={() => setProofState('populated')} onRowClick={() => {}} label="Custom slot sample rows"
+      searchAvailable={false} hideFooter mobileCards
+      labels={{ search: 'Search sample rows', clearSearch: 'Clear search', noResults: 'No results',
+        previous: 'Previous page', next: 'Next page', pageSize: 'Rows per page', range: (start, end) => `${start}–${end}`,
+        sort: column => `Sort by ${column}`, error: 'Unable to load sample rows', retry: 'Retry sample rows' }}
+      emptyContent={<div className="space-y-3 p-6 text-center">
+        <h3 className="text-lg font-medium">No sample entries yet</h3>
+        <p className="text-muted-foreground">Add the local sample entries to explore this table.</p>
+        <Button type="button" onClick={() => setProofState('populated')}>Add sample entries</Button>
+      </div>}
+    />
+  </section>
+}
+// End custom-slot DataTable proof.
 export function PrimitiveProofs() {
   const [tooltipOpen, setTooltipOpen] = useState(false)
   return <section className="c6a-proofs space-y-4">
     <h1 tabIndex={-1}>Primitive proof harness</h1>
     <p>Development accessibility and CSP proof controls.</p>
+    <DataTableEmptyContentProof />
     <DisabledButtonsProof />
     <DataTableFilterDropdown label="Filter proof" active={false} activeLabel="Active filter">{() => <TextFilter value="" onChange={() => {}} label="Contains" />}</DataTableFilterDropdown>
     <Button variant="outline">Outside focus target</Button>

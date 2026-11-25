@@ -93,6 +93,26 @@
 .compact-data-table th button { min-width: 0; flex-shrink: 1; white-space: normal; }
 .compact-data-table th button > span { min-width: 0; }
 
+/* Begin #318 E1 dashboard section. */
+/* #318 E1 — existing dashboard widget composition and card presentation. */
+.dashboard-cards { display: grid; gap: 16px; min-width: 0; container-type: inline-size; }
+[data-dashboard-row] { display: grid; grid-template-columns: minmax(0, 1fr); align-items: start; gap: 16px; min-width: 0; }
+@container (min-width: 640px) {
+  [data-dashboard-columns="2"], [data-dashboard-columns="3"] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@container (min-width: 1040px) {
+  [data-dashboard-columns="3"] { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+.dashboard-card { max-width: 100%; padding-block: 0; gap: 0; box-shadow: none; }
+.dashboard-card > [data-slot="card-header"] { padding: 21px 22px; border-bottom: 1px solid var(--border); }
+.dashboard-card [data-slot="card-title"] { min-width: 0; font-size: 16px; line-height: 1.4; overflow-wrap: anywhere; }
+.dashboard-card > [data-slot="card-content"] { min-width: 0; padding: 22px; }
+@media (max-width: 680px) {
+  .dashboard-card > [data-slot="card-header"], .dashboard-card > [data-slot="card-content"] { padding: 18px; }
+}
+/* End #318 E1. */
+/* End #318 E1 dashboard section. */
+
 .compact-data-table th button[data-filter-trigger] { flex-shrink: 0; }
 @media (max-width: 767px) {
   .compact-data-table th > div { flex-direction: column; align-items: center; }
@@ -188,6 +208,33 @@ body:has([data-slot="list-page"]) [data-list-row-menu] [role="menuitem"] { min-h
 @media (max-width: 1023px) {
   .list-page-footer { padding: 14px; flex-direction: column; align-items: stretch; }
 }
+
+/* #317 settings hierarchy and secondary navigation — start */
+[data-slot="settings-layout"] { padding: 22px 27px 48px; }
+[data-slot="settings-navigation"] { max-width: 100%; }
+[data-slot="settings-navigation"] nav { align-items: stretch; padding-inline: 20px; scrollbar-width: thin; overscroll-behavior-x: contain; scroll-padding-inline: 8px; }
+.wb-settings-group { display: flex; flex: 0 0 auto; align-items: stretch; }
+.wb-settings-group + .wb-settings-group { border-inline-start: 1px solid var(--border); }
+.wb-settings-group-label { align-self: center; padding-inline: 14px 4px; max-width: 18rem; overflow-wrap: anywhere; color: var(--muted-foreground); font-size: 11px; }
+.wb-settings-link { position: relative; display: flex; flex: 0 0 auto; align-items: center; gap: 8px; max-width: 22rem; padding: 12px 13px; border-bottom: 3px solid transparent; color: var(--muted-foreground); font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; text-decoration: none; }
+.wb-settings-link:hover { color: var(--foreground); background: var(--muted); }
+.wb-settings-link-active, .wb-settings-link[aria-current="page"] { color: var(--foreground); border-bottom-color: var(--foreground); }
+.wb-settings-link:focus-visible { outline: 2px solid var(--ring); outline-offset: -5px; border-radius: 6px; }
+.wb-settings-link svg { flex-shrink: 0; }
+[data-slot="settings-layout"] > h1 { font-size: 32px; line-height: 1.17; letter-spacing: -.95px; }
+[data-slot="settings-heading"] p { margin-top: 8px; font-size: 13px; line-height: 1.7; }
+[data-slot="settings-page"].bg-card { padding: 22px; }
+[data-slot="settings-panel"] input { max-width: 100%; }
+[data-slot="settings-actions"] > button { height: auto; min-height: 40px; max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+[data-slot="settings-panel"] [data-slot="settings-actions"]:empty { display: none; }
+@media (max-width: 749px) {
+  [data-slot="settings-layout"] { padding: 18px 14px 40px; }
+  [data-slot="settings-navigation"] nav { padding-inline: 4px; }
+  .wb-settings-link { max-width: 17rem; padding: 12px 14px; }
+  [data-slot="settings-layout"] > h1 { font-size: 27px; }
+  [data-slot="settings-page"].bg-card { padding: 18px; }
+}
+/* #317 settings hierarchy and secondary navigation — end */
 
 /* #316 C1 — detail heading and secondary identity */
 [data-slot="detail-page"] h1 { font-size: 32px; line-height: 1.17; letter-spacing: -.95px; }

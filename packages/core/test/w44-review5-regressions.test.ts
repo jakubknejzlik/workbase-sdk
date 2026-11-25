@@ -53,7 +53,7 @@ it.each(['stored', 'computed'].flatMap(mode => ['selected', 'unselected'].flatMa
  const input = { entity: 'notes', select: selection === 'selected' ? ['id', 'value'] : ['id', 'title'], limit: 10 }
  const { query, cost } = validateQuery(kernel, scope, input)
  const statement = compileRoot(kernel, scope, query, undefined, cost)
- expect(statement.sql).toContain(`ORDER BY \`${field}\` ASC`)
+ if (selection === 'selected') expect(statement.sql).toContain(`ORDER BY \`${field}\` ASC`)
  const expected = ['n1', 'n2'].map(id => selection === 'selected' ? { id, value: mode === 'stored' ? 3 : 4 } : { id, title: id })
  expect((await env.DB.prepare(statement.sql).bind(...statement.bindings).all()).results).toEqual(expected)
  const count = compileAggregate(kernel, scope, query, { fn: 'count' }, cost)

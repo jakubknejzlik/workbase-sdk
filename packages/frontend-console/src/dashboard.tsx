@@ -7,7 +7,7 @@ import { StaticDataTable } from '@workbasehq/ui'
 import { TablePresentationContext, useTablePresentation } from '../../ui/src/data-table/presentation'
 import { formatFieldValue, recordLabel, visibleEntities, type Model, type Capabilities } from '@workbasehq/console-generated/read'
 import { signedValue } from '@workbasehq/console-generated/screens'
-import { DetailCards } from '../../console-generated/src/detail-layout'
+import { DashboardCards } from './dashboard-layout'
 import { shortRecordId } from '../../console-generated/src/labels'
 import { listColumnAlignment } from '../../console-generated/src/list-presentation'
 import type { ConsoleModelContract, ConsolePage, ConsolePageResult, ConsoleWidgetResult } from '../../plugins/console/src/contract'
@@ -96,7 +96,7 @@ export function WidgetCards({ orgId, page, result, pending, error, model, caps, 
   // Successful responses contain only server-authorized widgets; denied cards never mount.
   const widgets = result ? result.widgets : page.widgets ?? []
   if (!widgets.length) return <p className="text-sm text-muted-foreground">{t('dashboardEmpty')}</p>
-  return <DetailCards sections={result ? result.sections : page.sections} cards={widgets.map(widget => ({ key: widget.id, content: <Card className="min-w-0" data-widget={widget.id}>
+  return <DashboardCards sections={result ? result.sections : page.sections} cards={widgets.map(widget => ({ key: widget.id, content: <Card className="dashboard-card min-w-0" data-widget={widget.id}>
     <CardHeader><CardTitle><h2>{caption(widget.label)}</h2></CardTitle></CardHeader><CardContent className="space-y-3">{error ? <p role="alert">{t('requestFailed')}</p> : pending ? <Skeleton role="status" aria-label={t('loading')} className="h-16 w-full" /> : content(widget as ConsoleWidgetResult)}</CardContent>
   </Card> }))} />
 }
