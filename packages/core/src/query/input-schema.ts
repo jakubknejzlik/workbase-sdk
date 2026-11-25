@@ -49,7 +49,8 @@ export function filterSchema(config: InstanceConfig, rest = false, maxDepth = L.
       if (depth < maxDepth) for (const [relation, r] of Object.entries(config.entities[name].relations)) {
         const child = filter(r.entity, depth + 1)
         const nested = r.many ? z.union([z.strictObject({ some: child }), z.strictObject({ none: child })]) : child
-        shape[relation] = (shape[relation] ? z.union([shape[relation], nested])
+        // Policy consumers dispatch by relation key; preserve their relation-only grammar.
+        shape[relation] = (!actorValues && shape[relation] ? z.union([shape[relation], nested])
           .refine(value => value === undefined || operandKind(config, name, relation, value) !== 'invalid', 'Mixed scalar and relation operands are invalid') : nested).optional()
       }
       if (actorValues) shape.actorLinkedIn = z.string().refine(entity =>

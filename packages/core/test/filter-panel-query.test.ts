@@ -190,3 +190,28 @@ it.each([
   expect(response.status).toBe(200)
   expect((await json(response)).data.map((row: any) => row.id)).toEqual(expected)
 })
+
+it.each([false, true])('review2 policy collision=%s rejects unsupported scalar shape or enforces deny-all', async collision => {
+  await env.DB.exec('ALTER TABLE records ADD COLUMN client TEXT; UPDATE records SET client=team_id;')
+  let source: ReturnType<typeof defineInstance>
+  try {
+    source = defineInstance({ ...policyGraph, entities: { ...policyGraph.entities,
+      records: { ...policyGraph.entities.records,
+        fields: { ...policyGraph.entities.records.fields, client: { type: 'ref', entity: 'teams' } },
+        relations: { ...policyGraph.entities.records.relations, ...(collision ? { client: { entity: 'teams', field: 'client' } } : {}) } },
+    }, policies: { ...policyGraph.policies, records: { ...policyGraph.policies.records,
+      administrator: { where: { client: { in: [] } } }
+    } } })
+  } catch (error) {
+    console.log(JSON.stringify({ name: 'policy-scalar-empty-in', collision, phase: 'config', rejected: true }))
+    if (!collision) throw error
+    return
+  }
+  console.log(JSON.stringify({ name: 'policy-scalar-empty-in', collision, phase: 'config', accepted: true }))
+  const app = createApp(source, runtime())
+  const response = await request(app, '/query', 'POST', { entity: 'records', select: ['id'], limit: 100 }, 'administrator')
+  const body = await json(response)
+  console.log(JSON.stringify({ name: 'policy-scalar-empty-in', collision, phase: 'HTTP', status: response.status, body }))
+  expect(response.status).toBe(200)
+  expect(body.data).toEqual([])
+})
