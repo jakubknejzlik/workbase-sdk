@@ -19,6 +19,6 @@ try {
     await proxy.env.DB.prepare('INSERT INTO sessions VALUES (?,?,?)').bind(await sha256(`list-v2-${id}-session`), id, new Date(Date.now() + 3600000).toISOString()).run()
   }
   for (const [id, name] of [['north', 'North team'], ['south', 'South team']]) await proxy.env.DB.prepare("INSERT INTO team (id,organization_id,name,created_at,updated_at) VALUES (?,'org-a',?,?,?)").bind(id, name, now, now).run()
-  for (const row of workers) await proxy.env.DB.prepare("INSERT INTO worker (id,organization_id,name,code,status,team_id,user,created_at,updated_at) VALUES (?,'org-a',?,?,?,?,?,?,?)").bind(row.id, row.name, row.code, row.status, row.team_id, row.user, now, now).run()
+  for (const row of workers) await proxy.env.DB.prepare("INSERT INTO worker (id,organization_id,name,code,status,team_id,amount,due_on,approved,description,user,created_at,updated_at) VALUES (?,'org-a',?,?,?,?,?,?,?,?,?,?,?)").bind(row.id, row.name, row.code, row.status, row.team_id, row.amount, row.due_on, row.approved ? 1 : 0, row.description, row.user, now, now).run()
   for (const [id, target, expires] of [['pending', 'w002', '2099-01-01T00:00:00.000Z'], ['expired', 'w005', '2020-01-01T00:00:00.000Z']]) await proxy.env.DB.prepare("INSERT INTO invitations (id,organization_id,email,role,token_hash,expires_at,inviter_id,created_at,target_entity,target_row) VALUES (?,'org-a',?,'staff',?,?,'admin',?,'worker',?)").bind(id, `${id}@example.test`, await sha256(`synthetic-${id}`), expires, now, target).run()
 } finally { await proxy.dispose() }
