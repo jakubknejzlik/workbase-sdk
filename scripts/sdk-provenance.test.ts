@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { assertSdkArchives, assertSdkPackageNames, sdkArchives, sdkSource, writeSdkProvenance } from './sdk-provenance'
 
-const assetFiles = ['index.html', 'assets/console.js', 'assets/console.css', 'locales/en.json', 'locales/cs.json', 'build-meta.json', 'LICENSE', 'NOTICE']
+const assetFiles = ['index.html', 'assets/console.js', 'assets/console.css', 'locales/en.json', 'locales/cs.json', 'build-meta.json', 'LICENSE', 'NOTICE', 'assets/Alata-Regular.ttf', 'licenses/alata/OFL.txt']
 const assetPath = (file: string) => `packages/plugins/console/assets/${file}`
 
 function withSourceRepository(run: (root: string, git: (args: string[]) => string) => void) {
@@ -36,7 +36,9 @@ function stageAssets(root: string) {
   for (const file of assetFiles) {
     const path = join(root, assetPath(file))
     mkdirSync(join(path, '..'), { recursive: true })
-    writeFileSync(path, `fixture payload: ${file}\n`)
+    writeFileSync(path, file === 'assets/Alata-Regular.ttf' || file === 'licenses/alata/OFL.txt'
+      ? readFileSync(join(import.meta.dirname, '../packages/ui/src/assets/fonts', file.split('/').at(-1)!))
+      : `fixture payload: ${file}\n`)
   }
 }
 
@@ -117,7 +119,7 @@ test('plugins pack includes ignored console payloads with the release manifest f
     for (const file of assetFiles) {
       const member = `package/console/assets/${file}`
       assert.ok(members.includes(member), member)
-      assert.equal(execFileSync('tar', ['-xOf', archive, member], { encoding: 'utf8' }), readFileSync(join(root, assetPath(file)), 'utf8'))
+      assert.deepEqual(execFileSync('tar', ['-xOf', archive, member]), readFileSync(join(root, assetPath(file))))
     }
   })
 })

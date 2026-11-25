@@ -75,7 +75,7 @@ beforeEach(async () => {
   await symlink(resolve('packages/mcp/node_modules'), join(runtime, 'node_modules'))
   await writeFile(join(runtime, 'src/sdk-target.ts'), `export { captureSdkInputs, runSdkTarget } from ${JSON.stringify(resolve('packages/mcp/test/fixtures/sdk-upgrade-process.ts'))}\n`)
   entry = join(runtime, 'src/stdio.ts'); peers = []
-  await writeFile(entry, (await readFile(entry, 'utf8')).replace('process.exitCode = 0', 'process.disconnect?.(); process.exitCode = 0').replace('const { server, idle } = await createServer({ root, allowed })', `const { server, idle } = await createServer({ root, allowed })
+  await writeFile(entry, (await readFile(entry, 'utf8')).replace('process.exitCode = 0', 'process.disconnect?.(); process.exitCode = 0').replace('const transport = new StdioServerTransport()', `const transport = new StdioServerTransport()
   process.on('message', async message => { if (message === 'idle') { await idle(); process.send?.({ event: 'idle' }) } })`))
 })
 afterEach(async () => {

@@ -10,11 +10,14 @@ async function main() {
     console.log(JSON.stringify(await bootstrapInstance(args.root, { id: args.id, displayName: args.displayName, target: args.target })))
     return
   }
+  const { loadGitHubTarget } = await import('./github-target.ts')
   const { StdioServerTransport } = await import('@modelcontextprotocol/sdk/server/stdio.js')
   const { createServer } = await import('./server.ts')
   const { root, agentTest } = args
   const allowed = agentTest ? [await (await import('./template.ts')).createAgentInstance(root)] : undefined
-  const { server, idle } = await createServer({ root, allowed })
+  // Requests start after server construction; consult its current allowlist, including after bootstrap.
+  const github = await loadGitHubTarget(process.env.WORKBASE_GITHUB_TARGET, instance => store.allowed.has(instance))
+  const { server, idle, store } = await createServer({ root, allowed, github })
   const transport = new StdioServerTransport()
   let closing = false
   async function shutdown() {

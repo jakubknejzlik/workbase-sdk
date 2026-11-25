@@ -874,6 +874,34 @@
       "value": "worker-{stage}.account.workers.dev.",
       "reason": "SDK template comment illustrating a stage placeholder and Cloudflare provider URL; no actual account or deployment.",
       "lineNumber": 15
+    },
+    {
+      "path": "packages/plugins/console/NOTICE",
+      "line": "Copyright 2019 The Alata Project Authors (https://github.com/SorkinType/Alata)",
+      "lineNumber": 15,
+      "reason": "Exact upstream Alata OFL attribution and pinned font provenance.",
+      "value": "github.com"
+    },
+    {
+      "path": "packages/plugins/console/NOTICE",
+      "line": "Source: https://github.com/google/fonts/blob/d96b7183a2649df3c2f145627c33c279daf8726d/ofl/alata/Alata-Regular.ttf",
+      "lineNumber": 17,
+      "reason": "Exact upstream Alata OFL attribution and pinned font provenance.",
+      "value": "github.com"
+    },
+    {
+      "path": "packages/ui/src/assets/fonts/OFL.txt",
+      "line": "Copyright 2016 The Alata Project Authors (https://github.com/SorkinType/Alata)",
+      "lineNumber": 1,
+      "reason": "Exact upstream Alata OFL attribution and pinned font provenance.",
+      "value": "github.com"
+    },
+    {
+      "path": "packages/ui/src/assets/fonts/OFL.txt",
+      "line": "https://openfontlicense.org",
+      "lineNumber": 5,
+      "reason": "Exact upstream Alata OFL attribution and pinned font provenance.",
+      "value": "openfontlicense.org"
     }
   ]
 }

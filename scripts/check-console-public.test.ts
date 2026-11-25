@@ -146,3 +146,23 @@ it('preserves exact legal notice, vendor filename and re-export reviews', () => 
   expect(() => assertBytes(noticePath, Buffer.from(notice.replace('derived', 'copied')), reviewed)).toThrow('customer/owner content')
   expect(() => assertBytes('NOTICE', Buffer.from(notice), reviewed)).toThrow('customer/owner content')
 })
+
+it('checks exact Alata metadata/integrity and rejects mutations, renamed fonts and other binaries', () => {
+  const directory = registerTempDir(mkdtempSync(resolve(tmpdir(), 'console-font-scan-')))
+  const font = readFileSync(resolve(import.meta.dirname, '../packages/ui/src/assets/fonts/Alata-Regular.ttf'))
+  try {
+    mkdirSync(resolve(directory, 'assets'))
+    writeFileSync(resolve(directory, 'index.js'), 'const label = "field_name"')
+    const path = resolve(directory, 'assets/Alata-Regular.ttf')
+    writeFileSync(path, font)
+    expect(scan(directory)).toContain('0 private model IDs')
+    const mutation = Buffer.from(font); mutation[mutation.length - 1] ^= 1
+    writeFileSync(path, mutation)
+    expect(() => scan(directory)).toThrow('integrity')
+    writeFileSync(path, font)
+    writeFileSync(resolve(directory, 'assets/Other.ttf'), font)
+    expect(() => scan(directory)).toThrow('unreviewed binary asset')
+    writeFileSync(resolve(directory, 'assets/Other.ttf'), Buffer.from([0, 1, 2, 3]))
+    expect(() => scan(directory)).toThrow('unreviewed binary asset')
+  } finally { cleanupTempDir(directory) }
+})

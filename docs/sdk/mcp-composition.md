@@ -8,30 +8,26 @@ environment variables. Data and ops keep separate credentials and responsibiliti
 only those remote servers need an app origin such as `https://app.example.test`.
 Existing Instances must merge the new entry manually: init preserves existing files.
 
-For documentation matching the installed MCP package, call `list_docs({})`, then
-`read_doc({"name":"mcp-composition.md"})` (or another returned name). The four
-packaged guides include getting started, composition, 0.4.0 migration and onboarding.
-Responses identify the installed package version and SHA256 of the raw packaged
-bytes. Names are a closed enum; paths are not accepted. Documents are capped at
-32 KiB. Release packing copies the canonical guides into the package.
+Call `list_docs({})`, then `read_doc({"name":"mcp-composition.md"})` (or another
+returned name) for the four guides shipped with the installed package. Responses
+include its version and raw-byte SHA256. Names are a closed enum; paths are not
+accepted. The first successful load snapshots all four guides, each capped at
+32 KiB, for the server lifetime. Restart to load changed packaged docs.
 
 Before choosing a change, call `capabilities({"instance":"my-instance"})`.
-It enumerates the schema-defined change kinds and the real route for this baseline:
-legacy, composition or schema. `eligible` describes a stage's kind-level support;
-`reachable` describes whether that stage can be reached from a new proposal,
-assuming normal prerequisites succeed. Errors and upstream `blockedBy` reasons are
-separate. An eligible kind can still fail strict input/semantic validation,
-canonical-source checks, current revision/history/dependency checks, target role
-safety or disposable verification. Constraint batches must be separate; V3
-presentation batches cannot mix with runtime/access/domain edits.
+It derives change kinds and routes from the schemas and baseline. `eligible` means
+kind-level stage support; `reachable` means reachability from a new proposal if
+prerequisites succeed. Stage errors and upstream `blockedBy` reasons are separate.
+Strict validation, canonical source, revision/history/dependencies, target role
+safety and disposable verification still apply. Constraint batches must be separate;
+V3 presentation batches cannot mix with runtime/access/domain edits.
 
-`submissionConfigured` is conservative operator-owned metadata for this instance.
-It defaults to false, even if a global GitHub callback exists. The embedding
-operator may supply `createServer({root, github, submissionConfigured: instance =>
-configuredInstances.has(instance)})`; that synchronous metadata resolver must only
-read trusted local configuration, without credential retrieval, network calls or
-returning target details. It does not prove that credentials are usable. Stdio
-GitHub provisioning is a separate follow-up; this guide does not configure it.
+`submissionConfigured` is conservative per-instance operator metadata, false by
+default even with a global GitHub callback. Embedders may use
+`createServer({root, github, submissionConfigured: instance => configuredInstances.has(instance)})`.
+This synchronous resolver reads trusted local configuration only: no credential
+retrieval, network calls or target details. It does not prove credentials work.
+See Operator GitHub target below for stdio provisioning.
 
 For a fresh root, call `bootstrap_instance`, then `initialize_instance` with
 `{ "instance": "my-instance", "mode": "preview" }`. Review the five generated
@@ -474,5 +470,74 @@ report, source inspection, successful tool output and a consumer runtime retest 
 separate evidence states. The coordinator returns the reply to an MCP-only consumer;
 issue creation or delivery alone is not acknowledgment. SDK-native feedback tools
 are tracked separately in [#328](https://github.com/jakubknejzlik/workbase-sdk/issues/328).
-Startup/provisioning, physical-field publication and provenance redesign are also
-separate work; this docs/capabilities change does not implement them.
+Physical-field publication and provenance redesign remain separate work.
+
+### Operator GitHub target
+
+The stdio config server can submit a verified, promoted change as a GitHub PR.
+Before starting the server, the operator sets `WORKBASE_GITHUB_TARGET` to an
+absolute path to a JSON file with this strict schema (unknown properties are
+rejected):
+
+```json
+{
+  "owner": "example",
+  "repository": "example",
+  "baseBranch": "integration/preview",
+  "directory": "instances/example",
+  "credential": {
+    "type": "token-file",
+    "path": "/private/operator/github-token"
+  }
+}
+```
+
+`directory` defaults to `""` (the repository root). Otherwise it is a
+repository-relative prefix: slash-separated components containing only letters,
+digits, `_`, `-` and `.`, with no empty, `.` or `..` components. The target applies
+only to the instance allowed by this stdio server; unknown instances have no
+GitHub target. Repository, branch, prefix and credentials cannot be selected or
+overridden by tool arguments.
+
+For a GitHub App, replace `credential` with:
+
+```json
+{
+  "type": "github-app",
+  "appId": "123",
+  "installationId": "456",
+  "privateKeyPath": "/private/operator/github-app.pem"
+}
+```
+
+App and installation IDs accept positive integer numbers or decimal strings.
+The key must be an RSA private key. The server signs a short-lived RS256 JWT,
+requests an installation token from GitHub, and caches it in memory until five
+minutes before expiry. Concurrent requests share one token request. The token-file
+provider reads the trimmed token on each request, allowing operator rotation.
+Grant access only to the intended repository, including the contents and pull
+request permissions needed to create the branch, commit and PR.
+
+The target JSON, token file and private key must be regular files at absolute
+filesystem paths. Every path component must be free of symlinks; use resolved
+paths (for example `/private/tmp/...` rather than `/tmp/...` on macOS). Parent
+traversal is rejected. Token and key files must not be readable by group or
+others (`chmod 600`); violations refuse startup with
+`insecure_github_credential_permissions`. Unsafe paths return
+`unsafe_github_path`, unreadable files `github_config_unreadable`, malformed
+configuration `invalid_github_config`, and invalid token/key contents
+`invalid_github_credential`. Credential reads are checked again when needed.
+
+The agent never receives the credential, private key or App JWT. They are never
+written into proposals or audit logs, and provider, transport and remote error
+text is suppressed. Tokens echoed in GitHub responses are redacted. Keep the
+operator files outside the agent's accessible workspace.
+
+After `validate` → `apply_to_disposable` → `promote`, call `submit_change` with
+only `{ "instance": "example", "proposalId": "<proposal UUID>",
+"expectedBaseSha": "<current base branch SHA>" }`. It creates
+`workbase/change-<proposal UUID>`, a commit of the promoted allowlisted files and
+one PR into the operator's base branch. The existing REST adapter exposes no
+merge, tag, release or deployment API. Without `WORKBASE_GITHUB_TARGET`, a valid
+promoted submission still returns `github_not_configured`; earlier validation
+errors retain their existing behavior.
