@@ -13,6 +13,8 @@ mkdirSync('packages/frontend-console/dist/locales', { recursive: true })
 for (const locale of ['en', 'cs']) cpSync(`packages/frontend-console/src/locales/${locale}.json`, `packages/frontend-console/dist/locales/${locale}.json`)
 cpSync('LICENSE', 'packages/frontend-console/dist/LICENSE')
 cpSync('packages/plugins/console/NOTICE', 'packages/frontend-console/dist/NOTICE')
+mkdirSync('packages/frontend-console/dist/licenses/alata', { recursive: true })
+cpSync('packages/ui/src/assets/fonts/OFL.txt', 'packages/frontend-console/dist/licenses/alata/OFL.txt')
 // Hash the final upload tree, including public assets, locales and legal files.
 // Match consoleUI() writeBundle ordering: hash, stamp HTML only, then metadata.
 const directory = 'packages/frontend-console/dist'

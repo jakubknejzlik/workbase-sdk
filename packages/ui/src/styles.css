@@ -13,6 +13,26 @@
 @source "../../console-generated/src/**/*.{ts,tsx}";
 @source "../../frontend-console/src/**/*.{ts,tsx}";
 
+@font-face {
+  font-family: Alata;
+  src: url('./assets/fonts/Alata-Regular.ttf') format('truetype');
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+}
+
+:root, body, button, input, select, textarea {
+  font-family: Alata, Arial, sans-serif;
+  font-synthesis: none;
+}
+/* Keep title utilities from synthesizing a weight absent from Alata Regular. */
+h1, h2, h3, strong, b,
+[data-slot="card-title"], [data-slot="dialog-title"], [data-slot="alert-dialog-title"] {
+  font-weight: 400 !important;
+}
+[data-slot="card"], [data-slot="dialog-content"], [data-slot="alert-dialog-content"] { border-radius: var(--radius-panel); }
+[data-slot="popover-content"], [data-slot="dropdown-menu-content"], [data-slot="dropdown-menu-sub-content"] { border-radius: var(--radius-popover); }
+
 @custom-variant dark (&:is(.dark *));
 
 /* 1. Use a more-intuitive box-sizing model */
@@ -30,7 +50,7 @@
   body {
     /* 4. Add accessible line-height */
     line-height: 1.5;
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
+    font-family: Alata, Arial, sans-serif;
     /* 5. Improve text rendering */
     -webkit-font-smoothing: antialiased;
   }
@@ -71,6 +91,7 @@
     --radius-md: calc(var(--radius) - 2px);
     --radius-lg: var(--radius);
     --radius-xl: calc(var(--radius) + 4px);
+    --color-canvas: var(--canvas);
     --color-background: var(--background);
     --color-foreground: var(--foreground);
     --color-card: var(--card);
@@ -107,27 +128,31 @@
 }
 
 :root {
+  /* Canvas belongs to page containers; background to header/control surfaces. */
+  --canvas: oklch(0.9769839862 0.0039707370 286.3260479404); /* #f7f7fa */
   --background: oklch(1 0 0);
-  --foreground: oklch(0 0 0);
+  --foreground: #000050;
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
+  --card-foreground: #000050;
   --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
+  --popover-foreground: #000050;
   --primary: oklch(0.8841 0.1927 162.4065);
   --primary-foreground: oklch(0.1998 0.1317 265.7063);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.54 0 0);
+  --secondary: #fafafd;
+  --secondary-foreground: #000050;
+  --muted: #fafafd;
+  --muted-foreground: #62627c;
   --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
+  --accent-foreground: #000050;
   --destructive: oklch(0.577 0.245 27.325);
   --destructive-foreground: oklch(1 0 0);
   /* Error text on translucent destructive fills; solid fills keep their own foreground. */
   --destructive-text: oklch(0.5 0.2 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0 0 0);
+  --border: #e3e3ed;
+  --input: #e3e3ed;
+  --quiet-foreground: #707086;
+  --separator: #eeeef4;
+  --ring: #000050;
   --chart-1: oklch(0.81 0.1 252);
   --chart-2: oklch(0.62 0.19 260);
   --chart-3: oklch(0.55 0.22 263);
@@ -142,14 +167,14 @@
   --sidebar-border: oklch(0.922 0 0);
   --sidebar-ring: oklch(0.708 0 0);
   --font-sans:
-    ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI',
-    Roboto, 'Helvetica Neue', Arial, 'Noto Sans', sans-serif,
-    'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji';
+    Alata, Arial, sans-serif;
   --font-serif: ui-serif, Georgia, Cambria, 'Times New Roman', Times, serif;
   --font-mono:
     ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono',
     'Courier New', monospace;
   --radius: 0.5rem;
+  --radius-panel: 14px;
+  --radius-popover: 13px;
   --shadow-2xs: 0 1px 3px 0px hsl(0 0% 0% / 0.05);
   --shadow-xs: 0 1px 3px 0px hsl(0 0% 0% / 0.05);
   --shadow-sm:
@@ -174,6 +199,7 @@
 }
 
 .dark {
+  --canvas: var(--background);
   --background: oklch(0.145 0 0);
   --foreground: oklch(0.985 0 0);
   --card: oklch(0.205 0 0);
@@ -208,9 +234,7 @@
   --sidebar-border: oklch(0.275 0 0);
   --sidebar-ring: oklch(0.439 0 0);
   --font-sans:
-    ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI',
-    Roboto, 'Helvetica Neue', Arial, 'Noto Sans', sans-serif,
-    'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji';
+    Alata, Arial, sans-serif;
   --font-serif: ui-serif, Georgia, Cambria, 'Times New Roman', Times, serif;
   --font-mono:
     ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono',
@@ -241,10 +265,11 @@
 
 @layer base {
   * { @apply border-border outline-ring/50; }
-  body { @apply bg-background text-foreground; }
+  body { @apply bg-canvas text-foreground; }
 }
 
 /* Shared composition extensions. All layout rules are served in this asset (strict CSP). */
+[data-slot="sidebar-inset"] { background-color: var(--canvas); }
 .wb-skip { position: absolute; left: 16px; top: -100px; padding: 12px; background: var(--background); z-index: 100; }
 .wb-skip:focus { top: 16px; }
 .wb-disabled-reason { display: block; margin-top: 6px; font-size: .875rem; color: var(--muted-foreground); }
