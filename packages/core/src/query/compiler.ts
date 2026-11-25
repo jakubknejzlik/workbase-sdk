@@ -17,8 +17,57 @@ import type { Filter, Order, QueryInput, Scalar, Selection } from './schema'
 import { configuredViews, listPredicate } from './list-views'
 import { operandKind } from './input-schema'
 
+type RenderOptions = NonNullable<Parameters<SelectQuery['toSQL']>[1]>
+type TableSource = Parameters<typeof Q.table>[0]
+const Table = Q.table('').constructor as new (source: TableSource, alias?: string) => ReturnType<typeof Q.table>
+
+/** Carry projection demand with this table occurrence through immutable AST clones.
+ * Ordinary table transforms can ignore the optional second argument and remain
+ * conservative. Only the scoped compiler uses it to prune projected columns.
+ */
+class DemandedTable extends Table {
+  constructor(source: string, alias: string | undefined, private demand: ReadonlySet<string>) { super(source, alias) }
+  clone(): this { return new DemandedTable(this.source as string, this.alias, this.demand) as this }
+  toSQL(flavor: ISQLFlavor, options?: RenderOptions): string {
+    const transform = options?.transformTable as ((entity: string, demand?: ReadonlySet<string>) => TableSource) | undefined
+    return transform
+      ? Q.table(transform(this.source as string, this.demand), this.alias).toSQL(flavor, { ...options, transformTable: undefined })
+      : super.toSQL(flavor, options)
+  }
+}
+function demandedSelect(entity: string, alias: string, demand: ReadonlySet<string>) {
+  const query = Q.select().from(entity, alias)
+  // This freshly constructed AST owns its source; later builder clones retain
+  // the occurrence's demand via DemandedTable.clone().
+  query.tables[0] = new DemandedTable(entity, alias, demand)
+  return query
+}
+function filterFields(kernel: KernelRegistry, entity: string, filter?: Filter): string[] {
+  return Object.entries(filter ?? {}).flatMap(([field, operand]): string[] => {
+    if (field === 'and' || field === 'or') return (operand as Filter[]).flatMap(child => filterFields(kernel, entity, child))
+    if (field === 'not') return filterFields(kernel, entity, operand as Filter)
+    const relation = operandKind(kernel.config, entity, field, operand) === 'relation' ? kernel.config.entities[entity].relations[field] : undefined
+    return [relation ? relation.many ? 'id' : relation.field : field]
+  })
+}
+/** Include correlation keys at every intermediate hop, not just leaf operands. */
+function pathDemands(paths: { field: string; hops: { field: string }[] }[]) {
+  const demands = new Map<string, Set<string>>()
+  const add = (path: string, field: string) => {
+    const demand = demands.get(path) ?? new Set(['id']); demand.add(field); demands.set(path, demand)
+  }
+  for (const dependency of paths) {
+    let path = ''
+    for (const hop of dependency.hops) { add(path, hop.field); path += `/${hop.field}` }
+    add(path, dependency.field)
+  }
+  return demands
+}
+
 export interface Statement { sql: string; bindings: unknown[] }
 const col = (alias: string, field: string) => `${alias}.${field}`
+const referenceKey = (kernel: KernelRegistry, entity: string, field: string) =>
+  kernel.config.entities[entity].fields[field]?.computed ? field : `__raw_${field}`
 const value = (v: unknown) => Q.value((typeof v === 'boolean' ? Number(v) : v) as Scalar)
 const truth = (yes: boolean) => Cond.equal(Q.raw('1'), Q.raw(yes ? '1' : '0'))
 /** Trusted structured predicates render in the library's binding context, never as raw question marks. */
@@ -150,9 +199,10 @@ function filterCondition(kernel: KernelRegistry, entity: string, alias: string, 
     if (operandKind(kernel.config, entity, key, v) === 'relation') {
       const r = kernel.config.entities[entity].relations[key]; const childAlias = nextAlias()
       const quantifier = r.many ? Object.keys(v as object)[0] : undefined
-      const sub = Q.select().from(r.entity, childAlias).field(col(childAlias, 'id'))
+      const childFilter = (quantifier ? (v as Record<string, Filter>)[quantifier] : v) as Filter
+      const sub = demandedSelect(r.entity, childAlias, new Set(['id', r.many ? r.field : 'id', ...filterFields(kernel, r.entity, childFilter)])).field(col(childAlias, 'id'))
         .where(Cond.columnEqual(col(childAlias, r.many ? r.field : 'id'), col(alias, r.many ? 'id' : r.field)))
-        .where(filterCondition(kernel, r.entity, childAlias, (quantifier ? (v as Record<string, Filter>)[quantifier] : v) as Filter, nextAlias))
+        .where(filterCondition(kernel, r.entity, childAlias, childFilter, nextAlias))
       conditions.push(quantifier === 'none' ? Cond.notExists(sub) : Cond.exists(sub)); continue
     }
     const column = col(alias, key)
@@ -201,14 +251,17 @@ export function assertStatement(statement: Statement, cost?: QueryCost) {
 }
 export function renderStatement(kernel: KernelRegistry, scope: Scope, ast: SelectQuery, cost?: QueryCost, requiredDisplays?: Set<string>): Statement {
   let references = 0
-  function scopedTable(entity: string, extra?: (alias: string) => Condition, maskForeignKeys = true, displayRequired = requiredDisplays?.has(entity) ?? true, computedDemand?: Set<string>): SelectQuery {
-    if (!maskForeignKeys) computedDemand = new Set()
+  function scopedTable(entity: string, extra?: (alias: string) => Condition, maskForeignKeys = true, displayRequired = requiredDisplays?.has(entity) ?? true, demand?: ReadonlySet<string>): SelectQuery {
+    if (!maskForeignKeys) demand = new Set()
     if (!Object.hasOwn(kernel.config.entities, entity)) throw new QueryError('query_invalid')
     // Bounds policy recursion too, before a future policy compiler can introduce cycles.
     if (++references > L.tableReferences) throw new QueryError('query_too_expensive', [], cost)
     const alias = `scope_row_${references}`
     let query = Q.select().from(entity, alias)
-    const fields = kernel.fieldMask(entity, scope)
+    // Policies and extra correlation predicates below still evaluate the complete
+    // physical row, including unreadable tenant/row/field dependencies. Demand
+    // intersects only the authorized output; it never prunes policy predicates.
+    const fields = kernel.fieldMask(entity, scope).filter(field => !demand || demand.has(field) || demand.has(`__raw_${field}`))
     const definition = kernel.config.entities[entity]
     const foreignKeys = new Map<string, Condition>()
     function foreignKeyVisible(field: string) {
@@ -236,12 +289,7 @@ export function renderStatement(kernel: KernelRegistry, scope: Scope, ast: Selec
       const info = expressionInfo(kernel.config, entity, field, definition.fields[field].computed!)
       const columns = new Map<string, string | Condition>(); const visible: Condition[] = []; const nested = new Map<string, ISequelizable>()
       const paths = new Map<string, string>()
-      const demands = new Map<string, Set<string>>()
-      for (const dependency of info.dependencies) {
-        if (dependency.qualifier && dependency.qualifier !== 'self') continue
-        const key = dependency.hops.map(hop => `/${hop.field}`).join('')
-        const demand = demands.get(key) ?? new Set<string>(); demand.add(dependency.field); demands.set(key, demand)
-      }
+      const demands = pathDemands(info.dependencies.filter(dep => !dep.qualifier || dep.qualifier === 'self'))
       for (const dependency of info.dependencies) {
         // Subquery aliases resolve against their own scoped projections. `self`
         // always denotes this row; no physical source name is ever rebound.
@@ -251,7 +299,7 @@ export function renderStatement(kernel: KernelRegistry, scope: Scope, ast: Selec
           key += `/${hop.field}`
           let target = paths.get(key)
           if (!target) {
-            const table = scopedTable(hop.target, undefined, true, true, demands.get(key) ?? new Set())
+            const table = scopedTable(hop.target, undefined, true, true, demands.get(key) ?? new Set(['id']))
             target = `computed_join_${references}_${paths.size}`; paths.set(key, target)
             const operand = parent === alias && definition.fields[hop.field]?.computed ? computedValue(hop.field) : col(parent, hop.field)
             query = query.leftJoin(Q.table(table, target), Cond.equal(col(target, 'id'), typeof operand === 'string' ? Q.expr(operand) : operand))
@@ -276,7 +324,7 @@ export function renderStatement(kernel: KernelRegistry, scope: Scope, ast: Selec
           ]))
         }
       }
-      const source = (target: string) => scopedTable(target, undefined, true, true, info.tables.get(target) ?? new Set())
+      const source = (target: string) => scopedTable(target, undefined, true, true, new Set(['id', ...(info.tables.get(target) ?? [])]))
       if (needsDisplayParts(kernel.config, entity, field)) {
         for (const dep of info.dependencies) if ((!dep.qualifier || dep.qualifier === 'self') && needsDisplayParts(kernel.config, dep.entity, dep.field)) {
           if (!dep.hops.length) { computedValue(dep.field); nested.set(dep.column, presentation.get(dep.field)!) }
@@ -309,8 +357,9 @@ export function renderStatement(kernel: KernelRegistry, scope: Scope, ast: Selec
     const joins = new Map<string, string>()
     let label: Condition | ReturnType<typeof Q.raw> = Q.raw('NULL')
     const labelVisibility: Condition[] = []
-    if (maskForeignKeys && displayRequired && (!computedDemand || computedDemand.has(definition.displayField!)) && definition.label && readableDisplay(kernel, scope, entity)) {
+    if (maskForeignKeys && displayRequired && (!demand || demand.has(definition.displayField!)) && definition.label && readableDisplay(kernel, scope, entity)) {
       const columns = new Map<string, string | Condition>()
+      const demands = pathDemands(expressionColumns(definition.label).map(column => expressionPath(kernel.config, entity, column)))
       // A joined source computes its own label only when this expression consumes
       // it. Passing through an account to its customer does not need account.label.
       const displayJoins = new Set(expressionColumns(definition.label).flatMap(column => {
@@ -324,7 +373,7 @@ export function renderStatement(kernel: KernelRegistry, scope: Scope, ast: Selec
           key += `/${hop.field}`
           let target = joins.get(key)
           if (!target) {
-            const table = scopedTable(hop.target, undefined, true, displayJoins.has(key))
+            const table = scopedTable(hop.target, undefined, true, displayJoins.has(key), demands.get(key) ?? new Set(['id']))
             target = `expression_join_${references}_${joins.size}`; joins.set(key, target)
             const operand = parent === alias && definition.fields[hop.field]?.computed ? computedValue(hop.field) : col(parent, hop.field)
             query = query.leftJoin(Q.table(table, target), Cond.equal(col(target, 'id'), typeof operand === 'string' ? Q.expr(operand) : operand))
@@ -358,18 +407,27 @@ export function renderStatement(kernel: KernelRegistry, scope: Scope, ast: Selec
     for (const field of fields) {
       const definition = kernel.config.entities[entity].fields[field]
       if (definition?.computed) {
-        const projected = !computedDemand || computedDemand.has(field) ? computedValue(field) : Q.raw('NULL')
+        // Computing can add joins to query; finish it before reading the builder
+        // receiver so its immutable clone retains those joins.
+        const projected = computedValue(field)
         query = query.field(projected, field)
         if (maskForeignKeys) {
           query = query.field(computedVisibility.get(field) ?? truth(false), `__computed_visible_${field}`)
           if (definition.type === 'ref') query = query.field(emptyComputedReferences.get(field) ?? truth(false), `__empty_${field}`)
         }
-        if (maskForeignKeys && (!computedDemand || computedDemand.has(field)) && needsDisplayParts(kernel.config, entity, field)) {
+        if (maskForeignKeys && needsDisplayParts(kernel.config, entity, field)) {
           query = query.field(presentation.get(field) ?? Q.raw('NULL'), partsAlias(field))
         }
       } else if (kernel.config.entities[entity].label && field === kernel.config.entities[entity].displayField) {
         query = query.field(label, field)
       } else if (maskForeignKeys && definition?.type === 'ref') {
+        // A label-only hop consumes the stored correlation key, and its scoped
+        // target join is the visibility residual. Do not materialize another FK
+        // value/probe unless select, filter, order or include actually needs it.
+        if (demand && !demand.has(field)) {
+          query = query.field(col(alias, field), `__raw_${field}`)
+          continue
+        }
         // Target identity must itself be readable. Visibility probes expose no target
         // columns and use the same scoped predicate/correlation as policy relations.
         const visible = foreignKeyVisible(field)
@@ -391,7 +449,7 @@ export function renderStatement(kernel: KernelRegistry, scope: Scope, ast: Selec
     return `${negated ? 'NOT ' : ''}EXISTS(SELECT 1 FROM (SELECT ${quote(child)}.${quote(node.field)} AS ${quote('policy_key')} FROM ${quote(node.entity)} AS ${quote(child)} WHERE ${explicit}) AS ${quote(visible)} WHERE ${quote(visible)}.${quote('policy_key')}=${quote(parent)}.${quote(node.parentField)})`
   }
   try {
-    return assertStatement(compactBindings(toSQLWithBindings(ast, numberedSQLite, { transformTable: entity => scopedTable(entity) })), cost)
+    return assertStatement(compactBindings(toSQLWithBindings(ast, numberedSQLite, { transformTable: (entity, demand?: ReadonlySet<string>) => scopedTable(entity, undefined, true, undefined, demand) })), cost)
   } catch (error) {
     if (error instanceof PolicyExpansionLimit) throw new QueryError('query_too_expensive', [], cost)
     if (error instanceof ApiError) throw error
@@ -399,9 +457,9 @@ export function renderStatement(kernel: KernelRegistry, scope: Scope, ast: Selec
   }
 }
 
-/** Expression demand follows all user-visible uses, including unprojected filters.
- * The table transform is entity-based; multiple occurrences share this conservative
- * union. Expression-internal joins carry their own narrower dependency demand.
+/** Display evaluation follows all user-visible uses, including unprojected filters.
+ * This entity-level hint is conservative; each scoped source also intersects it
+ * with its own column demand. Expression joins carry their dependency demand.
  */
 function requiredDisplayEntities(kernel: KernelRegistry, scope: Scope, entity: string, node: Selection) {
   const required = new Set<string>()
@@ -424,8 +482,9 @@ function requiredDisplayEntities(kernel: KernelRegistry, scope: Scope, entity: s
 
 export function buildSelect(kernel: KernelRegistry, scope: Scope, entity: string, node: Selection, extras: string[] = []) {
   let aliases = 0
-  let ast = Q.select().from(entity, 'row')
-  for (const field of executionFields(kernel, scope, entity, node, [...extras, ...((node as QueryInput).search?.fields ?? []).filter(key => !labelPath(kernel.config, entity, key))])) ast = ast.field(col('row', field))
+  const fields = executionFields(kernel, scope, entity, node, [...extras, ...((node as QueryInput).search?.fields ?? []).filter(key => !labelPath(kernel.config, entity, key))])
+  let ast = demandedSelect(entity, 'row', new Set([...fields, ...filterFields(kernel, entity, node.where)]))
+  for (const field of fields) ast = ast.field(col('row', field))
   const display = kernel.config.entities[entity].displayField
   if (display && selectedFields(kernel, scope, entity, node).includes(display) && needsDisplayParts(kernel.config, entity, display)) ast = ast.field(col('row', partsAlias(display)))
   if (node.where) ast = ast.where(filterCondition(kernel, entity, 'row', node.where, () => `rel_${++aliases}`))
@@ -436,7 +495,7 @@ export function buildSelect(kernel: KernelRegistry, scope: Scope, entity: string
  */
 export function compileAggregate(kernel: KernelRegistry, scope: Scope, query: QueryInput,
   aggregate: { fn: 'count' } | { fn: 'sum'; field: string }, cost?: QueryCost) {
-  const source = buildSelect(kernel, scope, query.entity, query)
+  const source = buildSelect(kernel, scope, query.entity, query, aggregate.fn === 'sum' ? [aggregate.field] : [])
   const expression = aggregate.fn === 'count' ? Fn.count('aggregate_row.id') : Fn.sum(col('aggregate_row', aggregate.field))
   const ast = Q.select().from(source, 'aggregate_row').field(expression, 'value').field(Fn.count('aggregate_row.id'), '__count')
   return renderStatement(kernel, scope, ast, cost, requiredDisplayEntities(kernel, scope, query.entity, query).required)
@@ -464,10 +523,25 @@ export const orderField = (order: Order) => order.label ? sortAlias(order.field)
  */
 function buildListSource(kernel: KernelRegistry, scope: Scope, query: QueryInput) {
   const filtered = listPredicate(kernel, query)
-  let source = buildSelect(kernel, scope, query.entity, filtered)
   const { required, add } = requiredDisplayEntities(kernel, scope, query.entity, filtered)
   add(query.entity, query.search?.fields ?? [])
   const labelKeys = [...new Set([...(query.labels ?? []), ...Object.keys(query.labelWhere ?? {}), ...(query.search?.fields ?? []).filter(key => labelPath(kernel.config, query.entity, key)), ...(query.orderBy ?? []).filter(o => o.label).map(o => o.field)])]
+  let source = buildSelect(kernel, scope, query.entity, filtered, labelKeys.map(key => referenceKey(kernel, query.entity, labelPath(kernel.config, query.entity, key)!.hops[0].field)))
+  const demands = pathDemands(labelKeys.flatMap(key => {
+    const plan = readableLabel(kernel, scope, query.entity, key)
+    return plan ? [{ hops: plan.hops, field: plan.display ?? 'id' }] : []
+  }))
+  for (const key of labelKeys) {
+    const plan = readableLabel(kernel, scope, query.entity, key)
+    let path = ''
+    for (const hop of plan?.hops ?? []) {
+      const demand = demands.get(path)
+      if (demand && !kernel.config.entities[hop.source].fields[hop.field].computed) {
+        demand.delete(hop.field); demand.add(`__raw_${hop.field}`)
+      }
+      path += `/${hop.field}`
+    }
+  }
   const joins = new Map<string, string>()
   const emptyReference = (parent: string, hop: { source: string; field: string }) =>
     kernel.config.entities[hop.source].fields[hop.field].computed
@@ -487,7 +561,7 @@ function buildListSource(kernel: KernelRegistry, scope: Scope, query: QueryInput
         let alias = joins.get(path)
         if (!alias) {
           alias = `label_join_${joins.size}`; joins.set(path, alias)
-          source = source.leftJoin(Q.table(hop.target, alias), Cond.columnEqual(col(alias, 'id'), col(parent, hop.field)))
+          source = source.leftJoin(new DemandedTable(hop.target, alias, demands.get(path) ?? new Set(['id'])), Cond.columnEqual(col(alias, 'id'), col(parent, referenceKey(kernel, hop.source, hop.field))))
         }
         parent = alias
       }

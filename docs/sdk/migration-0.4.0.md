@@ -3,9 +3,9 @@
 0.4.0 is a coordinated pre-1.0 minor release of core, plugins and MCP. Install
 all three at the same version when publication is available. This document
 records behavior implemented on the release branch, not a promise that npm
-publication or consumer acceptance has occurred. Start with the
-[Workers example](../../packages/core/examples/list-v2-workers.ts) and its
-[run commands](../../packages/core/examples/README.md).
+publication or consumer acceptance has occurred. Start with the Workers example
+(`list-v2-workers.ts`) and the run commands in its accompanying `README.md`,
+both in the core package's `examples` directory.
 
 ## Authoring shorthand and canonical output
 

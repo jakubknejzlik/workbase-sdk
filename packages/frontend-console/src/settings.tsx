@@ -18,23 +18,23 @@ export function WorkspaceSettingsLayout({ orgId }: { orgId?: string }) {
   const workflowDenied = useQuery({ queryKey: ['workflow-denied', orgId ?? ''], queryFn: () => false, initialData: false, enabled: false }).data
   const items = registry.error || caps.error ? [] : (registry.data?.navigation ?? []).filter(item => item.placement === 'settings' && !(item.page === 'core.workflows' && workflowDenied))
   const groups = [...new Map(items.filter(item => item.group).map(item => [item.group!.id, item.group!])).values()].sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
-  const linkClass = 'w-full text-left px-3 py-1 text-sm rounded-md transition-colors'
+  const linkClass = 'wb-settings-link'
   return <SettingsLayout title={t('settings')} navigation={<>
     {!orgId && <>
-      <Link to="/settings/profile" activeProps={{ className: 'bg-primary text-primary-foreground' }} className={linkClass} activeOptions={{ exact: true }}>{t('profileSettings')}</Link>
+      <Link to="/settings/profile" activeProps={{ className: 'wb-settings-link-active' }} className={linkClass} activeOptions={{ exact: true }}>{t('profileSettings')}</Link>
       <Link to="/organizations" className={linkClass}>{t('organizations')}</Link>
     </>}
     {orgId && <>
-      <Link to="/o/$orgId/settings/profile" params={{ orgId }} activeProps={{ className: 'bg-primary text-primary-foreground' }} className={linkClass} activeOptions={{ exact: true }}>{t('profileSettings')}</Link>
+      <Link to="/o/$orgId/settings/profile" params={{ orgId }} activeProps={{ className: 'wb-settings-link-active' }} className={linkClass} activeOptions={{ exact: true }}>{t('profileSettings')}</Link>
       {[undefined, ...groups].map(group => {
         const groupItems = items.filter(item => item.group?.id === group?.id)
-        return groupItems.length > 0 && <div key={group?.id ?? 'general'} className="flex flex-col space-y-1">
-          {group && <h3 className="px-3 pt-4 pb-1 text-sm font-medium text-muted-foreground">{t(group.label, { defaultValue: group.label })}</h3>}
+        return groupItems.length > 0 && <div key={group?.id ?? 'general'} className="wb-settings-group">
+          {group && <h3 className="wb-settings-group-label">{t(group.label, { defaultValue: group.label })}</h3>}
           {groupItems.map(item => {
             const page = registry.data?.pages.find(page => page.id === item.page)
             const path = page?.path ?? `/e/${item.entity}`
             const target = '/o/' + orgId + path
-            return <Link key={item.id} to={target} search={item.view ? { view: item.view } : {}} activeProps={{ className: 'bg-primary text-primary-foreground' }} className={`${linkClass} flex items-center gap-2 ${activeItem === item.label ? 'bg-primary text-primary-foreground' : ''}`} aria-current={activeItem === item.label ? 'page' : undefined} activeOptions={{ exact: true }}>{item.icon && <span className="[&>svg]:size-4"><NavigationIconView name={item.icon} /></span>}{t(item.label, { defaultValue: item.label })}</Link>
+            return <Link key={item.id} to={target} search={item.view ? { view: item.view } : {}} activeProps={{ className: 'wb-settings-link-active' }} className={`${linkClass} flex items-center gap-2 ${activeItem === item.label ? 'wb-settings-link-active' : ''}`} aria-current={activeItem === item.label ? 'page' : undefined} activeOptions={{ exact: true }}>{item.icon && <span className="[&>svg]:size-4"><NavigationIconView name={item.icon} /></span>}{t(item.label, { defaultValue: item.label })}</Link>
           })}
         </div>
       })}
