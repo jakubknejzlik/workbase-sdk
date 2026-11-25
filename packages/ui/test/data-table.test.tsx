@@ -1,4 +1,4 @@
-import { act, render, renderHook, screen, fireEvent } from '@testing-library/react'
+import { act, render, renderHook, screen, fireEvent, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { expect, it, vi } from 'vitest'
 import { DataTable, DataTableSearch, useResourceSearch, createDataTableQueryKey } from '../src'
@@ -292,4 +292,73 @@ it('A3 footer preserves direct page jumps, exact totals, maxOffset and busy/unkn
   expect([...document.querySelectorAll('button,select')].every(node => (node as HTMLButtonElement).disabled)).toBe(true)
   view.rerender(<ListPageFooter {...props} total={undefined} />)
   expect(screen.queryByRole('status')).toBeNull(); expect(document.querySelector('[data-list-page-counter]')).toBeNull()
+})
+
+
+const feedbackProps = {
+  rows: [] as { id: string }[], columns: [{ id: 'id', label: 'ID', cell: (row: { id: string }) => row.id }],
+  state: { search: '', sort: null, limit: 10 }, onStateChange: vi.fn(), page: 0, onPage: vi.fn(),
+  isFetching: false, label: 'Records', labels, onRowClick: vi.fn(),
+}
+it('s1 omitted empty composition preserves defaults and explicit null suppresses them', () => {
+  const clear = vi.fn()
+  const view = render(<DataTable {...feedbackProps} listV2 labels={{ ...labels, emptyDescription: 'No records in this view.' }} onClearFilters={clear} clearFilters="Clear filters" />)
+  expect(screen.getByRole('heading', { name: labels.noResults }).tagName).toBe('H2')
+  expect(screen.getByText('No records in this view.')).toBeTruthy()
+  fireEvent.click(screen.getByRole('button', { name: 'Clear filters' })); expect(clear).toHaveBeenCalledOnce()
+  view.rerender(<DataTable {...feedbackProps} emptyContent={null} onClearFilters={clear} clearFilters="Clear filters" />)
+  expect(screen.queryByText(labels.noResults)).toBeNull()
+  expect(screen.queryByRole('button', { name: 'Clear filters' })).toBeNull()
+})
+it('s1 custom feedback replaces defaults outside the scroller and the host removes its action', () => {
+  const create = vi.fn()
+  const view = render(<DataTable {...feedbackProps} listV2 emptyContent={<><h2>No records in this view</h2><button onClick={create}>Create record</button></>} />)
+  const action = screen.getByRole('button', { name: 'Create record' })
+  expect(action.closest('[data-slot="table-container"]')).toBeNull()
+  expect(screen.queryByText(labels.noResults)).toBeNull()
+  fireEvent.click(action); expect(create).toHaveBeenCalledOnce()
+  view.rerender(<DataTable {...feedbackProps} listV2 emptyContent={<h2>No records in this view</h2>} />)
+  expect(screen.queryByRole('button', { name: 'Create record' })).toBeNull()
+  expect(screen.getAllByText('No records in this view')).toHaveLength(1)
+})
+it('s1 pending, failure and populated states suppress the custom empty action', () => {
+  const emptyContent = <button>Create record</button>
+  const view = render(<DataTable {...feedbackProps} emptyContent={emptyContent} isFetching />)
+  expect(screen.queryByRole('button', { name: 'Create record' })).toBeNull()
+  view.rerender(<DataTable {...feedbackProps} emptyContent={emptyContent} error={new Error('Safe translated failure')} />)
+  expect(screen.queryByRole('button', { name: 'Create record' })).toBeNull()
+  expect(screen.getAllByRole('alert')).toHaveLength(1)
+  view.rerender(<DataTable {...feedbackProps} emptyContent={emptyContent} rows={[{ id: 'returned' }]} />)
+  expect(screen.queryByRole('button', { name: 'Create record' })).toBeNull()
+  expect(screen.getByRole('cell').textContent).toBe('returned')
+})
+it('s1 mobile cards share exclusive feedback, retry and host action suppression', () => {
+  const retry = vi.fn(), change = vi.fn(), page = vi.fn()
+  const props = { ...feedbackProps, mobileCards: true, onStateChange: change, onPage: page, onRetry: retry,
+    labels: { ...labels, error: 'Cannot load records', errorDescription: 'Your settings are preserved.', retry: 'Try again' },
+    emptyContent: <><h2>No records in this view</h2><button>Create record</button></>,
+  }
+  const view = render(<DataTable {...props} />)
+  const cards = () => within(view.container.querySelector('.md\\:hidden[aria-busy]') as HTMLElement)
+  expect(cards().getAllByRole('button', { name: 'Create record' })).toHaveLength(1)
+  // The shared renderer adds no extra live region around caller feedback.
+  expect(cards().queryAllByRole('status')).toHaveLength(0)
+  view.rerender(<DataTable {...props} isFetching error={new Error('Cannot load records')} />)
+  expect(cards().queryByText('No records in this view')).toBeNull()
+  expect(cards().queryByRole('alert')).toBeNull()
+  expect(cards().queryByRole('button', { name: 'Try again' })).toBeNull()
+  view.rerender(<DataTable {...props} error={new Error('Cannot load records')} />)
+  expect(cards().queryByText('No records in this view')).toBeNull()
+  const alert = cards().getByRole('alert')
+  expect(cards().getAllByText('Cannot load records')).toHaveLength(1)
+  expect(alert.textContent).toContain('Your settings are preserved.')
+  fireEvent.click(cards().getByRole('button', { name: 'Try again' }))
+  expect(retry).toHaveBeenCalledOnce(); expect(change).not.toHaveBeenCalled(); expect(page).not.toHaveBeenCalled()
+  view.rerender(<DataTable {...props} emptyContent={<h2>No records in this view</h2>} />)
+  expect(cards().queryByRole('alert')).toBeNull()
+  expect(cards().queryByRole('button', { name: 'Create record' })).toBeNull()
+  expect(cards().getAllByText('No records in this view')).toHaveLength(1)
+  view.rerender(<DataTable {...props} rows={[{ id: 'returned' }]} />)
+  expect(cards().queryByText('No records in this view')).toBeNull()
+  expect(cards().getByText('returned')).toBeTruthy()
 })
