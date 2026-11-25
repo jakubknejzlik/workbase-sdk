@@ -1,5 +1,5 @@
 import { afterEach, expect, it } from 'vitest'
-import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, rename, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -57,13 +57,12 @@ it.each(['file', 'directory'])('rejects a %s symlink escaping the packaged docs 
   await expect(docs.read('getting-started.md')).rejects.toBeDefined()
   await expect(docs.list()).rejects.toBeDefined()
 })
-it('reads normal packaged bytes with an identical hash after rejecting an escape', async () => {
+it('reads normal packaged bytes with an identical hash after a failed snapshot load', async () => {
   const { root, docs } = await fixture()
   const path = join(root, 'docs/getting-started.md')
   const bytes = Buffer.from('# Synthetic packaged marker ž\r\nAlex Example\r\n')
   await writeFile(path, bytes)
   const expected = { ok: true, bytes: bytes.length, content: bytes.toString(), sha256: createHash('sha256').update(bytes).digest('hex') }
-  expect(await docs.read('getting-started.md')).toMatchObject(expected)
   await rm(path)
   await symlink(join(root, 'docs/onboarding.md'), path)
   await expect(docs.read('getting-started.md')).rejects.toBeDefined()
@@ -88,6 +87,45 @@ it('caps document bytes above current docs and rejects oversize on read and list
   await writeFile(join(root, 'docs/getting-started.md'), Buffer.alloc(MAX_DOC_BYTES, 65))
   expect((await docs.read('getting-started.md')).content.length).toBe(MAX_DOC_BYTES)
   await writeFile(join(root, 'docs/getting-started.md'), Buffer.alloc(MAX_DOC_BYTES + 1, 65))
-  await expect(docs.read('getting-started.md')).rejects.toMatchObject({ code: 'doc_too_large' })
-  await expect(docs.list()).rejects.toMatchObject({ code: 'doc_too_large' })
+  const { PackagedDocs } = await import('../src/docs.ts')
+  const oversized = new PackagedDocs(pathToFileURL(root + '/'))
+  await expect(oversized.read('getting-started.md')).rejects.toMatchObject({ code: 'doc_too_large' })
+  await expect(oversized.list()).rejects.toMatchObject({ code: 'doc_too_large' })
+})
+
+it('serves the first complete snapshot after the docs directory is replaced', async () => {
+  const { root, docs } = await fixture()
+  const { docNames } = await import('../src/doc-manifest.ts')
+  const originals = new Map(docNames.map(name => [name, Buffer.from(`# Original ${name} ž\r\nAlex Example\r\n`)]))
+  for (const [name, bytes] of originals) await writeFile(join(root, 'docs', name), bytes)
+  const first = await docs.read('getting-started.md')
+  await rename(join(root, 'docs'), join(root, 'saved-docs'))
+  await mkdir(join(root, 'docs'))
+  for (const name of docNames) await writeFile(join(root, 'docs', name), `# Replacement ${name}\nalex@example.test\n`)
+  expect(await docs.read('getting-started.md')).toEqual(first)
+  const listed = await docs.list()
+  for (const [name, raw] of originals) {
+    const expected = { name, bytes: raw.length, sha256: createHash('sha256').update(raw).digest('hex') }
+    expect(await docs.read(name)).toMatchObject({ ...expected, content: raw.toString('utf8') })
+    expect(listed.docs.find(doc => doc.name === name)).toMatchObject(expected)
+  }
+  // Even removal after loading cannot turn a warm request into filesystem I/O.
+  await rm(join(root, 'docs'), { recursive: true })
+  first.content = 'caller mutation'
+  listed.docs[0]!.sha256 = 'caller mutation'
+  expect(await docs.read('getting-started.md')).toMatchObject({ content: originals.get('getting-started.md')!.toString('utf8') })
+  expect((await docs.list()).docs[0]!.sha256).not.toBe('caller mutation')
+})
+it('retries the entire snapshot after a different allowlisted document fails to load', async () => {
+  const { root, docs } = await fixture()
+  const other = join(root, 'docs/onboarding.md')
+  await rm(other)
+  await expect(docs.read('getting-started.md')).rejects.toBeDefined()
+  const raw = Buffer.from('# Repaired snapshot\r\nAlex Example\r\n')
+  await writeFile(join(root, 'docs/getting-started.md'), raw)
+  await writeFile(other, '# Restored onboarding\n')
+  const [read, list] = await Promise.all([docs.read('getting-started.md'), docs.list()])
+  const sha256 = createHash('sha256').update(raw).digest('hex')
+  expect(read).toMatchObject({ sha256, bytes: raw.length, content: raw.toString('utf8') })
+  expect(list.docs.find(doc => doc.name === read.name)).toMatchObject({ sha256, bytes: raw.length })
 })

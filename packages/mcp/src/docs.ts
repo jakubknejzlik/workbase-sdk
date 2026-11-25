@@ -8,8 +8,9 @@ import { fail } from './schemas.ts'
 import metadata from '../package.json' with { type: 'json' }
 
 export const MAX_DOC_BYTES = 32 * 1024
+type DocumentSnapshot = { raw: Buffer; title: string; sha256: string }
 export class PackagedDocs {
-  private realRoot?: Promise<string>
+  private snapshot?: Promise<Map<DocName, DocumentSnapshot>>
   // Trusted package location, never exposed in tool inputs or outputs.
   constructor(private root = new URL('../', import.meta.url)) {}
   private async components(root: string, name: DocName) {
@@ -25,10 +26,9 @@ export class PackagedDocs {
     }
     return entries
   }
-  async read(name: DocName) {
-    // Canonicalize the package boundary once, but check docs/ and every remaining
-    // component on each read: resolving docs/ itself would bless a symlink escape.
-    const root = await (this.realRoot ??= realpath(this.root))
+  private async loadDocument(root: string, name: DocName): Promise<DocumentSnapshot> {
+    // Resolving docs/ itself would bless a symlink escape. Keep the containment
+    // checks when loading each allowlisted document into the private snapshot.
     const before = await this.components(root, name), document = before[before.length - 1]!
     const file = await open(document.path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0))
     try {
@@ -48,16 +48,33 @@ export class PackagedDocs {
         length += bytesRead
       }
       if (length > MAX_DOC_BYTES) fail('doc_too_large', 'Packaged document exceeds the byte limit', 413)
-      const bytes = buffer.subarray(0, length), content = bytes.toString('utf8')
-      return { ok: true as const, version: metadata.version, name, title: /^#\s+(.+?)\s*$/m.exec(content)?.[1] ?? name,
-        sha256: createHash('sha256').update(bytes).digest('hex'), bytes: length, content }
+      const raw = buffer.subarray(0, length)
+      return { raw, title: /^#\s+(.+?)\s*$/m.exec(raw.toString('utf8'))?.[1] ?? name,
+        sha256: createHash('sha256').update(raw).digest('hex') }
     } finally { await file.close() }
   }
+  private documents() {
+    // Share one atomic load across readers. Never publish a partial snapshot;
+    // discard failures so a later call can retry after the package is repaired.
+    return this.snapshot ??= (async () => {
+      const root = await realpath(this.root)
+      const docs = new Map<DocName, DocumentSnapshot>()
+      for (const name of docNames) docs.set(name, await this.loadDocument(root, name))
+      return docs
+    })().catch(error => { this.snapshot = undefined; throw error })
+  }
+  async read(name: DocName) {
+    const { raw, title, sha256 } = (await this.documents()).get(name)!
+    // The raw buffer stays private: callers receive detached response objects.
+    return { ok: true as const, version: metadata.version, name, title, sha256,
+      bytes: raw.length, content: raw.toString('utf8') }
+  }
   async list() {
-    const docs = await Promise.all(docNames.map(async name => {
-      const { name: document, title, sha256, bytes } = await this.read(name)
-      return { name: document, title, sha256, bytes }
-    }))
+    const snapshot = await this.documents()
+    const docs = docNames.map(name => {
+      const { raw, title, sha256 } = snapshot.get(name)!
+      return { name, title, sha256, bytes: raw.length }
+    })
     return { ok: true, version: metadata.version, docs }
   }
 }
