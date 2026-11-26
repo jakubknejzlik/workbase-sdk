@@ -145,3 +145,7 @@ export async function submitChange(directory: string, p: Submission, expectedBas
   const checks = await github.checks(headSha)
   return { ok: true, prUrl: pr.html_url, prNumber: pr.number, headSha, checkState: state(checks), previewState: state(checks.filter(c => /preview/i.test(c.name))) }
 }
+
+// Internal structured transport; existing submitChange publication stays separate.
+export { structuredSubmitRequestSchema, structuredSubmitRequestDigest, structuredSubmitResponseSchema, createStructuredSubmitTransport } from './structured-submit.ts'
+export type { StructuredSubmitRequest, StructuredSubmitResponse, StructuredSubmitTransportConfiguration } from './structured-submit.ts'
