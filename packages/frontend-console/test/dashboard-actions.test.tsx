@@ -5,6 +5,7 @@ import { createMemoryHistory, createRootRoute, createRoute, createRouter, Router
 import { afterEach, expect, it, vi } from 'vitest'
 import { I18nextProvider, initReactI18next } from 'react-i18next'
 import i18next from 'i18next'
+import { Toaster } from '@workbasehq/ui'
 import type { ConsoleModelContract, ConsolePageAction } from '../../core/src/console-contract'
 import { WidgetPage } from '../src/dashboard'
 import { adaptConsoleModel } from '../src/api/runtime-model'
@@ -33,6 +34,10 @@ async function setup(kind: Kind = 'crud', initial = document(kind)) {
   let next = initial, status = 200, release: (() => void) | undefined, gate: Promise<void> | undefined
   let releaseAuthority: (() => void) | undefined, authorityGate: Promise<void> | undefined
   const writes: { path: string; body: any; headers: any }[] = []
+  const requests: string[] = []
+  let invitationStatus = 200, invited = false
+  let inviteGate: Promise<void> | undefined, releaseInvite: (() => void) | undefined
+  let onAccessRead: (() => void) | undefined
   client.setQueryData(['console-model', 'org'], adaptConsoleModel(next))
   client.setQueryData(['organization', 'org'], { user: { id: 'owner' }, memberships: [{ organization_id: 'org' }] })
   vi.stubGlobal('fetch', vi.fn(async (path: string, options?: RequestInit) => {
@@ -40,6 +45,18 @@ async function setup(kind: Kind = 'crud', initial = document(kind)) {
     if (path.endsWith('/console-model')) { await authorityGate; return Response.json(next) }
     if (path.includes('/console-pages/')) return Response.json({ id: 'summary', label: 'Summary', widgets: [] })
     if (path === '/query') return Response.json({ data: [] })
+    if (path.startsWith('/api/') || path.startsWith('/commands/')) requests.push(`${options?.method} ${path}`)
+    if (path === '/api/entries/new' && options?.method === 'GET') {
+      onAccessRead?.()
+      return Response.json({ id: 'new', version: 1, access: { state: invited ? 'invited' : 'no_account', inconsistency: null,
+        ...(invited ? { invitation: { id: 'invitation', email: 'sample@example.test' } } : {}) }, actions: { invite: { enabled: true } } })
+    }
+    if (path === '/api/entries/new/actions/invite' && options?.method === 'POST') {
+      await inviteGate
+      if (invitationStatus !== 200) return Response.json({ error: 'validation_error' }, { status: invitationStatus })
+      invited = true
+      return Response.json({ delivery: { status: 'queued' } })
+    }
     if (path.startsWith('/api/') || path.startsWith('/commands/')) {
       writes.push({ path, body: JSON.parse(String(options?.body)), headers: options?.headers }); await gate
       return Response.json(status === 200 ? { id: 'new', name: 'Ada' } : { error: 'validation_error' }, { status })
@@ -57,7 +74,7 @@ async function setup(kind: Kind = 'crud', initial = document(kind)) {
   await screen.findByRole('heading', { name: 'Summary' })
   await waitFor(() => expect(client.isFetching()).toBe(0))
   const update = async (value: ConsoleModelContract) => { next = value; await act(async () => { client.setQueryData(['console-model', 'org'], adaptConsoleModel(next)) }) }
-  return { client, router, view, writes, update, initial, holdAuthority: () => { authorityGate = new Promise(resolve => { releaseAuthority = resolve }) }, releaseAuthority: () => releaseAuthority?.(), hold: () => { gate = new Promise(resolve => { release = resolve }) }, release: () => release?.(), status: (value: number) => { status = value }, cleanup: () => { release?.(); releaseAuthority?.(); view.unmount(); client.clear() } }
+  return { client, router, view, writes, requests, update, initial, invitationStatus: (value: number) => { invitationStatus = value }, onAccessRead: (callback: () => void) => { onAccessRead = callback }, holdInvite: () => { inviteGate = new Promise(resolve => { releaseInvite = resolve }) }, releaseInvite: () => releaseInvite?.(), holdAuthority: () => { authorityGate = new Promise(resolve => { releaseAuthority = resolve }) }, releaseAuthority: () => releaseAuthority?.(), hold: () => { gate = new Promise(resolve => { release = resolve }) }, release: () => release?.(), status: (value: number) => { status = value }, cleanup: () => { release?.(); releaseAuthority?.(); releaseInvite?.(); view.unmount(); client.clear() } }
 }
 const region = () => screen.getByRole('region', { name: 'Quick actions' })
 const start = () => within(region()).getByRole('button', { name: /Start work/ })
@@ -276,4 +293,89 @@ it.each(['placed', 'command'] as const)('%s denies a removed command input befor
     expect(test.writes).toHaveLength(0)
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
   } finally { test.cleanup() }
+})
+
+
+function invitationDocument() {
+  const doc = document(), entity = doc.model.entities.entries as any
+  entity.accountLink = { field: 'user', entity: 'accounts' }; entity.rowAccess = true; entity.rowInvitations = true
+  doc.capabilities.resources['invitations.read'] = true
+  doc.capabilities.entities.entries.operations.push('update')
+  doc.model.commands!.push({ name: 'entries/access_invite', permission: { entity: 'entries', operation: 'update' }, additionalPermissions: [],
+    inputSchema: { type: 'object', properties: { email: { type: 'string' } }, required: ['email'] } })
+  doc.capabilities.commands.push('entries/access_invite')
+  return doc
+}
+async function invitationDraft() {
+  fireEvent.click(start())
+  const dialog = await screen.findByRole('dialog'), input = within(dialog).getByRole('textbox', { name: 'Name' })
+  fireEvent.change(input, { target: { value: 'Sample entry' } })
+  fireEvent.click(within(dialog).getByRole('checkbox', { name: en.rowInviteNow }))
+  fireEvent.change(within(dialog).getByRole('textbox', { name: en.rowInviteEmail }), { target: { value: 'sample@example.test' } })
+  return { dialog, form: input.closest('form')! }
+}
+it('create-and-invite completes the status read and invite before existing success feedback', async () => {
+  const test = await setup('crud', invitationDocument()), feedback = render(<Toaster />)
+  try {
+    const { dialog, form } = await invitationDraft()
+    test.holdInvite(); fireEvent.submit(form)
+    await waitFor(() => expect(test.requests).toContain('POST /api/entries/new/actions/invite'))
+    expect(screen.getByRole('dialog')).toBe(dialog)
+    await act(async () => test.releaseInvite())
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    await screen.findByText('Saved')
+    expect(test.writes).toHaveLength(1)
+    expect(test.requests.slice(0, 3)).toEqual(['POST /api/entries', 'GET /api/entries/new', 'POST /api/entries/new/actions/invite'])
+  } finally { console.log('R6 success', JSON.stringify(test.requests)); feedback.unmount(); test.cleanup() }
+})
+it('create-and-invite keeps partial success and error mounted and retries the same row', async () => {
+  const test = await setup('crud', invitationDocument())
+  try {
+    const { dialog, form } = await invitationDraft()
+    test.invitationStatus(400); fireEvent.submit(form)
+    await within(dialog).findByText(en.rowInviteSavedFailed)
+    expect(within(dialog).getByText(en.write_validation_error)).toBeTruthy()
+    await waitFor(() => expect(within(dialog).getByRole('button', { name: en.rowInviteRetry }).hasAttribute('disabled')).toBe(false))
+    expect(screen.getByRole('dialog')).toBe(dialog)
+    expect(test.writes).toHaveLength(1)
+    test.invitationStatus(200); fireEvent.submit(form)
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    expect(test.writes).toHaveLength(1)
+    expect(test.requests.filter(request => request === 'POST /api/entries/new/actions/invite')).toHaveLength(2)
+    expect(test.requests.filter(request => request === 'GET /api/entries/new').length).toBeGreaterThanOrEqual(2)
+  } finally { console.log('R6 retry', JSON.stringify(test.requests)); test.cleanup() }
+})
+it('create-and-invite refuses a grant revoked before submit with an explicit partial-save state and no duplicate row', async () => {
+  const test = await setup('crud', invitationDocument())
+  try {
+    const { dialog, form } = await invitationDraft()
+    const revoked = structuredClone(test.initial); revoked.capabilities.commands = []
+    test.client.setQueryData(['console-model', 'org'], adaptConsoleModel(revoked))
+    fireEvent.submit(form)
+    await within(dialog).findByText(en.rowInviteSavedFailed)
+    expect(within(dialog).getByText(en.requestFailed)).toBeTruthy()
+    expect(screen.getByRole('dialog')).toBe(dialog)
+    expect(test.writes).toHaveLength(1)
+    expect(test.requests).toContain('GET /api/entries/new')
+    expect(test.requests).not.toContain('POST /api/entries/new/actions/invite')
+  } finally { console.log('R6 revoked', JSON.stringify(test.requests)); test.cleanup() }
+})
+it.each(['read', 'invitations.read', 'access_invite'] as const)('create-and-invite rechecks %s at the continuation boundary', async grant => {
+  const test = await setup('crud', invitationDocument())
+  try {
+    const { dialog, form } = await invitationDraft()
+    const revoked = structuredClone(test.initial)
+    if (grant === 'read') revoked.capabilities.entities.entries.operations = ['create', 'update']
+    else if (grant === 'invitations.read') revoked.capabilities.resources['invitations.read'] = false
+    else revoked.capabilities.commands = []
+    // Withdraw authority after dispatch of the create, before React's next render.
+    if (grant === 'access_invite') test.onAccessRead(() => test.client.setQueryData(['console-model', 'org'], adaptConsoleModel(revoked)))
+    else { test.hold(); fireEvent.submit(form); await waitFor(() => expect(test.writes).toHaveLength(1)); test.client.setQueryData(['console-model', 'org'], adaptConsoleModel(revoked)); test.release() }
+    if (grant === 'access_invite') fireEvent.submit(form)
+    await within(dialog).findByText(en.rowInviteSavedFailed)
+    expect(within(dialog).getByText(en.requestFailed)).toBeTruthy()
+    expect(test.writes).toHaveLength(1)
+    expect(test.requests).not.toContain('POST /api/entries/new/actions/invite')
+    if (grant !== 'access_invite') expect(test.requests).not.toContain('GET /api/entries/new')
+  } finally { console.log(`R6 boundary ${grant}`, JSON.stringify(test.requests)); test.cleanup() }
 })

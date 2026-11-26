@@ -8,6 +8,7 @@ import { Card, CardHeader, CardTitle, CardContent } from '@workbasehq/ui/compone
 import { GeneratedCreateDialog, GeneratedCollectionCommandDialog, type WriteRequest } from '@workbasehq/console-generated/writes'
 import type { ConsolePage, ConsolePageAction } from '../../core/src/console-contract'
 import { ReferenceAuthority } from '../../console-generated/src/reference-authority'
+import { hasRecordAccess } from '../../console-generated/src/account-link'
 import { visibleEntities } from '../../console-generated/src/read'
 import { writeSchema } from '../../console-generated/src/write'
 import { api } from './api/client'
@@ -38,6 +39,7 @@ function ActionScope({ actor, orgId, pageId, data, blocked, children }: {
   const [selected, setSelected] = useState<ConsolePageAction>()
   const [denied, setDenied] = useState<string[]>([])
   const trigger = useRef<HTMLElement | null>(null)
+  const createSession = useRef<{ rowId?: string }>({})
   const active = useRef(true)
   useEffect(() => { active.current = true; return () => { active.current = false } }, [])
   const actions = (data.console.pages.find(page => page.id === pageId)?.actions ?? []).filter(action => !denied.includes(action.id))
@@ -59,6 +61,20 @@ function ActionScope({ actor, orgId, pageId, data, blocked, children }: {
     const target = current.target
     const actionCommand = 'command' in target ? model.commands?.find(command => command.name === target.command) : undefined
     const entity = 'create' in target ? target.create : actionCommand?.ui?.placement?.entity ?? actionCommand?.permission.entity
+    const session = createSession.current
+    const record = entity && session.rowId ? `/api/${encodeURIComponent(entity)}/${encodeURIComponent(session.rowId)}` : undefined
+    const accessStage = record && (path === record && method === 'GET' || path === `${record}/actions/invite` && method === 'POST')
+    if (accessStage) {
+      const definition = entity ? model.entities[entity] : undefined
+      const readable = entity && visibleEntities(model, caps).includes(entity) && caps.resources?.['invitations.read'] === true
+      const invite = model.commands?.find(command => command.name === `${entity}/access_invite` && caps.commands?.includes(command.name))
+      const allowed = entity && 'create' in target && definition?.accountLink && definition.rowAccess !== false && hasRecordAccess(model, entity) && readable
+        && (method === 'GET' ? body === undefined : invite && body && typeof body === 'object' && !Array.isArray(body)
+          && Object.keys(body).every(field => Object.hasOwn(invite.inputSchema.properties, field)))
+      // A row is already saved. Preserve the generated partial-success/error
+      // state instead of unmounting the form and losing its retry identity.
+      if (!allowed) throw { code: 'action_unavailable' }
+    }
     // Generated creates can follow with membership commands. Each command's
     // current input schema/grant, rather than entity fields, authorizes inputs.
     const command = model.commands?.find(command => path === `/commands/${command.name}` && caps.commands?.includes(command.name))
@@ -68,15 +84,16 @@ function ActionScope({ actor, orgId, pageId, data, blocked, children }: {
       : undefined
     // Reject the whole stale session rather than sending a partial draft. A
     // revision-only refresh still uses the same current field intersection.
-    if (method !== 'POST' || !fields || !body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).some(field => !Object.hasOwn(fields, field))) {
+    if (!accessStage && (method !== 'POST' || !fields || !body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).some(field => !Object.hasOwn(fields, field)))) {
       setSelected(undefined)
       throw { code: 'action_unavailable' }
     }
-    const result = await api(path, { method, body, orgId, idempotencyKey })
+    const result = await api<{ id?: unknown }>(path, { method, body, orgId, idempotencyKey })
+    if ('create' in target && path === `/api/${entity}` && method === 'POST' && typeof result?.id === 'string') session.rowId = result.id
     await client.invalidateQueries({ queryKey: ['console-page', orgId] })
     return result
   }
-  const open = (action: ConsolePageAction) => { trigger.current = document.activeElement as HTMLElement; setSelected(action) }
+  const open = (action: ConsolePageAction) => { createSession.current = {}; trigger.current = document.activeElement as HTMLElement; setSelected(action) }
   const label = (key: string) => t(key, { defaultValue: key })
   const control = (action: ConsolePageAction, card = false) => {
     const className = card ? 'dashboard-action' : 'dashboard-header-action'
