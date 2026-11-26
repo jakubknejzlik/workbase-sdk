@@ -48,18 +48,18 @@ async function counts(page: Page, selection: Selection = {}) {
 }
 async function tab(page: Page, view: string) { await page.getByRole('group', { name: en.listViews }).getByRole('button', { name: new RegExp(`^${labels[view]}`) }).click() }
 // DOM visibility does not prove intersection with a clipped table's visible area.
-async function insideViewport(locator: Locator) {
-  await expect(locator).toBeVisible()
+async function insideViewport(locator: Locator, check = expect) {
+  await check(locator).toBeVisible()
   const geometry = await locator.evaluate(element => {
     const rect = element.getBoundingClientRect()
     const clips = [document.documentElement.getBoundingClientRect(), ...Array.from((function* () { for (let parent = element.parentElement; parent; parent = parent.parentElement) yield parent })()).filter(parent => /auto|scroll|hidden|clip/.test(getComputedStyle(parent).overflowX)).map(parent => parent.getBoundingClientRect())]
     return { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom, clipLeft: Math.max(0, ...clips.map(clip => clip.left)), clipRight: Math.min(innerWidth, ...clips.map(clip => clip.right)), height: innerHeight }
   })
   observations.push({ kind: 'viewport-intersection', geometry })
-  expect(geometry.left).toBeGreaterThanOrEqual(geometry.clipLeft)
-  expect(geometry.right).toBeLessThanOrEqual(geometry.clipRight)
-  expect(geometry.top).toBeGreaterThanOrEqual(0)
-  expect(geometry.bottom).toBeLessThanOrEqual(geometry.height)
+  check(geometry.left).toBeGreaterThanOrEqual(geometry.clipLeft)
+  check(geometry.right).toBeLessThanOrEqual(geometry.clipRight)
+  check(geometry.top).toBeGreaterThanOrEqual(0)
+  check(geometry.bottom).toBeLessThanOrEqual(geometry.height)
 }
 async function atScrollStart(page: Page) {
   await expect.poll(() => list(page).locator('[data-slot="table-container"]').evaluate(element => element.scrollLeft)).toBe(0)
@@ -679,39 +679,42 @@ for (const density of ['comfortable', 'compact'] as const) test(`#291: applied t
 })
 
 for (const width of [1440, 390, 360]) for (const actor of ['admin', 'staff'] as const) for (const language of ['en', 'cs'] as const) test(`G4–G6 polish ${width} ${actor} ${language}`, async ({ page, context }, testInfo) => {
+  // Keep every polish assertion failure-producing without masking later checks.
+  // Actions and their state assertions still run; expect.poll keeps its existing timing.
+  const check = expect.configure({ soft: true })
   const copy = language === 'cs' ? cs : en
   await page.setViewportSize({ width, height: 1000 })
   await context.setExtraHTTPHeaders({ Authorization: `Bearer list-v2-${actor}-session` })
   await context.addInitScript(language => localStorage.setItem('console-language', language), language)
   await gotoSDK(page, route)
-  await expect(list(page).locator('[data-list-range]')).toBeVisible()
+  await check(list(page).locator('[data-list-range]')).toBeVisible()
   const table = list(page).locator('[data-slot="data-table"]')
   const row = table.locator('tbody [data-row-id]').first()
-  await expect(table).toHaveAttribute('data-list-density', 'comfortable')
+  await check(table).toHaveAttribute('data-list-density', 'comfortable')
   // A1 7bd77c2 (#331): typography, comfortable66/compact54 rows and desktop title32.
-  expect(await row.locator('td').first().evaluate(element => [getComputedStyle(element).fontSize, getComputedStyle(element).lineHeight])).toEqual(['12px', '17.76px'])
-  expect(Math.round((await row.boundingBox())!.height)).toBe(66)
+  check(await row.locator('td').first().evaluate(element => [getComputedStyle(element).fontSize, getComputedStyle(element).lineHeight])).toEqual(['12px', '17.76px'])
+  check(Math.round((await row.boundingBox())!.height)).toBe(66)
   if (width === 1440) {
-    expect(await page.locator('h1').evaluate(element => [getComputedStyle(element).fontSize, getComputedStyle(element).fontWeight])).toEqual(['32px', '400'])
+    check(await page.locator('h1').evaluate(element => [getComputedStyle(element).fontSize, getComputedStyle(element).fontWeight])).toEqual(['32px', '400'])
     // A2 481625f (#342): shared preview sidebar is 224px.
-    await expect.poll(async () => Math.round((await page.locator('[data-slot="sidebar-gap"]').boundingBox())!.width)).toBe(224)
+    await check.poll(async () => Math.round((await page.locator('[data-slot="sidebar-gap"]').boundingBox())!.width)).toBe(224)
   }
   await page.getByRole('button', { name: copy.listDisplay, exact: true }).click()
   const display = page.getByRole('dialog', { name: copy.listDisplayHeading })
   await display.getByRole('checkbox', { name: copy.listDisplayCompact }).click()
-  await expect(table).toHaveAttribute('data-list-density', 'compact')
-  expect(Math.round((await row.boundingBox())!.height)).toBe(54)
-  expect(new URL(page.url()).searchParams.has('compact')).toBe(false)
+  await check(table).toHaveAttribute('data-list-density', 'compact')
+  check(Math.round((await row.boundingBox())!.height)).toBe(54)
+  check(new URL(page.url()).searchParams.has('compact')).toBe(false)
   await page.keyboard.press('Escape')
   const scroller = list(page).getByRole('region', { name: copy.listScrollRegion })
-  await expect(scroller).toHaveAttribute('tabindex', '0')
+  await check(scroller).toHaveAttribute('tabindex', '0')
   const cue = list(page).locator('[data-list-overflow]')
   if (width < 500) {
-    await expect(cue).toHaveAttribute('data-list-overflow', 'end')
+    await check(cue).toHaveAttribute('data-list-overflow', 'end')
     await scroller.focus(); await page.keyboard.press('End')
-    await expect(cue).toHaveAttribute('data-list-overflow', 'start')
+    await check(cue).toHaveAttribute('data-list-overflow', 'start')
     await page.keyboard.press('Home')
-    await expect(cue).toHaveAttribute('data-list-overflow', 'end')
+    await check(cue).toHaveAttribute('data-list-overflow', 'end')
     await page.getByRole('button', { name: copy.listDisplay, exact: true }).click()
     for (const checkbox of await display.getByRole('checkbox').all()) {
       if (await checkbox.getAttribute('aria-checked') === 'true' && await checkbox.getAttribute('aria-label') !== copy.listDisplayCompact && await checkbox.textContent() !== copy.listDisplayCompact) {
@@ -721,20 +724,20 @@ for (const width of [1440, 390, 360]) for (const actor of ['admin', 'staff'] as 
       }
     }
     await page.keyboard.press('Escape')
-    await expect(cue).toHaveCount(0)
+    await check(cue).toHaveCount(0)
   } else {
-    await expect(cue).toHaveCount(0)
+    await check(cue).toHaveCount(0)
     await page.setViewportSize({ width: 360, height: 1000 })
-    await expect(cue).toHaveAttribute('data-list-overflow', 'end')
+    await check(cue).toHaveAttribute('data-list-overflow', 'end')
     await page.setViewportSize({ width, height: 1000 })
-    await expect(cue).toHaveCount(0)
+    await check(cue).toHaveCount(0)
   }
   // Text enlargement may move whole groups, never split Previous/current/Next.
   await page.evaluate(() => { document.documentElement.style.fontSize = '20px' })
   const lookup = page.getByRole('combobox', { name: 'Team', exact: true })
-  await insideViewport(lookup)
-  expect((await lookup.boundingBox())!.width).toBeGreaterThanOrEqual(130)
-  await expect(lookup).toHaveAttribute('placeholder', 'Team')
+  await insideViewport(lookup, check)
+  check((await lookup.boundingBox())!.width).toBeGreaterThanOrEqual(130)
+  await check(lookup).toHaveAttribute('placeholder', 'Team')
   const paging = list(page).locator('[data-list-paging]')
   const previous = paging.getByRole('button', { name: copy.previousPage, exact: true })
   const current = paging.locator('[aria-current="page"]')
@@ -742,41 +745,41 @@ for (const width of [1440, 390, 360]) for (const actor of ['admin', 'staff'] as 
   const diagnostic = await layoutDiagnostics(previous.or(current).or(next), true)
   await attachLayoutDiagnostics(page, testInfo, `pagination-atomic-${width}-${actor}-${language}`, { width, actor, language, ...diagnostic })
   const controls = diagnostic.controls
-  expect(controls).toHaveLength(3)
+  check(controls).toHaveLength(3)
   // The group may move to another row as a unit. Its three controls must still
   // share a row; no individual-control wrap exception or wider tolerance.
-  expect(Math.abs(controls[0].box.top - controls[2].box.top)).toBeLessThan(2)
+  check(Math.abs(controls[0].box.top - controls[2].box.top)).toBeLessThan(2)
   // The numbered button is shorter than Previous/Next; compare its centerline.
   const centers = controls.map(control => control.box.top + control.box.height / 2)
-  expect(Math.max(...centers) - Math.min(...centers)).toBeLessThan(2)
+  check(Math.max(...centers) - Math.min(...centers)).toBeLessThan(2)
   for (const { box, clip, hitAtCenter, disabled } of controls) {
-    expect(box.left).toBeGreaterThanOrEqual(clip.left)
-    expect(box.right).toBeLessThanOrEqual(clip.right)
-    expect(box.top).toBeGreaterThanOrEqual(clip.top)
-    expect(box.bottom).toBeLessThanOrEqual(clip.bottom)
-    if (!disabled) expect(hitAtCenter).toBe(true)
+    check(box.left).toBeGreaterThanOrEqual(clip.left)
+    check(box.right).toBeLessThanOrEqual(clip.right)
+    check(box.top).toBeGreaterThanOrEqual(clip.top)
+    check(box.bottom).toBeLessThanOrEqual(clip.bottom)
+    if (!disabled) check(hitAtCenter).toBe(true)
   }
   for (let i = 0; i < controls.length; i++) for (let j = i + 1; j < controls.length; j++) {
     const a = controls[i].box; const b = controls[j].box
-    expect(a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom).toBe(false)
+    check(a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom).toBe(false)
   }
   const onPage = async (number: number) => {
-    await expect(current).toHaveText(String(number))
-    await expect.poll(() => ids(page)).toEqual(expectedRows({ actor }).slice((number - 1) * 10, number * 10).map(row => row.id))
+    await check(current).toHaveText(String(number))
+    await check.poll(() => ids(page)).toEqual(expectedRows({ actor }).slice((number - 1) * 10, number * 10).map(row => row.id))
   }
   await next.click(); await onPage(2)
   await previous.click(); await onPage(1)
   const visibleButtons = paging.getByRole('button')
   await current.focus()
   for (let index = 2; index < await visibleButtons.count(); index++) {
-    await page.keyboard.press('Tab'); await expect(visibleButtons.nth(index)).toBeFocused()
+    await page.keyboard.press('Tab'); await check(visibleButtons.nth(index)).toBeFocused()
   }
-  await expect(next).toBeFocused()
+  await check(next).toBeFocused()
   await page.keyboard.press('Enter'); await onPage(2)
-  await visibleButtons.nth(1).focus(); await page.keyboard.press('Shift+Tab'); await expect(previous).toBeFocused()
+  await visibleButtons.nth(1).focus(); await page.keyboard.press('Shift+Tab'); await check(previous).toBeFocused()
   await page.keyboard.press('Space'); await onPage(1)
-  await expect(list(page).locator('[data-list-page-summary] select')).toBeVisible()
-  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+  await check(list(page).locator('[data-list-page-summary] select')).toBeVisible()
+  check(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
   // Every actor/locale/viewport exercises a held new key and contextual empty recovery.
   let release: (() => void) | undefined
   const hold = new Promise<void>(resolve => { release = resolve })
@@ -787,26 +790,26 @@ for (const width of [1440, 390, 360]) for (const actor of ['admin', 'staff'] as 
   })
   try {
     await page.getByRole('group', { name: copy.listViews }).getByRole('button', { name: /^Empty workers/ }).click()
-    await expect(list(page).locator('[data-list-skeleton]')).toHaveCount(5)
-    await expect(footer(page).getByRole('status')).toHaveText(copy.loading)
-    await expect(list(page).locator('[data-list-range]')).toHaveCount(0)
+    await check(list(page).locator('[data-list-skeleton]')).toHaveCount(5)
+    await check(footer(page).getByRole('status')).toHaveText(copy.loading)
+    await check(list(page).locator('[data-list-range]')).toHaveCount(0)
     const skeleton = list(page).locator('[data-list-skeleton]').first()
-    await expect(skeleton.locator('td')).toHaveCount(await table.getByRole('columnheader').count())
-    expect(Math.round((await skeleton.boundingBox())!.height)).toBe(54)
+    await check(skeleton.locator('td')).toHaveCount(await table.getByRole('columnheader').count())
+    check(Math.round((await skeleton.boundingBox())!.height)).toBe(54)
     release!()
     // D s3 cda97da (#357): configured-view and filtered-empty contracts.
-    await expect(list(page).getByRole('heading', { name: copy.listS3EmptyViewHeading })).toBeVisible()
-    await insideViewport(list(page).getByText(copy.listS3EmptyViewHelp))
-    await expect(list(page).getByRole('button', { name: copy.clearSearchFilters })).toHaveCount(0)
+    await check(list(page).getByRole('heading', { name: copy.listS3EmptyViewHeading })).toBeVisible()
+    await insideViewport(list(page).getByText(copy.listS3EmptyViewHelp), check)
+    await check(list(page).getByRole('button', { name: copy.clearSearchFilters })).toHaveCount(0)
     await page.getByRole('searchbox', { name: copy.search, exact: true }).fill('missing')
-    await expect(list(page).getByRole('heading', { name: copy.listS3NoMatchesHeading })).toBeVisible()
-    await expect(list(page).getByText(copy.listEmptyFilteredDescription)).toBeVisible()
+    await check(list(page).getByRole('heading', { name: copy.listS3NoMatchesHeading })).toBeVisible()
+    await check(list(page).getByText(copy.listEmptyFilteredDescription)).toBeVisible()
     await list(page).getByRole('button', { name: copy.clearSearchFilters }).click()
-    await expect(list(page).getByText(copy.listS3EmptyViewHelp)).toBeVisible()
-    expect(new URL(page.url()).searchParams.get('view')).toBe('empty')
-    expect(new URL(page.url()).searchParams.has('search')).toBe(false)
+    await check(list(page).getByText(copy.listS3EmptyViewHelp)).toBeVisible()
+    check(new URL(page.url()).searchParams.get('view')).toBe('empty')
+    check(new URL(page.url()).searchParams.has('search')).toBe(false)
     await page.getByRole('group', { name: copy.listViews }).getByRole('button', { name: /^All workers/ }).click()
-    await expect(row).toBeVisible()
+    await check(row).toBeVisible()
     await page.screenshot({ path: `${process.env.LIST_V2_OUTPUT}/polish-${width}-${actor}-${language}.png`, fullPage: true })
   } finally { release?.(); await page.unrouteAll({ behavior: 'wait' }) }
 })
