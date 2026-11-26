@@ -18,6 +18,7 @@ import { workerAccessFixture } from './fixtures/worker-access'
 import { loadActorProjection } from '../src/policies'
 import { scopeOperations } from '../src/scope-operations'
 import { validateQuery, fieldsFor } from '../src/query/schema'
+import { listPredicate } from '../src/query/list-views'
 import type { Scope } from '../src/types'
 import { consoleModel } from '../src/console-model'
 import type { RuntimeOptions } from '../src/types'
@@ -970,7 +971,7 @@ it.each([false, true])('E4 projects authorized targets after view grants and liv
   const pages = [{ id: 'matching', path: '/matching', label: 'Matching', widgets }]
   const provider = raw ? { name: 'raw-matching', version: '1', provides: { console: '1.x' as const }, validateConsole() {}, consoleRegistry: () => ({ entities, pages, navigation: [] }) }
     : { name: 'matching', version: '1', requires: { console: '^1' as const }, contributes: { console: { entities, pages } } }
-  const kernel = new KernelRegistry({ ...base, plugins: [...base.plugins!, ...(raw ? [] : [consoleUI()]), provider, {
+  const kernel = new KernelRegistry({ ...base, ...(raw ? { ui: { ...base.ui, entities } } : {}), plugins: [...base.plugins!, ...(raw ? [] : [consoleUI()]), provider, {
     name: 'live-mask', version: '1', fieldMask: () => masked ? ['id', 'name'] : ['id', 'name', 'state', 'count', 'secret'],
   }] })
   const scope: Scope = { organizationId: 'org-a', role: 'viewer', actor: { type: 'user', id: 'viewer' }, correlationId: 'matching' }
@@ -1058,4 +1059,34 @@ it('E4 count and sum retain contributing-record scope, row policies, org scope a
   expect(records.data.reduce((sum, row) => sum + row.count, 0)).toBe(6)
   expect(JSON.stringify(result)).not.toMatch(/drilldown|foreign|denied/)
   expect((await request('/o/org-b/console-pages/matching')).status).toBe(403)
+})
+
+
+it.each(['membership', 'https://example.test/destination', '/o/org-b/e/measurements', 'unknown_named', 'denied'])('E4 raw-provider destinations use effective authorized views: %s', mode => {
+  const base = fixture()
+  const open = { state: { eq: 'new' } }
+  const closed = { state: { eq: 'done' } }
+  const destination = mode === 'membership' || mode === 'denied' ? 'chosen' : mode
+  const effectiveWhere = mode === 'denied' ? { note: { eq: 'hidden operand' } } : open
+  const suppliedWhere = mode === 'denied' ? {} : mode === 'membership' ? closed : open
+  const widget = { id: 'reading', label: 'Reading', kind: 'table' as const, columns: ['name'],
+    query: { entity: 'specimens', select: ['id', 'name'], limit: 1, where: suppliedWhere }, drilldown: { view: destination } }
+  const kernel = new KernelRegistry({ ...base,
+    ui: { entities: { specimens: { list: { views: [{ id: 'chosen', label: 'Chosen', where: effectiveWhere }] } } } },
+    plugins: [...base.plugins!, { name: 'raw-destination', version: '1', provides: { console: '1.x' }, validateConsole() {},
+      consoleRegistry: () => ({ entities: { specimens: { list: { views: [{ id: destination, label: 'Supplied', where: suppliedWhere }] } } },
+        navigation: [], pages: [{ id: 'readings', path: '/readings', label: 'Readings', widgets: [widget] }] }),
+    }],
+  })
+  const scope: Scope = { organizationId: 'org-a', role: 'viewer', actor: { type: 'user', id: 'viewer' }, correlationId: 'destination' }
+  scopeOperations.set(scope, { operations: null })
+  const query = { entity: 'specimens', select: ['id', 'name'], limit: 1, view: destination }
+  if (mode === 'membership') {
+    expect(listPredicate(kernel, validateQuery(kernel, scope, query).query).where).toEqual(open)
+    expect(widget.query.where).toEqual(closed)
+  } else expect(() => validateQuery(kernel, scope, query)).toThrow()
+  const projected = consoleModel(kernel, scope).console?.pages.find(page => page.id === 'readings')?.widgets
+  const { drilldown: _target, ...readable } = widget
+  expect(projected).toEqual([readable])
+  expect(JSON.stringify(consoleModel(kernel, scope))).not.toContain('hidden operand')
 })

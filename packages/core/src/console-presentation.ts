@@ -8,6 +8,7 @@ import type { Scope } from './types'
 import type { ConsoleWidget, ConsoleDetailItem, ConsoleEntityDisplay, ConsoleFieldDisplay, ConsoleGrant, ConsoleModelUI, ConsoleRegistry } from './console-contract'
 import type { ConsoleAuthorization } from './console-authorization'
 import type { ListConfig } from './list-contract'
+import { configuredList } from './query/list-views'
 
 const safeGrant = (grant: ConsoleGrant): ConsoleGrant => typeof grant === 'string' ? grant : pick(grant, ['entity', 'operation'])
 
@@ -252,7 +253,9 @@ export function consolePresentation(kernel: KernelRegistry, scope: Scope, author
         if (!query || query.include || query.cursor || 'contextList' in input) return []
         const fieldAllowed = (field: string) => !!query.select?.includes(field) && read(query.entity, field)
           || !!query.labels?.includes(field) && authority.label(query.entity, field)
-        const drilldown = consoleWidgetDrilldown(widget, entities[query.entity]?.list?.views)
+        // Resolve explicit destination views as list queries do, under this live authority.
+        const views = configuredList(kernel, query.entity)?.views?.filter(view => predicate(query.entity, view.where))
+        const drilldown = consoleWidgetDrilldown(widget, views)
         const common = { ...pick(widget, ['id', 'label']), ...(drilldown ? { drilldown } : {}) }
         if (widget.kind === 'stat') return [{ ...common, kind: 'stat', query: pick(query, ['entity', 'where']),
           aggregate: widget.aggregate.fn === 'count' ? { fn: 'count' } : { fn: 'sum', field: widget.aggregate.field } }]
