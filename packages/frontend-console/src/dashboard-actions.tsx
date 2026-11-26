@@ -2,11 +2,14 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Link } from '@tanstack/react-router'
 import { useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
+import { ArrowRight } from 'lucide-react'
 import { Button } from '@workbasehq/ui'
 import { Card, CardHeader, CardTitle, CardContent } from '@workbasehq/ui/components/ui/card'
 import { GeneratedCreateDialog, GeneratedCollectionCommandDialog, type WriteRequest } from '@workbasehq/console-generated/writes'
 import type { ConsolePage, ConsolePageAction } from '../../core/src/console-contract'
 import { ReferenceAuthority } from '../../console-generated/src/reference-authority'
+import { visibleEntities } from '../../console-generated/src/read'
+import { writeSchema } from '../../console-generated/src/write'
 import { api } from './api/client'
 import { useOrganization, type Me } from './api/queries'
 import { refreshRuntimeModel, type RuntimeConsole, type useRuntimeModel } from './api/runtime-model'
@@ -52,6 +55,23 @@ function ActionScope({ actor, orgId, pageId, data, blocked, children }: {
     if (authority?.status !== 'success' || authority.fetchStatus !== 'idle' || organization?.status !== 'success' || organization.fetchStatus !== 'idle'
       || authority.data?.model.instance !== data.model.instance || organization.data?.user?.id !== actor || !current) throw { code: 'action_unavailable' }
     const [path, method, body, idempotencyKey] = args
+    const { model, capabilities: caps } = authority.data
+    const target = current.target
+    const actionCommand = 'command' in target ? model.commands?.find(command => command.name === target.command) : undefined
+    const entity = 'create' in target ? target.create : actionCommand?.ui?.placement?.entity ?? actionCommand?.permission.entity
+    // Generated creates can follow with membership commands. Each command's
+    // current input schema/grant, rather than entity fields, authorizes inputs.
+    const command = model.commands?.find(command => path === `/commands/${command.name}` && caps.commands?.includes(command.name))
+    const fields = entity && model.entities[entity] && visibleEntities(model, caps).includes(entity)
+      ? command ? { ...command.inputSchema.properties, idempotencyKey: {} }
+        : 'create' in target && caps.entities[entity]?.operations.includes('create') && path === `/api/${entity}` ? writeSchema(model, entity, caps).properties : undefined
+      : undefined
+    // Reject the whole stale session rather than sending a partial draft. A
+    // revision-only refresh still uses the same current field intersection.
+    if (method !== 'POST' || !fields || !body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).some(field => !Object.hasOwn(fields, field))) {
+      setSelected(undefined)
+      throw { code: 'action_unavailable' }
+    }
     const result = await api(path, { method, body, orgId, idempotencyKey })
     await client.invalidateQueries({ queryKey: ['console-page', orgId] })
     return result
@@ -60,7 +80,7 @@ function ActionScope({ actor, orgId, pageId, data, blocked, children }: {
   const label = (key: string) => t(key, { defaultValue: key })
   const control = (action: ConsolePageAction, card = false) => {
     const className = card ? 'dashboard-action' : 'dashboard-header-action'
-    const content = card ? <><span className="dashboard-action-icon" aria-hidden="true"><NavigationIconView name={action.icon ?? 'Database'} /></span><span className="dashboard-action-copy"><span className="dashboard-action-title">{label(action.label)}</span>{action.description && <span className="dashboard-action-description">{label(action.description)}</span>}</span></> : label(action.label)
+    const content = card ? <><span className="dashboard-action-top"><span className="dashboard-action-icon" aria-hidden="true"><NavigationIconView name={action.icon ?? 'Database'} /></span><span className="dashboard-action-copy"><span className="dashboard-action-title">{label(action.label)}</span>{action.description && <span className="dashboard-action-description">{label(action.description)}</span>}</span></span><span className="dashboard-action-arrow" aria-hidden="true"><ArrowRight /></span></> : label(action.label)
     const props = { className, 'data-primary': action.primary ? 'true' : undefined }
     const target = action.target
     if ('navigation' in target) {

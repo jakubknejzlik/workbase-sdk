@@ -201,6 +201,10 @@ for (const language of ['en', 'cs']) for (const width of [1440, 1280, 900, 390])
       await dialog.locator('button[type="submit"]').click()
       expect((await failure).ok()).toBe(false)
       await expect(dialog.getByRole('alert')).toBeVisible()
+      await page.evaluate(async () => {
+        await document.fonts.ready
+        await Promise.all(document.getAnimations().map(animation => animation.finished.catch(() => {})))
+      })
       expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([])
       await capture('failed-submit')
       await page.keyboard.press('Escape')

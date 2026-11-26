@@ -175,3 +175,105 @@ it('blocks submits during an authority refresh while preserving the cancel focus
     await act(async () => { test.releaseAuthority(); await refresh! })
   } finally { test.cleanup() }
 })
+
+// Query notifications can arrive before React replaces the mounted form.
+it('denies a synchronous descriptor revocation before the next render', async () => {
+  const test = await setup()
+  try {
+    fireEvent.click(start())
+    const input = await screen.findByRole('textbox', { name: 'Name' })
+    fireEvent.change(input, { target: { value: 'Neutral record' } })
+    const revoked = structuredClone(test.initial); revoked.console!.pages[0].actions = []
+    test.client.setQueryData(['console-model', 'org'], adaptConsoleModel(revoked))
+    expect(screen.queryByRole('dialog')).toBeTruthy()
+    fireEvent.submit(input.closest('form')!); await act(async () => {})
+    expect(test.writes).toHaveLength(0)
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+  } finally { test.cleanup() }
+})
+it('denies a synchronous actor replacement before the next render', async () => {
+  const test = await setup()
+  try {
+    fireEvent.click(start())
+    const input = await screen.findByRole('textbox', { name: 'Name' })
+    fireEvent.change(input, { target: { value: 'Neutral record' } })
+    test.client.setQueryData(['organization', 'org'], { user: { id: 'other' }, memberships: [{ organization_id: 'org' }] })
+    fireEvent.submit(input.closest('form')!); await act(async () => {})
+    expect(test.writes).toHaveLength(0)
+  } finally { test.cleanup() }
+})
+it('isolates the new actor draft from a previously dispatched command response', async () => {
+  const test = await setup('command')
+  try {
+    fireEvent.click(start())
+    const input = await screen.findByRole('textbox', { name: 'Name' })
+    fireEvent.change(input, { target: { value: 'First neutral record' } })
+    test.hold(); fireEvent.submit(input.closest('form')!)
+    await waitFor(() => expect(test.writes).toHaveLength(1))
+    await act(async () => { test.client.setQueryData(['organization', 'org'], { user: { id: 'other' }, memberships: [{ organization_id: 'org' }] }) })
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    fireEvent.click(start())
+    const next = await screen.findByRole('textbox', { name: 'Name' })
+    fireEvent.change(next, { target: { value: 'Second neutral draft' } })
+    await act(async () => test.release())
+    await waitFor(() => expect(test.client.isMutating()).toBe(0))
+    expect(screen.getByRole('textbox', { name: 'Name' })).toBe(next)
+    expect(next).toHaveProperty('value', 'Second neutral draft')
+    expect(test.writes).toHaveLength(1)
+  } finally { test.cleanup() }
+})
+it('denies optional-field revocation before render even when the create descriptor remains', async () => {
+  const doc = document(), entity = doc.model.entities.entries as any
+  entity.fields.note = { type: 'string' }; entity.writeSchema.properties.note = { type: 'string' }
+  doc.capabilities.entities.entries.readable.push('note'); doc.capabilities.entities.entries.writable.push('note')
+  const test = await setup('crud', doc)
+  try {
+    fireEvent.click(start())
+    const name = await screen.findByRole('textbox', { name: 'Name' })
+    const note = screen.getAllByRole('textbox').find(field => field !== name)!
+    fireEvent.change(name, { target: { value: 'Neutral record' } })
+    fireEvent.change(note, { target: { value: 'Neutral optional value' } })
+    const current = structuredClone(doc); current.model.revision = 2; current.capabilities.revision = 2
+    current.capabilities.entities.entries.writable = ['name']; current.capabilities.entities.entries.readable = ['id', 'name']
+    delete (current.model.entities.entries as any).fields.note
+    delete (current.model.entities.entries as any).writeSchema.properties.note
+    test.client.setQueryData(['console-model', 'org'], adaptConsoleModel(current))
+    expect(screen.getAllByRole('textbox')).toHaveLength(2)
+    fireEvent.submit(name.closest('form')!); await act(async () => {})
+    expect(test.writes).toHaveLength(0)
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+  } finally { test.cleanup() }
+})
+
+it.each(['crud', 'placed', 'command'] as const)('%s submits the retained draft after a synchronous revision-only refresh', async kind => {
+  const test = await setup(kind)
+  try {
+    fireEvent.click(start())
+    const input = await screen.findByRole('textbox', { name: 'Name' })
+    fireEvent.change(input, { target: { value: 'Retained neutral draft' } })
+    const current = structuredClone(test.initial); current.model.revision = 2; current.capabilities.revision = 2
+    test.client.setQueryData(['console-model', 'org'], adaptConsoleModel(current))
+    fireEvent.submit(input.closest('form')!)
+    await waitFor(() => expect(test.writes).toHaveLength(1))
+    expect(test.writes[0].body.name).toBe('Retained neutral draft')
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+  } finally { test.cleanup() }
+})
+it.each(['placed', 'command'] as const)('%s denies a removed command input before render', async kind => {
+  const doc = document(kind)
+  ;(doc.model.commands![0].inputSchema.properties as any).note = { type: 'string' }
+  const test = await setup(kind, doc)
+  try {
+    fireEvent.click(start())
+    const name = await screen.findByRole('textbox', { name: 'Name' })
+    const note = screen.getAllByRole('textbox').find(field => field !== name)!
+    fireEvent.change(name, { target: { value: 'Neutral record' } })
+    fireEvent.change(note, { target: { value: 'Neutral optional input' } })
+    const current = structuredClone(doc)
+    delete (current.model.commands![0].inputSchema.properties as any).note
+    test.client.setQueryData(['console-model', 'org'], adaptConsoleModel(current))
+    fireEvent.submit(name.closest('form')!); await act(async () => {})
+    expect(test.writes).toHaveLength(0)
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+  } finally { test.cleanup() }
+})
