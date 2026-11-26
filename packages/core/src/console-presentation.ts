@@ -7,6 +7,8 @@ import type { KernelRegistry } from './kernel/registry'
 import type { Scope } from './types'
 import type { ConsoleWidget, ConsoleDetailItem, ConsoleEntityDisplay, ConsoleFieldDisplay, ConsoleGrant, ConsoleModelUI, ConsoleRegistry } from './console-contract'
 import type { ConsoleAuthorization } from './console-authorization'
+import type { ListConfig } from './list-contract'
+import { configuredList } from './query/list-views'
 
 const safeGrant = (grant: ConsoleGrant): ConsoleGrant => typeof grant === 'string' ? grant : pick(grant, ['entity', 'operation'])
 
@@ -112,6 +114,28 @@ export function consolePageActions(kernel: KernelRegistry, actions: readonly Con
     }
     return target ? [{ ...pick(action, ['id', 'label', 'description', 'icon', 'primary']), target }] : []
   })
+}
+
+/** Exact membership only; callers supply normalized (and, at projection, granted) views. */
+export function consoleWidgetDrilldown(widget: ConsoleWidget, views: ListConfig['views']): ConsoleWidget['drilldown'] {
+  const target = widget.drilldown
+  if (!target || typeof target !== 'object' || Array.isArray(target) || Object.keys(target).length !== 1
+    || typeof target.view !== 'string' || !target.view) return undefined
+  const query = widget.query
+  if ('search' in query && query.search !== undefined || 'labelWhere' in query && query.labelWhere !== undefined
+    || ['view', 'rowAccess', 'contextList'].some(key => key in query && (query as unknown as Record<string, unknown>)[key] !== undefined)) return undefined
+  const view = views?.find(view => view.id === target.view)
+  if (!view || view.rowAccess) return undefined
+  function equal(left: unknown, right: unknown): boolean {
+    if (left === right) return true
+    if (!left || !right || typeof left !== 'object' || typeof right !== 'object') return false
+    if (Array.isArray(left) || Array.isArray(right)) return Array.isArray(left) && Array.isArray(right)
+      && left.length === right.length && left.every((value, index) => equal(value, right[index]))
+    const a = left as Record<string, unknown>, b = right as Record<string, unknown>
+    const keys = Object.keys(a)
+    return keys.length === Object.keys(b).length && keys.every(key => Object.hasOwn(b, key) && equal(a[key], b[key]))
+  }
+  return equal(query.where ?? {}, view.where) ? { view: view.id } : undefined
 }
 
 /** Project every copy of presentation data through the same live authority.
@@ -229,7 +253,10 @@ export function consolePresentation(kernel: KernelRegistry, scope: Scope, author
         if (!query || query.include || query.cursor || 'contextList' in input) return []
         const fieldAllowed = (field: string) => !!query.select?.includes(field) && read(query.entity, field)
           || !!query.labels?.includes(field) && authority.label(query.entity, field)
-        const common = pick(widget, ['id', 'label'])
+        // Resolve explicit destination views as list queries do, under this live authority.
+        const views = configuredList(kernel, query.entity)?.views?.filter(view => predicate(query.entity, view.where))
+        const drilldown = consoleWidgetDrilldown(widget, views)
+        const common = { ...pick(widget, ['id', 'label']), ...(drilldown ? { drilldown } : {}) }
         if (widget.kind === 'stat') return [{ ...common, kind: 'stat', query: pick(query, ['entity', 'where']),
           aggregate: widget.aggregate.fn === 'count' ? { fn: 'count' } : { fn: 'sum', field: widget.aggregate.field } }]
         const safeQuery = { ...pick(query, ['entity', 'where', 'limit', 'select', 'labels', 'search', 'labelWhere', 'orderBy']), select: query.select! }

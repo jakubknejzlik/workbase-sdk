@@ -17,7 +17,10 @@ export interface ConsoleNavigation {
   view?: string
 }
 export type ConsoleAggregate = { fn: 'count' } | { fn: 'sum'; field: string }
-export type ConsoleWidget = { id: string; label: string } & (
+export type ConsoleWidget = { id: string; label: string;
+  /** Optional matching named list view of this widget's own entity; grants no access. */
+  drilldown?: { view: string }
+} & (
   | { kind: 'stat'; query: Pick<ConsoleQuery, 'entity' | 'where'>; aggregate: ConsoleAggregate }
   | { kind: 'table'; query: ConsoleQuery; columns: string[] }
   | { kind: 'list'; query: ConsoleQuery; field: string })

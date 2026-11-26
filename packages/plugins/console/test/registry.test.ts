@@ -193,3 +193,74 @@ it.each(['row', 'unsupported', 'undeclared'])('E2 rejects %s runtime command tar
     permission: { entity: 'clients', operation: 'update' }, plan: () => ({ rules: [], result: { status: 200, body: {} }, event: { operation: 'test', entity: 'clients', entityId: 'synthetic' } }) })
   expect(() => new KernelRegistry({ ...actionConfig([{ id: 'collect', label: 'collectKey', primary: true, target: { command: command.name } }]), commands: kind === 'undeclared' ? [] : [command.name] }, { commands: new Map([[command.name, command]]) })).toThrow(/console action/i)
 })
+
+// E4: untyped inputs exercise the strict metadata boundary too.
+function matchingConfig(widgets: unknown[], views: unknown[] = [{ id: 'named', label: 'Named', where: { name: { eq: 'Public' } } }], contributed = false): InstanceConfig {
+  const list = { views }
+  return { ...sample, ui: { ...sample.ui, entities: { ...sample.ui?.entities, clients: { list: contributed ? { views: [] } : list } } },
+    plugins: [...sample.plugins!, { name: 'matching-list', version: '1', requires: { console: '^1' }, contributes: { console: {
+      ...(contributed ? { entities: { clients: { list } } } : {}),
+      pages: [{ id: 'matching', path: '/matching', label: 'Matching', widgets }],
+    } } }],
+  } as InstanceConfig
+}
+const matchingTable = { id: 'table', label: 'Clients', kind: 'table', query: { entity: 'clients', select: ['id', 'name'], limit: 1, where: { name: { eq: 'Public' } } }, columns: ['name'], drilldown: { view: 'named' } }
+it.each([false, true])('E4 accepts normalized same-entity list targets, contributed=%s', contributed => {
+  const config = matchingConfig([
+    matchingTable,
+    { ...matchingTable, id: 'list', kind: 'list', columns: undefined, field: 'name' },
+  ].map(widget => Object.fromEntries(Object.entries(widget).filter(([, value]) => value !== undefined))), undefined, contributed)
+  expect(() => new KernelRegistry(config)).not.toThrow()
+})
+it.each(['count', 'sum'])('E4 %s target describes all contributing records rather than the loaded page', fn => {
+  const widget = { id: fn, label: fn, kind: 'stat', query: { entity: 'stock_items', where: { quantity: { gte: 0 } } }, aggregate: fn === 'count' ? { fn } : { fn, field: 'quantity' }, drilldown: { view: 'nonnegative' } }
+  const config = matchingConfig([widget])
+  config.ui!.entities!.stock_items = { list: { views: [{ id: 'nonnegative', label: 'Nonnegative', where: { quantity: { gte: 0 } } }] } }
+  expect(() => new KernelRegistry(config)).not.toThrow()
+})
+it.each([undefined, {}])('E4 accepts an unfiltered widget with an explicitly named unfiltered view: %s', where => {
+  expect(() => new KernelRegistry(matchingConfig([{ ...matchingTable, query: { ...matchingTable.query, where } }], [{ id: 'named', label: 'All', where: {} }]))).not.toThrow()
+})
+it('E4 structural equality ignores object key order and preserves Boolean operand order', () => {
+  const where = { and: [{ name: { eq: 'Public' } }, { id: { in: ['one', 'two'] } }] }
+  const widget = { ...matchingTable, query: { ...matchingTable.query, where } }
+  expect(() => new KernelRegistry(matchingConfig([widget], [{ id: 'named', label: 'Named', where }]))).not.toThrow()
+  const reversedKeys = { id: { in: ['one', 'two'] }, name: { eq: 'Public' } }
+  expect(() => new KernelRegistry(matchingConfig([{ ...widget, query: { ...widget.query, where: { name: { eq: 'Public' }, id: { in: ['one', 'two'] } } } }], [{ id: 'named', label: 'Named', where: reversedKeys }]))).not.toThrow()
+  expect(() => new KernelRegistry(matchingConfig([widget], [{ id: 'named', label: 'Named', where: { and: [...where.and].reverse() } }]))).toThrow(/drilldown/i)
+})
+it.each([
+  null, {}, { view: '' }, { view: 'missing' }, { view: 'https://example.test/' },
+  { view: 'named', entity: 'workers' }, { view: 'named', organization: 'org-b' }, { view: 'named', url: '/e/clients' },
+])('E4 rejects unknown or non-reference drilldown metadata: %j', drilldown => {
+  expect(() => new KernelRegistry(matchingConfig([{ ...matchingTable, drilldown }]))).toThrow(/drilldown/i)
+})
+it.each([
+  { where: undefined }, { where: {} }, { where: { name: { eq: 'Other' } } },
+  { where: { and: [{ name: { eq: 'Public' } }] } },
+  { search: { text: 'Public', fields: ['name'] } }, { labelWhere: { name: { contains: 'Public' } } },
+  { view: 'named' }, { rowAccess: 'signed_in' }, { contextList: { entity: 'clients', list: 'related', id: 'one' } },
+])('E4 rejects mismatched or unsupported membership: %j', change => {
+  expect(() => new KernelRegistry(matchingConfig([{ ...matchingTable, query: { ...matchingTable.query, ...change } }]))).toThrow()
+})
+it('E4 rejects a rowAccess view even when its where matches', () => {
+  expect(() => new KernelRegistry(matchingConfig([matchingTable], [{ id: 'named', label: 'Named', where: matchingTable.query.where, rowAccess: 'signed_in' }]))).toThrow(/drilldown/i)
+})
+it('E4 never resolves a same-named view on another entity or a superseded config overlay', () => {
+  const config = matchingConfig([matchingTable], [], true)
+  config.ui!.entities!.workers = { list: { views: [{ id: 'named', label: 'Named', where: {} }] } }
+  config.ui!.entities!.clients = { list: { views: [{ id: 'named', label: 'Named', where: matchingTable.query.where }] } }
+  expect(() => new KernelRegistry(config)).toThrow(/drilldown/i)
+})
+it.each([false, true])('E4 retains same-name scalar ref versus nested relation predicates: nested=%s', nested => {
+  const where = nested ? { parent: { name: { eq: 'Public' } } } : { parent: { eq: 'parent-id' } }
+  const config = matchingConfig([{ ...matchingTable, query: { ...matchingTable.query, where } }], [{ id: 'named', label: 'Named', where }])
+  config.entities = { ...config.entities, clients: { ...config.entities.clients, fields: { ...config.entities.clients.fields, parent: { type: 'ref', entity: 'clients', required: false } }, relations: { parent: { entity: 'clients', field: 'parent' } } } }
+  expect(() => new KernelRegistry(config)).not.toThrow()
+})
+it('E4 descriptor-free configuration retains its existing shape', async () => {
+  const { drilldown: _target, ...widget } = matchingTable
+  const config = matchingConfig([widget])
+  const registry = await providerRegistry(config)
+  expect(registry.pages.find(page => page.id === 'matching')?.widgets).toEqual([widget])
+})
