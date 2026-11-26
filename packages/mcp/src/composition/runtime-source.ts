@@ -1,5 +1,5 @@
 import ts from 'typescript'
-import { runtimeChangeSchema, fail, WorkflowError, type CompositionChange } from '../schemas.ts'
+import { runtimeChangeSchema, setInteractiveSchema, fail, WorkflowError, type CompositionChange } from '../schemas.ts'
 import { importOrder, permissionOptions, pluginOrder, pluginRegistry, parsePluginOptions, type CompositionConfig, type PluginName, type RuntimePlugin } from './registry.ts'
 
 export interface RuntimeModel { interactive?: boolean; plugins: RuntimePlugin[] }
@@ -165,6 +165,13 @@ export function applyRuntimeChanges(model: RuntimeModel, changes: readonly Compo
     }
   }
   return normalize(next, config)
+}
+/** Derive source from caller-supplied base data without hydrating runtime plugins. */
+export function deriveInteractiveSource(source: string, change: unknown, config: CompositionConfig) {
+  const parsedChange = setInteractiveSchema.parse(change)
+  const model = applyRuntimeChanges(parseRuntimeSource(source), [parsedChange], config)
+  const data = rewriteRuntimeSource(source, model, config)
+  return { model, files: [{ path: 'runtime.ts', data }] }
 }
 function text(value: unknown): string {
   if (typeof value === 'string') return "'" + value.replace(/['\\\u0000-\u001f\u2028\u2029]/g, character => character === "'" ? "\\'" : character === '\u2028' ? '\\u2028' : character === '\u2029' ? '\\u2029' : JSON.stringify(character).slice(1, -1)) + "'"

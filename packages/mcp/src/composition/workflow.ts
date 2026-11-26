@@ -11,7 +11,7 @@ import { byteHash } from '../byte-digest.ts'
 import { instanceMeta, replayEngine } from '../offline.ts'
 import { applyDisposable } from '../disposable.ts'
 import type { CompositionProposal } from '../proposals.ts'
-import { applyRuntimeChanges, parseRuntimeSource, rewritePermissionsSource, rewriteRuntimeSource } from './runtime-source.ts'
+import { applyRuntimeChanges, deriveInteractiveSource, parseRuntimeSource, rewritePermissionsSource, rewriteRuntimeSource } from './runtime-source.ts'
 import { hydrateRuntimePlugins } from './registry.ts'
 import { accessPlan, compositionPlan, presentationPlan } from './plan.ts'
 import { compositionRequirements, assertCompositionRequirements } from './requirements.ts'
@@ -45,8 +45,10 @@ async function prepare(bundle: Bundle, changes: CompositionChange[], root: strin
   const presentation = await presentationPlan(root, changes.filter(change => change.kind === 'set_locale' || change.kind === 'set_instance_display_name'))
   const catalogs = await catalogPlan(root, changes.flatMap(change => change.kind === 'set_label' ? [labelCatalog(bundle.config, change)] : change.kind === 'set_catalog_entries' ? [change] : []))
   const config = presentation?.config ?? access.config
-  const model = applyRuntimeChanges(parseRuntimeSource(bundle.runtimeSource!), runtimeChanges, config)
-  const source = runtimeChanges.length ? rewriteRuntimeSource(bundle.runtimeSource!, model, config)
+  const derived = runtimeChanges.length === 1 && runtimeChanges[0].kind === 'set_interactive'
+    ? deriveInteractiveSource(bundle.runtimeSource!, runtimeChanges[0], config) : undefined
+  const model = derived?.model ?? applyRuntimeChanges(parseRuntimeSource(bundle.runtimeSource!), runtimeChanges, config)
+  const source = derived ? derived.files[0].data : runtimeChanges.length ? rewriteRuntimeSource(bundle.runtimeSource!, model, config)
     : changes.some(change => change.kind === 'set_roles') ? rewritePermissionsSource(bundle.runtimeSource!, config) : bundle.runtimeSource!
   const runtime = { ...config, ...(model.interactive === undefined ? {} : { interactive: model.interactive }), plugins: hydrateRuntimePlugins(model, config) }
   const target = { ...bundle, config, runtime }
