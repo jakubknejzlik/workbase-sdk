@@ -1,5 +1,8 @@
 @import './tokens.css';
 
+/* Only mounted standalone shells opt into document defaults. Inline host styles win. */
+:where(html[data-workbase-auth-shell]) body { margin: 0; }
+
 /* Defaults belong to SDK roots and controls, never the embedding document or slots. */
 :where(.wb-ui) {
   box-sizing: border-box;

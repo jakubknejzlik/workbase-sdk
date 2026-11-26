@@ -1,4 +1,4 @@
-declare const document: { documentElement: { lang: string }; body: { style: { cssText: string; length: number; item(index: number): string; margin: string; getPropertyValue(name: string): string; getPropertyPriority(name: string): string; setProperty(name: string, value: string, priority?: string): void; removeProperty(name: string): string } } }
+declare const document: { documentElement: { lang: string; setAttribute(name: string, value: string): void; removeAttribute(name: string): void } }
 import { clearSavedViews } from '../saved-views-storage'
 declare const location: { pathname: string; search: string; replace(path: string): void }
 declare const history: { replaceState(state: unknown, unused: string, url: string): void }
@@ -155,35 +155,22 @@ function InvitationFlow({ auth, initial, go, select, displayName }: { auth: Auth
   return h(ProfileGate, { auth, required: true }, h('div', null, preview, acceptButton))
 }
 export type AuthShellProps = { manifest: Manifest; i18n: I18n; displayName?: string; children?: ReactNode; fetch?: Transport; navigate: (path: string) => void | Promise<unknown> }
+// Track each document independently so concurrent shells share one lifecycle marker.
+const standaloneMounts = new Map<typeof document.documentElement, number>()
 /** Mount outside RouterProvider so reserved auth paths never mount Instance data. */
 export function AuthShell({ manifest, i18n, displayName, children, fetch: transport = globalThis.fetch, navigate }: AuthShellProps) {
-  // AuthShell owns the standalone document (including its language). Component
-  // embeds never mount this shell. Restore the host declaration when it unmounts.
+  // Standalone defaults live in the shipped stylesheet; host inline styles win.
   useEffect(() => {
-    const style = document.body.style
-    const isMargin = (name: string) => /^margin(?:-(?:top|right|bottom|left|(?:block|inline)(?:-(?:start|end))?))?$/.test(name)
-    const declarations = () => Array.from({ length: style.length }, (_, index) => style.item(index))
-      .map(name => ({ name, value: style.getPropertyValue(name), priority: style.getPropertyPriority(name) }))
-    // `all` competes with both physical and logical margins. Keep its position
-    // in the snapshot so cleanup cannot move an earlier margin past the reset.
-    const margins = declarations().filter(({ name }) => isMargin(name) || name === 'all')
-    const clearMargins = () => {
-      for (const name of ['margin', 'margin-top', 'margin-right', 'margin-bottom', 'margin-left', 'margin-block', 'margin-block-start', 'margin-block-end', 'margin-inline', 'margin-inline-start', 'margin-inline-end']) style.removeProperty(name)
-    }
-    clearMargins()
-    style.setProperty('margin', '0px', margins.some(({ priority }) => priority === 'important') ? 'important' : '')
+    const html = document.documentElement
+    standaloneMounts.set(html, (standaloneMounts.get(html) ?? 0) + 1)
+    html.setAttribute('data-workbase-auth-shell', '')
     return () => {
-      // Replay around the surviving reset's position, retaining the current
-      // non-margin declarations on either side (including later host changes).
-      const current = declarations().filter(({ name }) => !isMargin(name))
-      const resetIndex = current.findIndex(({ name }) => name === 'all')
-      const hasReset = margins.some(({ name }) => name === 'all')
-      const restored = hasReset && resetIndex !== -1
-        ? [...current.slice(0, resetIndex), ...margins, ...current.slice(resetIndex + 1)]
-        : [...current, ...margins]
-      // Parse the sequence together: setProperty('all', ...) can normalize an
-      // earlier logical margin differently from parsing the original CSS text.
-      style.cssText = restored.map(({ name, value, priority }) => `${name}: ${value}${priority ? ' !' + priority : ''};`).join(' ')
+      const remaining = (standaloneMounts.get(html) ?? 1) - 1
+      if (remaining) standaloneMounts.set(html, remaining)
+      else {
+        standaloneMounts.delete(html)
+        html.removeAttribute('data-workbase-auth-shell')
+      }
     }
   }, [])
   const [initial, setEntry] = useState(entry), [org, setOrg] = useState(() => authStorage.org.read()), [memberships, setMemberships] = useState<Membership[]>(), [inbox, setInbox] = useState<Invitation[]>(), [failed, setFailed] = useState(false), [retry, setRetry] = useState(0)

@@ -1,6 +1,6 @@
 declare const history: { state: unknown; pushState(state: unknown, unused: string, url: string): void; replaceState(state: unknown, unused: string, url: string): void }
 declare const location: { pathname: string; search: string }
-declare const document: { documentElement: { lang: string }; body: { textContent: string | null; style: { length: number; item(index: number): string; margin: string; cssText: string; setProperty(name: string, value: string, priority?: string): void; getPropertyPriority(name: string): string; getPropertyValue(name: string): string } } }
+declare const document: { documentElement: { lang: string; style: typeof document.body.style; hasAttribute(name: string): boolean }; body: { textContent: string | null; style: { length: number; item(index: number): string; margin: string; cssText: string; setProperty(name: string, value: string, priority?: string): void; removeProperty(name: string): string; getPropertyPriority(name: string): string; getPropertyValue(name: string): string } } }
 declare const window: { location: typeof location; localStorage: Storage; sessionStorage: Storage; dispatchEvent(event: Event): void }
 // @vitest-environment jsdom
 import { createElement as h, StrictMode, type ReactNode } from 'react'
@@ -253,108 +253,51 @@ test('document language follows active SDK language on the styled sign-in root',
 })
 
 
-test('standalone AuthShell owns body margin only for its mounted lifetime', () => {
-  history.replaceState(null, '', '/sign-in')
-  const original = document.body.style.cssText
-  document.body.style.setProperty('margin', '13px', 'important')
-  try {
-    const mounted = render(view(async () => json({}), true).element)
-    expect(document.body.style.margin).toBe('0px')
-    mounted.unmount()
-    expect(document.body.style.margin).toBe('13px')
-    expect(document.body.style.getPropertyPriority('margin')).toBe('important')
-  } finally { document.body.style.cssText = original }
-})
-
-
 for (const strict of [false, true]) {
   test.each([
-    '',
-    'margin: 13px !important; color: red',
-    'margin-top: 21px; color: red',
-    'margin: 13px; margin-top: 21px !important; color: red',
-    'margin-left: 5px',
-    'margin-top: 7px !important; margin-right: 9px; color: red',
-  ])(`AuthShell restores host margins (StrictMode=${strict}): %s`, css => {
+    '', 'margin:13px!important', 'margin-top:21px',
+    'margin:13px;margin-top:21px!important', 'margin-left:5px',
+    'margin-top:7px!important;margin-right:9px',
+    'margin-top:21px;margin-block-start:30px',
+    'margin-block-start:30px;margin-top:21px',
+    'margin-top:21px;margin-block-start:30px!important', 'margin-inline-start:7px',
+    'margin-block-start:30px;all:initial', 'all:initial;margin-block-start:30px',
+    'margin-top:21px!important;all:initial', 'all:initial!important;margin-block-start:30px',
+    String.raw`--host\:token:41px!important;--semi\;colon:retained;--with\ space:kept;width:var(--host\:token)`,
+  ])(`AuthShell never writes host inline styles (StrictMode=${strict}): %s`, css => {
     history.replaceState(null, '', '/sign-in')
-    const style = document.body.style, original = style.cssText
-    const margins = () => ['margin-top', 'margin-right', 'margin-bottom', 'margin-left'].map(name => [
-      style.getPropertyValue(name), style.getPropertyPriority(name),
+    const styles = [document.body.style, document.documentElement.style]
+    const originals = styles.map(style => style.cssText)
+    styles.forEach(style => { style.cssText = css })
+    const before = styles.map(style => style.cssText)
+    const writes = styles.flatMap(style => [
+      vi.spyOn(style, 'setProperty'), vi.spyOn(style, 'removeProperty'),
+      vi.spyOn(style, 'cssText', 'set'),
     ])
-    style.cssText = css
-    const before = margins()
     const mounted = render(view(async () => json({}), strict).element)
     try {
-      expect(style.margin).toBe('0px')
-      style.setProperty('color', 'blue', 'important')
-      style.setProperty('background-color', 'yellow')
+      expect(styles.map(style => style.cssText)).toEqual(before)
+      expect(document.documentElement.hasAttribute('data-workbase-auth-shell')).toBe(true)
+      mounted.rerender(view(async () => json({}), strict).element)
+      expect(styles.map(style => style.cssText)).toEqual(before)
       mounted.unmount()
-      expect(margins()).toEqual(before)
-      expect(style.getPropertyValue('color')).toBe('blue')
-      expect(style.getPropertyPriority('color')).toBe('important')
-      expect(style.getPropertyValue('background-color')).toBe('yellow')
-    } finally { mounted.unmount(); style.cssText = original }
+      expect(styles.map(style => style.cssText)).toEqual(before)
+      expect(document.documentElement.hasAttribute('data-workbase-auth-shell')).toBe(false)
+      writes.forEach(write => expect(write).not.toHaveBeenCalled())
+    } finally {
+      mounted.unmount()
+      writes.forEach(write => write.mockRestore())
+      styles.forEach((style, index) => { style.cssText = originals[index] })
+    }
   })
-}
-
-for (const strict of [false, true]) {
-  test.each([
-    'margin-top: 21px; margin-block-start: 30px',
-    'margin-block-start: 30px; margin-top: 21px',
-    'margin-top: 21px; margin-block-start: 30px !important',
-    'margin-inline-start: 7px',
-    'margin-block: 30px 12px; margin-top: 21px; margin-inline: 7px 9px',
-  ])(`AuthShell restores ordered physical/logical margins (StrictMode=${strict}): %s`, css => {
+  test(`AuthShell attribute counts concurrent shells (StrictMode=${strict})`, () => {
     history.replaceState(null, '', '/sign-in')
-    const style = document.body.style, original = style.cssText
-    const margins = () => Array.from({ length: style.length }, (_, index) => style.item(index))
-      .filter(name => name === 'margin' || name.startsWith('margin-'))
-      .map(name => [name, style.getPropertyValue(name), style.getPropertyPriority(name)])
-    style.cssText = css
-    const before = margins()
-    const mounted = render(view(async () => json({}), strict).element)
-    try {
-      expect(style.margin).toBe('0px')
-      expect(margins().every(([name]) => !name.startsWith('margin-block') && !name.startsWith('margin-inline'))).toBe(true)
-      style.setProperty('color', 'blue', 'important')
-      style.setProperty('background-color', 'yellow')
-      mounted.unmount()
-      expect(margins()).toEqual(before)
-      expect(style.getPropertyValue('color')).toBe('blue')
-      expect(style.getPropertyPriority('color')).toBe('important')
-      expect(style.getPropertyValue('background-color')).toBe('yellow')
-    } finally { mounted.unmount(); style.cssText = original }
-  })
-}
-
-
-for (const strict of [false, true]) {
-  test.each([
-    'margin-block-start: 30px; all: initial; color: red',
-    'all: initial; margin-block-start: 30px',
-    'margin-top: 21px !important; all: initial',
-    'all: initial !important; margin-block-start: 30px',
-  ])(`AuthShell restores margins across all (StrictMode=${strict}): %s`, css => {
-    history.replaceState(null, '', '/sign-in')
-    const style = document.body.style, original = style.cssText
-    const sequence = () => Array.from({ length: style.length }, (_, index) => style.item(index))
-      .filter(name => name === 'all' || name === 'margin' || name.startsWith('margin-'))
-      .map(name => [name, style.getPropertyValue(name), style.getPropertyPriority(name)])
-    style.cssText = css
-    const before = sequence()
-    expect(before.some(([name]) => name === 'all')).toBe(true)
-    const mounted = render(view(async () => json({}), strict).element)
-    try {
-      expect(style.margin).toBe('0px')
-      style.setProperty('color', 'blue', 'important')
-      style.setProperty('background-color', 'yellow')
-      style.setProperty('--host-sentinel', 'retained')
-      mounted.unmount()
-      expect(sequence()).toEqual(before)
-      expect(style.getPropertyValue('color')).toBe('blue')
-      expect(style.getPropertyPriority('color')).toBe('important')
-      expect(style.getPropertyValue('background-color')).toBe('yellow')
-      expect(style.getPropertyValue('--host-sentinel')).toBe('retained')
-    } finally { mounted.unmount(); style.cssText = original }
+    const first = render(view(async () => json({}), strict).element)
+    const second = render(view(async () => json({}), strict).element)
+    expect(document.documentElement.hasAttribute('data-workbase-auth-shell')).toBe(true)
+    first.unmount()
+    expect(document.documentElement.hasAttribute('data-workbase-auth-shell')).toBe(true)
+    second.unmount()
+    expect(document.documentElement.hasAttribute('data-workbase-auth-shell')).toBe(false)
   })
 }
