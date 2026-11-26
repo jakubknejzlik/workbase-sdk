@@ -1,7 +1,7 @@
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, expect, it, vi } from 'vitest'
-import { createMemoryHistory, createRootRoute, createRoute, createRouter, RouterProvider } from '@tanstack/react-router'
+import { createMemoryHistory, createRootRoute, createRoute, createRouter, RouterProvider, useParams } from '@tanstack/react-router'
 import { I18nextProvider, initReactI18next } from 'react-i18next'
 import i18next from 'i18next'
 import type { Model, Capabilities } from '../../console-generated/src/read'
@@ -88,11 +88,12 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act } from '@testing-library/react'
 import { useSyncExternalStore } from 'react'
 import { WidgetPage } from '../src/dashboard'
+import { PluginPage } from '../src/console-pages'
 import * as runtimeModel from '../src/api/runtime-model'
 import * as client from '../src/api/client'
 import { validateListSearch } from '../../console-generated/src/list-model'
 
-async function mountTarget(options: { kind?: 'stat' | 'table' | 'list'; language?: 'en' | 'cs'; view?: string; value?: number | null; empty?: boolean; failed?: boolean; missing?: boolean; denied?: boolean } = {}) {
+async function mountTarget(options: { kind?: 'stat' | 'table' | 'list'; language?: 'en' | 'cs'; view?: string; value?: number | null; empty?: boolean; failed?: boolean; missing?: boolean; denied?: boolean; routeBoundary?: boolean } = {}) {
   vi.spyOn(window, 'scrollTo').mockImplementation(() => {})
   const kind = options.kind ?? 'stat'
   const query = { entity: 'entries', where: { status: { eq: 'pending' } }, select: ['id', 'name'], limit: 5 }
@@ -115,9 +116,10 @@ async function mountTarget(options: { kind?: 'stat' | 'table' | 'list'; language
   vi.spyOn(client, 'api').mockResolvedValue({ id: page.id, label: page.label, widgets: options.denied ? [] : [widget] })
   const cache = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })
   const root = createRootRoute()
-  const dashboard = createRoute({ getParentRoute: () => root, path: '/summary', component: () => <WidgetPage orgId="org /α" page={page} /> })
+  // Raw URL encoding enters the real router; PluginPage receives the real route params.
+  const dashboard = createRoute({ getParentRoute: () => root, path: '/o/$orgId/summary', component: () => { const { orgId } = useParams({ strict: false }); return options.routeBoundary ? <PluginPage orgId={orgId!} /> : <WidgetPage orgId="org /α" page={page} /> } })
   const list = createRoute({ getParentRoute: () => root, path: '/o/$orgId/e/$entity', validateSearch: validateListSearch, component: () => <h1>Matching list</h1> })
-  const router = createRouter({ routeTree: root.addChildren([dashboard, list]), history: createMemoryHistory({ initialEntries: ['/summary?search=stale&page=9'] }) })
+  const router = createRouter({ routeTree: root.addChildren([dashboard, list]), history: createMemoryHistory({ initialEntries: ['/o/org%20%2F%CE%B1/summary?search=stale&page=9'] }) })
   await router.load()
   const i18n = i18next.createInstance()
   await i18n.use(initReactI18next).init({ lng: options.language ?? 'en', resources: { en: { translation: en }, cs: { translation: cs } } })
@@ -131,7 +133,7 @@ async function mountTarget(options: { kind?: 'stat' | 'table' | 'list'; language
 }
 
 it.each(['stat', 'table', 'list'] as const)('opens the named view at page one in the encoded current org from a %s', async kind => {
-  const { user, router } = await mountTarget({ kind })
+  const { user, router } = await mountTarget({ kind, routeBoundary: true })
   const link = await screen.findByRole('link', { name: 'View matching records' })
   expect(link.getAttribute('href')).toBe('/o/org%20%2F%CE%B1/e/entries?view=attention&page=1')
   // Native keyboard traversal and router history, without inheriting dashboard search.
@@ -143,7 +145,7 @@ it.each(['stat', 'table', 'list'] as const)('opens the named view at page one in
   expect(router.state.location.search).toEqual({ view: 'attention', page: 1 })
   await act(async () => { router.history.back() })
   await screen.findByRole('link', { name: 'View matching records' })
-  expect(router.state.location.pathname).toBe('/summary')
+  expect(router.state.location.pathname).toBe('/o/org %2Fα/summary')
 })
 
 it('uses the Czech shared link text', async () => {

@@ -29,28 +29,33 @@ import { Breadcrumbs } from './Breadcrumbs'
 import { instanceTitle, useConsoleTitle } from './console-title'
 import { ScopeHomeContext, scopeHomeDestination, useScopeHome } from '../../console-generated/src/scope-home'
 import './styles.css'
+
+// Router pathnames still escape reserved characters such as slashes. Decode the
+// segment once at this boundary; malformed escapes remain a literal ID.
+function decodeOrgPath(orgPath?: string) {
+  try { return orgPath ? decodeURIComponent(orgPath) : undefined } catch { return orgPath }
+}
 export function Frame() {
   const location = useLocation(); const client = useQueryClient(); const { t } = useTranslation()
   const gated = isBootstrappedRoute(location.pathname)
   const schema = useQuery({ ...instanceOptions, enabled: !gated })
   useConsoleTitle(schema.data?.displayName, location.pathname)
   useEffect(() => { if (schema.data) applyInstanceLanguage(schema.data.ui?.defaultLanguage ?? schema.data.locale) }, [schema.data])
-  const orgId = /^\/o\/([^/]+)/.exec(location.pathname)?.[1]
+  const orgId = decodeOrgPath(/^\/o\/([^/]+)/.exec(location.pathname)?.[1])
   const me = useQuery({ ...meOptions, queryFn: () => api<Me>('/me', { redirect401: false }), enabled: !gated })
   // This observer must survive RuntimeLocalization's org-keyed routed subtree.
-  useScopeTeardown(client, { orgId: orgId ? decodeURIComponent(orgId) : undefined, actor: me.data?.user?.id })
-  const home = scopeHomeDestination(me.data, orgId ? decodeURIComponent(orgId) : undefined)
-  useRuntimeModel(orgId ? decodeURIComponent(orgId) : undefined)
+  useScopeTeardown(client, { orgId, actor: me.data?.user?.id })
+  const home = scopeHomeDestination(me.data, orgId)
+  useRuntimeModel(orgId)
   useEffect(() => { client.removeQueries({ queryKey: ['resource-denied'], type: 'inactive' }) }, [client, location.pathname])
   useEffect(() => () => {
     if (!orgId) return
-    const scope = decodeURIComponent(orgId)
-    for (const key of ['console-model', 'bootstrap', 'capabilities', 'console-registry', 'workflow-schema']) client.removeQueries({ queryKey: [key, scope], exact: true })
+    for (const key of ['console-model', 'bootstrap', 'capabilities', 'console-registry', 'workflow-schema']) client.removeQueries({ queryKey: [key, orgId], exact: true })
   }, [client, orgId])
   // Profile and bootstrap are independent reads. Keep the completeness gate while
   // starting both in the first wave; bootstrap seeds safe metadata and scoped grants.
-  const boot = useQuery({ ...bootstrapOptions(client, orgId ? decodeURIComponent(orgId) : undefined), enabled: gated })
-  const content = gated && !boot.data ? <main id="main">{boot.error ? <QueryError error={boot.error} /> : <div role="status" aria-label={t('loading')} className="space-y-4 p-4"><Skeleton className="h-9 w-64" /><Skeleton className="h-24 w-full" /></div>}</main> : <RecordBreadcrumbProvider>{orgId ? <RuntimeLocalization key={orgId} orgId={decodeURIComponent(orgId)}><FrameContent /></RuntimeLocalization> : <FrameContent />}</RecordBreadcrumbProvider>
+  const boot = useQuery({ ...bootstrapOptions(client, orgId), enabled: gated })
+  const content = gated && !boot.data ? <main id="main">{boot.error ? <QueryError error={boot.error} /> : <div role="status" aria-label={t('loading')} className="space-y-4 p-4"><Skeleton className="h-9 w-64" /><Skeleton className="h-24 w-full" /></div>}</main> : <RecordBreadcrumbProvider>{orgId ? <RuntimeLocalization key={orgId} orgId={orgId}><FrameContent /></RuntimeLocalization> : <FrameContent />}</RecordBreadcrumbProvider>
   return <ScopeHomeContext.Provider value={home}>{gated ? <ProfileGate>{content}</ProfileGate> : content}</ScopeHomeContext.Provider>
 }
 function FrameContent() {
@@ -61,7 +66,8 @@ function FrameContent() {
   const profile = useQuery({ ...profileOptions, refetchOnMount: false, enabled: !publicRoute })
   const build = useBuild()
   const schema = useQuery({ ...instanceOptions, enabled: !publicRoute })
-  const orgId = /^\/o\/([^/]+)/.exec(location.pathname)?.[1]
+  const orgPath = /^\/o\/([^/]+)/.exec(location.pathname)?.[1]
+  const orgId = decodeOrgPath(orgPath)
   const caps = useCapabilities(orgId)
   const registry = useConsoleRegistry(orgId)
   // The capability projection carries the same server gates as the read routes.
@@ -74,7 +80,7 @@ function FrameContent() {
   const [reloaded] = useState(() => { const value = sessionStorage.getItem('console-schema-reloaded'); sessionStorage.removeItem('console-schema-reloaded'); return !!value })
   const membership = me.data?.memberships.find(org => org.organization_id === orgId)
   const submit = useMutationSubmit()
-  const logout = useMutation({ mutationFn: () => logoutSession(client, orgId ? decodeURIComponent(orgId) : undefined) })
+  const logout = useMutation({ mutationFn: () => logoutSession(client, orgId) })
   useEffect(() => {
     let heading: HTMLElement | null = null
     const focus = () => { const next = document.querySelector<HTMLElement>('h1'); if (next && next !== heading) { heading = next; next.focus() } }
@@ -84,10 +90,10 @@ function FrameContent() {
   const workspace = me.data?.organizationsEnabled === false ? <span className="px-2 py-3 font-medium">{instanceTitle(schema.data?.displayName)}</span> : <OrganizationSwitcher key={orgId} activeId={orgId} allowCreate={me.data?.organizationCreationAllowed !== false} memberships={me.data?.memberships ?? []} onSwitch={async id => { const next = await client.fetchQuery({ queryKey: ['capabilities', id], queryFn: () => fetchCapabilities(client, id), staleTime: 0 }); await navigate({ to: organizationDestination(location.pathname, id, next) }) }} />
   const currentView = (location.search as { view?: string }).view
   const items = registry.error ? [] : (registry.data?.navigation ?? []).filter(item => item.placement === 'sidebar')
-  const activeItem = (item: typeof items[number]) => item.entity ? activeNavigationItem({ id: item.id, entity: item.entity, view: item.view }, location.pathname, orgId!, currentView, registry.data?.modelUi?.navigation) : location.pathname === `/o/${orgId}${registry.data?.pages.find(page => page.id === item.page)?.path}`
+  const activeItem = (item: typeof items[number]) => item.entity ? activeNavigationItem({ id: item.id, entity: item.entity, view: item.view }, location.pathname, orgPath!, currentView, registry.data?.modelUi?.navigation) : location.pathname === `/o/${orgPath}${registry.data?.pages.find(page => page.id === item.page)?.path}`
   const itemLink = (item: typeof items[number]) => {
     const page = registry.data?.pages.find(page => page.id === item.page)
-    const target = '/o/' + orgId + (page?.path ?? '/e/' + item.entity)
+    const target = '/o/' + orgPath + (page?.path ?? '/e/' + item.entity)
     return <Link to={target} search={item.view ? { view: item.view } : {}}>{item.icon ? <NavigationIconView name={item.icon} /> : !item.group && <Database />}<span>{t(item.label, { defaultValue: item.label })}</span></Link>
   }
   const groups = [...new Map(items.filter(item => item.group).map(item => [item.group!.id, item.group!])).values()]
