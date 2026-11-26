@@ -54,7 +54,7 @@ it.each(['en', 'cs'] as const)('%s drafts wait for Apply; Cancel discards and Cl
   expect(test.auditRequests()).toHaveLength(1)
   await test.user.click(screen.getByRole('button', { name: test.t.auditApply }))
   await waitFor(() => expect(test.auditRequests()).toHaveLength(2))
-  const applied = new URL(test.auditRequests().at(-1)!.path, 'http://local').searchParams
+  const applied = new URL(test.auditRequests().at(-1)!.path, 'https://example.test').searchParams
   expect(applied.get('entity')).toBe('records'); expect(applied.get('entity_id')).toBe('record-1')
   expect(applied.get('from')).toBe(new Date('2026-11-01T10:00').toISOString()); expect(applied.get('to')).toBe(new Date('2026-11-25T10:00').toISOString())
   await test.open(); fireEvent.change(screen.getByLabelText(test.t.auditFilter_entity), { target: { value: 'unconfirmed' } })

@@ -14,7 +14,7 @@ const output = process.env.DETAIL_CONTEXT_CAPTURES
 if (!output) throw new Error('DETAIL_CONTEXT_CAPTURES must point to the requested evidence folder')
 const build = JSON.parse(readFileSync(resolve(import.meta.dirname, '../dist/build-meta.json'), 'utf8'))
 const captures: Record<string, unknown>[] = []
-const longName = 'Žaneta Šťastná Dlouhá — zdravotní technik a koordinátorka odborné péče'
+const longName = 'Žofie Příkladová Dlouhá — ukázková koordinátorka obecných úkolů a dlouhých názvů'
 let stop: (() => Promise<void>) | undefined
 
 test.beforeAll(async () => {
@@ -57,7 +57,7 @@ for (const locale of ['en', 'cs'] as const) for (const width of [1440, 1280, 900
       const policy = csp.split(';').map(rule => rule.trim()).find(rule => rule.startsWith('font-src ')) ?? csp.split(';').map(rule => rule.trim()).find(rule => rule.startsWith('default-src '))
       expect(policy?.split(/\s+/).slice(1)).toEqual(["'self'"])
       await expect(page.getByRole('heading', { level: 1, name: longName })).toBeVisible()
-      const font = await page.evaluate(async () => { await document.fonts.ready; return { family: getComputedStyle(document.querySelector('h1')!).fontFamily, loaded: document.fonts.check('16px Alata', 'Žaneta Šťastná'), files: performance.getEntriesByType('resource').map(entry => entry.name).filter(url => /Alata.*\.ttf/.test(url)) } })
+      const font = await page.evaluate(async () => { await document.fonts.ready; return { family: getComputedStyle(document.querySelector('h1')!).fontFamily, loaded: document.fonts.check('16px Alata', 'Žofie Příkladová'), files: performance.getEntriesByType('resource').map(entry => entry.name).filter(url => /Alata.*\.ttf/.test(url)) } })
       expect(font.family).toContain('Alata'); expect(font.loaded).toBe(true); expect(font.files.some(url => url.startsWith(origin))).toBe(true)
       const trigger = page.locator('.wb-write-actions').getByRole('button', { name: labels.rowActions.replace('{{name}}', longName), exact: true })
       await expect(page.locator('.wb-write-actions').getByRole('button', { name: labels.edit, exact: true })).toHaveCount(1)

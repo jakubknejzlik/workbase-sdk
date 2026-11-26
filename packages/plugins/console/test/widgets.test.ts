@@ -30,7 +30,7 @@ it('uses identical cost, SQL, bindings and authorized data for list and referenc
   const validated = validateQuery(kernel, scope, referenceQuery)
   expect(validated.cost).toEqual({ statements: 1, depth: 1, relations: 1, fieldRows: 35, exists: 8, nodes: 0 })
   const statement = compileRoot(kernel, scope, validated.query, undefined, validated.cost)
-  expect({ sqlLength: statement.sql.length, bindings: statement.bindings.length }).toEqual({ sqlLength: 9657, bindings: 6 })
+  expect({ sqlLength: statement.sql.length, bindings: statement.bindings.length }).toEqual({ sqlLength: 3089, bindings: 6 })
   const prepare = vi.fn((sql: string) => env.DB.prepare(sql))
   const db = { prepare, batch: env.DB.batch.bind(env.DB) } as unknown as D1Database
   const widgets = (await executeWidgets(kernel, scope, db, page)).widgets
@@ -44,9 +44,10 @@ it('uses identical cost, SQL, bindings and authorized data for list and referenc
 })
 
 it('returns 200 with a real compiler refusal and keeps the other staff-scoped widgets', async () => {
-  // Repeated grants keep the same semantics; the expanded SQL reaches the
-  // unchanged 64-source guard only when the reference-label source is added.
-  const { app, kernel, scope } = await fixture(55)
+  // Per-source demand pruning (#348) needs 62 repeated grants with the same
+  // semantics. The SQL still reaches the unchanged 64-source guard only
+  // when the reference-label source is added.
+  const { app, kernel, scope } = await fixture(62)
   const validated = validateQuery(kernel, scope, referenceQuery)
   expect(validated.cost).toMatchObject({ exists: 8, relations: 1, fieldRows: 35 })
   expect(() => compileRoot(kernel, scope, validated.query, undefined, validated.cost)).toThrow('query_too_expensive')
