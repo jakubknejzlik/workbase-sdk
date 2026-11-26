@@ -481,6 +481,7 @@
   "dashboardWidgetFailed": "This widget could not be loaded.",
   "dashboardWidgetTooComplex": "This overview is too complex to load. Contact your administrator.",
   "dashboardWidgetRetry": "This section could not be loaded right now. Reload the page to try again.",
+  "dashboardViewMatchingRecords": "View matching records",
   "dashboardEmpty": "No data yet",
   "tableView": "Table",
   "calendarView": "Calendar",

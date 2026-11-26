@@ -21,7 +21,7 @@ export function useGeneratedList({ model, caps, orgId, entity, request, contextL
   // Router location can advance before the outgoing route's props unmount. Never
   // canonicalize the destination's saved view against that outgoing entity.
   const [local, setLocal] = useState<{ search: ListSearch; history?: PageHistory }>({ search: {} })
-  const currentRoute = !!contextList || location.pathname.replace(/\/$/, '') === `/o/${encodeURIComponent(orgId)}/e/${encodeURIComponent(entity)}`
+  const currentRoute = !!contextList || JSON.stringify(location.pathname.replace(/\/$/, '').split('/').map(segment => { try { return decodeURIComponent(segment) } catch { return segment } })) === JSON.stringify(['', 'o', orgId, 'e', entity])
   // Read search and cursor state from one Router location snapshot. Separate match/search
   // subscriptions can briefly combine old search with new history state during navigation.
   // After an actor/org change the previous scope's URL state must never be interpreted again, not even for one render.

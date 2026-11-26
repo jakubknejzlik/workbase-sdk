@@ -1,7 +1,7 @@
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, expect, it, vi } from 'vitest'
-import { createMemoryHistory, createRootRoute, createRoute, createRouter, RouterProvider } from '@tanstack/react-router'
+import { createMemoryHistory, createRootRoute, createRoute, createRouter, RouterProvider, useParams } from '@tanstack/react-router'
 import { I18nextProvider, initReactI18next } from 'react-i18next'
 import i18next from 'i18next'
 import type { Model, Capabilities } from '../../console-generated/src/read'
@@ -79,4 +79,110 @@ it('retains reference links when the primary detail is denied', async () => {
 it('retains the same primary accessible name in Czech', async () => {
   await mount({ kind: 'list', language: 'cs' })
   await waitFor(() => expect(screen.getByRole('link', { name: 'Alex Example' })).toBeTruthy())
+})
+
+// Exercise WidgetPage with a stale caller page and independently refreshed authority.
+// This catches cached-result links surviving a projection-only permission change.
+vi.mock('../src/dashboard-actions', () => ({ DashboardActions: ({ children }: { children: (slots: object) => unknown }) => children({}) }))
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { act } from '@testing-library/react'
+import { useSyncExternalStore } from 'react'
+import { WidgetPage } from '../src/dashboard'
+import { PluginPage } from '../src/console-pages'
+import * as runtimeModel from '../src/api/runtime-model'
+import * as client from '../src/api/client'
+import { validateListSearch } from '../../console-generated/src/list-model'
+
+async function mountTarget(options: { kind?: 'stat' | 'table' | 'list'; language?: 'en' | 'cs'; view?: string; value?: number | null; empty?: boolean; failed?: boolean; missing?: boolean; denied?: boolean; routeBoundary?: boolean } = {}) {
+  vi.spyOn(window, 'scrollTo').mockImplementation(() => {})
+  const kind = options.kind ?? 'stat'
+  const query = { entity: 'entries', where: { status: { eq: 'pending' } }, select: ['id', 'name'], limit: 5 }
+  const configured = { id: 'records', label: 'Records', kind, query, drilldown: { view: options.view ?? 'attention' },
+    ...(kind === 'stat' ? { aggregate: { fn: 'count' } } : kind === 'table' ? { columns: ['name'] } : { field: 'name' }) }
+  const page = { id: 'summary', path: '/summary', label: 'Summary', widgets: [configured] } as ConsolePage
+  const model: Model = { instance: 'target-tests', revision: 1, limits: { root: 100, children: 20, relations: 4, exists: 4 }, entities: {
+    entries: { fields: { id: { type: 'string' }, name: { type: 'string' }, status: { type: 'string' } }, columns: ['name'], relations: {}, routes: { list: '', detail: '' },
+      list: { views: [{ id: 'attention', label: 'Attention', where: { status: { eq: 'pending' } } }, { id: 'all', label: 'All', where: {} }] } },
+  } }
+  const caps: Capabilities = { revision: 1, entities: { entries: { operations: ['read'], readable: ['id', 'name', 'status'], writable: [] } } }
+  let authority = { data: { model, capabilities: caps, console: { pages: [page] } }, error: null as Error | null, isFetching: false }
+  const listeners = new Set<() => void>()
+  const subscribe = (notify: () => void) => { listeners.add(notify); return () => { listeners.delete(notify) } }
+  vi.spyOn(runtimeModel, 'useRuntimeModel').mockImplementation(() => useSyncExternalStore(subscribe, () => authority) as unknown as ReturnType<typeof runtimeModel.useRuntimeModel>)
+  const widget = options.failed ? { id: 'records', label: 'Records', kind: 'error', code: 'query_failed' } : {
+    id: 'records', label: 'Records', kind, ...(kind === 'stat' ? options.missing ? {} : { value: options.value === undefined ? 7 : options.value }
+      : { data: options.empty ? [] : [{ id: 'entry', name: 'Matching entry' }], ...(kind === 'table' ? { columns: ['name'] } : { field: 'name' }) }),
+  }
+  vi.spyOn(client, 'api').mockResolvedValue({ id: page.id, label: page.label, widgets: options.denied ? [] : [widget] })
+  const cache = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })
+  const root = createRootRoute()
+  // Raw URL encoding enters the real router; PluginPage receives the real route params.
+  const dashboard = createRoute({ getParentRoute: () => root, path: '/o/$orgId/summary', component: () => { const { orgId } = useParams({ strict: false }); return options.routeBoundary ? <PluginPage orgId={orgId!} /> : <WidgetPage orgId="org /α" page={page} /> } })
+  const list = createRoute({ getParentRoute: () => root, path: '/o/$orgId/e/$entity', validateSearch: validateListSearch, component: () => <h1>Matching list</h1> })
+  const router = createRouter({ routeTree: root.addChildren([dashboard, list]), history: createMemoryHistory({ initialEntries: ['/o/org%20%2F%CE%B1/summary?search=stale&page=9'] }) })
+  await router.load()
+  const i18n = i18next.createInstance()
+  await i18n.use(initReactI18next).init({ lng: options.language ?? 'en', resources: { en: { translation: en }, cs: { translation: cs } } })
+  const tree = () => <QueryClientProvider client={cache}><I18nextProvider i18n={i18n}><RouterProvider router={router} /></I18nextProvider></QueryClientProvider>
+  const rendered = render(tree())
+  await waitFor(() => expect(cache.getQueryData(['console-page', 'org /α', page.id, caps])).toBeTruthy())
+  const refresh = async (change: (current: typeof authority) => typeof authority) => {
+    await act(async () => { authority = change(authority); listeners.forEach(notify => notify()) })
+  }
+  return { ...rendered, router, cache, user: userEvent.setup(), refresh }
+}
+
+it.each(['stat', 'table', 'list'] as const)('opens the named view at page one in the encoded current org from a %s', async kind => {
+  const { user, router } = await mountTarget({ kind, routeBoundary: true })
+  const link = await screen.findByRole('link', { name: 'View matching records' })
+  expect(link.getAttribute('href')).toBe('/o/org%20%2F%CE%B1/e/entries?view=attention&page=1')
+  // Native keyboard traversal and router history, without inheriting dashboard search.
+  for (let step = 0; step < 5 && document.activeElement !== link; step++) await user.tab()
+  expect(document.activeElement).toBe(link)
+  await user.keyboard('{Enter}')
+  await screen.findByRole('heading', { name: 'Matching list' })
+  expect(router.state.matches.at(-1)?.params).toEqual({ orgId: 'org /α', entity: 'entries' })
+  expect(router.state.location.search).toEqual({ view: 'attention', page: 1 })
+  await act(async () => { router.history.back() })
+  await screen.findByRole('link', { name: 'View matching records' })
+  expect(router.state.location.pathname).toBe('/o/org %2Fα/summary')
+})
+
+it('uses the Czech shared link text', async () => {
+  await mountTarget({ language: 'cs' })
+  expect(await screen.findByRole('link', { name: 'Zobrazit odpovídající záznamy' })).toBeTruthy()
+})
+it.each(['stat', 'table', 'list'] as const)('keeps zero or an empty %s linked to its authorized view', async kind => {
+  await mountTarget({ kind, value: 0, empty: true })
+  expect(await screen.findByRole('link', { name: 'View matching records' })).toBeTruthy()
+  expect(screen.getByText(kind === 'stat' ? '0' : en.dashboardEmpty, { exact: true })).toBeTruthy()
+})
+for (const options of [{ value: null }, { missing: true }, { failed: true }, { denied: true }]) it(`does not link missing/error/denied results: ${JSON.stringify(options)}`, async () => {
+  await mountTarget(options)
+  expect(screen.queryByRole('link', { name: 'View matching records' })).toBeNull()
+  expect(screen.queryByText('0', { exact: true })).toBeNull()
+})
+it.each(['unknown', 'https://example.test/o/other', 'attention?orgId=other'])('omits unsupported destinations: %s', async view => {
+  await mountTarget({ view })
+  expect(screen.queryByRole('link', { name: 'View matching records' })).toBeNull()
+})
+it('links an explicit all view but never invents implicit all', async () => {
+  const { refresh } = await mountTarget({ view: 'all' })
+  expect(await screen.findByRole('link', { name: 'View matching records' })).toBeTruthy()
+  await refresh(current => ({ ...current, data: { ...current.data, model: { ...current.data.model, entities: { entries: { ...current.data.model.entities.entries, list: { views: [] } } } } } }))
+  expect(screen.queryByRole('link', { name: 'View matching records' })).toBeNull()
+})
+it.each(['descriptor', 'page', 'entity', 'field', 'view', 'refresh', 'error'] as const)('removes cached clickable targets after %s authority changes', async change => {
+  const { refresh, cache } = await mountTarget()
+  expect(await screen.findByRole('link', { name: 'View matching records' })).toBeTruthy()
+  await refresh(current => {
+    if (change === 'refresh') return { ...current, isFetching: true }
+    if (change === 'error') return { ...current, error: new Error('Denied') }
+    if (change === 'page') return { ...current, data: { ...current.data, console: { pages: [] } } }
+    if (change === 'descriptor') return { ...current, data: { ...current.data, console: { pages: [{ ...current.data.console.pages[0], widgets: current.data.console.pages[0].widgets!.map(widget => ({ ...widget, drilldown: undefined })) }] } } }
+    if (change === 'view') return { ...current, data: { ...current.data, model: { ...current.data.model, entities: { entries: { ...current.data.model.entities.entries, list: { views: [] } } } } } }
+    return { ...current, data: { ...current.data, capabilities: { ...current.data.capabilities, entities: { entries: { operations: change === 'entity' ? [] : ['read'], readable: change === 'field' ? ['id', 'name'] : ['id', 'name', 'status'], writable: [] } } } } }
+  })
+  expect(screen.queryByRole('link', { name: 'View matching records' })).toBeNull()
+  expect(cache.getQueriesData({ queryKey: ['console-page'] }).some(([, data]) => !!data)).toBe(true)
 })
