@@ -51,7 +51,8 @@ export function DataTable<T extends { id?: unknown }>({ rows, columns, state, on
       ...(actions ? { size: 72 } : {}),
       // Explicit col widths let the browser derive the scrolling minimum from
       // the configured, visible columns instead of a column-count breakpoint.
-      meta: { align: column.align, compact, fixedWidth: actions, widthClass: scrollOnNarrow ? actions ? 'w-18' : column.id === '_access' ? 'w-48' : index === 0 ? 'w-56' : 'w-40' : undefined, serverColumn: column, labelId: `${labelPrefix}-${column.id}`, sortLabel: labels.sort(column.label) },
+      // List v2 density changes row spacing; wrapping remains a column choice.
+      meta: { align: column.align, compact: compact && !listV2, fixedWidth: actions, widthClass: scrollOnNarrow ? actions ? 'w-18' : column.id === '_access' ? 'w-48' : index === 0 ? 'w-56' : 'w-40' : undefined, serverColumn: column, labelId: `${labelPrefix}-${column.id}`, sortLabel: labels.sort(column.label) },
       header: ServerHeader, cell: ServerCell,
     }
   })
