@@ -724,13 +724,22 @@ for (const width of [1440, 390, 360]) for (const actor of ['admin', 'staff'] as 
       }
     }
     await page.keyboard.press('Escape')
+    const fit = await scroller.evaluate(node => ({ scrollWidth: node.scrollWidth, clientWidth: node.clientWidth }))
+    observations.push({ kind: 'N3-negative-fit', width, actor, language, ...fit, cueCount: await cue.count() })
+    check(fit.scrollWidth).toBeLessThanOrEqual(fit.clientWidth)
     await check(cue).toHaveCount(0)
   } else {
-    await check(cue).toHaveCount(0)
+    // SPEC-DRIFT: A3a bfef820 (#344), this spec's real rich fixture contract
+    // (ad65b253:1801): cue iff the same scroll region overflows, with its 1px tolerance.
+    const before = await scroller.evaluate(node => ({ scrollWidth: node.scrollWidth, clientWidth: node.clientWidth }))
+    observations.push({ kind: 'N3-desktop-overflow', phase: 'before-resize', width, actor, language, ...before, cueCount: await cue.count() })
+    await check(cue).toHaveCount(Number(before.scrollWidth > before.clientWidth + 1))
     await page.setViewportSize({ width: 360, height: 1000 })
     await check(cue).toHaveAttribute('data-list-overflow', 'end')
     await page.setViewportSize({ width, height: 1000 })
-    await check(cue).toHaveCount(0)
+    const after = await scroller.evaluate(node => ({ scrollWidth: node.scrollWidth, clientWidth: node.clientWidth }))
+    observations.push({ kind: 'N3-desktop-overflow', phase: 'after-resize', width, actor, language, ...after, cueCount: await cue.count() })
+    await check(cue).toHaveCount(Number(after.scrollWidth > after.clientWidth + 1))
   }
   // Text enlargement may move whole groups, never split Previous/current/Next.
   await page.evaluate(() => { document.documentElement.style.fontSize = '20px' })
