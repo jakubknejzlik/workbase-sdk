@@ -416,6 +416,8 @@
   "colourSwatch": "{{label}} – vzorník",
   "record": "záznam",
   "detailInformation": "Podrobné informace",
+  "detailInformationHelp": "Dostupné údaje tohoto záznamu.",
+  "detailConditionalHelp": "Hodnota se zobrazuje pouze tehdy, když se vztahuje k tomuto záznamu.",
   "createEntity": "Přidat {{entity}}",
   "pickDate": "Vyberte datum",
   "createEntityDescription": "Vyplňte údaje pro {{entity}}.",
