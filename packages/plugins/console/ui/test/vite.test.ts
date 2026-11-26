@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process'
-import { readFileSync, rmSync, unlinkSync, readdirSync, symlinkSync } from 'node:fs'
+import { existsSync, readFileSync, rmSync, unlinkSync, readdirSync, symlinkSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { createServer, build, type ViteDevServer } from 'vite'
 import { beforeEach, afterEach, expect, test, vi } from 'vitest'
@@ -30,6 +30,14 @@ async function start(root: string) {
 function snapshot(root: string) {
   return { manifest: readFileSync(join(root, '.workbase-ui/manifest.json'), 'utf8'), tree: readFileSync(join(root, '.workbase-ui/routeTree.gen.ts'), 'utf8'), generation: JSON.parse(readFileSync(join(root, '.workbase-ui/generation.json'), 'utf8')) }
 }
+test('manifest extraction does not start client dependency optimization', async () => {
+  const { root, put } = setup()
+  put('index.html', '<script type="module" src="/entry.ts"></script>')
+  put('entry.ts', `import React from 'react'; console.log(React)`)
+  const manifest = await extractManifest(root)
+  expect(manifest.routes[0].title).toBe('sample.title')
+  expect(existsSync(join(root, 'node_modules/.vite'))).toBe(false)
+})
 test('extraction stubs browser imports; manifest is byte-identical twice', async () => {
   const { root, put } = setup()
   put('ui/-components/widget.tsx', `if (!('window' in globalThis)) throw new Error('BROWSER_ONLY'); export default function Widget() { return 'REAL_COMPONENT_MARKER' }`)
