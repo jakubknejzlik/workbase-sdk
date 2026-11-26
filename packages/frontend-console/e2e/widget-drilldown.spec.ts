@@ -190,7 +190,7 @@ for (const locale of ['en', 'cs'] as const) for (const width of [1440, 1280, 900
         entries.push({ file, width, locale, state, headSHA: head, sha256: createHash('sha256').update(readFileSync(path)).digest('hex'), font, externalFonts, cspErrors, csp: response!.headers()['content-security-policy'], build: JSON.parse(readFileSync(new URL('../dist/build-meta.json', import.meta.url), 'utf8')) })
         writeFileSync(manifest, JSON.stringify(entries, null, 2) + '\n')
       }
-    } finally { release?.(); await context.close() }
+    } finally { release?.(); await page.unrouteAll({ behavior: 'wait' }); await context.close() }
   }
 })
 
