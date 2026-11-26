@@ -1,6 +1,6 @@
 declare const history: { state: unknown; pushState(state: unknown, unused: string, url: string): void; replaceState(state: unknown, unused: string, url: string): void }
 declare const location: { pathname: string; search: string }
-declare const document: { documentElement: { lang: string }; body: { textContent: string | null; style: { margin: string; cssText: string; setProperty(name: string, value: string, priority?: string): void; getPropertyPriority(name: string): string; getPropertyValue(name: string): string } } }
+declare const document: { documentElement: { lang: string }; body: { textContent: string | null; style: { length: number; item(index: number): string; margin: string; cssText: string; setProperty(name: string, value: string, priority?: string): void; getPropertyPriority(name: string): string; getPropertyValue(name: string): string } } }
 declare const window: { location: typeof location; localStorage: Storage; sessionStorage: Storage; dispatchEvent(event: Event): void }
 // @vitest-environment jsdom
 import { createElement as h, StrictMode, type ReactNode } from 'react'
@@ -286,6 +286,36 @@ for (const strict of [false, true]) {
     const mounted = render(view(async () => json({}), strict).element)
     try {
       expect(style.margin).toBe('0px')
+      style.setProperty('color', 'blue', 'important')
+      style.setProperty('background-color', 'yellow')
+      mounted.unmount()
+      expect(margins()).toEqual(before)
+      expect(style.getPropertyValue('color')).toBe('blue')
+      expect(style.getPropertyPriority('color')).toBe('important')
+      expect(style.getPropertyValue('background-color')).toBe('yellow')
+    } finally { mounted.unmount(); style.cssText = original }
+  })
+}
+
+for (const strict of [false, true]) {
+  test.each([
+    'margin-top: 21px; margin-block-start: 30px',
+    'margin-block-start: 30px; margin-top: 21px',
+    'margin-top: 21px; margin-block-start: 30px !important',
+    'margin-inline-start: 7px',
+    'margin-block: 30px 12px; margin-top: 21px; margin-inline: 7px 9px',
+  ])(`AuthShell restores ordered physical/logical margins (StrictMode=${strict}): %s`, css => {
+    history.replaceState(null, '', '/sign-in')
+    const style = document.body.style, original = style.cssText
+    const margins = () => Array.from({ length: style.length }, (_, index) => style.item(index))
+      .filter(name => name === 'margin' || name.startsWith('margin-'))
+      .map(name => [name, style.getPropertyValue(name), style.getPropertyPriority(name)])
+    style.cssText = css
+    const before = margins()
+    const mounted = render(view(async () => json({}), strict).element)
+    try {
+      expect(style.margin).toBe('0px')
+      expect(margins().every(([name]) => !name.startsWith('margin-block') && !name.startsWith('margin-inline'))).toBe(true)
       style.setProperty('color', 'blue', 'important')
       style.setProperty('background-color', 'yellow')
       mounted.unmount()

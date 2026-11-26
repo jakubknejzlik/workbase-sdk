@@ -161,13 +161,13 @@ export function AuthShell({ manifest, i18n, displayName, children, fetch: transp
   // embeds never mount this shell. Restore the host declaration when it unmounts.
   useEffect(() => {
     const style = document.body.style
-    // Preserve the declared shorthand/longhands, including absence and priority.
-    // A shorthand value alone is empty for partial or mixed-priority margins.
+    // Preserve physical and logical margins together, in CSSOM declaration order.
+    // Their relative order decides which side wins at equal priority.
     const margins = Array.from({ length: style.length }, (_, index) => style.item(index))
-      .filter(name => /^margin(?:-(?:top|right|bottom|left))?$/.test(name))
+      .filter(name => /^margin(?:-(?:top|right|bottom|left|(?:block|inline)(?:-(?:start|end))?))?$/.test(name))
       .map(name => ({ name, value: style.getPropertyValue(name), priority: style.getPropertyPriority(name) }))
     const clearMargins = () => {
-      for (const name of ['margin', 'margin-top', 'margin-right', 'margin-bottom', 'margin-left']) style.removeProperty(name)
+      for (const name of ['margin', 'margin-top', 'margin-right', 'margin-bottom', 'margin-left', 'margin-block', 'margin-block-start', 'margin-block-end', 'margin-inline', 'margin-inline-start', 'margin-inline-end']) style.removeProperty(name)
     }
     clearMargins()
     style.setProperty('margin', '0px', margins.some(({ priority }) => priority === 'important') ? 'important' : '')
