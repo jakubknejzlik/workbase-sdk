@@ -483,6 +483,58 @@ it('live provider field masks prune label dependencies and references throughout
   expect(expanded.relations).toHaveProperty('parent')
 })
 
+// Exercise both presentation entry points through the serialized console-model boundary.
+function detailCardsFixture(source: 'canonical' | 'contribution', detail: NonNullable<ConsoleEntityDisplay['detail']>) {
+  const base = fixture()
+  const display = { detail }
+  return defineInstance({ ...base,
+    ui: source === 'canonical' ? { entities: { specimens: display } } : undefined,
+    plugins: [...plugins, consoleUI(), ...(source === 'contribution' ? [{
+      name: 'detail-cards', version: '1', requires: { console: '^1' as const },
+      contributes: { console: { entities: { specimens: display } } },
+    }] : [])],
+  })
+}
+const detailCardLists = { notes: { entity: 'specimens', label: 'Notes', bind: { field: 'parent_id', record: 'id' as const }, columns: ['name'] } }
+for (const source of ['canonical', 'contribution'] as const) {
+  it.each([
+    { name: 'context list row', sections: [{ row: ['info', 'notes'] }], granted: [{ row: ['info', 'notes'] }], revoked: [{ row: ['info'] }] },
+    { name: 'relation row', sections: [{ row: ['info', 'children'] }], granted: [{ row: ['info', 'children'] }], revoked: [{ row: ['info'] }] },
+    { name: 'three card row', sections: [{ row: ['children', 'info', 'notes'] }], granted: [{ row: ['children', 'info', 'notes'] }], revoked: [{ row: ['info'] }] },
+    { name: 'empty pruned row', sections: [{ row: ['children', 'notes'] }, { fields: 'info' as const }], granted: [{ row: ['children', 'notes'] }, { fields: 'info' }], revoked: [{ fields: 'info' }] },
+    { name: 'unspecified card fallback', sections: [{ row: ['notes'] }], granted: [{ row: ['notes'] }], revoked: [] },
+    { name: 'no sections fallback', sections: undefined, granted: undefined, revoked: undefined },
+  ])(`C4 ${source}: $name preserves declared cards across live revocation`, async ({ sections, granted, revoked }) => {
+    await start(detailCardsFixture(source, { fields: ['name'], lists: detailCardLists, relations: { children: { columns: ['name'] } }, sections }))
+    const check = (body: ConsoleModelContract, expected: typeof granted, allowed: boolean) => {
+      const displays = [body.console!.entities.specimens,
+        ...(source === 'canonical' ? [body.model.entities.specimens, body.model.ui!.entities!.specimens, body.console!.modelUi!.entities!.specimens] : [])]
+      for (const display of displays) {
+        expect(display.detail?.sections).toEqual(expected)
+        expect(Object.keys(display.detail!.lists!)).toEqual(allowed ? ['notes'] : [])
+        expect(Object.keys(display.detail!.relations!)).toEqual(allowed ? ['children'] : [])
+      }
+      expect(Object.keys(body.model.entities.specimens.relations)).toEqual(allowed ? ['parent', 'children'] : [])
+    }
+    check(await contract(), granted, true)
+    // Same user and endpoint, different live field grants: parent_id is revoked.
+    await env.DB.prepare("UPDATE memberships SET role='viewer' WHERE user_id='owner'").run()
+    check(await contract(), revoked, false)
+  })
+
+  it.each([
+    { name: 'duplicate info in row', detail: { sections: [{ row: ['info', 'info'] }] }, error: /Duplicate UI detail layout card/ },
+    { name: 'duplicate info across sections', detail: { sections: [{ fields: 'info' as const }, { row: ['info'] }] }, error: /Duplicate UI detail layout card/ },
+    { name: 'duplicate list', detail: { lists: detailCardLists, sections: [{ row: ['notes'] }, { row: ['notes'] }] }, error: /Duplicate UI detail layout card/ },
+    { name: 'unknown card', detail: { sections: [{ row: ['unknown'] }] }, error: /Unknown UI detail layout card/ },
+    { name: 'to-one relation', detail: { sections: [{ row: ['parent'] }] }, error: /Unknown UI detail layout card/ },
+    { name: 'empty row', detail: { sections: [{ row: [] }] }, error: /Too small/ },
+    { name: 'reserved list key', detail: { lists: { info: detailCardLists.notes } }, error: /Invalid UI context list/ },
+  ])(`C4 ${source}: rejects $name before projection`, ({ detail, error }) => {
+    expect(() => new KernelRegistry(detailCardsFixture(source, detail))).toThrow(error)
+  })
+}
+
 it.each(['create', 'update'] as const)('%s input metadata requires its own operation and writable field grants', async operation => {
   const base = fixture()
   await start(defineInstance({ ...base, permissions: { ...base.permissions, owner: { specimens: [operation] } } }))

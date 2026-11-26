@@ -213,7 +213,7 @@ export function consolePresentation(kernel: KernelRegistry, scope: Scope, author
         const defaultSort = hint.defaultSort
         return [[key, { columns: hint.columns.filter(field => read(target, field)), ...(defaultSort && literals(target, defaultSort.key) ? { defaultSort: pick(defaultSort, ['key', 'direction']) } : {}) }]]
       }))
-      const card = (key: string) => Object.hasOwn(lists, key) || !!relation(entity, key)
+      const card = (key: string) => key === 'info' || Object.hasOwn(lists, key) || !!relation(entity, key)
       result.detail = {
         ...(detail.inlineEdit !== undefined && authority.operation(entity, 'update') ? { inlineEdit: detail.inlineEdit } : {}),
         ...(detail.lists ? { lists } : {}),
