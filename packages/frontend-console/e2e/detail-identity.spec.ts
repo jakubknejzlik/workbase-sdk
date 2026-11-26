@@ -9,9 +9,9 @@ import en from '../src/locales/en.json' with { type: 'json' }
 import cs from '../src/locales/cs.json' with { type: 'json' }
 
 // Real SDK Worker + D1 + built console. Synthetic worker/team shapes only;
-// eventual Cleaning/Infodental acceptance is a separate integration gate.
+// Eventual consumer acceptance is a separate integration gate.
 const output = process.env.DETAIL_IDENTITY_CAPTURES ?? join(tmpdir(), 'detail-identity-captures')
-const longName = 'Žaneta Šťastná Dlouhá — zdravotní technik a koordinátorka odborné péče'
+const longName = 'Žofie Příkladová Dlouhá — ukázková koordinátorka obecných úkolů a dlouhých názvů'
 let stop: (() => Promise<void>) | undefined
 let longId: string
 const captures: Record<string, unknown>[] = []
@@ -74,7 +74,7 @@ for (const locale of ['en', 'cs'] as const) for (const width of [1440, 1280, 900
       const font = await page.evaluate(async () => {
         await document.fonts.ready
         return { family: getComputedStyle(document.querySelector('h1')!).fontFamily,
-          loaded: document.fonts.check('16px Alata', 'Žaneta Šťastná'),
+          loaded: document.fonts.check('16px Alata', 'Žofie Příkladová'),
           files: performance.getEntriesByType('resource').map(entry => entry.name).filter(url => /Alata.*\.ttf/.test(url)) }
       })
       expect(font.family).toContain('Alata'); expect(font.loaded).toBe(true)
