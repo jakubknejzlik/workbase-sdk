@@ -1,7 +1,7 @@
 /* Shared SDK visual roles. See NOTICE for upstream attribution. */
 @font-face {
   font-family: Alata;
-  src: url('./assets/fonts/Alata-Regular.ttf') format('truetype');
+  src: url('../../assets/assets/Alata-Regular.ttf') format('truetype');
   font-style: normal;
   font-weight: 400;
   font-display: swap;

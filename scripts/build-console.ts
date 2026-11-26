@@ -3,6 +3,10 @@ import { cpSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { CONSOLE_SHA_MARKER, consoleArtifactsSHA, readConsoleArtifacts } from '../packages/core/src/console-build'
 import { checkTerminology } from './check-terminology'
 const run = (args: string[]) => execFileSync('bun', args, { stdio: 'inherit' })
+// Seed the approved distribution asset before either CSS consumer builds.
+// The tracked copy also makes dev/tests work without any prior console build.
+mkdirSync('packages/plugins/console/assets/assets', { recursive: true })
+cpSync('packages/ui/src/assets/fonts/Alata-Regular.ttf', 'packages/plugins/console/assets/assets/Alata-Regular.ttf')
 run(['packages/frontend-console/generate-routes.ts'])
 run(['run', '--cwd', 'packages/ui', 'build'])
 // Explicit local proof build only; ordinary production builds eliminate the harness chunk.

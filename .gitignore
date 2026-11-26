@@ -1,6 +1,9 @@
 node_modules/
 dist-sdk/
 **/dist/
-/packages/plugins/console/assets/
+/packages/plugins/console/assets/*
+!/packages/plugins/console/assets/assets/
+/packages/plugins/console/assets/assets/*
+!/packages/plugins/console/assets/assets/Alata-Regular.ttf
 **/.wrangler/
 test-results/

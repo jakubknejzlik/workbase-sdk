@@ -1,6 +1,6 @@
 declare const history: { state: unknown; pushState(state: unknown, unused: string, url: string): void; replaceState(state: unknown, unused: string, url: string): void }
 declare const location: { pathname: string; search: string }
-declare const document: { documentElement: { lang: string }; body: { textContent: string | null } }
+declare const document: { documentElement: { lang: string }; body: { textContent: string | null; style: { margin: string; cssText: string; setProperty(name: string, value: string, priority?: string): void; getPropertyPriority(name: string): string } } }
 declare const window: { location: typeof location; localStorage: Storage; sessionStorage: Storage; dispatchEvent(event: Event): void }
 // @vitest-environment jsdom
 import { createElement as h, StrictMode, type ReactNode } from 'react'
@@ -250,4 +250,18 @@ test('document language follows active SDK language on the styled sign-in root',
   await act(async () => { await current.i18n.changeLanguage('cs') })
   expect(document.documentElement.lang).toBe('cs')
   expect(screen.getByRole('heading', { name: 'Přihlášení' })).toBeTruthy()
+})
+
+
+test('standalone AuthShell owns body margin only for its mounted lifetime', () => {
+  history.replaceState(null, '', '/sign-in')
+  const original = document.body.style.cssText
+  document.body.style.setProperty('margin', '13px', 'important')
+  try {
+    const mounted = render(view(async () => json({}), true).element)
+    expect(document.body.style.margin).toBe('0px')
+    mounted.unmount()
+    expect(document.body.style.margin).toBe('13px')
+    expect(document.body.style.getPropertyPriority('margin')).toBe('important')
+  } finally { document.body.style.cssText = original }
 })

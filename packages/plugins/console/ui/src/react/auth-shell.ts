@@ -1,4 +1,4 @@
-declare const document: { documentElement: { lang: string } }
+declare const document: { documentElement: { lang: string }; body: { style: { margin: string; getPropertyValue(name: string): string; getPropertyPriority(name: string): string; setProperty(name: string, value: string, priority?: string): void; removeProperty(name: string): string } } }
 import { clearSavedViews } from '../saved-views-storage'
 declare const location: { pathname: string; search: string; replace(path: string): void }
 declare const history: { replaceState(state: unknown, unused: string, url: string): void }
@@ -157,6 +157,14 @@ function InvitationFlow({ auth, initial, go, select, displayName }: { auth: Auth
 export type AuthShellProps = { manifest: Manifest; i18n: I18n; displayName?: string; children?: ReactNode; fetch?: Transport; navigate: (path: string) => void | Promise<unknown> }
 /** Mount outside RouterProvider so reserved auth paths never mount Instance data. */
 export function AuthShell({ manifest, i18n, displayName, children, fetch: transport = globalThis.fetch, navigate }: AuthShellProps) {
+  // AuthShell owns the standalone document (including its language). Component
+  // embeds never mount this shell. Restore the host declaration when it unmounts.
+  useEffect(() => {
+    const style = document.body.style
+    const margin = style.getPropertyValue('margin'), priority = style.getPropertyPriority('margin')
+    style.setProperty('margin', '0px', priority)
+    return () => { if (margin) style.setProperty('margin', margin, priority); else style.removeProperty('margin') }
+  }, [])
   const [initial, setEntry] = useState(entry), [org, setOrg] = useState(() => authStorage.org.read()), [memberships, setMemberships] = useState<Membership[]>(), [inbox, setInbox] = useState<Invitation[]>(), [failed, setFailed] = useState(false), [retry, setRetry] = useState(0)
   const [suspended, setSuspended] = useState(false), [boot, setBoot] = useState(0)
   // Set while this document is being left or frozen: unmount cleanup must not release a deferred build reload here.

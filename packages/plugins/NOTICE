@@ -10,5 +10,5 @@ Existing upstream license and notice headers are retained where present.
 Alata Regular v1.005 (unmodified TrueType font, font/ttf)
 Copyright 2019 The Alata Project Authors (https://github.com/SorkinType/Alata)
 Licensed under the SIL Open Font License, Version 1.1.
-See Alata-OFL.txt distributed alongside Alata-Regular.ttf.
+See console/assets/licenses/alata/OFL.txt; the font is console/assets/assets/Alata-Regular.ttf.
 Source: https://github.com/google/fonts/tree/main/ofl/alata

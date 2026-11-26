@@ -15,6 +15,11 @@ test('producer staging and the resulting tarball retain React/Vite exports and a
     put('packages/plugins/package.json', JSON.stringify(manifest)); put('packages/plugins/NOTICE', 'Synthetic notice'); put('LICENSE', 'Synthetic license')
     put('packages/plugins/console/src/index.ts', 'export {}')
     put('packages/plugins/console/assets/build-meta.json', JSON.stringify({ version: manifest.version, sha: 'a'.repeat(40), sourceCommit: 'b'.repeat(40) }))
+    for (const [source, target] of [['Alata-Regular.ttf', 'assets/Alata-Regular.ttf'], ['OFL.txt', 'licenses/alata/OFL.txt']]) {
+      const file = join(root, 'packages/plugins/console/assets', target)
+      mkdirSync(join(file, '..'), { recursive: true })
+      cpSync(resolve('packages/ui/src/assets/fonts', source), file)
+    }
     cpSync(resolve('packages/plugins/console/ui/src'), join(root, 'packages/plugins/console/ui/src'), { recursive: true })
     cpSync(resolve('packages/plugins/console/ui/README.md'), join(root, 'packages/plugins/console/ui/README.md'))
     stageConsolePackage(root, 'plugins', stage); mkdirSync(archives)
@@ -28,8 +33,8 @@ test('producer staging and the resulting tarball retain React/Vite exports and a
     expect(member(react)).toContain("import '../styles.css'");
     expect(member('console/ui/src/styles.css')).toContain("@import './tokens.css'");
     expect(member('console/ui/src/tokens.css')).toContain('Alata-Regular.ttf');
-    expect(member('console/ui/src/assets/fonts/Alata-OFL.txt')).toContain('SIL OPEN FONT LICENSE');
-    expect(member('console/ui/src/assets/fonts/Alata-Regular.ttf')).toBeTruthy();
+    expect(member('console/assets/licenses/alata/OFL.txt')).toContain('SIL OPEN FONT LICENSE');
+    expect(member('console/assets/assets/Alata-Regular.ttf')).toBeTruthy();
     expect(member(react)).toContain('AuthShell'); expect(member(react)).toContain('useAuthDirty'); expect(member(vite)).toContain('resolveBuildSHA')
     for (const name of ['auth-shell', 'auth-dirty']) expect(member('console/ui/src/react/' + name + '.ts')).toBeTruthy()
     for (const name of ['build-reload', 'auth-storage']) expect(member('console/ui/src/' + name + '.ts')).toBeTruthy()
