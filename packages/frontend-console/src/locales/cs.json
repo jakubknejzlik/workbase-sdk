@@ -487,6 +487,7 @@
   "dashboardWidgetFailed": "Tuto část přehledu se nepodařilo načíst.",
   "dashboardWidgetTooComplex": "Tento přehled je příliš složitý na načtení. Obraťte se na správce.",
   "dashboardWidgetRetry": "Tuto část se nyní nepodařilo načíst. Zkuste to znovu obnovením stránky.",
+  "dashboardViewMatchingRecords": "Zobrazit odpovídající záznamy",
   "dashboardEmpty": "Zatím žádná data",
   "tableView": "Tabulka",
   "calendarView": "Kalendář",
