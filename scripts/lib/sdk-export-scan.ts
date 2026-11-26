@@ -209,7 +209,6 @@ function assertText(path: string, text: string, policy: ScanPolicy, depth = 0, s
 // Reviewed upstream Alata Regular v1.005: metadata is covered by whole-file integrity.
 // The packed path is stable and maps only this one asset back to its source identity.
 export const alataSourcePath = 'packages/ui/src/assets/fonts/Alata-Regular.ttf'
-export const alataPublicPath = 'packages/plugins/console/ui/src/assets/fonts/Alata-Regular.ttf'
 export const alataPackedPath = 'packages/plugins/console/assets/assets/Alata-Regular.ttf'
 export function assertAlataIntegrity(bytes: Buffer): void {
   if (bytes.length !== 349132 || bytes.readUInt32BE(0) !== 0x00010000 ||
@@ -219,8 +218,7 @@ export function assertAlataIntegrity(bytes: Buffer): void {
 }
 export function assertBytes(path: string, bytes: Buffer, policy: ScanPolicy, depth = 0): void {
   if (customerTerms.test(path) && !policy.nameDigests.includes(reviewDigest(path))) throw new Error(`customer/owner filename: ${path}`)
-  if (depth === 0 && (path === alataSourcePath || path === alataPackedPath || path === alataPublicPath)) { assertAlataIntegrity(bytes); return }
-  if (depth === 0 && path === 'packages/plugins/console/ui/src/assets/fonts/Alata-OFL.txt') { assertBytes('packages/ui/src/assets/fonts/OFL.txt', bytes, policy); return }
+  if (depth === 0 && (path === alataSourcePath || path === alataPackedPath)) { assertAlataIntegrity(bytes); return }
   const text = bytes.toString('utf8')
   if (bytes.includes(0) || !Buffer.from(text).equals(bytes)) throw new Error(`binary/encoded asset requires explicit review: ${path}`)
   const namePolicy = { ...policy, terms: policy.nameDigests.includes(reviewDigest(path)) ? [{ pathDigest: reviewDigest(path), lineDigest: reviewDigest(path), lineNumber: 1, reason: 'Exact reviewed vendor filename' }] : [] }

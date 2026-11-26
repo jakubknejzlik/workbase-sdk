@@ -4,17 +4,11 @@ Copyright 2026 Jakub Knejzlík
 Licensed under the Apache License, Version 2.0. See LICENSE.
 
 Public V3 visual foundation
-The theme baseline is derived from the SDK-attributed import:
-packages/ui/src/styles.css:1–5 at SDK commit
-0faf60db35e0d2039bf586fec72e29f160521dae attributes reset/theme to
-the upstream repository named in console/assets/NOTICE, packages/ui/src/index.css and
-packages/frontend-app/src/index.css at 523ee6a.
-This is SDK import attribution, not independently verified upstream authorship.
-Per-token SDK sources and commits are retained in console/ui/src/tokens.css.
+Shared styles retain the upstream source attribution in the bundled console NOTICE.
+Existing upstream license and notice headers are retained where present.
 
 Alata Regular v1.005 (unmodified TrueType font, font/ttf)
 Copyright 2019 The Alata Project Authors (https://github.com/SorkinType/Alata)
 Licensed under the SIL Open Font License, Version 1.1.
-Font and licence: console/ui/src/assets/fonts/Alata-Regular.ttf and Alata-OFL.txt.
-Source: https://github.com/google/fonts/blob/d96b7183a2649df3c2f145627c33c279daf8726d/ofl/alata/Alata-Regular.ttf
-SHA256: 7b71432a5e2e2409a3583553bc5ce703209a8bce9b2f136ca257ac4c2d3addc4
+See Alata-OFL.txt distributed alongside Alata-Regular.ttf.
+Source: https://github.com/google/fonts/tree/main/ofl/alata

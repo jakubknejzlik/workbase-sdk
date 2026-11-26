@@ -64,10 +64,10 @@ it('every literal exact-line review matches its source line', () => {
 })
 
 it('accepts only the exact upstream Alata at its source and packed identities', async () => {
-  const { assertBytes, alataSourcePath, alataPackedPath, alataPublicPath, withPolicyDataReviews } = await import('./lib/sdk-export-scan')
+  const { assertBytes, alataSourcePath, alataPackedPath, withPolicyDataReviews } = await import('./lib/sdk-export-scan')
   const bytes = readFileSync(resolve(import.meta.dirname, '..', alataSourcePath))
   const reviewed = withPolicyDataReviews(policy)
-  for (const path of [alataSourcePath, alataPackedPath, alataPublicPath]) {
+  for (const path of [alataSourcePath, alataPackedPath]) {
     expect(() => assertBytes(path, bytes, reviewed)).not.toThrow()
     const mutation = Buffer.from(bytes); mutation[mutation.length - 1] ^= 1
     expect(() => assertBytes(path, mutation, reviewed)).toThrow('integrity')

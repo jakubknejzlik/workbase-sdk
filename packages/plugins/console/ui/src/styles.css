@@ -70,7 +70,7 @@
 @media (max-width: 849px) {
   :where(.wb-shell) { grid-template-columns: minmax(0, 1fr); align-content: start; }
   :where(.wb-shell > .wb-page, .wb-shell > nav) { grid-column: 1; grid-row: auto; }
-  :where(.wb-menu) { display: block; justify-self: start; align-self: start; margin: calc(var(--wb-spacing) * 3.5); }
+  :where(.wb-menu) { display: block; min-height: 44px; justify-self: start; align-self: start; margin: calc(var(--wb-spacing) * 3.5); }
   :where(.wb-shell > nav[data-open='false']) { display: none; }
   :where(.wb-auth-tools) { min-height: var(--wb-header-height-mobile); padding: calc(var(--wb-spacing) * 2.5) calc(var(--wb-spacing) * 3.5); }
 }
