@@ -22,7 +22,11 @@ export function PluginPage({ orgId, id }: { orgId: string; id?: string }) {
   const registry = useConsoleRegistry(orgId); const location = useLocation()
   if (registry.error) return <QueryError error={registry.error} />
   if (!registry.data) return <Loading />
-  const page = registry.data.pages.find(page => id ? page.id === id : `/o/${orgId}${page.path}`.replace(/\/$/, '') === location.pathname.replace(/\/$/, ''))
+  // Match the URL segment at the route boundary; orgId is the router's raw ID.
+  const scope = /^\/o\/([^/]+)(\/.*)?$/.exec(location.pathname)
+  let scopeId = scope?.[1]
+  try { if (scopeId) scopeId = decodeURIComponent(scopeId) } catch { /* Keep malformed escapes literal. */ }
+  const page = registry.data.pages.find(page => id ? page.id === id : scope && scopeId === orgId && page.path.replace(/\/$/, '') === (scope[2] ?? '').replace(/\/$/, ''))
   if (!page) return <Failure kind="notFound" />
   if (page.widgets) return <WidgetPage orgId={orgId} page={page} />
   switch (page.renderer) {

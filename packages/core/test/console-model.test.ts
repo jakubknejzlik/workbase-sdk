@@ -5,7 +5,7 @@ import { z } from 'zod'
 import { identity } from '@workbasehq/plugins/identity'
 import { localAuth } from '@workbasehq/plugins/local-auth'
 import { legacyPermissions } from '@workbasehq/plugins/permissions'
-import { consoleUI } from '@workbasehq/plugins/console'
+import { consoleUI, consoleRegistry } from '@workbasehq/plugins/console'
 import { createApp } from '../src/app'
 import { defineInstance, Fn, Q } from '../src/config'
 import { defineCommand } from '../src/commands'
@@ -18,6 +18,7 @@ import { workerAccessFixture } from './fixtures/worker-access'
 import { loadActorProjection } from '../src/policies'
 import { scopeOperations } from '../src/scope-operations'
 import { validateQuery, fieldsFor } from '../src/query/schema'
+import { listPredicate } from '../src/query/list-views'
 import type { Scope } from '../src/types'
 import { consoleModel } from '../src/console-model'
 import type { RuntimeOptions } from '../src/types'
@@ -482,6 +483,58 @@ it('live provider field masks prune label dependencies and references throughout
   expect(expanded.relations).toHaveProperty('parent')
 })
 
+// Exercise both presentation entry points through the serialized console-model boundary.
+function detailCardsFixture(source: 'canonical' | 'contribution', detail: NonNullable<ConsoleEntityDisplay['detail']>) {
+  const base = fixture()
+  const display = { detail }
+  return defineInstance({ ...base,
+    ui: source === 'canonical' ? { entities: { specimens: display } } : undefined,
+    plugins: [...plugins, consoleUI(), ...(source === 'contribution' ? [{
+      name: 'detail-cards', version: '1', requires: { console: '^1' as const },
+      contributes: { console: { entities: { specimens: display } } },
+    }] : [])],
+  })
+}
+const detailCardLists = { notes: { entity: 'specimens', label: 'Notes', bind: { field: 'parent_id', record: 'id' as const }, columns: ['name'] } }
+for (const source of ['canonical', 'contribution'] as const) {
+  it.each([
+    { name: 'context list row', sections: [{ row: ['info', 'notes'] }], granted: [{ row: ['info', 'notes'] }], revoked: [{ row: ['info'] }] },
+    { name: 'relation row', sections: [{ row: ['info', 'children'] }], granted: [{ row: ['info', 'children'] }], revoked: [{ row: ['info'] }] },
+    { name: 'three card row', sections: [{ row: ['children', 'info', 'notes'] }], granted: [{ row: ['children', 'info', 'notes'] }], revoked: [{ row: ['info'] }] },
+    { name: 'empty pruned row', sections: [{ row: ['children', 'notes'] }, { fields: 'info' as const }], granted: [{ row: ['children', 'notes'] }, { fields: 'info' }], revoked: [{ fields: 'info' }] },
+    { name: 'unspecified card fallback', sections: [{ row: ['notes'] }], granted: [{ row: ['notes'] }], revoked: [] },
+    { name: 'no sections fallback', sections: undefined, granted: undefined, revoked: undefined },
+  ])(`C4 ${source}: $name preserves declared cards across live revocation`, async ({ sections, granted, revoked }) => {
+    await start(detailCardsFixture(source, { fields: ['name'], lists: detailCardLists, relations: { children: { columns: ['name'] } }, sections }))
+    const check = (body: ConsoleModelContract, expected: typeof granted, allowed: boolean) => {
+      const displays = [body.console!.entities.specimens,
+        ...(source === 'canonical' ? [body.model.entities.specimens, body.model.ui!.entities!.specimens, body.console!.modelUi!.entities!.specimens] : [])]
+      for (const display of displays) {
+        expect(display.detail?.sections).toEqual(expected)
+        expect(Object.keys(display.detail!.lists!)).toEqual(allowed ? ['notes'] : [])
+        expect(Object.keys(display.detail!.relations!)).toEqual(allowed ? ['children'] : [])
+      }
+      expect(Object.keys(body.model.entities.specimens.relations)).toEqual(allowed ? ['parent', 'children'] : [])
+    }
+    check(await contract(), granted, true)
+    // Same user and endpoint, different live field grants: parent_id is revoked.
+    await env.DB.prepare("UPDATE memberships SET role='viewer' WHERE user_id='owner'").run()
+    check(await contract(), revoked, false)
+  })
+
+  it.each([
+    { name: 'duplicate info in row', detail: { sections: [{ row: ['info', 'info'] }] }, error: /Duplicate UI detail layout card/ },
+    { name: 'duplicate info across sections', detail: { sections: [{ fields: 'info' as const }, { row: ['info'] }] }, error: /Duplicate UI detail layout card/ },
+    { name: 'duplicate list', detail: { lists: detailCardLists, sections: [{ row: ['notes'] }, { row: ['notes'] }] }, error: /Duplicate UI detail layout card/ },
+    { name: 'unknown card', detail: { sections: [{ row: ['unknown'] }] }, error: /Unknown UI detail layout card/ },
+    { name: 'to-one relation', detail: { sections: [{ row: ['parent'] }] }, error: /Unknown UI detail layout card/ },
+    { name: 'empty row', detail: { sections: [{ row: [] }] }, error: /Too small/ },
+    { name: 'reserved list key', detail: { lists: { info: detailCardLists.notes } }, error: /Invalid UI context list/ },
+  ])(`C4 ${source}: rejects $name before projection`, ({ detail, error }) => {
+    expect(() => new KernelRegistry(detailCardsFixture(source, detail))).toThrow(error)
+  })
+}
+
 it.each(['create', 'update'] as const)('%s input metadata requires its own operation and writable field grants', async operation => {
   const base = fixture()
   await start(defineInstance({ ...base, permissions: { ...base.permissions, owner: { specimens: [operation] } } }))
@@ -831,4 +884,261 @@ it.each(['provider', 'link', 'id-mask', 'entity-read', 'resource-read', 'organiz
   expect(body.model.entities.worker?.list?.views?.some(view => view.id === 'linked')).not.toBe(true)
   for (const input of [{ rowAccess: 'signed_in' }, { view: 'linked' }]) expect(() => validateQuery(kernel, current, { entity: 'worker', select: ['id'], ...input })).toThrow()
   vi.restoreAllMocks()
+})
+
+it('E2 redacts action destinations and caption dictionaries through the final core projection', () => {
+  const config = fixture()
+  const navigation = [
+    { id: 'open', placement: 'sidebar' as const, label: 'open', entity: 'specimens' },
+    { id: 'owner', placement: 'sidebar' as const, label: 'owner', entity: 'specimens', roles: ['owner'] },
+    { id: 'private-view', placement: 'sidebar' as const, label: secret, entity: 'specimens', view: 'private' },
+  ]
+  const actions = [
+    { id: 'open', label: 'openAction', description: 'openDescription', primary: true as const, target: { navigation: 'open' } },
+    { id: 'owner', label: secret, description: 'deniedDescription', target: { navigation: 'owner' } },
+    { id: 'private-view', label: secret, target: { navigation: 'private-view' } },
+    { id: 'create', label: 'createAction', target: { create: 'specimens' } },
+    { id: 'command', label: 'commandAction', target: { command: 'specimens/collect' } },
+  ]
+  const collect = defineCommand({ name: 'specimens/collect', input: z.object({ parent: z.string().meta({ referenceEntity: 'hidden' }) }),
+    permission: { entity: 'specimens', operation: 'update' }, plan: () => ({ rules: [], result: { status: 200, body: {} }, event: { operation: 'test', entity: 'clients', entityId: 'synthetic' } }) })
+  const provider = { name: 'external-console', version: '1', provides: { console: '1.x' as const }, validateConsole() {}, consoleRegistry: () => ({ navigation,
+    pages: [{ id: 'quick', label: 'Quick', path: '/quick', renderer: 'custom', actions }], entities: { specimens: { list: { views: [{ id: 'private', label: secret, where: { secret: { eq: secret } } }] } } },
+  }) }
+  const kernel = new KernelRegistry({ ...config, commands: ['specimens/collect'], enumLabels: { en: { openAction: 'Open', openDescription: 'Browse', [secret]: secret, deniedDescription: secret, createAction: 'Create', commandAction: secret } }, plugins: [...config.plugins!, provider] }, { commands: new Map([[collect.name, collect]]) })
+  const scope: Scope = { organizationId: 'org-a', role: 'viewer', actor: { type: 'user', id: 'viewer' }, correlationId: 'actions' }
+  scopeOperations.set(scope, { operations: null })
+  const body = consoleModel(kernel, scope)
+  expect(body.console?.pages[0].actions).toEqual([actions[0]])
+  expect(body.model.enumLabels?.en).toMatchObject({ openAction: 'Open', openDescription: 'Browse' })
+  expect(JSON.stringify(body)).not.toContain(secret)
+  expect(body.model.enumLabels?.en ?? {}).not.toHaveProperty('createAction')
+})
+
+it.each(['reference', 'sensitive', 'hidden'])('E2 omits actions with unavailable required %s command inputs and their captions', async kind => {
+  const input = kind === 'reference' ? z.string().meta({ referenceEntity: 'hidden' }) : kind === 'sensitive' ? z.string().meta({ sensitive: true }) : z.string().meta({ 'x-ui': { hidden: true } })
+  const command = defineCommand({ name: 'specimens/collect', input: z.object({ value: input }), permission: { entity: 'specimens', operation: 'update' }, plan: () => ({ rules: [], result: { status: 200, body: {} }, event: { operation: 'test', entity: 'clients', entityId: 'synthetic' } }) })
+  const base = fixture()
+  const action = { id: 'collect', label: secret, description: 'privateDescription', primary: true as const, target: { command: command.name } }
+  await start(defineInstance({ ...base, commands: [command.name], enumLabels: { en: { [secret]: secret, privateDescription: secret } }, plugins: [...base.plugins!, consoleUI(), {
+    name: 'actions', version: '1', requires: { console: '^1' }, contributes: { console: { pages: [{ id: 'quick', path: '/quick', label: 'Quick', renderer: 'custom', actions: [action] }] } },
+  }] }), { commands: new Map([[command.name, command]]) })
+  const body = await contract()
+  expect(body.console?.pages.find(page => page.id === 'quick')?.actions).toEqual([])
+  expect(JSON.stringify(body.console)).not.toContain(secret)
+  expect(body.model.enumLabels?.en ?? {}).not.toHaveProperty('privateDescription')
+  expect(body.model.enumLabels?.en ?? {}).not.toHaveProperty(secret)
+})
+
+// The same nested form must be checked before provider disclosure and after a raw provider.
+it.each([false, true].flatMap(raw => ['tuple', 'rest', 'nested', 'array', 'union', 'intersection', 'alias'].map((kind, index) => ({ raw, kind, index }))))('E2 checks required $kind reference edges and dictionaries, raw=$raw', ({ raw, index }) => {
+  const reference = z.string().meta({ referenceEntity: 'archives' })
+  const inputs = [
+    z.tuple([reference]),
+    z.tuple([z.string()], reference),
+    z.tuple([z.object({ destination: reference })]),
+    z.array(z.tuple([reference])),
+    z.union([z.tuple([reference]), z.string()]),
+    z.object({ details: z.intersection(z.object({ destination: reference }), z.object({ note: z.string() })) }),
+    // Local aliases must resolve against the same input document.
+    z.object({ first: reference, second: reference }).meta({ properties: { first: { $ref: '#/$defs/destination' }, second: { $ref: '#/$defs/destination' } } }),
+  ]
+  const input = inputs[index]
+  let masked = false
+  const base = fixture()
+  const command = defineCommand({ name: 'specimens/collect', input: z.object({ destinations: input }).meta({ $defs: { destination: { type: 'string', referenceEntity: 'archives' } } }),
+    permission: { entity: 'specimens', operation: 'update' }, plan: () => ({ rules: [], result: { status: 200, body: {} }, event: { operation: 'test', entity: 'specimens', entityId: 'synthetic' } }) })
+  const action = { id: 'collect', label: 'collectCaption', description: 'collectHelp', primary: true as const, target: { command: command.name } }
+  const page = { id: 'quick', path: '/quick', label: 'Quick', renderer: 'custom', actions: [action] }
+  const provider = raw ? { name: 'raw-console', version: '1', provides: { console: '1.x' as const }, validateConsole() {},
+    consoleRegistry: () => ({ navigation: [], pages: [page], entities: {} }) } : consoleUI()
+  const kernel = new KernelRegistry(defineInstance({ ...base, commands: [command.name],
+    entities: { ...base.entities, archives: { fields: { name: { type: 'string' } } } },
+    permissions: { ...base.permissions, owner: { ...base.permissions.owner, archives: ['read'] } },
+    policies: { ...base.policies, archives: { owner: 'all' } },
+    enumLabels: { en: { collectCaption: 'Collect', collectHelp: 'Collect records' }, cs: { collectCaption: 'Shromáždit', collectHelp: 'Shromáždit záznamy' } },
+    plugins: [...base.plugins!, provider, { name: 'tuple-inputs', version: '1',
+      fieldMask: entity => masked && entity === 'archives' ? ['name'] : entity === 'archives' ? ['id', 'version', 'name'] : fieldsFor(base, entity),
+      ...(raw ? {} : { requires: { console: '^1' as const }, contributes: { console: { pages: [page] } } }),
+    }],
+  }), { commands: new Map([[command.name, command]]) })
+  const current = (): Scope => {
+    const scope: Scope = { organizationId: 'org-a', role: 'owner', actor: { type: 'user', id: 'owner' }, correlationId: `tuple-${index}` }
+    scopeOperations.set(scope, { operations: null })
+    return scope
+  }
+  expect(consoleModel(kernel, current()).console?.pages.find(page => page.id === 'quick')?.actions, `allowed input ${index}`).toEqual([action])
+  masked = true
+  if (!raw) expect.soft(consoleRegistry(kernel.config, current()).pages.find(page => page.id === 'quick')?.actions, `provider input ${index}`).toEqual([])
+  const body = consoleModel(kernel, current())
+  expect(body.capabilities.entities.archives.readable).not.toContain('id')
+  expect.soft(body.console?.pages.find(page => page.id === 'quick')?.actions, `final input ${index}`).toEqual([])
+  for (const dictionary of Object.values(body.model.enumLabels ?? {})) {
+    expect.soft(dictionary, `caption input ${index}`).not.toHaveProperty('collectCaption')
+    expect.soft(dictionary, `description input ${index}`).not.toHaveProperty('collectHelp')
+  }
+})
+
+it('E2 refresh removes revoked navigation/actions/captions and unavailable required CRUD fields', async () => {
+  let denied = false
+  const base = fixture()
+  const actions = [
+    { id: 'new', label: 'newAction', description: 'newDescription', primary: true as const, target: { create: 'specimens' } },
+    { id: 'browse', label: 'browseAction', target: { navigation: 'entity.specimens' } },
+  ]
+  await start(defineInstance({ ...base, enumLabels: { cs: { newAction: 'Nový', newDescription: 'Vytvořit záznam', browseAction: 'Procházet' } }, plugins: [...base.plugins!, consoleUI(), {
+    name: 'actions', version: '1', requires: { console: '^1' }, contributes: { console: { pages: [{ id: 'quick', path: '/quick', label: 'Quick', renderer: 'custom', actions }] } },
+    commandGuard: () => denied ? { allow: false, code: 'permission_denied' } : { allow: true },
+  }] }))
+  const allowed = await contract()
+  expect(allowed.console?.pages.find(page => page.id === 'quick')?.actions).toEqual(actions)
+  expect(allowed.model.enumLabels?.cs).toMatchObject({ newAction: 'Nový', newDescription: 'Vytvořit záznam', browseAction: 'Procházet' })
+  denied = true
+  const revoked = await contract()
+  expect(revoked.console?.pages.find(page => page.id === 'quick')?.actions).toEqual([])
+  for (const key of ['newAction', 'newDescription', 'browseAction']) expect(revoked.model.enumLabels?.cs ?? {}).not.toHaveProperty(key)
+  denied = false
+  expect((await contract()).console?.pages.find(page => page.id === 'quick')?.actions).toEqual(actions)
+
+  // A required reference cannot be supplied when its destination is unreadable.
+  const config = defineInstance({ ...base, entities: { ...base.entities, archives: { fields: { title: { type: 'string' } } }, specimens: { ...base.entities.specimens, fields: { ...base.entities.specimens.fields, required_archive: { type: 'ref', entity: 'archives', required: true } } } }, ui: { entities: { specimens: { form: { create: { fields: ['name', 'required_archive'] } } } } }, plugins: [...base.plugins!, consoleUI(), {
+    name: 'restricted-create', version: '1', requires: { console: '^1' }, contributes: { console: { pages: [{ id: 'quick', path: '/quick', label: 'Quick', renderer: 'custom', actions }] } },
+  }] })
+  const kernel = new KernelRegistry(config)
+  const scope: Scope = { organizationId: 'org-a', role: 'owner', actor: { type: 'user', id: 'owner' }, correlationId: 'required-fields' }
+  scopeOperations.set(scope, { operations: null })
+  expect(consoleModel(kernel, scope).console?.pages.find(page => page.id === 'quick')?.actions).toEqual([actions[1]])
+})
+
+it.each([false, true])('E4 projects authorized targets after view grants and live field masks, raw=%s', raw => {
+  const base = fixture()
+  let masked = false
+  const where = { state: { eq: 'new' } }
+  const widgets = [
+    { id: 'count', label: 'Count', kind: 'stat' as const, query: { entity: 'specimens', where }, aggregate: { fn: 'count' as const }, drilldown: { view: 'new_items' } },
+    { id: 'unfiltered', label: 'All', kind: 'stat' as const, query: { entity: 'specimens' }, aggregate: { fn: 'count' as const }, drilldown: { view: 'all' } },
+    { id: 'private', label: 'Private', kind: 'stat' as const, query: { entity: 'specimens', where: { secret: { eq: secret } } }, aggregate: { fn: 'count' as const }, drilldown: { view: 'private' } },
+  ]
+  const entities = { specimens: { list: { views: [{ id: 'all', label: 'All', where: {} }, { id: 'new_items', label: 'New', where }, { id: 'private', label: 'Private', where: { secret: { eq: secret } } }] } } }
+  const pages = [{ id: 'matching', path: '/matching', label: 'Matching', widgets }]
+  const provider = raw ? { name: 'raw-matching', version: '1', provides: { console: '1.x' as const }, validateConsole() {}, consoleRegistry: () => ({ entities, pages, navigation: [] }) }
+    : { name: 'matching', version: '1', requires: { console: '^1' as const }, contributes: { console: { entities, pages } } }
+  const kernel = new KernelRegistry({ ...base, ...(raw ? { ui: { ...base.ui, entities } } : {}), plugins: [...base.plugins!, ...(raw ? [] : [consoleUI()]), provider, {
+    name: 'live-mask', version: '1', fieldMask: () => masked ? ['id', 'name'] : ['id', 'name', 'state', 'count', 'secret'],
+  }] })
+  const scope: Scope = { organizationId: 'org-a', role: 'viewer', actor: { type: 'user', id: 'viewer' }, correlationId: 'matching' }
+  scopeOperations.set(scope, { operations: null })
+  const project = () => consoleModel(kernel, scope)
+  const before = JSON.stringify(pages)
+  expect(project().console?.pages.find(page => page.id === 'matching')?.widgets?.map(widget => [widget.id, widget.drilldown])).toEqual([
+    ['count', { view: 'new_items' }], ['unfiltered', { view: 'all' }],
+  ])
+  expect(JSON.stringify(project())).not.toContain(secret)
+  masked = true
+  const reduced = project()
+  expect(reduced.console?.entities.specimens.list?.views?.map(view => view.id)).toEqual(['all'])
+  expect(reduced.console?.pages.find(page => page.id === 'matching')?.widgets?.map(widget => [widget.id, widget.drilldown])).toEqual([['unfiltered', { view: 'all' }]])
+  masked = false
+  expect(project().console?.pages.find(page => page.id === 'matching')?.widgets?.[0].drilldown).toEqual({ view: 'new_items' })
+  expect(JSON.stringify(pages)).toBe(before)
+})
+it.each(['missing', 'private', 'mismatch', 'rowAccess', 'search', 'labelWhere', 'cross-entity', 'raw-url', 'extra-key'])('E4 removes unsupported raw-provider target metadata without changing readable widgets: %s', kind => {
+  const base = fixture()
+  const views = [{ id: 'all', label: 'All', where: {} }, { id: 'private', label: 'Private', where: { secret: { eq: secret } } },
+    { id: 'filtered', label: 'Filtered', where: { state: { eq: 'new' } } }, { id: 'row_access', label: 'Row access', where: {}, rowAccess: 'signed_in' as const }]
+  const drilldown = kind === 'raw-url' ? { view: 'https://example.test' } : kind === 'extra-key' ? { view: 'all', url: secret }
+    : { view: kind === 'private' ? 'private' : kind === 'mismatch' ? 'filtered' : kind === 'rowAccess' ? 'row_access' : kind === 'cross-entity' || kind === 'missing' ? 'missing' : 'all' }
+  const widget = { id: 'safe', label: 'Safe', kind: 'table' as const, columns: ['name'], query: { entity: 'specimens', select: ['id', 'name'], limit: 1,
+    ...(kind === 'search' ? { search: { text: 'public', fields: ['name'] } } : {}), ...(kind === 'labelWhere' ? { labelWhere: { parent_id: { contains: 'public' } } } : {}),
+  }, drilldown }
+  const provider = { name: 'raw-matching', version: '1', provides: { console: '1.x' as const }, validateConsole() {}, consoleRegistry: () => ({ entities: { specimens: { list: { views } }, other: { list: { views: [{ id: 'missing', label: 'Other', where: {} }] } } },
+    pages: [{ id: 'matching', path: '/matching', label: 'Matching', widgets: [widget] }], navigation: [] }) }
+  const kernel = new KernelRegistry({ ...base, plugins: [...base.plugins!, provider] })
+  const scope: Scope = { organizationId: 'org-a', role: 'owner', actor: { type: 'user', id: 'owner' }, correlationId: 'matching' }
+  scopeOperations.set(scope, { operations: null })
+  const body = consoleModel(kernel, scope)
+  const projected = body.console?.pages.find(page => page.id === 'matching')?.widgets?.[0]
+  expect(projected?.id).toBe('safe')
+  expect(projected).not.toHaveProperty('drilldown')
+  expect(JSON.stringify(body)).not.toContain(secret)
+})
+it.each([false, true])('E4 same-name scalar ref and relation targets follow nested grants: nested=%s', nested => {
+  const base = fixture()
+  let denied = false
+  const where = nested ? { parent_id: { state: { eq: 'new' } } } : { parent_id: { eq: 'parent-id' } }
+  const widget = { id: 'count', label: 'Count', kind: 'stat' as const, query: { entity: 'specimens', where }, aggregate: { fn: 'count' as const }, drilldown: { view: 'named' } }
+  const kernel = new KernelRegistry({ ...base,
+    entities: { specimens: { ...base.entities.specimens, relations: { ...base.entities.specimens.relations, parent_id: { entity: 'specimens', field: 'parent_id' } } } },
+    plugins: [...base.plugins!, consoleUI(), { name: 'matching', version: '1', requires: { console: '^1' },
+      fieldMask: () => denied ? ['id', 'name', 'parent_id'] : ['id', 'name', 'parent_id', 'state'],
+      contributes: { console: { entities: { specimens: { list: { views: [{ id: 'named', label: 'Named', where }] } } }, pages: [{ id: 'matching', path: '/matching', label: 'Matching', widgets: [widget] }] } },
+    }],
+  })
+  const scope: Scope = { organizationId: 'org-a', role: 'owner', actor: { type: 'user', id: 'owner' }, correlationId: 'matching' }
+  scopeOperations.set(scope, { operations: null })
+  expect(consoleModel(kernel, scope).console?.pages.find(page => page.id === 'matching')?.widgets?.[0].drilldown).toEqual({ view: 'named' })
+  denied = true
+  const page = consoleModel(kernel, scope).console?.pages.find(page => page.id === 'matching')
+  expect(page?.widgets?.[0]?.drilldown).toEqual(nested ? undefined : { view: 'named' })
+})
+it('E4 count and sum retain contributing-record scope, row policies, org scope and result wire shapes', async () => {
+  const base = fixture()
+  const where = { state: { eq: 'new' } }
+  const target = { view: 'new_items' }
+  await start(defineInstance({ ...base,
+    policies: { specimens: { ...base.policies!.specimens, owner: { where: { enabled: { eq: true } } } } },
+    plugins: [...base.plugins!, consoleUI(), { name: 'matching', version: '1', requires: { console: '^1' }, contributes: { console: {
+      pages: [{ id: 'matching', path: '/matching', label: 'Matching', widgets: [
+        { id: 'count', label: 'Count', kind: 'stat', query: { entity: 'specimens', where }, aggregate: { fn: 'count' }, drilldown: target },
+        { id: 'sum', label: 'Sum', kind: 'stat', query: { entity: 'specimens', where }, aggregate: { fn: 'sum', field: 'count' }, drilldown: target },
+        { id: 'table', label: 'Table', kind: 'table', query: { entity: 'specimens', select: ['id', 'count'], limit: 1, where }, columns: ['count'], drilldown: target },
+      ] }],
+    } } }],
+  }))
+  for (const [id, org, state, enabled, count] of [
+    ['one', 'org-a', 'new', 1, 1], ['two', 'org-a', 'new', 1, 2], ['three', 'org-a', 'new', 1, 3],
+    ['done', 'org-a', 'done', 1, 100], ['denied', 'org-a', 'new', 0, 100], ['foreign', 'org-b', 'new', 1, 100],
+  ]) await env.DB.prepare('INSERT INTO specimens (id,organization_id,name,state,enabled,count,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)').bind(id, org, id, state, enabled, count, 'now', 'now').run()
+  const response = await request('/o/org-a/console-pages/matching')
+  expect(response.status).toBe(200)
+  const result = await response.json() as import('../src/console-contract').ConsolePageResult
+  expect(result.widgets.slice(0, 2)).toEqual([{ id: 'count', label: 'Count', kind: 'stat', value: 3 }, { id: 'sum', label: 'Sum', kind: 'stat', value: 6 }])
+  expect(result.widgets[2]).toMatchObject({ kind: 'table', data: [{ count: expect.any(Number) }] })
+  const listed = await request('/query', 'owner', 'POST', { entity: 'specimens', select: ['id', 'count'], limit: 10, view: 'new_items' })
+  expect(listed.status).toBe(200)
+  const records = await listed.json() as { data: { count: number }[] }
+  expect(records.data).toHaveLength(3)
+  expect(records.data.reduce((sum, row) => sum + row.count, 0)).toBe(6)
+  expect(JSON.stringify(result)).not.toMatch(/drilldown|foreign|denied/)
+  expect((await request('/o/org-b/console-pages/matching')).status).toBe(403)
+})
+
+
+it.each(['membership', 'https://example.test/destination', '/o/org-b/e/measurements', 'unknown_named', 'denied'])('E4 raw-provider destinations use effective authorized views: %s', mode => {
+  const base = fixture()
+  const open = { state: { eq: 'new' } }
+  const closed = { state: { eq: 'done' } }
+  const destination = mode === 'membership' || mode === 'denied' ? 'chosen' : mode
+  const effectiveWhere = mode === 'denied' ? { note: { eq: 'hidden operand' } } : open
+  const suppliedWhere = mode === 'denied' ? {} : mode === 'membership' ? closed : open
+  const widget = { id: 'reading', label: 'Reading', kind: 'table' as const, columns: ['name'],
+    query: { entity: 'specimens', select: ['id', 'name'], limit: 1, where: suppliedWhere }, drilldown: { view: destination } }
+  const kernel = new KernelRegistry({ ...base,
+    ui: { entities: { specimens: { list: { views: [{ id: 'chosen', label: 'Chosen', where: effectiveWhere }] } } } },
+    plugins: [...base.plugins!, { name: 'raw-destination', version: '1', provides: { console: '1.x' }, validateConsole() {},
+      consoleRegistry: () => ({ entities: { specimens: { list: { views: [{ id: destination, label: 'Supplied', where: suppliedWhere }] } } },
+        navigation: [], pages: [{ id: 'readings', path: '/readings', label: 'Readings', widgets: [widget] }] }),
+    }],
+  })
+  const scope: Scope = { organizationId: 'org-a', role: 'viewer', actor: { type: 'user', id: 'viewer' }, correlationId: 'destination' }
+  scopeOperations.set(scope, { operations: null })
+  const query = { entity: 'specimens', select: ['id', 'name'], limit: 1, view: destination }
+  if (mode === 'membership') {
+    expect(listPredicate(kernel, validateQuery(kernel, scope, query).query).where).toEqual(open)
+    expect(widget.query.where).toEqual(closed)
+  } else expect(() => validateQuery(kernel, scope, query)).toThrow()
+  const projected = consoleModel(kernel, scope).console?.pages.find(page => page.id === 'readings')?.widgets
+  const { drilldown: _target, ...readable } = widget
+  expect(projected).toEqual([readable])
+  expect(JSON.stringify(consoleModel(kernel, scope))).not.toContain('hidden operand')
 })

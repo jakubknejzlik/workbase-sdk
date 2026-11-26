@@ -96,3 +96,171 @@ it('filters contributed role/grant placements and unreadable entity views before
   for (const id of ['owners', 'authorized-tokens', 'entity.named_clients']) expect(viewer.navigation.some(item => item.id === id)).toBe(false)
   expect(viewer.navigation.some(item => item.group?.id === 'customers')).toBe(false)
 })
+
+// E2 configuration is deliberately data-only; casts also exercise untyped config loads.
+function actionConfig(actions: unknown) {
+  return { ...sample, plugins: [...sample.plugins!, { name: 'quick-actions', version: '1', requires: { console: '^1' as const }, contributes: { console: {
+    pages: [{ id: 'quick', path: '/quick', label: 'Quick', renderer: 'custom', actions }],
+  } } }] } as InstanceConfig
+}
+const primaryNavigation = { id: 'open', label: 'openKey', description: 'openDescription', icon: 'Folder', primary: true, target: { navigation: 'entity.clients' } }
+it.each([
+  null, {}, Array(13).fill(primaryNavigation), [primaryNavigation, primaryNavigation],
+  [{ ...primaryNavigation, id: '../escape' }], [{ ...primaryNavigation, id: '' }],
+  [{ ...primaryNavigation, primary: false }], [primaryNavigation, { ...primaryNavigation, id: 'other' }],
+  [{ ...primaryNavigation, target: { navigation: 'missing' } }],
+  [{ ...primaryNavigation, target: { create: 'missing' } }],
+  [{ ...primaryNavigation, target: { command: 'missing/action' } }],
+  [{ ...primaryNavigation, target: { url: 'https://example.test' } }],
+  [{ ...primaryNavigation, target: { navigation: 'entity.clients', create: 'clients' } }],
+  [{ ...primaryNavigation, icon: 'UnknownIcon' }], [{ ...primaryNavigation, callback: 'run' }], [{ ...primaryNavigation, label: '<b>Run</b>' }],
+])('E2 rejects malformed or unsupported actions at config load: %j', actions => {
+  expect(() => new KernelRegistry(actionConfig(actions))).toThrow(/console action/i)
+})
+it.each(['workspace/items', '7' + 'x'.repeat(64)])('E2 accepts registered navigation IDs using the existing contract: %s', async id => {
+  const action = { ...primaryNavigation, target: { navigation: id } }
+  const config = actionConfig([action])
+  config.plugins = [...config.plugins!, { name: 'existing-navigation', version: '1', requires: { console: '^1' },
+    contributes: { console: { navigation: [{ id, placement: 'sidebar', page: 'core.overview', label: 'Items' }] } },
+  }]
+  expect((await providerRegistry(config)).pages.find(page => page.id === 'quick')?.actions).toEqual([action])
+  expect(() => new KernelRegistry(actionConfig([action]))).toThrow(/console action target/i)
+})
+it('E2 projects navigation against live roles, views and grants without promoting a denied primary', async () => {
+  const config = actionConfig([primaryNavigation, { id: 'audit', label: 'auditKey', target: { navigation: 'audit.activity' } }])
+  const owner = await providerRegistry(config)
+  expect(owner.pages.find(page => page.id === 'quick')?.actions).toHaveLength(2)
+  const viewer = await providerRegistry(config, 'viewer-a')
+  expect(viewer.pages.find(page => page.id === 'quick')?.actions).toEqual([primaryNavigation])
+  const restricted = { ...actionConfig([{ ...primaryNavigation, target: { navigation: 'audit.activity' } }, { id: 'secondary', label: 'secondaryKey', target: { navigation: 'core.overview' } }]), ui: { ...config.ui, entities: config.ui?.entities ?? {}, navigation: { groups: [], items: [{ id: 'clients', entity: 'clients', roles: ['owner'] }] } } }
+  expect((await providerRegistry(restricted, 'viewer-a')).pages.find(page => page.id === 'quick')?.actions).toEqual([{ id: 'secondary', label: 'secondaryKey', target: { navigation: 'core.overview' } }])
+})
+it('E2 preserves descriptor-free pages and the configured overview fallback', async () => {
+  expect((await providerRegistry(sample)).pages.every(page => !Object.hasOwn(page, 'actions'))).toBe(true)
+  const config = actionConfig([])
+  const contribution = config.plugins!.at(-1)!.contributes!.console!
+  contribution.pages = contribution.pages!.map(page => ({ ...page, path: '/' }))
+  const registry = await providerRegistry(config)
+  expect(registry.navigation.find(item => item.id === 'core.overview')?.page).toBe('quick')
+})
+
+it('E2 resolves create precedence and collection forms from runtime definitions, with live input and additional grants', async () => {
+  const { z } = await import('zod')
+  const { defineCommand } = await import('../../../core/src/commands')
+  const { scopeOperations } = await import('../../../core/src/scope-operations')
+  const make = (name: string, input = z.object({ note: z.string() })) => defineCommand({ name, input,
+    permission: { entity: 'clients', operation: 'update' }, plan: () => ({ rules: [], result: { status: 200, body: {} }, event: { operation: 'test', entity: 'clients', entityId: 'synthetic' } }) })
+  const create = { ...make('clients/new'), ui: { placement: { entity: 'clients', action: 'create' as const } } }
+  const secondCreate = { ...make('clients/other'), ui: create.ui }
+  const collect = make('clients/batch/collect')
+  const reference = make('clients/reference', z.object({ worker: z.string().meta({ referenceEntity: 'workers' }) }) as any)
+  const extra = { ...make('clients/extra'), additionalPermissions: [{ entity: 'workers', operation: 'delete' as const }] }
+  const definitions = [create, secondCreate, collect, reference, extra]
+  const actions = [
+    { id: 'new', label: 'newKey', primary: true, target: { create: 'clients' } },
+    ...definitions.map((command, index) => ({ id: `command${index}`, label: `command${index}Key`, target: { command: command.name } })),
+  ]
+  const project = (config: InstanceConfig, fields = ['id', 'name', 'version']) => {
+    const kernel = new KernelRegistry({ ...config, commands: definitions.map(command => command.name), plugins: [...config.plugins!, {
+      name: 'input-masks', version: '1', fieldMask: (entity: string) => entity === 'workers' ? fields : ['id', 'name', 'version'],
+      commandGuard: (_command: import('../../../core/src/kernel/plugin').KernelCommand, scope: import('../../../core/src/types').Scope) => scope.role === 'blocked' ? { allow: false as const, code: 'permission_denied' } : { allow: true as const },
+    }] }, { commands: new Map(definitions.map(command => [command.name, command])) })
+    const scope = { organizationId: 'org-a', actor: { type: 'user' as const, id: 'owner-a' }, role: 'owner', correlationId: 'actions' }
+    scopeOperations.set(scope, { operations: null })
+    return { kernel, scope, actions: consoleRegistry(kernel.config, scope).pages.find(page => page.id === 'quick')!.actions }
+  }
+  const config = actionConfig(actions)
+  expect(project(config).actions?.map(action => action.target)).toEqual([
+    { create: 'clients' }, { command: collect.name }, { command: reference.name }, { command: extra.name },
+  ])
+  const commandsOnly = { ...config, entities: { ...config.entities, clients: { ...config.entities.clients, commandsOnly: true } } }
+  expect(project(commandsOnly).actions?.map(action => action.target)).toEqual([
+    { command: create.name }, { command: create.name }, { command: collect.name }, { command: reference.name }, { command: extra.name },
+  ])
+  expect(project(config, []).actions?.map(action => action.target)).toEqual([{ create: 'clients' }, { command: collect.name }, { command: extra.name }])
+  const grants = { ...config, permissions: { ...config.permissions, owner: { ...config.permissions.owner, workers: ['read' as const] } } }
+  expect(project(grants).actions?.some(action => 'command' in action.target && action.target.command === extra.name)).toBe(false)
+  const { kernel, scope } = project(config)
+  const viewer = { ...scope, role: 'viewer' }; scopeOperations.set(viewer, { operations: null })
+  const blocked = { ...scope, role: 'blocked' }; scopeOperations.set(blocked, { operations: null })
+  expect(consoleRegistry(kernel.config, viewer).pages.find(page => page.id === 'quick')!.actions).toEqual([])
+  expect(consoleRegistry(kernel.config, blocked).pages.find(page => page.id === 'quick')!.actions).toEqual([])
+})
+it.each(['row', 'unsupported', 'undeclared'])('E2 rejects %s runtime command targets during construction', async kind => {
+  const { z } = await import('zod')
+  const { defineCommand } = await import('../../../core/src/commands')
+  const command = defineCommand({ name: 'clients/collect', input: kind === 'row' ? z.object({ id: z.string().meta({ referenceEntity: 'clients' }) }) : kind === 'unsupported' ? z.string() : z.object({}),
+    permission: { entity: 'clients', operation: 'update' }, plan: () => ({ rules: [], result: { status: 200, body: {} }, event: { operation: 'test', entity: 'clients', entityId: 'synthetic' } }) })
+  expect(() => new KernelRegistry({ ...actionConfig([{ id: 'collect', label: 'collectKey', primary: true, target: { command: command.name } }]), commands: kind === 'undeclared' ? [] : [command.name] }, { commands: new Map([[command.name, command]]) })).toThrow(/console action/i)
+})
+
+// E4: untyped inputs exercise the strict metadata boundary too.
+function matchingConfig(widgets: unknown[], views: unknown[] = [{ id: 'named', label: 'Named', where: { name: { eq: 'Public' } } }], contributed = false): InstanceConfig {
+  const list = { views }
+  return { ...sample, ui: { ...sample.ui, entities: { ...sample.ui?.entities, clients: { list: contributed ? { views: [] } : list } } },
+    plugins: [...sample.plugins!, { name: 'matching-list', version: '1', requires: { console: '^1' }, contributes: { console: {
+      ...(contributed ? { entities: { clients: { list } } } : {}),
+      pages: [{ id: 'matching', path: '/matching', label: 'Matching', widgets }],
+    } } }],
+  } as InstanceConfig
+}
+const matchingTable = { id: 'table', label: 'Clients', kind: 'table', query: { entity: 'clients', select: ['id', 'name'], limit: 1, where: { name: { eq: 'Public' } } }, columns: ['name'], drilldown: { view: 'named' } }
+it.each([false, true])('E4 accepts normalized same-entity list targets, contributed=%s', contributed => {
+  const config = matchingConfig([
+    matchingTable,
+    { ...matchingTable, id: 'list', kind: 'list', columns: undefined, field: 'name' },
+  ].map(widget => Object.fromEntries(Object.entries(widget).filter(([, value]) => value !== undefined))), undefined, contributed)
+  expect(() => new KernelRegistry(config)).not.toThrow()
+})
+it.each(['count', 'sum'])('E4 %s target describes all contributing records rather than the loaded page', fn => {
+  const widget = { id: fn, label: fn, kind: 'stat', query: { entity: 'stock_items', where: { quantity: { gte: 0 } } }, aggregate: fn === 'count' ? { fn } : { fn, field: 'quantity' }, drilldown: { view: 'nonnegative' } }
+  const config = matchingConfig([widget])
+  config.ui!.entities!.stock_items = { list: { views: [{ id: 'nonnegative', label: 'Nonnegative', where: { quantity: { gte: 0 } } }] } }
+  expect(() => new KernelRegistry(config)).not.toThrow()
+})
+it.each([undefined, {}])('E4 accepts an unfiltered widget with an explicitly named unfiltered view: %s', where => {
+  expect(() => new KernelRegistry(matchingConfig([{ ...matchingTable, query: { ...matchingTable.query, where } }], [{ id: 'named', label: 'All', where: {} }]))).not.toThrow()
+})
+it('E4 structural equality ignores object key order and preserves Boolean operand order', () => {
+  const where = { and: [{ name: { eq: 'Public' } }, { id: { in: ['one', 'two'] } }] }
+  const widget = { ...matchingTable, query: { ...matchingTable.query, where } }
+  expect(() => new KernelRegistry(matchingConfig([widget], [{ id: 'named', label: 'Named', where }]))).not.toThrow()
+  const reversedKeys = { id: { in: ['one', 'two'] }, name: { eq: 'Public' } }
+  expect(() => new KernelRegistry(matchingConfig([{ ...widget, query: { ...widget.query, where: { name: { eq: 'Public' }, id: { in: ['one', 'two'] } } } }], [{ id: 'named', label: 'Named', where: reversedKeys }]))).not.toThrow()
+  expect(() => new KernelRegistry(matchingConfig([widget], [{ id: 'named', label: 'Named', where: { and: [...where.and].reverse() } }]))).toThrow(/drilldown/i)
+})
+it.each([
+  null, {}, { view: '' }, { view: 'missing' }, { view: 'https://example.test/' },
+  { view: 'named', entity: 'workers' }, { view: 'named', organization: 'org-b' }, { view: 'named', url: '/e/clients' },
+])('E4 rejects unknown or non-reference drilldown metadata: %j', drilldown => {
+  expect(() => new KernelRegistry(matchingConfig([{ ...matchingTable, drilldown }]))).toThrow(/drilldown/i)
+})
+it.each([
+  { where: undefined }, { where: {} }, { where: { name: { eq: 'Other' } } },
+  { where: { and: [{ name: { eq: 'Public' } }] } },
+  { search: { text: 'Public', fields: ['name'] } }, { labelWhere: { name: { contains: 'Public' } } },
+  { view: 'named' }, { rowAccess: 'signed_in' }, { contextList: { entity: 'clients', list: 'related', id: 'one' } },
+])('E4 rejects mismatched or unsupported membership: %j', change => {
+  expect(() => new KernelRegistry(matchingConfig([{ ...matchingTable, query: { ...matchingTable.query, ...change } }]))).toThrow()
+})
+it('E4 rejects a rowAccess view even when its where matches', () => {
+  expect(() => new KernelRegistry(matchingConfig([matchingTable], [{ id: 'named', label: 'Named', where: matchingTable.query.where, rowAccess: 'signed_in' }]))).toThrow(/drilldown/i)
+})
+it('E4 never resolves a same-named view on another entity or a superseded config overlay', () => {
+  const config = matchingConfig([matchingTable], [], true)
+  config.ui!.entities!.workers = { list: { views: [{ id: 'named', label: 'Named', where: {} }] } }
+  config.ui!.entities!.clients = { list: { views: [{ id: 'named', label: 'Named', where: matchingTable.query.where }] } }
+  expect(() => new KernelRegistry(config)).toThrow(/drilldown/i)
+})
+it.each([false, true])('E4 retains same-name scalar ref versus nested relation predicates: nested=%s', nested => {
+  const where = nested ? { parent: { name: { eq: 'Public' } } } : { parent: { eq: 'parent-id' } }
+  const config = matchingConfig([{ ...matchingTable, query: { ...matchingTable.query, where } }], [{ id: 'named', label: 'Named', where }])
+  config.entities = { ...config.entities, clients: { ...config.entities.clients, fields: { ...config.entities.clients.fields, parent: { type: 'ref', entity: 'clients', required: false } }, relations: { parent: { entity: 'clients', field: 'parent' } } } }
+  expect(() => new KernelRegistry(config)).not.toThrow()
+})
+it('E4 descriptor-free configuration retains its existing shape', async () => {
+  const { drilldown: _target, ...widget } = matchingTable
+  const config = matchingConfig([widget])
+  const registry = await providerRegistry(config)
+  expect(registry.pages.find(page => page.id === 'matching')?.widgets).toEqual([widget])
+})

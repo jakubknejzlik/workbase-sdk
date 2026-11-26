@@ -7,7 +7,9 @@ import { StaticDataTable } from '@workbasehq/ui'
 import { TablePresentationContext, useTablePresentation } from '../../ui/src/data-table/presentation'
 import { formatFieldValue, recordLabel, visibleEntities, type Model, type Capabilities } from '@workbasehq/console-generated/read'
 import { signedValue } from '@workbasehq/console-generated/screens'
+import { listViewDestination } from '@workbasehq/console-generated/list-model'
 import { DashboardCards } from './dashboard-layout'
+import { DashboardActions } from './dashboard-actions'
 import { shortRecordId } from '../../console-generated/src/labels'
 import { listColumnAlignment } from '../../console-generated/src/list-presentation'
 import type { ConsoleModelContract, ConsolePage, ConsolePageResult, ConsoleWidgetResult } from '../../plugins/console/src/contract'
@@ -30,7 +32,7 @@ function WidgetRecords({ widget, caption, entity, model, value }: {
     meta: { fixedWidth: false, align: model && entity && model.entities[entity] ? listColumnAlignment(model, entity, field) : 'left', widthClass: index === 0 ? 'w-56' : 'w-40' },
     cell: ({ row }: { row: { original: Record<string, any> } }) => <div className="whitespace-normal break-words">{value(row.original, field)}</div>,
   }))
-  return <TablePresentationContext.Provider value={{ ...presentation, tableClass: 'w-full', listV2: true, scrollTabStop: 'overflow', scrollRegion: t('listScrollRegion'), scrollHint: t('listScrollHint') }}>
+  return <TablePresentationContext.Provider value={{ ...presentation, tableClass: 'w-full', listV2: true, scrollTabStop: 'overflow', scrollRegion: `${caption} — ${t('listScrollRegion')}`, scrollHint: t('listScrollHint') }}>
     <div data-list-density="comfortable" className="min-w-0 max-w-full"><StaticDataTable data={widget.data} columns={columns} label={caption} /></div>
   </TablePresentationContext.Provider>
 }
@@ -40,14 +42,16 @@ export function WidgetPage({ orgId, page }: { orgId: string; page: ConsolePage }
   const runtime = useRuntimeModel(orgId)
   const model = runtime.error ? undefined : runtime.data?.model
   const caps = runtime.error ? undefined : runtime.data?.capabilities
+  const livePage = runtime.error ? undefined : runtime.data?.console.pages.find(current => current.id === page.id)
   const result = useQuery({ queryKey: ['console-page', orgId, page.id, caps],
     queryFn: () => api<ConsolePageResult>(`/o/${encodeURIComponent(orgId)}/console-pages/${encodeURIComponent(page.id)}`), enabled: !!model && !!caps, refetchOnWindowFocus: true })
-  return <Page title={t(page.label)}><div className="space-y-6"><WidgetCards orgId={orgId} page={page} result={result.data} pending={result.isPending} error={result.error ?? runtime.error} enumLabels={model?.enumLabels} model={model} caps={caps} /></div></Page>
+  return <DashboardActions orgId={orgId} page={page} runtime={runtime}>{({ header, actions }) => <Page title={t(page.label)} actions={header}><div className="space-y-6"><WidgetCards orgId={orgId} page={livePage ?? page} drilldownEnabled={!!livePage && !runtime.isFetching} actions={actions} result={result.data} pending={result.isPending} error={result.error ?? runtime.error} enumLabels={model?.enumLabels} model={model} caps={caps} /></div></Page>}</DashboardActions>
 }
 
 /** All values, including reference labels, arrive in the single page response. */
-export function WidgetCards({ orgId, page, result, pending, error, model, caps, enumLabels }: {
-  orgId: string; page: ConsolePage; result?: ConsolePageResult; pending: boolean; error: Error | null; model?: Model; caps?: Capabilities; enumLabels?: ConsoleModelContract['model']['enumLabels']
+export function WidgetCards({ orgId, page, actions, result, pending, error, model, caps, enumLabels, drilldownEnabled = true }: {
+  orgId: string; page: ConsolePage; actions?: ReactNode; result?: ConsolePageResult; pending: boolean; error: Error | null; model?: Model; caps?: Capabilities; enumLabels?: ConsoleModelContract['model']['enumLabels']
+  drilldownEnabled?: boolean
 }) {
   const { t, i18n } = useTranslation()
   const caption = (label: string) => {
@@ -93,10 +97,22 @@ export function WidgetCards({ orgId, page, result, pending, error, model, caps, 
     const primary = widget.kind === 'list' ? widget.field : widget.columns.find(field => model?.entities[entity ?? '']?.fields[field]?.type !== 'ref' && !(configured?.kind !== 'stat' && configured?.query.labels?.includes(field)))
     return <WidgetRecords widget={widget} caption={caption(widget.label)} entity={entity} model={model} value={(row, field) => value(widget, row, field, field === primary)} />
   }
+  const matchingRecords = (widget: ConsoleWidgetResult) => {
+    if (!drilldownEnabled || pending || error || !result || !model || !caps || widget.kind === 'error' || widget.kind === 'stat' && widget.value == null) return null
+    const configured = page.widgets?.find(item => item.id === widget.id && item.kind === widget.kind)
+    const target = configured?.drilldown && listViewDestination(model, caps, orgId, configured.query.entity, configured.drilldown.view)
+    return target ? <p className="text-sm"><Link {...target} className="text-foreground underline underline-offset-4">{t('dashboardViewMatchingRecords')}</Link></p> : null
+  }
   // Successful responses contain only server-authorized widgets; denied cards never mount.
   const widgets = result ? result.widgets : page.widgets ?? []
-  if (!widgets.length) return <p className="text-sm text-muted-foreground">{t('dashboardEmpty')}</p>
-  return <DashboardCards sections={result ? result.sections : page.sections} cards={widgets.map(widget => ({ key: widget.id, content: <Card className="dashboard-card min-w-0" data-widget={widget.id}>
-    <CardHeader><CardTitle><h2>{caption(widget.label)}</h2></CardTitle></CardHeader><CardContent className="space-y-3">{error ? <p role="alert">{t('requestFailed')}</p> : pending ? <Skeleton role="status" aria-label={t('loading')} className="h-16 w-full" /> : content(widget as ConsoleWidgetResult)}</CardContent>
-  </Card> }))} />
+  if (!widgets.length) return <>{actions}<p className="text-sm text-muted-foreground">{t('dashboardEmpty')}</p></>
+  const sections = result ? result.sections : page.sections
+  const cards = widgets.map(widget => ({ key: widget.id, content: <Card className="dashboard-card min-w-0" data-widget={widget.id}>
+    <CardHeader><CardTitle><h2>{caption(widget.label)}</h2></CardTitle></CardHeader><CardContent className="space-y-3">{error ? <p role="alert">{t('requestFailed')}</p> : pending ? <Skeleton role="status" aria-label={t('loading')} className="h-16 w-full" /> : content(widget as ConsoleWidgetResult)}{matchingRecords(widget as ConsoleWidgetResult)}</CardContent>
+  </Card> }))
+  if (!actions) return <DashboardCards sections={sections} cards={cards} />
+  // Share the first configured, nonempty row with actions. Later rows retain
+  // their exact section/legacy order, without inferring urgency from names.
+  const first = sections?.find(section => section.row.some(id => cards.some(card => card.key === id)))?.row ?? [cards[0].key]
+  return <div className="dashboard-work"><div className="dashboard-priority">{actions}<DashboardCards sections={[{ row: first }]} cards={cards.filter(card => first.includes(card.key))} /></div><DashboardCards sections={sections} cards={cards.filter(card => !first.includes(card.key))} /></div>
 }

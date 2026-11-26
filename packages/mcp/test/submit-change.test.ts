@@ -2,10 +2,12 @@ import { registerTempDir, cleanupTempDir } from '../../../scripts/lib/test-temp-
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createServer } from 'node:http'
 import { createHash } from 'node:crypto'
-import { cp, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
+import { execFileSync } from 'node:child_process'
+import { cp, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { KernelRegistry } from '@workbasehq/core/kernel/registry'
+import { accessSystemActions } from '@workbasehq/core/schema'
 import { generate } from '../../core/src/openapi/generate.ts'
 import { json, Store } from '../src/storage.ts'
 import { Workflow } from '../src/workflow.ts'
@@ -14,8 +16,10 @@ import * as planning from '../src/planning.ts'
 import * as disposable from '../src/disposable.ts'
 import { parseProposal } from '../src/proposals.ts'
 import { promotionHash } from '../src/submit-change.ts'
-import { schemas } from '../src/schemas.ts'
+import { schemas, type CompositionChange } from '../src/schemas.ts'
+import { bootstrapInstance } from '../src/bootstrap.ts'
 import { copyHistoricalInstances } from './fixtures.ts'
+import { csDomain, csUi } from './presentation-fixture.ts'
 
 const configure = vi.fn(), credential = vi.fn()
 const baseSha = 'a'.repeat(40), secret = 'test-only-credential-never-log'
@@ -455,3 +459,141 @@ it.each(['config.ts', 'schema.lock.json', 'migrations/0001_r1.sql', 'access.ts']
     expect(calls).toEqual([])
   },
 )
+
+// Exercise the producer/consumer contract with real, persisted promotions. The
+// exhaustive table makes a new composition kind require a submission example.
+const enField: CompositionChange = { kind: 'set_label', entity: 'worker', field: 'name', language: 'en', label: 'Full name' }
+const csEntity: CompositionChange = { kind: 'set_label', entity: 'worker', language: 'cs', pluralForms: {
+  one: '{{count}} člen týmu', few: '{{count}} členové týmu', many: '{{count}} člena týmu', other: '{{count}} členů týmu',
+} }
+const domainCatalog: CompositionChange = { kind: 'set_catalog_entries', language: 'en', namespace: 'domain', entries: { 'field.worker.user': 'Sign in' } }
+const locks = ['access.lock.json', 'access.lock.md']
+type CompositionCase = { changes: CompositionChange[]; paths: string[] }
+const compositionCases = {
+  set_label: { changes: [enField], paths: ['locales/en/domain.json'] },
+  set_catalog_entries: { changes: [{ kind: 'set_catalog_entries', language: 'en', namespace: 'ui', entries: { 'workers.list.title': 'Team' } }], paths: ['locales/en/ui.json'] },
+  set_locale: { changes: [{ kind: 'set_locale', locale: 'cs' }], paths: ['config.ts', 'openapi.json', ...locks] },
+  set_instance_display_name: { changes: [{ kind: 'set_instance_display_name', displayName: 'Členové týmu' }], paths: ['config.ts', 'openapi.json', ...locks] },
+  set_plugin: { changes: [{ kind: 'set_plugin', plugin: 'organizations', options: { allowCreate: true } }], paths: ['runtime.ts', ...locks] },
+  set_interactive: { changes: [{ kind: 'set_interactive', interactive: false }], paths: ['runtime.ts', ...locks] },
+  set_system_access: { changes: [{ kind: 'set_system_access', role: 'staff', grants: { ...Object.fromEntries(accessSystemActions.map(action => [action, 'deny' as const])), 'audit.read': 'allow' } }], paths: ['access.ts', 'openapi.json', ...locks] },
+  set_entity_access: { changes: [{ kind: 'set_entity_access', entity: 'worker', role: 'staff', access: { read: 'allow', create: 'deny', update: 'deny', delete: 'deny' } }], paths: ['schema/worker.ts', 'openapi.json', ...locks] },
+  set_account_link: { changes: [{ kind: 'set_account_link', entity: 'worker', invitationRole: 'staff' }], paths: ['access.ts', 'openapi.json', ...locks] },
+  set_roles: { changes: [{ kind: 'set_roles', roles: ['admin', 'staff', 'viewer'], organizationOwnerRole: 'admin' }], paths: ['config.ts', 'access.ts', 'schema/worker.ts', 'runtime.ts', 'openapi.json', ...locks] },
+} satisfies Record<CompositionChange['kind'], CompositionCase>
+const labelCases: Record<string, CompositionCase> = {
+  'CS entity caption alone': { changes: [csEntity], paths: ['locales/cs/domain.json'] },
+  'bilingual labels alone': { changes: [enField, csEntity], paths: ['locales/en/domain.json', 'locales/cs/domain.json'] },
+  'repeated labels sharing one file': { changes: [enField, { ...enField, field: 'user', label: 'Account' }, { ...enField, label: 'Team member name' }], paths: ['locales/en/domain.json'] },
+  'label plus explicit same-language domain catalog': { changes: [enField, domainCatalog], paths: ['locales/en/domain.json'] },
+  'reported locale + three labels + CS ui catalog batch': { changes: [
+    { kind: 'set_locale', languages: ['en', 'cs'], locale: 'cs' }, csEntity,
+    { kind: 'set_label', entity: 'worker', field: 'name', language: 'cs', label: 'Celé jméno' },
+    { kind: 'set_label', entity: 'worker', field: 'user', language: 'cs', label: 'Účet' },
+    { kind: 'set_catalog_entries', language: 'cs', namespace: 'ui', entries: { 'workers.list.title': 'Tým' } },
+  ], paths: ['config.ts', 'openapi.json', 'locales/cs/domain.json', 'locales/cs/ui.json', ...locks] },
+}
+let compositionFixture: string
+beforeAll(async () => {
+  compositionFixture = registerTempDir(await mkdtemp(join(tmpdir(), 'wb-submit-composition-fixture-')))
+  await bootstrapInstance(compositionFixture, { id: 'sample', target: 'cloudflare-github' })
+  // Include the scaffold's explicit UI peers, as in the presentation tests.
+  for (const directory of ['node_modules', 'packages/plugins/node_modules', 'packages/frontend-console/node_modules']) {
+    for (const name of await readdir(resolve(directory))) {
+      if (name.startsWith('.')) continue
+      const names = name.startsWith('@') ? (await readdir(resolve(directory, name))).map(child => `${name}/${child}`) : [name]
+      for (const dependency of names) {
+        const destination = join(compositionFixture, 'node_modules', dependency)
+        await mkdir(join(destination, '..'), { recursive: true })
+        await symlink(resolve(directory, dependency), destination).catch(error => { if (error.code !== 'EEXIST') throw error })
+      }
+    }
+  }
+  const config = join(compositionFixture, 'config.ts')
+  await writeFile(config, (await readFile(config, 'utf8')).replace("languages: ['en']", "languages: ['en', 'cs']"))
+  await mkdir(join(compositionFixture, 'locales/cs'), { recursive: true })
+  await writeFile(join(compositionFixture, 'locales/cs/domain.json'), json(csDomain))
+  await writeFile(join(compositionFixture, 'locales/cs/ui.json'), json(csUi))
+  execFileSync('bun', [resolve('packages/core/src/migrations/schema-cli.ts'), 'plan', '--root', compositionFixture, '--init'], { encoding: 'utf8' })
+  execFileSync('bun', [resolve('packages/core/src/openapi/cli.ts'), '--root', compositionFixture, '--write'], { encoding: 'utf8' })
+  execFileSync('bun', ['run', 'access:lock'], { cwd: compositionFixture, encoding: 'utf8' })
+})
+afterAll(() => { cleanupTempDir(compositionFixture) })
+
+async function promoteComposition(changes: CompositionChange[]) {
+  await rm(dir(), { recursive: true, force: true })
+  await cp(compositionFixture, dir(), { recursive: true, verbatimSymlinks: true })
+  store = new Store(dir(), new Set(['sample'])); await store.init()
+  workflow = new Workflow(store, configure)
+  const proposed = await workflow.call('propose_change', { instance: 'sample', baseRevision: 1, changes })
+  expect(proposed, JSON.stringify(proposed)).toMatchObject({ ok: true, kind: 'composition_change' })
+  id = String(proposed.proposalId)
+  for (const name of ['validate', 'apply_to_disposable', 'promote']) {
+    const result = await workflow.call(name, { proposalId: id, ...(name === 'promote' ? { expectedRevision: 1 } : {}) })
+    expect(result, JSON.stringify(result)).toMatchObject({ ok: true })
+  }
+  const p = await proposal()
+  expect(p.status).toBe('promoted')
+  expect(p.changes).toEqual(changes)
+  return p
+}
+
+// Successful submission checks the actual operation-derived allowlist, rather
+// than duplicating it in a test helper or trusting promotedFiles as authority.
+it.each(Object.entries({ ...compositionCases, ...labelCases }))('promotedFiles are a subset of the submission allowlist: %s', async (_name, { changes, paths }) => {
+  const p = await promoteComposition(changes)
+  expect(p.promotedFiles.map((file: { path: string }) => file.path).sort()).toEqual([...paths].sort())
+  // Assert catalog content independently of the captured promotion snapshot.
+  const catalogs = new Map<string, Record<string, string>>()
+  for (const language of ['en', 'cs']) for (const namespace of ['domain', 'ui']) {
+    const path = `locales/${language}/${namespace}.json`
+    catalogs.set(path, JSON.parse(await readFile(join(compositionFixture, path), 'utf8')))
+  }
+  for (const change of changes) {
+    if (change.kind === 'set_catalog_entries') Object.assign(catalogs.get(`locales/${change.language}/${change.namespace}.json`)!, change.entries)
+    if (change.kind === 'set_label') {
+      const entries = catalogs.get(`locales/${change.language}/domain.json`)!
+      if (change.field) entries[`field.${change.entity}.${change.field}`] = change.label!
+      else for (const [category, caption] of Object.entries(change.pluralForms!)) entries[`entity.${change.entity}_${category}`] = caption!
+    }
+  }
+  for (const file of p.promotedFiles) if (catalogs.has(file.path)) expect(file.data).toBe(json(catalogs.get(file.path)))
+  const preserved = { path: 'config/sample/locales/cs/untouched.json', mode: '100644', type: 'blob', sha: 'unrelated-remote-catalog' }
+  trees.get('base-tree')!.push(preserved)
+  const before = await readFile(proposalPath(), 'utf8')
+  // Reload the saved proposal, including original set_label operations: no migration.
+  store = new Store(dir(), new Set(['sample'])); await store.init()
+  workflow = new Workflow(store, configure)
+  const first = await submit()
+  expect(first, JSON.stringify(first)).toMatchObject({ ok: true, prNumber: 17 })
+  const tree = trees.get(commits.get(String(first.headSha)).tree.sha)!
+  expect(tree.map(entry => entry.path).sort()).toEqual(['README.md', preserved.path, ...paths.map(path => `config/sample/${path}`)].sort())
+  expect(tree.find(entry => entry.path === 'README.md')!.sha).toBe('original-readme')
+  expect(tree.find(entry => entry.path === preserved.path)).toEqual(preserved)
+  for (const file of p.promotedFiles) {
+    expect(await readFile(join(dir(), file.path), 'utf8')).toBe(file.data)
+    expect(blobs.get(tree.find(entry => entry.path === `config/sample/${file.path}`)!.sha)).toBe(file.data)
+  }
+  expect(await submit()).toEqual(first)
+  expect(await readFile(proposalPath(), 'utf8')).toBe(before)
+  expect(calls.filter(call => call === 'POST /pulls')).toHaveLength(1)
+  expect(calls.filter(call => call === 'POST /git/refs')).toHaveLength(1)
+})
+
+it('label-only promotion reaches github_not_configured (503) without an operator target', async () => {
+  await promoteComposition([enField])
+  workflow = new Workflow(store)
+  expect(await submit()).toMatchObject({ ok: false, error: { code: 'github_not_configured', status: 503 } })
+  expect(configure).not.toHaveBeenCalled()
+  expect(calls).toEqual([])
+})
+it.each(['locales/cs/domain.json', 'locales/en/ui.json', 'unrelated.txt', 'duplicate'])('rejects unrequested composition path %s with a valid recomputed hash', async path => {
+  await promoteComposition([enField, domainCatalog])
+  await changeProposal(p => {
+    p.promotedFiles.push(path === 'duplicate' ? { ...p.promotedFiles[0] } : { path, data: '{}\n' })
+    p.promotionHash = promotionHash(p)
+  })
+  expect(await submit()).toMatchObject({ ok: false, error: { code: 'file_not_allowed', status: 409 } })
+  expect(configure).not.toHaveBeenCalled()
+  expect(calls).toEqual([])
+})

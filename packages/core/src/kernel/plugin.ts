@@ -5,7 +5,7 @@ import type { MailOutboxPort } from './mail-outbox-port'
 import type { AuditPort } from './audit-port'
 import type { ZodType } from 'zod'
 import type { InstanceConfig, InstanceInput, OrganizationAction } from '../config'
-import type { CommandDefinition } from '../commands'
+import type { CommandDefinition, CommandRegistry } from '../commands'
 import type { WorkflowDefinition } from '../execution/workflow'
 import type { AtomicOperation } from '../execution/types'
 import type { AuditEvent } from '../audit-event'
@@ -56,6 +56,8 @@ export interface PluginMigration {
 }
 export interface PluginMcpTool { name: string; description: string; inputSchema: ZodType }
 export interface PluginContext { readonly config: InstanceConfig }
+/** Final command precedence, available before binding ports or mounting routes. */
+export interface ConsoleValidationContext { readonly commands: CommandRegistry }
 export interface WorkbasePlugin {
   name: string
   version: string
@@ -74,7 +76,7 @@ export interface WorkbasePlugin {
   audit?: AuditPort
   contributes?: { console?: ConsoleContribution }
   /** Console provider owns registry validation and actor projection. */
-  validateConsole?(config: InstanceConfig): void
+  validateConsole?(config: InstanceConfig, context?: ConsoleValidationContext): void
   consoleRegistry?(config: InstanceConfig, scope: Scope): ConsoleRegistry
   authenticate?(this: PluginContext, req: Request, env: RuntimeEnv): Promise<ResolvedActor | null> | ResolvedActor | null
   /** Runs only for the sole, Identity-validated login claimant. */

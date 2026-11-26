@@ -2,7 +2,7 @@ import { listColumnFields, readableListField } from './list-presentation'
 import { filterOperand } from '../../core/src/query/filter-operand'
 import { availableCalendar, calendarQuery, dayKey, validDay, type CalendarMode } from './calendar-model'
 import { filterDescriptors, filterMapping, selectionCap, type FilterDescriptor } from './filter-kinds'
-import { projection, listSearchableFields, type Model, type Capabilities, type ReadQuery, type RowAccessState } from './read'
+import { projection, listSearchableFields, visibleEntities, type Model, type Capabilities, type ReadQuery, type RowAccessState } from './read'
 export type ListHints = import('../../core/src/list-contract').ListConfig
 export interface ListFilter { field: string; predicate: Record<string, unknown> }
 export interface ListState {
@@ -52,6 +52,14 @@ export function validateListSearch(input: Record<string, unknown>): ListSearch {
   const size = Number(input.pageSize)
   if (pageSizes.includes(size as any)) result.pageSize = size
   return result
+}
+/** A projected widget target never falls back to an implicit or unavailable view. */
+export function listViewDestination(model: Model, caps: Capabilities, orgId: string, entity: string, viewId: string) {
+  if (!visibleEntities(model, caps).includes(entity)) return undefined
+  const view = model.entities[entity].list?.views?.find(view => view.id === viewId)
+  const search = validateListSearch({ view: viewId, page: 1 })
+  if (!view || view.rowAccess || search.invalidSettings || !readableWhere(view.where, model, entity, caps)) return undefined
+  return { to: '/o/$orgId/e/$entity' as const, params: { orgId, entity }, search }
 }
 export function defaultListState(model: Model, entity: string): ListState {
   const hints = model.entities[entity].list

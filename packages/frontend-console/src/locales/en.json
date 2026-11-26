@@ -1,4 +1,5 @@
 {
+  "dashboardQuickActions": "Quick actions",
   "filterOperator": "Operator",
   "filterEquals": "Equals",
   "filterBetween": "Between",
@@ -482,6 +483,7 @@
   "dashboardWidgetFailed": "This widget could not be loaded.",
   "dashboardWidgetTooComplex": "This overview is too complex to load. Contact your administrator.",
   "dashboardWidgetRetry": "This section could not be loaded right now. Reload the page to try again.",
+  "dashboardViewMatchingRecords": "View matching records",
   "dashboardEmpty": "No data yet",
   "tableView": "Table",
   "calendarView": "Calendar",
@@ -666,5 +668,15 @@
   "membersS4EmptyHelp": "Active members and pending invitations will appear here when available.",
   "membersS4SearchFields": "Search names and email addresses in this list.",
   "membersS4RequestFailed": "Could not load this list",
-  "membersS4RetryHelp": "Try again to reload this list. Your search will be kept."
+  "membersS4RetryHelp": "Try again to reload this list. Your search will be kept.",
+  "auditS5EmptyPage": "No events on this page",
+  "auditS5ContinueHelp": "More history is available. Continue to the next page to look for delivered events.",
+  "auditS5NoMatches": "No events on this page for these filters",
+  "auditS5FilterHelp": "This page returned no delivered events. Clear the filters to broaden the history.",
+  "auditS5Empty": "No delivered events returned",
+  "auditS5EmptyHelp": "This page currently returns no delivered events. Events may arrive later.",
+  "auditS5RequestFailed": "Audit history could not be loaded",
+  "auditS5RetryHelp": "Retry the same request. Your applied filters, draft and page are preserved.",
+  "auditS5AppliedFilters_one": "{{count}} applied filter",
+  "auditS5AppliedFilters_other": "{{count}} applied filters"
 }

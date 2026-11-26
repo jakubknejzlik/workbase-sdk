@@ -2,6 +2,8 @@ import { test, expect } from '@playwright/test'
 import { execFileSync } from 'node:child_process'
 import { readFileSync, writeFileSync } from 'node:fs'
 import setup, { origin } from './runtime/setup'
+import AxeBuilder from '@axe-core/playwright'
+import { join } from 'node:path'
 
 let stop: (() => Promise<void>) | undefined
 test.beforeAll(async () => { stop = await setup({ worker: 'widget-table-worker.ts', seed: 'widget-table-seed.ts' }) })
@@ -118,6 +120,99 @@ for (const language of ['en', 'cs']) for (const width of [1440, 1280, 900, 390])
         await page.screenshot({ path: info.outputPath(`${name}-${state}-dashboard.png`), fullPage: true, animations: 'disabled' })
         writeFileSync(info.outputPath(`${name}-${state}.json`), JSON.stringify(body, null, 2))
       }
+      expect(errors).toEqual([])
+    } finally { await context.close() }
+  })
+}
+
+for (const language of ['en', 'cs']) for (const width of [1440, 1280, 900, 390]) {
+  test(`E3 actions ${language} ${width}: real forms, navigation, denial and whole-page states`, async ({ browser }, info) => {
+    test.setTimeout(120_000)
+    const context = await browser.newContext({ baseURL: origin, viewport: { width, height: 1000 }, extraHTTPHeaders: { Authorization: 'Bearer widget-table-owner-session' } })
+    await context.addInitScript(language => localStorage.setItem('console-language', language), language)
+    const page = await context.newPage(), errors: string[] = []
+    page.on('pageerror', error => errors.push(error.message))
+    const region = page.getByRole('region', { name: language === 'cs' ? 'Rychlé akce' : 'Quick actions' })
+    const capture = async (state: string) => {
+      await page.evaluate(async () => { await document.fonts.ready })
+      const name = `dashboard-${width}-${language}-${state}-${head}.png`
+      await page.screenshot({ path: process.env.E3_CAPTURE_DIR ? join(process.env.E3_CAPTURE_DIR, name) : info.outputPath(name), fullPage: true, animations: 'disabled' })
+    }
+    const create = language === 'cs' ? 'Vytvořit vzorek' : 'Create specimen'
+    const register = language === 'cs' ? 'Zaregistrovat klienta' : 'Register client'
+    const processLabel = language === 'cs' ? 'Zpracovat vzorky' : 'Process specimens'
+    const browse = language === 'cs' ? 'Procházet vzorky' : 'Browse specimens'
+    try {
+      for (const [state, count] of [['zero', 0], ['one', 1], ['multiple', 4], ['long', 4], ['denied', 0]] as const) {
+        await page.goto(`/o/org-a/actions-${state}`)
+        await expect(page.locator('[data-widget="count"]')).toBeVisible()
+        if (!count) await expect(region).toHaveCount(0)
+        else {
+          await expect(region.locator('.dashboard-action')).toHaveCount(count)
+          await expect(region.locator('button').first()).toBeEnabled()
+          expect(await region.locator('button button, a button, button a, a a').count()).toBe(0)
+          const geometry = await region.locator('.dashboard-action').evaluateAll(nodes => nodes.map(node => {
+            const rect = node.getBoundingClientRect(), icon = node.querySelector('svg')!.getBoundingClientRect(), badge = node.querySelector('.dashboard-action-icon')!.getBoundingClientRect(), title = node.querySelector('.dashboard-action-copy') as HTMLElement
+            return { x: rect.x, width: rect.width, fits: node.scrollWidth <= node.clientWidth && title.scrollWidth <= title.clientWidth, iconWidth: icon.width, iconHeight: icon.height,
+              centered: Math.abs(icon.x + icon.width / 2 - badge.x - badge.width / 2) < 1 && Math.abs(icon.y + icon.height / 2 - badge.y - badge.height / 2) < 1 }
+          }))
+          expect(geometry.every(card => card.fits && card.centered && card.iconWidth === 24 && card.iconHeight === 24)).toBe(true)
+          expect(new Set(geometry.map(card => Math.round(card.x))).size).toBe(count > 1 && width > 680 ? 2 : 1)
+          const priority = await page.locator('.dashboard-priority').evaluate(node => {
+            const action = node.querySelector('.dashboard-actions')!.getBoundingClientRect(), widget = node.querySelector('[data-widget]')!.getBoundingClientRect()
+            return { action: { x: action.x, y: action.y, bottom: action.bottom }, widget: { x: widget.x, y: widget.y } }
+          })
+          expect(priority.action.y).toBeLessThanOrEqual(priority.widget.y)
+          if (width === 390) expect(priority.widget.y).toBeGreaterThanOrEqual(priority.action.bottom)
+          writeFileSync(info.outputPath(`${language}-${width}-${state}-actions.json`), JSON.stringify({ geometry, priority }, null, 2))
+        }
+        expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+        expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([])
+        await capture(state)
+      }
+      await page.goto('/o/org-a/actions-multiple')
+      await expect(region.getByRole('button', { name: create, exact: false })).toBeEnabled()
+      // The header and card use the same descriptor and both reach the same form.
+      await page.getByRole('button', { name: create, exact: true }).first().click()
+      const dialog = page.getByRole('dialog')
+      await expect(dialog.getByRole('textbox').first()).toBeVisible()
+      await dialog.getByRole('button', { name: language === 'cs' ? 'Zrušit' : 'Cancel', exact: true }).click()
+      await expect(page.getByRole('button', { name: create, exact: true }).first()).toBeFocused()
+      const trigger = region.getByRole('button', { name: create, exact: false })
+      await trigger.focus(); await page.keyboard.press('Enter')
+      await expect(dialog).toBeVisible()
+      await page.keyboard.press('Escape')
+      await expect(trigger).toBeFocused()
+      for (const [label, path] of [[create, '/api/specimens'], [register, '/commands/clients/register'], [processLabel, '/commands/specimens/process']]) {
+        await region.getByRole('button', { name: label, exact: false }).click()
+        await expect(dialog).toBeVisible()
+        // Fill only visible generated controls; actual API validation and mutation run in D1.
+        await dialog.getByRole('textbox').first().fill(`E3 ${language} ${width}`)
+        const response = page.waitForResponse(response => response.url().endsWith(path) && response.request().method() === 'POST')
+        await dialog.locator('button[type="submit"]').click()
+        expect((await response).ok()).toBe(true)
+        // Completion includes the real dashboard and generated-form cache reads.
+        await expect(dialog).toHaveCount(0, { timeout: 20_000 })
+        await expect(region.getByRole('button', { name: label, exact: false })).toBeFocused({ timeout: 10_000 })
+      }
+      await region.getByRole('button', { name: processLabel, exact: false }).click()
+      await dialog.getByRole('textbox').first().fill('fail')
+      const failure = page.waitForResponse(response => response.url().endsWith('/commands/specimens/process') && response.request().method() === 'POST')
+      await dialog.locator('button[type="submit"]').click()
+      expect((await failure).ok()).toBe(false)
+      await expect(dialog.getByRole('alert')).toBeVisible()
+      await page.evaluate(async () => {
+        await document.fonts.ready
+        await Promise.all(document.getAnimations().map(animation => animation.finished.catch(() => {})))
+      })
+      expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([])
+      await capture('failed-submit')
+      await page.keyboard.press('Escape')
+      // A dirty failed form uses the existing discard confirmation before navigation.
+      await dialog.locator('[data-slot="discard-prompt"] button').last().click()
+      await expect(dialog).toHaveCount(0)
+      await region.getByRole('link', { name: browse, exact: false }).click()
+      await expect(page).toHaveURL(/\/o\/org-a\/e\/specimens$/)
       expect(errors).toEqual([])
     } finally { await context.close() }
   })

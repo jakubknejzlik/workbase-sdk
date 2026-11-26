@@ -17,7 +17,10 @@ export interface ConsoleNavigation {
   view?: string
 }
 export type ConsoleAggregate = { fn: 'count' } | { fn: 'sum'; field: string }
-export type ConsoleWidget = { id: string; label: string } & (
+export type ConsoleWidget = { id: string; label: string;
+  /** Optional matching named list view of this widget's own entity; grants no access. */
+  drilldown?: { view: string }
+} & (
   | { kind: 'stat'; query: Pick<ConsoleQuery, 'entity' | 'where'>; aggregate: ConsoleAggregate }
   | { kind: 'table'; query: ConsoleQuery; columns: string[] }
   | { kind: 'list'; query: ConsoleQuery; field: string })
@@ -31,6 +34,16 @@ export type ConsoleWidgetResult = Pick<ConsoleWidget, 'id' | 'label'> & (
 export interface ConsolePageResult {
   id: string; label: string; sections?: ConsoleWidgetSection[]; widgets: ConsoleWidgetResult[]
 }
+/** References only; the runtime rechecks destinations and live authority. */
+export interface ConsolePageAction {
+  id: string
+  label: string
+  description?: string
+  icon?: string
+  /** Exactly one configured primary on a nonempty page; denial never promotes another. */
+  primary?: true
+  target: { navigation: string } | { create: string } | { command: string }
+}
 export interface ConsolePage {
   id: string
   label: string
@@ -40,6 +53,8 @@ export interface ConsolePage {
   renderer?: string
   widgets?: readonly ConsoleWidget[]
   sections?: ConsoleWidgetSection[]
+  /** At most 12 data-only references. Absent preserves the legacy contract. */
+  actions?: readonly ConsolePageAction[]
 }
 /** Wire types only: canonical model validation remains in core. No runtime imports. */
 export interface ConsoleQuery {

@@ -1,12 +1,141 @@
+import { z } from 'zod'
+import type { InstanceConfig } from './config'
+import type { CommandDefinition } from './commands'
+import type { ConsoleNavigation, ConsolePageAction } from './console-contract'
+import { isAccountAccessCommand } from './account-command'
 import type { KernelRegistry } from './kernel/registry'
 import type { Scope } from './types'
 import type { ConsoleWidget, ConsoleDetailItem, ConsoleEntityDisplay, ConsoleFieldDisplay, ConsoleGrant, ConsoleModelUI, ConsoleRegistry } from './console-contract'
 import type { ConsoleAuthorization } from './console-authorization'
+import type { ListConfig } from './list-contract'
+import { configuredList } from './query/list-views'
 
 const safeGrant = (grant: ConsoleGrant): ConsoleGrant => typeof grant === 'string' ? grant : pick(grant, ['entity', 'operation'])
 
 function pick<T, K extends keyof T>(source: T, keys: readonly K[]): Pick<T, K> {
   return Object.fromEntries(keys.filter(key => source[key] !== undefined).map(key => [key, source[key]])) as Pick<T, K>
+}
+
+
+/** Match the existing collection menu's placement and row-binding rules. */
+export function consoleCollectionCommand(config: InstanceConfig, command: CommandDefinition<any>, entity?: string): Record<string, any> | undefined {
+  if ('system' in command.permission || isAccountAccessCommand(config, command.name)) return undefined
+  const destination = entity ?? command.ui?.placement?.entity ?? command.permission.entity
+  if (!config.entities[destination] || command.ui?.placement?.entity !== destination && command.permission.entity !== destination) return undefined
+  // Legacy account actions also belong exclusively to Application access.
+  if (Object.values(config.entities[destination].fields).some(field => field.userLink)
+    && ['link_account', 'remove_access'].some(action => command.name === `${destination}/${action}`)) return undefined
+  let schema: Record<string, any>
+  try { schema = z.toJSONSchema(command.input, { io: 'input' }); z.fromJSONSchema(schema as any) } catch { return undefined }
+  if (schema.type !== 'object' || !schema.properties || typeof schema.properties !== 'object'
+    || schema.anyOf || schema.oneOf || schema.allOf || schema.$ref || schema.patternProperties) return undefined
+  const fields = Object.values(schema.properties) as Record<string, any>[]
+  const spec = (field: Record<string, any>) => field.anyOf?.find((item: Record<string, any>) => item.type !== 'null') ?? field
+  if (fields.some(field => !['string', 'number', 'integer', 'boolean', 'object', 'array', 'null'].includes(
+    Array.isArray(spec(field).type) ? spec(field).type.find((type: string) => type !== 'null') : spec(field).type))) return undefined
+  if (fields.filter(field => field.type === 'string' && field.referenceEntity === destination).length === 1) return undefined
+  return schema
+}
+export function consoleCommandCreates(command: CommandDefinition<any>, entity: string) {
+  return command.ui?.placement?.entity === entity && command.ui.placement.action === 'create'
+    || command.ui?.replacesCrud === 'create' || !('system' in command.permission) && command.permission.operation === 'create'
+}
+
+/** Reused by the provider and the final core boundary; captions follow this result only. */
+export function consolePageActions(kernel: KernelRegistry, actions: readonly ConsolePageAction[], navigation: readonly ConsoleNavigation[], authority: ConsoleAuthorization): ConsolePageAction[] {
+  const config = kernel.config
+  const requiredInputs = (schema: Record<string, any>): boolean => {
+    const visited = new Set<object>()
+    const allowed = (node: any): boolean => {
+      if (typeof node === 'boolean') return node
+      if (!node || typeof node !== 'object') return false
+      if (Array.isArray(node)) return node.every(allowed)
+      if (visited.has(node)) return true
+      visited.add(node)
+      if (!authority.schema(node) || node.readOnly || node['x-ui']?.hidden) return false
+      if (node.$ref) {
+        // Zod accepts local JSON pointers, including recursive definitions.
+        if (typeof node.$ref !== 'string' || !node.$ref.startsWith('#')) return false
+        let target: any = schema
+        try {
+          const pointer = decodeURIComponent(node.$ref.slice(1))
+          if (pointer && !pointer.startsWith('/')) return false
+          for (const part of pointer ? pointer.slice(1).split('/') : []) {
+            if (/~[^01]|~$/.test(part)) return false
+            const key = part.replaceAll('~1', '/').replaceAll('~0', '~')
+            if (!target || !Object.hasOwn(target, key)) return false
+            target = target[key]
+          }
+        } catch { return false }
+        if (!allowed(target)) return false
+      }
+      // Inspect every accepted schema dependency, not literal/annotation objects.
+      return ['anyOf', 'oneOf', 'allOf', 'prefixItems', 'items', 'additionalItems', 'contains', 'additionalProperties', 'propertyNames']
+        .every(key => !node[key] || allowed(node[key]))
+        && Object.values(node.patternProperties ?? {}).every(allowed)
+        && (node.required ?? []).every((name: string) => node.properties?.[name] && allowed(node.properties[name]))
+    }
+    return allowed(schema)
+  }
+  const commandAllowed = (command: CommandDefinition<any>, entity: string) => {
+    const schema = consoleCollectionCommand(config, command, entity)
+    return config.commands.includes(command.name) && authority.canRead(entity) && authority.command(command.name)
+      && !!schema && requiredInputs(schema) && !(command.ui?.replacesCrud && authority.operation(entity, command.ui.replacesCrud))
+  }
+  const creates = (entity: string) => [...kernel.commands.values()].find(command => commandAllowed(command, entity) && consoleCommandCreates(command, entity))
+  return actions.flatMap(action => {
+    if (!action || !action.target) return []
+    let target: ConsolePageAction['target'] | undefined
+    const reference = action.target
+    if ('navigation' in reference && navigation.some(item => item.id === reference.navigation)) target = { navigation: reference.navigation }
+    if ('create' in action.target) {
+      const entity = action.target.create
+      if (authority.canRead(entity)) {
+        if (authority.operation(entity, 'create')) {
+          const definition = config.entities[entity]
+          const explicit = config.ui?.entities?.[entity]?.form?.create?.fields
+          const available = Object.entries(definition.fields).every(([field, spec]) => !spec.required || spec.readOnly || spec.default !== undefined
+            || authority.write(entity, field, 'create') && !spec.ui?.hidden && (!explicit || explicit.includes(field))
+              && (spec.type !== 'ref' || !!spec.entity && authority.canRead(spec.entity)))
+          if (available) target = { create: entity }
+        } else {
+          const command = creates(entity)
+          if (command) target = { command: command.name }
+        }
+      }
+    }
+    if ('command' in action.target) {
+      const command = kernel.commands.get(action.target.command)
+      if (command && !('system' in command.permission)) {
+        const entity = command.ui?.placement?.entity ?? command.permission.entity
+        if (commandAllowed(command, entity) && (!consoleCommandCreates(command, entity)
+          || !authority.operation(entity, 'create') && creates(entity)?.name === command.name)) target = { command: command.name }
+      }
+    }
+    return target ? [{ ...pick(action, ['id', 'label', 'description', 'icon', 'primary']), target }] : []
+  })
+}
+
+/** Exact membership only; callers supply normalized (and, at projection, granted) views. */
+export function consoleWidgetDrilldown(widget: ConsoleWidget, views: ListConfig['views']): ConsoleWidget['drilldown'] {
+  const target = widget.drilldown
+  if (!target || typeof target !== 'object' || Array.isArray(target) || Object.keys(target).length !== 1
+    || typeof target.view !== 'string' || !target.view) return undefined
+  const query = widget.query
+  if ('search' in query && query.search !== undefined || 'labelWhere' in query && query.labelWhere !== undefined
+    || ['view', 'rowAccess', 'contextList'].some(key => key in query && (query as unknown as Record<string, unknown>)[key] !== undefined)) return undefined
+  const view = views?.find(view => view.id === target.view)
+  if (!view || view.rowAccess) return undefined
+  function equal(left: unknown, right: unknown): boolean {
+    if (left === right) return true
+    if (!left || !right || typeof left !== 'object' || typeof right !== 'object') return false
+    if (Array.isArray(left) || Array.isArray(right)) return Array.isArray(left) && Array.isArray(right)
+      && left.length === right.length && left.every((value, index) => equal(value, right[index]))
+    const a = left as Record<string, unknown>, b = right as Record<string, unknown>
+    const keys = Object.keys(a)
+    return keys.length === Object.keys(b).length && keys.every(key => Object.hasOwn(b, key) && equal(a[key], b[key]))
+  }
+  return equal(query.where ?? {}, view.where) ? { view: view.id } : undefined
 }
 
 /** Project every copy of presentation data through the same live authority.
@@ -84,7 +213,7 @@ export function consolePresentation(kernel: KernelRegistry, scope: Scope, author
         const defaultSort = hint.defaultSort
         return [[key, { columns: hint.columns.filter(field => read(target, field)), ...(defaultSort && literals(target, defaultSort.key) ? { defaultSort: pick(defaultSort, ['key', 'direction']) } : {}) }]]
       }))
-      const card = (key: string) => Object.hasOwn(lists, key) || !!relation(entity, key)
+      const card = (key: string) => key === 'info' || Object.hasOwn(lists, key) || !!relation(entity, key)
       result.detail = {
         ...(detail.inlineEdit !== undefined && authority.operation(entity, 'update') ? { inlineEdit: detail.inlineEdit } : {}),
         ...(detail.lists ? { lists } : {}),
@@ -124,7 +253,10 @@ export function consolePresentation(kernel: KernelRegistry, scope: Scope, author
         if (!query || query.include || query.cursor || 'contextList' in input) return []
         const fieldAllowed = (field: string) => !!query.select?.includes(field) && read(query.entity, field)
           || !!query.labels?.includes(field) && authority.label(query.entity, field)
-        const common = pick(widget, ['id', 'label'])
+        // Resolve explicit destination views as list queries do, under this live authority.
+        const views = configuredList(kernel, query.entity)?.views?.filter(view => predicate(query.entity, view.where))
+        const drilldown = consoleWidgetDrilldown(widget, views)
+        const common = { ...pick(widget, ['id', 'label']), ...(drilldown ? { drilldown } : {}) }
         if (widget.kind === 'stat') return [{ ...common, kind: 'stat', query: pick(query, ['entity', 'where']),
           aggregate: widget.aggregate.fn === 'count' ? { fn: 'count' } : { fn: 'sum', field: widget.aggregate.field } }]
         const safeQuery = { ...pick(query, ['entity', 'where', 'limit', 'select', 'labels', 'search', 'labelWhere', 'orderBy']), select: query.select! }
@@ -134,7 +266,7 @@ export function consolePresentation(kernel: KernelRegistry, scope: Scope, author
       })
       return widgets.length ? [{ ...safePage, widgets, ...(page.sections ? { sections: page.sections.map(section => ({ row: section.row.filter(id => widgets.some(widget => widget.id === id)) })).filter(section => section.row.length) } : {}) }] : []
     })
-    return {
+    const result: ConsoleRegistry = {
       entities, pages,
       navigation: source.navigation.filter(item => (scope.role !== 'member' || item.placement === 'sidebar' && !!item.entity) && !!item.page !== !!item.entity && permits(item.grant) && (!item.roles || item.roles.includes(scope.role)) && (!item.page || pages.some(page => page.id === item.page))
         && (!item.entity || canRead(item.entity) && (!item.view || entities[item.entity]?.list?.views?.some(view => view.id === item.view)))).map(item => ({ ...pick(item, ['id', 'placement', 'label', 'icon', 'order', 'roles', 'page', 'entity', 'view']),
@@ -142,6 +274,11 @@ export function consolePresentation(kernel: KernelRegistry, scope: Scope, author
           ...(item.group ? { group: pick(item.group, ['id', 'label', 'order', 'icon']) } : {}) })),
       ...(source.modelUi ? { modelUi: modelUI(source.modelUi) } : {}),
     }
+    result.pages = result.pages.map(page => {
+      const sourcePage = source.pages.find(candidate => candidate.id === page.id)!
+      return sourcePage.actions === undefined ? page : { ...page, actions: consolePageActions(kernel, sourcePage.actions, result.navigation, authority) }
+    })
+    return result
   }
   return { fieldUI, display, modelUI, registry }
 }
