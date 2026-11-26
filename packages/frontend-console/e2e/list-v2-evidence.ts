@@ -35,7 +35,7 @@ export async function capture(page: Page, scenario: string, reference: string, i
   const path = join(output, `en-${width}-${scenario}.png`)
   await page.evaluate(async () => { await document.fonts.ready; await Promise.all(document.getAnimations().filter(animation => animation.effect?.getComputedTiming().iterations !== Infinity).map(animation => animation.finished.catch(() => {}))) })
   await page.screenshot({ path, fullPage: true, animations: 'disabled' })
-  record('captures', `${scenario}-${width}`, { scenario, referenceAsset: reference, referenceScenario: scenario, capturePath: path, viewport: page.viewportSize(), locale: 'en', fullPage: true, injection: injection ?? null, ...JSON.parse(readFileSync(join(output, 'manifest.json'), 'utf8')).provenance.run })
+  record('captures', `${scenario}-${width}`, { scenario, referenceAsset: reference, referenceScenario: scenario, capturePath: path, relativePath: relative(output, path), sha256: hash(readFileSync(path)), viewport: page.viewportSize(), locale: 'en', fullPage: true, injection: injection ?? null, ...JSON.parse(readFileSync(join(output, 'manifest.json'), 'utf8')).provenance.run })
 }
 export function result(info: TestInfo, failure?: unknown) {
   record('checks', info.title, { status: failure ? 'failed' : info.status, expectedStatus: info.expectedStatus, errors: [...info.errors.map(error => error.message), ...(failure ? [failure instanceof Error ? failure.message : String(failure)] : [])], tracePath: info.status === 'passed' && !failure ? null : info.outputPath('trace.zip'), attachments: info.attachments.map(({ name, path }) => ({ name, path })) })
@@ -48,5 +48,5 @@ export async function captureSDK(page: Page, state: string, locale: 'en' | 'cs',
   await page.evaluate(async () => { await document.fonts.ready; await Promise.all(document.getAnimations().filter(animation => animation.effect?.getComputedTiming().iterations !== Infinity).map(animation => animation.finished.catch(() => {}))) })
   await page.screenshot({ path, animations: 'disabled' })
   const display = await page.evaluate(() => ({ DPR: devicePixelRatio, rootFontSize: getComputedStyle(document.documentElement).fontSize }))
-  record('SDK', path.split('/').at(-1)!, { label: 'SDK', state, locale, viewport, ...display, sourceSHA: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repository, encoding: 'utf8' }).trim(), spec: info.file.split('/').at(-1), test: info.title, path })
+  record('SDK', path.split('/').at(-1)!, { label: 'SDK', state, locale, viewport, ...display, sourceSHA: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repository, encoding: 'utf8' }).trim(), spec: info.file.split('/').at(-1), test: info.title, path, relativePath: relative(output, path), sha256: hash(readFileSync(path)) })
 }

@@ -55,16 +55,16 @@ const diagnosticUpload: Step = {
   uses: diagnosticUploadAction,
   with: {
     name: 'list-v2-acceptance-${{ github.run_attempt }}',
-    path: [
-      '${{ runner.temp }}/list-v2-acceptance/test-results/',
-      '${{ runner.temp }}/list-v2-acceptance/playwright-report/',
-      '${{ runner.temp }}/list-v2-acceptance/results.json',
-      '${{ runner.temp }}/list-v2-acceptance/manifest.json',
-      '',
-    ].join('\n'),
+    path: '${{ runner.temp }}/list-v2-acceptance/',
     'retention-days': 14,
     'if-no-files-found': 'warn',
   },
+}
+const completenessName = 'Verify List v2 evidence completeness'
+const completenessCheck: Step = {
+  name: completenessName,
+  if: 'always()',
+  run: 'bun scripts/check-list-v2-evidence.ts "${{ runner.temp }}/list-v2-acceptance"',
 }
 const privateTermsCommands = ['bun run check:ci-invariants', 'bun run test', 'bash scripts/sdk-pack.sh', 'bun scripts/check-sdk-boundary.ts', 'bun scripts/scan-sdk-public.ts', 'bun scripts/smoke-mcp-template.ts --directory dist-sdk']
 function assertDiagnosticUploads(parsed: Workflow) {
@@ -120,8 +120,14 @@ function assertCiWorkflowPolicy(document: { source: string; parsed: Workflow }) 
   expect(parsed.jobs.check.permissions).toBeUndefined()
   expect(parsed.env).toBeUndefined()
   expect(parsed.jobs.check.env).toBeUndefined()
-  for (const step of parsed.jobs.check.steps) {
-    if (step.name !== diagnosticUploadName) expect(step.if).toBeUndefined()
+  const steps = parsed.jobs.check.steps
+  expect(steps.filter(step => step.name === completenessName)).toEqual([completenessCheck])
+  const acceptance = steps.findIndex(step => step.run === 'bun run console:build && bun run test:list-v2-acceptance')
+  expect(steps[acceptance + 1]).toEqual(completenessCheck)
+  expect(steps[acceptance + 2]).toEqual(diagnosticUpload)
+  for (const step of steps) {
+    if (step.name === completenessName) expect(step).toEqual(completenessCheck)
+    else if (step.name !== diagnosticUploadName) expect(step.if).toBeUndefined()
     const expectedEnv = step.run === 'bun run console:build && bun run test:list-v2-acceptance'
       ? { LIST_V2_OUTPUT: '${{ runner.temp }}/list-v2-acceptance', WORKBASE_PRIVATE_TERMS: '${{ secrets.WORKBASE_PRIVATE_TERMS }}' }
       : privateTermsCommands.includes(step.run ?? '')
@@ -246,6 +252,9 @@ describe('CI diagnostic upload security regressions', () => {
   const upload = (document: Workflow) => document.jobs.check.steps.find(step => step.name === diagnosticUploadName)!
   const required = (document: Workflow) => document.jobs.check.steps.find(step => step.run === 'bun run test')!
   const cases: [string, (document: Workflow) => void][] = [
+    ['completeness check removed', document => { document.jobs.check.steps = document.jobs.check.steps.filter(step => step.name !== completenessName) }],
+    ['completeness check conditional', document => { document.jobs.check.steps.find(step => step.name === completenessName)!.if = 'success()' }],
+    ['completeness check with extra env', document => { document.jobs.check.steps.find(step => step.name === completenessName)!.env = { TOKEN: 'credential' } }],
     ['unknown upload step', document => { delete upload(document).if; upload(document).name = 'Upload other files' }],
     ['additional upload step', document => { document.jobs.check.steps.push(structuredClone(upload(document))) }],
     ['upload with a tag', document => { upload(document).uses = 'actions/upload-artifact@v4' }],
