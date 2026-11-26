@@ -1,4 +1,4 @@
-declare const document: { documentElement: { lang: string }; body: { style: { length: number; item(index: number): string; margin: string; getPropertyValue(name: string): string; getPropertyPriority(name: string): string; setProperty(name: string, value: string, priority?: string): void; removeProperty(name: string): string } } }
+declare const document: { documentElement: { lang: string }; body: { style: { cssText: string; length: number; item(index: number): string; margin: string; getPropertyValue(name: string): string; getPropertyPriority(name: string): string; setProperty(name: string, value: string, priority?: string): void; removeProperty(name: string): string } } }
 import { clearSavedViews } from '../saved-views-storage'
 declare const location: { pathname: string; search: string; replace(path: string): void }
 declare const history: { replaceState(state: unknown, unused: string, url: string): void }
@@ -161,19 +161,29 @@ export function AuthShell({ manifest, i18n, displayName, children, fetch: transp
   // embeds never mount this shell. Restore the host declaration when it unmounts.
   useEffect(() => {
     const style = document.body.style
-    // Preserve physical and logical margins together, in CSSOM declaration order.
-    // Their relative order decides which side wins at equal priority.
-    const margins = Array.from({ length: style.length }, (_, index) => style.item(index))
-      .filter(name => /^margin(?:-(?:top|right|bottom|left|(?:block|inline)(?:-(?:start|end))?))?$/.test(name))
+    const isMargin = (name: string) => /^margin(?:-(?:top|right|bottom|left|(?:block|inline)(?:-(?:start|end))?))?$/.test(name)
+    const declarations = () => Array.from({ length: style.length }, (_, index) => style.item(index))
       .map(name => ({ name, value: style.getPropertyValue(name), priority: style.getPropertyPriority(name) }))
+    // `all` competes with both physical and logical margins. Keep its position
+    // in the snapshot so cleanup cannot move an earlier margin past the reset.
+    const margins = declarations().filter(({ name }) => isMargin(name) || name === 'all')
     const clearMargins = () => {
       for (const name of ['margin', 'margin-top', 'margin-right', 'margin-bottom', 'margin-left', 'margin-block', 'margin-block-start', 'margin-block-end', 'margin-inline', 'margin-inline-start', 'margin-inline-end']) style.removeProperty(name)
     }
     clearMargins()
     style.setProperty('margin', '0px', margins.some(({ priority }) => priority === 'important') ? 'important' : '')
     return () => {
-      clearMargins()
-      for (const { name, value, priority } of margins) style.setProperty(name, value, priority)
+      // Replay around the surviving reset's position, retaining the current
+      // non-margin declarations on either side (including later host changes).
+      const current = declarations().filter(({ name }) => !isMargin(name))
+      const resetIndex = current.findIndex(({ name }) => name === 'all')
+      const hasReset = margins.some(({ name }) => name === 'all')
+      const restored = hasReset && resetIndex !== -1
+        ? [...current.slice(0, resetIndex), ...margins, ...current.slice(resetIndex + 1)]
+        : [...current, ...margins]
+      // Parse the sequence together: setProperty('all', ...) can normalize an
+      // earlier logical margin differently from parsing the original CSS text.
+      style.cssText = restored.map(({ name, value, priority }) => `${name}: ${value}${priority ? ' !' + priority : ''};`).join(' ')
     }
   }, [])
   const [initial, setEntry] = useState(entry), [org, setOrg] = useState(() => authStorage.org.read()), [memberships, setMemberships] = useState<Membership[]>(), [inbox, setInbox] = useState<Invitation[]>(), [failed, setFailed] = useState(false), [retry, setRetry] = useState(0)

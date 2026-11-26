@@ -326,3 +326,35 @@ for (const strict of [false, true]) {
     } finally { mounted.unmount(); style.cssText = original }
   })
 }
+
+
+for (const strict of [false, true]) {
+  test.each([
+    'margin-block-start: 30px; all: initial; color: red',
+    'all: initial; margin-block-start: 30px',
+    'margin-top: 21px !important; all: initial',
+    'all: initial !important; margin-block-start: 30px',
+  ])(`AuthShell restores margins across all (StrictMode=${strict}): %s`, css => {
+    history.replaceState(null, '', '/sign-in')
+    const style = document.body.style, original = style.cssText
+    const sequence = () => Array.from({ length: style.length }, (_, index) => style.item(index))
+      .filter(name => name === 'all' || name === 'margin' || name.startsWith('margin-'))
+      .map(name => [name, style.getPropertyValue(name), style.getPropertyPriority(name)])
+    style.cssText = css
+    const before = sequence()
+    expect(before.some(([name]) => name === 'all')).toBe(true)
+    const mounted = render(view(async () => json({}), strict).element)
+    try {
+      expect(style.margin).toBe('0px')
+      style.setProperty('color', 'blue', 'important')
+      style.setProperty('background-color', 'yellow')
+      style.setProperty('--host-sentinel', 'retained')
+      mounted.unmount()
+      expect(sequence()).toEqual(before)
+      expect(style.getPropertyValue('color')).toBe('blue')
+      expect(style.getPropertyPriority('color')).toBe('important')
+      expect(style.getPropertyValue('background-color')).toBe('yellow')
+      expect(style.getPropertyValue('--host-sentinel')).toBe('retained')
+    } finally { mounted.unmount(); style.cssText = original }
+  })
+}
