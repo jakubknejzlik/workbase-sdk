@@ -154,6 +154,8 @@ main:has([data-slot="list-page"]) h1 { font-weight: 400; }
 /* Reference body metrics apply to sortable/plain headers and values alike. */
 [data-list-density] :is(table, td, th, th button, td button) { font-size: 12px; line-height: 17.76px; }
 [data-list-density] :is(th, td) { padding: 12px 11px; border-color: #eef1f7; }
+/* Keep the 36px Actions control inside the approved 54px compact row. */
+[data-list-density="compact"] td.sticky { padding-block: 8px; }
 /* The measured first-cell inset is distinct from ordinary and action columns. */
 [data-list-density] :is(th, td):first-child { padding-left: 9px; }
 [data-list-density] :is(th, td).sticky { padding-right: 14px; }

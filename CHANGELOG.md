@@ -2,6 +2,35 @@
 
 ## Unreleased
 
+## 0.4.2 — 2026-11-25
+
+Patch candidate for `@workbasehq/core`, `@workbasehq/plugins` and
+`@workbasehq/mcp`. Publication awaits release-head hosted CI, independent
+review and fresh rendered evidence.
+
+- Gate read-only row-access lists, tabs and filters on read authorization while
+  keeping invitation creation separately authorized. (PR #338, issue #321)
+- Configure operator-owned GitHub targets for verified stdio MCP submissions,
+  with token-file or GitHub App credentials and existing submission safeguards.
+  (PR #335, issue #325)
+- Render explicitly configured, authorized metadata list cells while preserving
+  user-declared hiding and grant/masking checks across cache refreshes.
+  (PR #337, issue #336)
+- Establish the A1 shared visual foundation with bundled local Alata, its OFL
+  license and notices, shared typography/tokens and font integrity checks.
+  Shell, toolbar and Columns parity follow separately. (PR #331, issue #315)
+- Persist list column visibility and density in account/instance-scoped browser
+  preferences and clear only the verified account on logout. (PR #287)
+- Require instance-local SDK module origins during MCP initialization.
+  (PR #313, issue #183 slice A)
+- Preserve shared form registrations, initial defaults, drafts and write-version
+  baselines across capability refreshes; retain mutation safety and validate
+  complete membership reads before writes. (PR #320, issue #162)
+
+The complete preview merge also retains the original integration history of
+0.4.1 fixes and its release-head synchronization (PR #330); those are not new
+0.4.2 changes. No query budget or limit is raised.
+
 ## 0.4.1 — 2026-11-24
 
 Patch release for `@workbasehq/core`, `@workbasehq/plugins` and
