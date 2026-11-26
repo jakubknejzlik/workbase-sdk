@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import type { InstanceConfig } from '@workbasehq/core/config'
+import { normalizeListConfig, type InstanceConfig } from '@workbasehq/core/config'
 import type { KernelRegistry } from '@workbasehq/core/kernel/registry'
 import type { Scope } from '../../../core/src/types'
 import { ApiError } from '../../../core/src/errors'
@@ -10,8 +10,9 @@ import { projectRootRow, type Row } from '../../../core/src/query/executor'
 import { detailSectionsSchema } from '../../../core/src/detail-layout'
 import { QUERY_LIMITS } from '../../../core/src/query/limits'
 import type { ConsolePage, ConsolePageResult, ConsoleWidget } from './contract'
+import { consoleWidgetDrilldown } from '../../../core/src/console-presentation'
 
-const common = { id: z.string().min(1), label: z.string().min(1) }
+const common = { id: z.string().min(1), label: z.string().min(1), drilldown: z.strictObject({ view: z.string().min(1) }).optional() }
 const widgetSchema = z.discriminatedUnion('kind', [
   z.strictObject({ ...common, kind: z.literal('stat'), query: z.strictObject({ entity: z.string(), where: z.record(z.string(), z.unknown()).optional() }),
     aggregate: z.discriminatedUnion('fn', [z.strictObject({ fn: z.literal('count') }), z.strictObject({ fn: z.literal('sum'), field: z.string() })]) }),
@@ -34,6 +35,16 @@ export function validateWidgets(config: InstanceConfig, page: ConsolePage) {
     ids.add(widget.id)
     const query = widgetQuery(widget)
     if (!Object.hasOwn(config.entities, query.entity)) throw new Error(`Unknown console widget entity: ${query.entity}`)
+    if (widget.drilldown !== undefined) {
+      // Match the registry's effective list overlay, normalized through the existing seam.
+      let list: unknown = config.ui?.entities?.[query.entity]?.list
+      for (const plugin of config.plugins ?? []) {
+        const overlay = plugin.contributes?.console?.entities?.[query.entity]?.list
+        if (overlay) list = overlay
+      }
+      const views = list ? normalizeListConfig(config, query.entity, list).views : undefined
+      if (!consoleWidgetDrilldown(widget, views)) throw new Error(`Invalid console widget drilldown: ${page.id}.${widget.id}`)
+    }
     querySchema(config, query.entity).parse(query)
     // Dashboard widgets are flat single statements, never include trees or cursors.
     if (query.include || query.cursor) throw new Error(`Console widget must use one query: ${widget.id}`)

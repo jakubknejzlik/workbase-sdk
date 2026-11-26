@@ -956,3 +956,106 @@ it('E2 refresh removes revoked navigation/actions/captions and unavailable requi
   scopeOperations.set(scope, { operations: null })
   expect(consoleModel(kernel, scope).console?.pages.find(page => page.id === 'quick')?.actions).toEqual([actions[1]])
 })
+
+it.each([false, true])('E4 projects authorized targets after view grants and live field masks, raw=%s', raw => {
+  const base = fixture()
+  let masked = false
+  const where = { state: { eq: 'new' } }
+  const widgets = [
+    { id: 'count', label: 'Count', kind: 'stat' as const, query: { entity: 'specimens', where }, aggregate: { fn: 'count' as const }, drilldown: { view: 'new_items' } },
+    { id: 'unfiltered', label: 'All', kind: 'stat' as const, query: { entity: 'specimens' }, aggregate: { fn: 'count' as const }, drilldown: { view: 'all' } },
+    { id: 'private', label: 'Private', kind: 'stat' as const, query: { entity: 'specimens', where: { secret: { eq: secret } } }, aggregate: { fn: 'count' as const }, drilldown: { view: 'private' } },
+  ]
+  const entities = { specimens: { list: { views: [{ id: 'all', label: 'All', where: {} }, { id: 'new_items', label: 'New', where }, { id: 'private', label: 'Private', where: { secret: { eq: secret } } }] } } }
+  const pages = [{ id: 'matching', path: '/matching', label: 'Matching', widgets }]
+  const provider = raw ? { name: 'raw-matching', version: '1', provides: { console: '1.x' as const }, validateConsole() {}, consoleRegistry: () => ({ entities, pages, navigation: [] }) }
+    : { name: 'matching', version: '1', requires: { console: '^1' as const }, contributes: { console: { entities, pages } } }
+  const kernel = new KernelRegistry({ ...base, plugins: [...base.plugins!, ...(raw ? [] : [consoleUI()]), provider, {
+    name: 'live-mask', version: '1', fieldMask: () => masked ? ['id', 'name'] : ['id', 'name', 'state', 'count', 'secret'],
+  }] })
+  const scope: Scope = { organizationId: 'org-a', role: 'viewer', actor: { type: 'user', id: 'viewer' }, correlationId: 'matching' }
+  scopeOperations.set(scope, { operations: null })
+  const project = () => consoleModel(kernel, scope)
+  const before = JSON.stringify(pages)
+  expect(project().console?.pages.find(page => page.id === 'matching')?.widgets?.map(widget => [widget.id, widget.drilldown])).toEqual([
+    ['count', { view: 'new_items' }], ['unfiltered', { view: 'all' }],
+  ])
+  expect(JSON.stringify(project())).not.toContain(secret)
+  masked = true
+  const reduced = project()
+  expect(reduced.console?.entities.specimens.list?.views?.map(view => view.id)).toEqual(['all'])
+  expect(reduced.console?.pages.find(page => page.id === 'matching')?.widgets?.map(widget => [widget.id, widget.drilldown])).toEqual([['unfiltered', { view: 'all' }]])
+  masked = false
+  expect(project().console?.pages.find(page => page.id === 'matching')?.widgets?.[0].drilldown).toEqual({ view: 'new_items' })
+  expect(JSON.stringify(pages)).toBe(before)
+})
+it.each(['missing', 'private', 'mismatch', 'rowAccess', 'search', 'labelWhere', 'cross-entity', 'raw-url', 'extra-key'])('E4 removes unsupported raw-provider target metadata without changing readable widgets: %s', kind => {
+  const base = fixture()
+  const views = [{ id: 'all', label: 'All', where: {} }, { id: 'private', label: 'Private', where: { secret: { eq: secret } } },
+    { id: 'filtered', label: 'Filtered', where: { state: { eq: 'new' } } }, { id: 'row_access', label: 'Row access', where: {}, rowAccess: 'signed_in' as const }]
+  const drilldown = kind === 'raw-url' ? { view: 'https://example.test' } : kind === 'extra-key' ? { view: 'all', url: secret }
+    : { view: kind === 'private' ? 'private' : kind === 'mismatch' ? 'filtered' : kind === 'rowAccess' ? 'row_access' : kind === 'cross-entity' || kind === 'missing' ? 'missing' : 'all' }
+  const widget = { id: 'safe', label: 'Safe', kind: 'table' as const, columns: ['name'], query: { entity: 'specimens', select: ['id', 'name'], limit: 1,
+    ...(kind === 'search' ? { search: { text: 'public', fields: ['name'] } } : {}), ...(kind === 'labelWhere' ? { labelWhere: { parent_id: { contains: 'public' } } } : {}),
+  }, drilldown }
+  const provider = { name: 'raw-matching', version: '1', provides: { console: '1.x' as const }, validateConsole() {}, consoleRegistry: () => ({ entities: { specimens: { list: { views } }, other: { list: { views: [{ id: 'missing', label: 'Other', where: {} }] } } },
+    pages: [{ id: 'matching', path: '/matching', label: 'Matching', widgets: [widget] }], navigation: [] }) }
+  const kernel = new KernelRegistry({ ...base, plugins: [...base.plugins!, provider] })
+  const scope: Scope = { organizationId: 'org-a', role: 'owner', actor: { type: 'user', id: 'owner' }, correlationId: 'matching' }
+  scopeOperations.set(scope, { operations: null })
+  const body = consoleModel(kernel, scope)
+  const projected = body.console?.pages.find(page => page.id === 'matching')?.widgets?.[0]
+  expect(projected?.id).toBe('safe')
+  expect(projected).not.toHaveProperty('drilldown')
+  expect(JSON.stringify(body)).not.toContain(secret)
+})
+it.each([false, true])('E4 same-name scalar ref and relation targets follow nested grants: nested=%s', nested => {
+  const base = fixture()
+  let denied = false
+  const where = nested ? { parent_id: { state: { eq: 'new' } } } : { parent_id: { eq: 'parent-id' } }
+  const widget = { id: 'count', label: 'Count', kind: 'stat' as const, query: { entity: 'specimens', where }, aggregate: { fn: 'count' as const }, drilldown: { view: 'named' } }
+  const kernel = new KernelRegistry({ ...base,
+    entities: { specimens: { ...base.entities.specimens, relations: { ...base.entities.specimens.relations, parent_id: { entity: 'specimens', field: 'parent_id' } } } },
+    plugins: [...base.plugins!, consoleUI(), { name: 'matching', version: '1', requires: { console: '^1' },
+      fieldMask: () => denied ? ['id', 'name', 'parent_id'] : ['id', 'name', 'parent_id', 'state'],
+      contributes: { console: { entities: { specimens: { list: { views: [{ id: 'named', label: 'Named', where }] } } }, pages: [{ id: 'matching', path: '/matching', label: 'Matching', widgets: [widget] }] } },
+    }],
+  })
+  const scope: Scope = { organizationId: 'org-a', role: 'owner', actor: { type: 'user', id: 'owner' }, correlationId: 'matching' }
+  scopeOperations.set(scope, { operations: null })
+  expect(consoleModel(kernel, scope).console?.pages.find(page => page.id === 'matching')?.widgets?.[0].drilldown).toEqual({ view: 'named' })
+  denied = true
+  const page = consoleModel(kernel, scope).console?.pages.find(page => page.id === 'matching')
+  expect(page?.widgets?.[0]?.drilldown).toEqual(nested ? undefined : { view: 'named' })
+})
+it('E4 count and sum retain contributing-record scope, row policies, org scope and result wire shapes', async () => {
+  const base = fixture()
+  const where = { state: { eq: 'new' } }
+  const target = { view: 'new_items' }
+  await start(defineInstance({ ...base,
+    policies: { specimens: { ...base.policies!.specimens, owner: { where: { enabled: { eq: true } } } } },
+    plugins: [...base.plugins!, consoleUI(), { name: 'matching', version: '1', requires: { console: '^1' }, contributes: { console: {
+      pages: [{ id: 'matching', path: '/matching', label: 'Matching', widgets: [
+        { id: 'count', label: 'Count', kind: 'stat', query: { entity: 'specimens', where }, aggregate: { fn: 'count' }, drilldown: target },
+        { id: 'sum', label: 'Sum', kind: 'stat', query: { entity: 'specimens', where }, aggregate: { fn: 'sum', field: 'count' }, drilldown: target },
+        { id: 'table', label: 'Table', kind: 'table', query: { entity: 'specimens', select: ['id', 'count'], limit: 1, where }, columns: ['count'], drilldown: target },
+      ] }],
+    } } }],
+  }))
+  for (const [id, org, state, enabled, count] of [
+    ['one', 'org-a', 'new', 1, 1], ['two', 'org-a', 'new', 1, 2], ['three', 'org-a', 'new', 1, 3],
+    ['done', 'org-a', 'done', 1, 100], ['denied', 'org-a', 'new', 0, 100], ['foreign', 'org-b', 'new', 1, 100],
+  ]) await env.DB.prepare('INSERT INTO specimens (id,organization_id,name,state,enabled,count,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)').bind(id, org, id, state, enabled, count, 'now', 'now').run()
+  const response = await request('/o/org-a/console-pages/matching')
+  expect(response.status).toBe(200)
+  const result = await response.json() as import('../src/console-contract').ConsolePageResult
+  expect(result.widgets.slice(0, 2)).toEqual([{ id: 'count', label: 'Count', kind: 'stat', value: 3 }, { id: 'sum', label: 'Sum', kind: 'stat', value: 6 }])
+  expect(result.widgets[2]).toMatchObject({ kind: 'table', data: [{ count: expect.any(Number) }] })
+  const listed = await request('/query', 'owner', 'POST', { entity: 'specimens', select: ['id', 'count'], limit: 10, view: 'new_items' })
+  expect(listed.status).toBe(200)
+  const records = await listed.json() as { data: { count: number }[] }
+  expect(records.data).toHaveLength(3)
+  expect(records.data.reduce((sum, row) => sum + row.count, 0)).toBe(6)
+  expect(JSON.stringify(result)).not.toMatch(/drilldown|foreign|denied/)
+  expect((await request('/o/org-b/console-pages/matching')).status).toBe(403)
+})

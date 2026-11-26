@@ -335,3 +335,32 @@ typed read-only `commands` registry with final runtime/plugin/builtin precedence
 including generated command definitions. Existing one-argument hooks remain
 compatible. The kernel remains unbound until validation and authorization setup
 complete; this context supplies no execution or authorization bypass.
+
+### Optional matching-list widget target
+
+`ConsoleWidget.drilldown` may contain `{ view: 'named_view' }`. It references an
+existing named list view of the widget's own entity, using the effective normalized
+list configuration (including console contributions). It is presentation metadata;
+it adds no query grammar, read grant, destination URL or organization override.
+
+Configuration validation requires the widget's `where` (absent means `{}`) to be
+structurally equal to the view's normalized `where`. Object key order does not
+matter; array order and predicate structure do. No logical equivalence is inferred.
+A named unfiltered view can target an unfiltered widget. Additional `search`,
+`labelWhere`, query `view`, `rowAccess` or `contextList` inputs, and views with
+`rowAccess`, are unsupported with this descriptor. Unknown, mismatched and
+unsupported targets fail validation; there is no fallback to an unfiltered list.
+Such queries can continue to be used without a descriptor.
+
+The final core projection retains only authorized, matching named-view IDs after
+view grants have been applied. A denied view removes the descriptor; unreadable or
+sensitive predicate operands remain protected by the existing widget and view
+projection. The target covers the contributing records under the same live row
+policies and organization scope: count/sum describe the full matching set, while a
+bounded table/list may display only part of it. Selection, ordering and limits do
+not define a different target membership.
+
+This additive optional field follows the version 2 compatibility policy. Absent
+metadata, widget execution, query budgets and the result/value/error wire shapes
+are unchanged. Existing record and reference links retain their destinations.
+The descriptor alone introduces no dashboard control or link.
