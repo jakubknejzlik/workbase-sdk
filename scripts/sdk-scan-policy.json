@@ -448,20 +448,20 @@
     },
     {
       "pathDigest": "b8ad98987e3367e40cc04c1987ee05c6f8d26445ee6744cb83808e9fa3be7a52",
-      "lineDigest": "62af17fb97563b6b70a80c478e7179aee1c04e3dfdfa0b48cc67f6ee2cce0e24",
-      "lineNumber": 1,
+      "lineDigest": "e1d3e2139858622164947f0053898623ae3eac648595c4864894945b225b8078",
+      "lineNumber": 2,
       "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test."
     },
     {
       "pathDigest": "b8ad98987e3367e40cc04c1987ee05c6f8d26445ee6744cb83808e9fa3be7a52",
-      "lineDigest": "a437fa8bbd5faed2833b27e590e873a1a244cde3a92d59bd851db2c7c81443d3",
+      "lineDigest": "e1d3e2139858622164947f0053898623ae3eac648595c4864894945b225b8078",
       "lineNumber": 2,
       "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test."
     },
     {
       "pathDigest": "b8ad98987e3367e40cc04c1987ee05c6f8d26445ee6744cb83808e9fa3be7a52",
       "lineDigest": "f485347a1a84ae844df684ff12bb8bd2f0d7427dddf6617991a8b0749a243fc6",
-      "lineNumber": 6,
+      "lineNumber": 8,
       "reason": "Amendment 6 shared component attribution, compatibility import or generic vendor test."
     },
     {
@@ -721,12 +721,6 @@
       "lineDigest": "f5b88636a5e5a9b7d63a335662b5f5f4ad9cc2e939bfb1b0189ddb76fa4072a2",
       "lineNumber": 98,
       "reason": "Public npm dependency used to copy the existing SDK runtime into offline bridge fixtures; dependency attribution, not private owner content."
-    },
-    {
-      "pathDigest": "b8ad98987e3367e40cc04c1987ee05c6f8d26445ee6744cb83808e9fa3be7a52",
-      "lineDigest": "b7bdee93305257e9353c35389a866d12b63472d58fdcab948e6534143aec77d4",
-      "lineNumber": 3,
-      "reason": "Generic shared single-date picker import from the existing restored UI vendor source; no customer data."
     }
   ],
   "ids": [

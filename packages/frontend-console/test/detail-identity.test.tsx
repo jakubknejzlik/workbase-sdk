@@ -17,7 +17,7 @@ vi.mock('@tanstack/react-router', () => ({
 }))
 afterEach(() => vi.restoreAllMocks())
 const id = '019a31c0-4a8a-7000-aaaa-123456789abc'
-const name = 'Žaneta Šťastná Dlouhá — zdravotní technik'
+const name = 'Žofie Černá Zkušební — správkyně ukázkových záznamů'
 async function mount(language: 'en' | 'cs' = 'en', title: string | null = name, hideId = false) {
   const labels = language === 'en' ? en : cs
   const model: Model = { instance: 'detail-identity', revision: 1, limits: { root: 100, children: 10, relations: 10, exists: 100 }, entities: {
