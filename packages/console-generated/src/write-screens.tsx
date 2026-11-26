@@ -80,26 +80,45 @@ export function GeneratedActions(props: Context & { row?: Record<string, any> })
   return <div className="wb-write-actions">
     {createCommand && <CreateCommandDialog {...props} command={createCommand} />}
     {(!row ? ['create'] : ['update']).filter(operation => operations.includes(operation) && (operation !== 'update' || caps.entities[entity].readable.includes('version'))).map(operation => <ResourceFormDialog entity={entity} outcome={row ? 'updated' : 'created'} schema={writeSchema(model, entity, caps, row ? 'edit' : 'create')} compact={!!row} key={operation} trigger={operation === 'create' ? createLabel : t('edit', { context: '' })} triggerIcon={row ? 'edit' : undefined} triggerVariant={row ? 'secondary' : undefined} title={t(operation === 'create' ? 'createEntity' : 'editEntity', { entity: operation === 'create' ? entityObjectName(entity, t) : t(`entitySingular_${entity}`) })} description={t(operation === 'create' ? 'createEntityDescription' : 'editEntityDescription', { entity: operation === 'create' ? entityObjectName(entity, t) : t(`entitySingular_${entity}`) })} cancelLabel={t('cancel')}>{controls => <EntityMutation {...props} row={row} controls={controls} />}</ResourceFormDialog>)}
-    {row && operations.includes('delete') && <ResourceDeleteDialog entity={entity} entityType={t(`entity_${entity}`, { defaultValue: entity })} entityName={recordLabel(model, entity, row, caps, i18n.language, t)} targetDescription={t('deleteTarget')} warningMessage={t('deleteDescription')} confirmText={t('delete')} compact trigger={t('delete', { context: '' })} triggerIcon="delete" triggerVariant="destructive" title={t('deleteRecord')} description={t('deleteDescription')} cancelLabel={t('cancel')} destructive>{controls => <DeleteMutation {...props} row={row} close={controls.close} />}</ResourceDeleteDialog>}
-    {row ? commandDefinitions(model, entity, caps).filter(command => !!commandRowField(command, entity)).map(command => {
+    {row ? commandDefinitions(model, entity, caps).filter(command => !!commandRowField(command, entity) && command.ui?.replacesCrud !== 'delete').map(command => {
       const replacement = command.ui?.replacesCrud
       const label = commandLabel(command, i18n.language, t)
       return <ResourceFormDialog entity={command.permission.entity} outcome={command.name.endsWith('/create') ? 'created' : command.name.endsWith('/delete') ? 'deleted' : undefined} schema={commandFormSchema(command.inputSchema)} compact key={command.name}
         trigger={label} triggerLabel={label}
-        triggerIcon={replacement === 'update' ? 'edit' : replacement === 'delete' ? 'delete' : undefined} triggerVariant={replacement === 'update' ? 'secondary' : replacement === 'delete' ? 'destructive' : undefined}
+        triggerIcon={replacement === 'update' ? 'edit' : undefined} triggerVariant={replacement === 'update' ? 'secondary' : undefined}
         title={label} description={t('commandDescription', { context: command.name.replace('/', '_') })} cancelLabel={t('cancel')}>{controls => <CommandMutation {...props} schema={command.inputSchema} name={command.name} values={{ [commandRowField(command, entity)!]: row.id }} controls={controls} />}</ResourceFormDialog>
     }) : <HeaderCommands {...props} />}
+    {/* Keep the return-focus target connected and focusable during background reads. */}
+    {row && <RecordActionMenu key={JSON.stringify([model.instance, props.orgId, entity, row.id])} {...props} row={row} destructiveOnly />}
   </div>
 }
 export function GeneratedRowActions(input: Context & { row: Record<string, any>; disabled?: boolean }) {
-  const props = { ...input, readBlocked: input.readBlocked || input.disabled }
+  return <RecordActionMenu {...input} />
+}
+/** Detail reuses row-menu eligibility and dialogs, without duplicating quiet actions. */
+function RecordActionMenu(input: Context & { row: Record<string, any>; disabled?: boolean; destructiveOnly?: boolean }) {
+  const latest = useRef(input); latest.current = input
+  const active = useRef(true)
+  useEffect(() => { active.current = true; return () => { active.current = false } }, [])
+  // A queued mutation can outlive its removed dialog. Recheck the same resolver
+  // at the write boundary, against the live authority and original record.
+  const write: WriteRequest = (...args) => {
+    const current = latest.current; const [path, method] = args
+    const sameRecord = current.model.instance === input.model.instance && current.orgId === input.orgId && current.entity === input.entity && current.row.id === input.row.id
+    const allowed = path === `/api/${current.entity}/${encodeURIComponent(current.row.id)}` && method === 'DELETE'
+      ? current.caps.entities[current.entity]?.operations.includes('delete')
+      : method === 'POST' && commandDefinitions(current.model, current.entity, current.caps).some(command => command.ui?.replacesCrud === 'delete' && !!commandRowField(command, current.entity) && path === `/commands/${command.name}`)
+    if (!active.current || !sameRecord || current.readBlocked || current.disabled || !visibleEntities(current.model, current.caps).includes(current.entity) || !allowed) return Promise.reject({ code: 'action_unavailable' })
+    return current.write(...args)
+  }
+  const props = { ...input, readBlocked: input.readBlocked || input.disabled, write: input.destructiveOnly ? write : input.write }
   const { t, i18n } = useEntityTranslation(props.entity); const { model, caps, entity, row } = props
   if (!visibleEntities(model, caps).includes(entity)) return null
   const operations = caps.entities[entity].operations
-  const commands = commandDefinitions(model, entity, caps).filter(command => !!commandRowField(command, entity))
+  const commands = commandDefinitions(model, entity, caps).filter(command => !!commandRowField(command, entity) && (!input.destructiveOnly || command.ui?.replacesCrud === 'delete'))
   const items = [
-    ...(operations.includes('update') && caps.entities[entity].readable.includes('version') ? [{ id: 'edit', label: t('edit') }] : []),
-    ...commands.map(command => ({ id: command.name, label: commandLabel(command, i18n.language, t) })),
+    ...(!input.destructiveOnly && operations.includes('update') && caps.entities[entity].readable.includes('version') ? [{ id: 'edit', label: t('edit') }] : []),
+    ...commands.map(command => ({ id: command.name, label: commandLabel(command, i18n.language, t), destructive: input.destructiveOnly })),
     ...(operations.includes('delete') ? [{ id: 'delete', label: t('delete'), destructive: true }] : []),
   ]
   return <><RowActions label={t('rowActions', { name: recordLabel(model, entity, row, caps, i18n.language, t) })} items={items} disabled={props.disabled}>{(action, close, restoreFocus) => {

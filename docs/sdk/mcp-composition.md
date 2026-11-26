@@ -1,21 +1,18 @@
 # Authoring V3 composition, access, presentation and constraints through MCP
 
-The standalone `.mcp.json` registers `workbase_config` alongside `workbase_data`
-and `workbase_ops`. After provisioning dependencies, launch it from the Instance
-directory, including an incomplete scaffold. It runs the
-installed `workbase config --root .` and needs no API credentials or optional
-environment variables. Data and ops keep separate credentials and responsibilities;
-only those remote servers need an app origin such as `https://app.example.test`.
-Existing Instances must merge the new entry manually: init preserves existing files.
+The standalone `.mcp.json` registers `workbase_config`, `workbase_data` and
+`workbase_ops`. After provisioning dependencies, launch config from the Instance
+directory (even an incomplete scaffold). It runs `workbase config --root .`
+without API credentials or optional environment variables. Only remote data/ops
+need credentials and an app origin such as `https://app.example.test`.
+Existing Instances must merge the entry manually; init preserves existing files.
 
 `WORKBASE_MCP_STATE_ROOT` defaults to `/tmp/codex/mcp-state`; relative values resolve
 once at startup against the launch cwd, independently of `--root` or `.mcp.json`.
 
-Call `list_docs({})`, then `read_doc({"name":"mcp-composition.md"})` (or another
-returned name) for the four guides shipped with the installed package. Responses
-include its version and raw-byte SHA256. Names are a closed enum; paths are not
-accepted. The first successful load snapshots all four guides, each capped at
-32 KiB, for the server lifetime. Restart to load changed packaged docs.
+Call `list_docs({})`, then `read_doc({"name":"mcp-composition.md"})` for a packaged
+guide. The four-name enum rejects paths. Responses include version and raw-byte
+SHA256. First load snapshots all four guides (32 KiB each) until server restart.
 
 Before choosing a change, call `capabilities({"instance":"my-instance"})`.
 It derives change kinds and routes from the schemas and baseline. `eligible` means
@@ -477,70 +474,66 @@ Physical-field publication and provenance redesign remain separate work.
 
 ### Operator GitHub target
 
-The stdio config server can submit a verified, promoted change as a GitHub PR.
-Before starting the server, the operator sets `WORKBASE_GITHUB_TARGET` to an
-absolute path to a JSON file with this strict schema (unknown properties are
-rejected):
+Set `WORKBASE_GITHUB_TARGET` before stdio startup to an absolute JSON file
+(unknown keys fail):
 
 ```json
 {
-  "owner": "example",
-  "repository": "example",
-  "baseBranch": "integration/preview",
+  "owner": "example", "repository": "example", "baseBranch": "integration/preview",
   "directory": "projects/example",
-  "credential": {
-    "type": "token-file",
-    "path": "/private/operator/github-token"
-  }
+  "credential": { "type": "token-file", "path": "/private/operator/github-token" }
 }
 ```
 
-`directory` defaults to `""` (the repository root). Otherwise it is a
-repository-relative prefix: slash-separated components containing only letters,
-digits, `_`, `-` and `.`, with no empty, `.` or `..` components. The target applies
-only to the instance allowed by this stdio server; unknown instances have no
-GitHub target. Repository, branch, prefix and credentials cannot be selected or
-overridden by tool arguments.
-
-For a GitHub App, replace `credential` with:
+`directory` defaults to `""` (repo root): slash-separated letters, digits, `_`,
+`-`, `.`, excluding empty, `.` and `..` components. Only the configured instance
+is served; arguments cannot override target/credentials. For an App, use:
 
 ```json
-{
-  "type": "github-app",
-  "appId": "123",
-  "installationId": "456",
-  "privateKeyPath": "/private/operator/github-app.pem"
-}
+{ "type": "github-app", "appId": "123", "installationId": "456",
+  "privateKeyPath": "/private/operator/github-app.pem" }
 ```
 
-App and installation IDs accept positive integer numbers or decimal strings.
-The key must be an RSA private key. The server signs a short-lived RS256 JWT,
-requests an installation token from GitHub, and caches it in memory until five
-minutes before expiry. Concurrent requests share one token request. The token-file
-provider reads the trimmed token on each request, allowing operator rotation.
-Grant access only to the intended repository, including the contents and pull
-request permissions needed to create the branch, commit and PR.
+IDs: positive integers/decimal strings; key: RSA. A short-lived RS256 JWT obtains
+an installation token cached until five minutes before expiry; concurrent calls
+share retrieval. Token files are reread for rotation. Grant contents/PR permissions
+only on the intended repo.
 
-The target JSON, token file and private key must be regular files at absolute
-filesystem paths. Every path component must be free of symlinks; use resolved
-paths (for example `/private/tmp/...` rather than `/tmp/...` on macOS). Parent
-traversal is rejected. Token and key files must not be readable by group or
-others (`chmod 600`); violations refuse startup with
-`insecure_github_credential_permissions`. Unsafe paths return
-`unsafe_github_path`, unreadable files `github_config_unreadable`, malformed
-configuration `invalid_github_config`, and invalid token/key contents
-`invalid_github_credential`. Credential reads are checked again when needed.
+Target/token/key: regular absolute files, no symlink components or traversal;
+use resolved paths (`/private/tmp/...` on macOS). Token/key: `chmod 600`. Errors: `insecure_github_credential_permissions`,
+`unsafe_github_path`, `github_config_unreadable`, `invalid_github_config` or
+`invalid_github_credential`. Credential reads recheck these guards.
 
-The agent never receives the credential, private key or App JWT. They are never
-written into proposals or audit logs, and provider, transport and remote error
-text is suppressed. Tokens echoed in GitHub responses are redacted. Keep the
-operator files outside the agent's accessible workspace.
+Credentials/JWTs stay out of responses/proposals/audits; provider/transport/remote
+errors are suppressed and echoed tokens redacted. Keep operator files outside
+the agent workspace.
 
-After `validate` → `apply_to_disposable` → `promote`, call `submit_change` with
-only `{ "instance": "example", "proposalId": "<proposal UUID>",
-"expectedBaseSha": "<current base branch SHA>" }`. It creates
-`workbase/change-<proposal UUID>`, a commit of the promoted allowlisted files and
-one PR into the operator's base branch. The existing REST adapter exposes no
-merge, tag, release or deployment API. Without `WORKBASE_GITHUB_TARGET`, a valid
-promoted submission still returns `github_not_configured`; earlier validation
-errors retain their existing behavior.
+`submit_change` after promotion creates `workbase/change-<proposal UUID>` with
+promoted allowlisted files and one PR into the configured base (arguments and proof
+gates above). The adapter has no merge/tag/release/deploy API. Without this setting,
+valid submissions return `github_not_configured`; earlier proof gates still apply.
+
+## Change provenance guarantees
+
+- **Consistency:** today's [`submit_change`](../../packages/mcp/src/submit-change.ts)
+  checks hashes, allowed paths, local byte equality, available dependency snapshots,
+  the expected base SHA and remote tree diff.
+- **Service provenance:** a trusted service independently derived, verified and
+  published the tree. Uploading agent-supplied bytes does not prove this.
+- **Denial of direct agent writes:** the agent runtime cannot write the repo by
+  other paths (filesystem, shell, Git or connectors). This requires runtime controls
+  and negative tests, independently of service provenance.
+
+The current SDK provides only **consistency**. The `Workbase` commit author is
+metadata, not proof; neither are branch names, PR text or tool-call logs.
+
+The strict exported `changeReceiptSchema` / `ChangeReceipt` contract in the linked
+module describes `.workbase/receipts/<proposalId>.json`, with `version: 1` and
+`guarantee: "consistency"`. All fields are required. SHA256 hashes/fingerprints
+use 64 lowercase hex characters; Git SHA uses 40. File paths follow `directory`'s
+relative grammar above. `disposableApply` records verified table names and
+columns/indexes as `{table, name}` arrays, with `verified: true`.
+Include only plan-level evidence, never secrets, local paths or database rows.
+Parsing checks shape, not hashes, allowlists, bytes or disposable results; any
+repo writer can reproduce an unsigned receipt. Receipt emission, `verify-receipt`, service provenance and runtime enforcement
+remain later work.

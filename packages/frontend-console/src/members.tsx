@@ -1,13 +1,12 @@
 import { authDestination } from './api/auth-destination'
 import { meOptions } from './api/queries'
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate } from '@tanstack/react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
-import { Mail, Shield, UserPlus, UserCheck, Clock, MoreHorizontal, Copy, Send, Trash2, LogOut, Pencil, RefreshCw } from 'lucide-react'
-import { WorkspaceMembers, WorkspaceMembersTable, InviteUserModal, FormDialog, ConfirmDialog, MutationSession, Form, FormFieldInput, FormFieldWrapper, MutationErrorAlert, Button, useMutationForm, useMutationLabels, useMutationSession, useMutationSubmit } from '@workbasehq/ui'
+import { Mail, Shield, UserPlus, UserCheck, Clock, MoreHorizontal, Copy, Send, Trash2, LogOut, Pencil, RefreshCw, Search } from 'lucide-react'
+import { WorkspaceMembers, ListPageComposition, DataTable, DataTableSearch, InviteUserModal, FormDialog, ConfirmDialog, MutationSession, Form, FormFieldInput, FormFieldWrapper, MutationErrorAlert, Button, useMutationForm, useMutationLabels, useMutationSession, useMutationSubmit } from '@workbasehq/ui'
 import { Badge } from '@workbasehq/ui/components/ui/badge'
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@workbasehq/ui/components/ui/table'
 import { Input } from '@workbasehq/ui/components/ui/input'
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@workbasehq/ui/components/ui/select'
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from '@workbasehq/ui/components/ui/dropdown-menu'
@@ -44,17 +43,26 @@ function useMemberRefresh(orgId: string) {
 export function MembersScreen({ orgId, history = false }: { orgId: string; history?: boolean }) {
   const { t, i18n } = useTranslation(); const scope = useOrganization(orgId); const caps = useCapabilities(orgId)
   const grants = caps.error ? {} : caps.data?.resources ?? {}
-  const enabled = !!scope.data && !scope.error && !!grants['members.read']
+  const enabled = !history && !!scope.data && !scope.error && !!grants['members.read']
   const members = useQuery({ queryKey: [...identityKey(orgId, scope.data?.role), 'combined'], queryFn: () => identityClient.combined(orgId), enabled, staleTime: 0 })
   const invitations = useQuery({ queryKey: [...identityKey(orgId, scope.data?.role), 'invitations'], queryFn: () => identityClient.list(orgId, 'invitations'), enabled: !!scope.data && !scope.error && history && !!grants['invitations.read'], staleTime: 0 })
   const [action, setAction] = useState<Action>(); const trigger = useRef<HTMLButtonElement | null>(null)
+  const [search, setSearch] = useState('')
+  const [searchPending, setSearchPending] = useState(false)
+  const collection = history ? invitations : members
+  const denied = !grants[history ? 'invitations.read' : 'members.read'] || collection.error instanceof ApiError && collection.error.status === 403
+  useEffect(() => { if (denied || scope.error || caps.error) setAction(undefined) }, [denied, scope.error, caps.error])
+  useEffect(() => { setAction(undefined); setSearch('') }, [orgId, history, scope.data?.role])
   if (scope.error || caps.error) return <QueryError error={(scope.error ?? caps.error)!} />
-  if (!caps.isPending && !grants[history ? 'invitations.read' : 'members.read']) return <Failure kind="forbidden" />
-  const loading = scope.isPending || caps.isPending || (enabled && members.isPending) || (history && !!grants['invitations.read'] && invitations.isPending)
-  const failed = members.error || (history && invitations.error)
-  const roleOptions = members.data?.role_options ?? []
+  if (!caps.isPending && denied) return <Failure kind="forbidden" />
+  const loading = scope.isPending || caps.isPending || collection.isPending
+  const failed = collection.error
+  const roleOptions = history ? [] : members.data?.role_options ?? []
   const organization = scope.data?.memberships.find(item => item.organization_id === orgId)?.name ?? t('organization')
-  const rows = history ? (invitations.data?.data ?? []).filter(row => invitationState(row) !== 'pending') : (members.data?.data ?? []).filter(row => memberRow(row) || invitationState(row) === 'pending')
+  const authorizedRows: Row[] = history ? (invitations.data?.data ?? []).filter(row => invitationState(row) !== 'pending') : (members.data?.data ?? []).filter(row => memberRow(row) || invitationState(row) === 'pending')
+  // Both endpoints return the complete authorized collection. Search only rendered identity fields.
+  const tokens = search.trim().toLocaleLowerCase(i18n.language).split(/\s+/).filter(Boolean)
+  const rows = loading || failed ? [] : authorizedRows.filter(row => tokens.every(token => [row.email, memberRow(row) ? row.display_name : undefined].some(value => value?.toLocaleLowerCase(i18n.language).includes(token))))
   const roleLabel = (role: string) => t(`role_${role}`, { defaultValue: role })
   const open = (next: Action) => setAction(next)
   const menu = (row: Row) => {
@@ -83,22 +91,35 @@ export function MembersScreen({ orgId, history = false }: { orgId: string; histo
     if (memberRow(row)) return row.user_id === scope.data?.user?.id ? <span className="text-muted-foreground">{t('memberYou')}</span> : null
     const hours = Math.max(1, Math.round((Date.parse(row.expires_at) - Date.now()) / 3600000))
     const relative = new Intl.RelativeTimeFormat(i18n.language, { numeric: 'always' }).format(hours < 24 ? hours : Math.round(hours / 24), hours < 24 ? 'hour' : 'day')
-    return <div className="space-y-1 whitespace-normal text-sm text-muted-foreground">{row.inviter && <p>{t('inviteInviter', { name: row.inviter.display_name === 'Unavailable' ? t('unavailable') : row.inviter.display_name })}</p>}<p className={`flex items-center gap-1 ${hours < 24 ? 'text-destructive' : ''}`}><Clock className="h-3 w-3 shrink-0" aria-hidden="true" />{history ? new Intl.DateTimeFormat(i18n.language, { dateStyle: 'medium' }).format(new Date(row.expires_at)) : t('inviteExpires', { time: relative })}</p></div>
+    return <div className="space-y-1 whitespace-normal text-muted-foreground">{row.inviter && <p>{t('inviteInviter', { name: row.inviter.display_name === 'Unavailable' ? t('unavailable') : row.inviter.display_name })}</p>}<p className={`flex items-center gap-1 ${hours < 24 ? 'text-destructive' : ''}`}><Clock className="h-3 w-3 shrink-0" aria-hidden="true" />{history ? new Intl.DateTimeFormat(i18n.language, { dateStyle: 'medium' }).format(new Date(row.expires_at)) : t('inviteExpires', { time: relative })}</p></div>
   }
-  return <WorkspaceMembers title={t(history ? 'inviteHistory' : 'instanceMembersTitle', { defaultValue: t('members') })} description={t(history ? 'inviteHistoryDescription' : 'memberDescription')} actions={!history && grants['invitations.create'] ? <Button disabled={members.isPending || !!members.error || !roleOptions.length || !members.data?.default_role} onClick={event => { trigger.current = event.currentTarget; open({ kind: 'invite' }) }}><UserPlus className="mr-2 h-4 w-4" />{t('inviteUser')}</Button> : undefined}>
-    <WorkspaceMembersTable title={t(history ? 'inviteHistory' : 'members')} description={t(history ? 'inviteHistoryDescription' : 'memberTableDescription')} loading={loading && !failed} loadingLabel={t('loading')}>
-      {failed ? <div role="alert" className="space-y-3"><p>{t(!history || members.error && invitations.error ? 'memberFailed' : 'memberPartialError')}</p><Button variant="outline" onClick={() => { if (enabled) void members.refetch(); if (history && grants['invitations.read']) void invitations.refetch() }}>{t('memberRetry')}</Button></div> : rows.length ? <div className="min-w-0 rounded-md border"><Table aria-label={t(history ? 'inviteHistory' : 'members')} className="max-md:block">
-        <TableHeader className="max-md:sr-only"><TableRow>{['memberUser', 'status', 'role', 'memberDetails', 'actions'].map(key => <TableHead key={key} className={key === 'actions' ? 'w-12' : undefined}>{key === 'actions' ? <span className="sr-only">{t(key)}</span> : t(key)}</TableHead>)}</TableRow></TableHeader>
-        <TableBody className="max-md:block">{rows.map(row => <TableRow key={memberRow(row) ? row.user_id : row.id} className="max-md:grid max-md:grid-cols-[auto_minmax(0,1fr)_auto] max-md:gap-3 max-md:p-3">
-          <TableCell className="whitespace-normal [overflow-wrap:anywhere] max-md:col-span-2 max-md:row-start-1 max-md:min-w-0 max-md:p-0"><div className="font-medium">{rowName(row)}</div>{memberRow(row) && row.display_name && row.display_name !== row.email && <div className="text-sm text-muted-foreground">{row.email}</div>}</TableCell>
-          <TableCell className="max-md:col-start-1 max-md:row-start-2 max-md:overflow-visible max-md:p-0"><Badge variant={memberRow(row) ? 'default' : 'secondary'} className="gap-1">{memberRow(row) ? <UserCheck className="h-3 w-3" aria-hidden="true" /> : <UserPlus className="h-3 w-3" aria-hidden="true" />}{t(memberRow(row) ? 'memberActive' : history ? `inviteState_${invitationState(row)}` : row.target_entity && row.target_row ? 'memberPendingLink' : 'memberInvited')}</Badge></TableCell>
-          <TableCell className="max-md:col-span-2 max-md:col-start-2 max-md:row-start-2 max-md:min-w-0 max-md:overflow-visible max-md:p-0"><Badge variant={roleOptions.find(role => role.id === row.role)?.administrator ? 'default' : 'outline'} className="max-w-full whitespace-normal">{roleLabel(row.role)}</Badge></TableCell>
-          <TableCell className="max-md:col-span-3 max-md:row-start-3 max-md:min-w-0 max-md:whitespace-normal max-md:p-0">{details(row)}</TableCell>
-          <TableCell className="text-right max-md:col-start-3 max-md:row-start-1 max-md:p-0">{menu(row)}</TableCell>
-        </TableRow>)}</TableBody>
-      </Table></div> : <p className="py-8 text-center text-muted-foreground">{t(history ? 'inviteHistoryEmpty' : 'memberEmpty')}</p>}
-    </WorkspaceMembersTable>
-    <div className="text-sm text-muted-foreground underline">{history ? <Link to={membersRoute.to} params={{ orgId }}>{t('memberBack')}</Link> : grants['invitations.read'] && <Link to="/o/$orgId/settings/invitations" params={{ orgId }}>{t('inviteHistory')}</Link>}</div>
+  const canInvite = !history && !!grants['invitations.create'] && !loading && !failed && !!members.data?.default_role && roleOptions.some(role => role.id === members.data?.default_role)
+  const inviteAction = canInvite ? <Button onClick={event => { trigger.current = event.currentTarget; open({ kind: 'invite' }) }}><UserPlus className="mr-2 h-4 w-4" />{t('inviteUser')}</Button> : undefined
+  const backLink = <Link to={membersRoute.to} params={{ orgId }}>{t('memberBack')}</Link>
+  const emptyContent = <div className="flex min-h-[300px] flex-col items-center justify-center px-6 py-[68px] text-center">
+    <span className="mb-5 flex size-14 items-center justify-center rounded-[18px] border border-border bg-muted text-primary" aria-hidden="true">{tokens.length ? <Search className="size-6" /> : history ? <Clock className="size-6" /> : <UserPlus className="size-6" />}</span>
+    <h3 className="mb-3 text-lg font-normal text-foreground">{t(tokens.length ? 'membersS4NoMatches' : history ? 'inviteHistoryEmpty' : 'memberEmpty')}</h3>
+    <p className="mb-[22px] max-w-[390px] text-xs leading-[1.7] text-muted-foreground">{t(tokens.length ? 'membersS4SearchHelp' : history ? 'membersS4HistoryHelp' : canInvite ? 'membersS4InviteHelp' : 'membersS4EmptyHelp')}</p>
+    {tokens.length ? <Button variant="outline" onClick={() => setSearch('')}>{t('clearSearch')}</Button> : history ? <div className="text-sm underline">{backLink}</div> : inviteAction}
+  </div>
+  const columns = [
+    { id: 'identity', label: t('memberUser'), wrap: true, cell: ({ identity: row }: { identity: Row }) => <div className="min-w-0 [overflow-wrap:anywhere]"><div className="font-medium">{rowName(row)}</div>{memberRow(row) && row.display_name && row.display_name !== row.email && <div className="text-muted-foreground">{row.email}</div>}</div> },
+    { id: 'status', label: t('status'), wrap: true, cell: ({ identity: row }: { identity: Row }) => <Badge variant={memberRow(row) ? 'default' : 'secondary'} className="gap-1 whitespace-normal">{memberRow(row) ? <UserCheck className="h-3 w-3 shrink-0" aria-hidden="true" /> : <UserPlus className="h-3 w-3 shrink-0" aria-hidden="true" />}{t(memberRow(row) ? 'memberActive' : history ? `inviteState_${invitationState(row)}` : row.target_entity && row.target_row ? 'memberPendingLink' : 'memberInvited')}</Badge> },
+    { id: 'role', label: t('role'), wrap: true, cell: ({ identity: row }: { identity: Row }) => <Badge variant={roleOptions.find(role => role.id === row.role)?.administrator ? 'default' : 'outline'} className="max-w-full whitespace-normal">{roleLabel(row.role)}</Badge> },
+    { id: 'details', label: t('memberDetails'), wrap: true, cell: ({ identity: row }: { identity: Row }) => details(row) },
+    ...(!history ? [{ id: '_actions', label: t('actions'), cell: ({ identity: row }: { identity: Row }) => menu(row) }] : []),
+  ]
+  return <WorkspaceMembers title={t(history ? 'inviteHistory' : 'instanceMembersTitle', { defaultValue: t('members') })} description={t(history ? 'inviteHistoryDescription' : 'memberDescription')} actions={inviteAction}>
+    <ListPageComposition toolbar={<DataTableSearch value={search} onChange={setSearch} label={t('search')} clearLabel={t('clearSearch')} description={t('membersS4SearchFields')} onPendingChange={setSearchPending} />}>
+      {loading && <p role="status" className="sr-only">{t('loading')}</p>}
+      <DataTable listV2 compact scrollOnNarrow hideFooter searchAvailable={false}
+        rows={rows.map(row => ({ id: memberRow(row) ? `member:${row.user_id}` : `invitation:${row.id}`, identity: row }))} columns={columns}
+        state={{ search, sort: null, limit: 10 }} onStateChange={() => {}} page={0} onPage={() => {}} onRowClick={undefined!}
+        label={t(history ? 'inviteHistory' : 'members')} isFetching={loading || collection.isFetching} pendingSearch={searchPending}
+        error={failed ? new Error(t('membersS4RequestFailed')) : null} onRetry={() => { void collection.refetch() }} emptyContent={emptyContent}
+        labels={{ error: t('membersS4RequestFailed'), errorDescription: t('membersS4RetryHelp'), retry: t('memberRetry'), search: t('search'), clearSearch: t('clearSearch'), noResults: t('memberEmpty'), sort: column => t('sortColumn', { column }), previous: t('previousPage'), next: t('nextPage'), pageSize: t('rowsPerPage'), range: () => '', scrollRegion: t('listScrollRegion'), scrollHint: t('listScrollHint') }} />
+    </ListPageComposition>
+    <div className="text-sm text-muted-foreground underline">{history ? backLink : grants['invitations.read'] && <Link to="/o/$orgId/settings/invitations" params={{ orgId }}>{t('inviteHistory')}</Link>}</div>
     {action && <MutationSession key={JSON.stringify(action)} close={() => setAction(undefined)} cancelLabel={t('cancel')} confirming={!['invite', 'role', 'delivery'].includes(action.kind)}>{session => <MemberAction orgId={orgId} action={action} roles={roleOptions} defaultRole={members.data?.default_role ?? ''} organization={organization} dismiss={() => setAction(undefined)} restoreFocus={event => { event.preventDefault(); if (trigger.current?.isConnected) trigger.current.focus(); else document.querySelector<HTMLElement>('h1')?.focus() }} complete={session.complete} controls={session} />}</MutationSession>}
   </WorkspaceMembers>
 }

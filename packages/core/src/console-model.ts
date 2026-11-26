@@ -104,7 +104,10 @@ export function consoleModel(kernel: KernelRegistry, scope: Scope): ConsoleModel
           for (const field of fieldsFor(config, name)) if (authority.literals(name, field)) keys.add(`field_${field}_${name}`)
         }
         // Only captions referenced by the authorized registry enter this actor's dictionary.
-        for (const page of console?.pages ?? []) for (const widget of page.widgets ?? []) keys.add(widget.label)
+        for (const page of console?.pages ?? []) {
+          for (const widget of page.widgets ?? []) keys.add(widget.label)
+          for (const action of page.actions ?? []) { keys.add(action.label); if (action.description) keys.add(action.description) }
+        }
         const dictionary = Object.fromEntries(Object.entries(labels).filter(([key]) => keys.has(key)))
         for (const [name, entity] of Object.entries(config.entities)) if (entity.displayExpression && entity.displayField && authority.read(name, entity.displayField)) {
           const title = labels[`entitySingular_${name}`] ?? labels[`entity_${name}`] ?? name.replaceAll('_', ' ').replace(/^./, first => first.toUpperCase())
