@@ -721,12 +721,6 @@
       "lineDigest": "f5b88636a5e5a9b7d63a335662b5f5f4ad9cc2e939bfb1b0189ddb76fa4072a2",
       "lineNumber": 98,
       "reason": "Public npm dependency used to copy the existing SDK runtime into offline bridge fixtures; dependency attribution, not private owner content."
-    },
-    {
-      "pathDigest": "b8ad98987e3367e40cc04c1987ee05c6f8d26445ee6744cb83808e9fa3be7a52",
-      "lineDigest": "b7bdee93305257e9353c35389a866d12b63472d58fdcab948e6534143aec77d4",
-      "lineNumber": 3,
-      "reason": "Generic shared single-date picker import from the existing restored UI vendor source; no customer data."
     }
   ],
   "ids": [
