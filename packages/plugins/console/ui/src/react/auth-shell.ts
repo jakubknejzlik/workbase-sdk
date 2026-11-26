@@ -1,4 +1,4 @@
-declare const document: { documentElement: { lang: string }; body: { style: { margin: string; getPropertyValue(name: string): string; getPropertyPriority(name: string): string; setProperty(name: string, value: string, priority?: string): void; removeProperty(name: string): string } } }
+declare const document: { documentElement: { lang: string }; body: { style: { length: number; item(index: number): string; margin: string; getPropertyValue(name: string): string; getPropertyPriority(name: string): string; setProperty(name: string, value: string, priority?: string): void; removeProperty(name: string): string } } }
 import { clearSavedViews } from '../saved-views-storage'
 declare const location: { pathname: string; search: string; replace(path: string): void }
 declare const history: { replaceState(state: unknown, unused: string, url: string): void }
@@ -161,9 +161,20 @@ export function AuthShell({ manifest, i18n, displayName, children, fetch: transp
   // embeds never mount this shell. Restore the host declaration when it unmounts.
   useEffect(() => {
     const style = document.body.style
-    const margin = style.getPropertyValue('margin'), priority = style.getPropertyPriority('margin')
-    style.setProperty('margin', '0px', priority)
-    return () => { if (margin) style.setProperty('margin', margin, priority); else style.removeProperty('margin') }
+    // Preserve the declared shorthand/longhands, including absence and priority.
+    // A shorthand value alone is empty for partial or mixed-priority margins.
+    const margins = Array.from({ length: style.length }, (_, index) => style.item(index))
+      .filter(name => /^margin(?:-(?:top|right|bottom|left))?$/.test(name))
+      .map(name => ({ name, value: style.getPropertyValue(name), priority: style.getPropertyPriority(name) }))
+    const clearMargins = () => {
+      for (const name of ['margin', 'margin-top', 'margin-right', 'margin-bottom', 'margin-left']) style.removeProperty(name)
+    }
+    clearMargins()
+    style.setProperty('margin', '0px', margins.some(({ priority }) => priority === 'important') ? 'important' : '')
+    return () => {
+      clearMargins()
+      for (const { name, value, priority } of margins) style.setProperty(name, value, priority)
+    }
   }, [])
   const [initial, setEntry] = useState(entry), [org, setOrg] = useState(() => authStorage.org.read()), [memberships, setMemberships] = useState<Membership[]>(), [inbox, setInbox] = useState<Invitation[]>(), [failed, setFailed] = useState(false), [retry, setRetry] = useState(0)
   const [suspended, setSuspended] = useState(false), [boot, setBoot] = useState(0)
