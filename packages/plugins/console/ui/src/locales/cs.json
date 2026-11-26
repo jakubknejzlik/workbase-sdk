@@ -82,5 +82,7 @@
   "auth.invitations": "Čekající pozvánky",
   "auth.noInvitations": "Žádné čekající pozvánky",
   "auth.openInvitation": "Otevřít pozvánku",
-  "auth.failed": "Požadavek se nepodařilo dokončit"
+  "auth.failed": "Požadavek se nepodařilo dokončit",
+  "auth.signInTitle": "Přihlášení",
+  "auth.signInHelp": "Na váš e-mail zašleme odkaz pro přihlášení."
 }

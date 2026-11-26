@@ -2,5 +2,7 @@
   "entity.worker_one": "{{count}} worker",
   "entity.worker_other": "{{count}} workers",
   "field.worker.name": "Name",
-  "field.worker.user": "Application access"
+  "field.worker.user": "Application access",
+  "entity.worker.object": "worker",
+  "entity.worker.singular": "Worker"
 }

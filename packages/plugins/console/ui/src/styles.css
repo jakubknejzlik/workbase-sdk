@@ -1,18 +1,86 @@
-/* Public V3 host styles; served as an external asset under the Worker CSP. */
-.wb-console { color: #18212f; background: #fff; font: 1rem/1.5 system-ui, sans-serif; padding: 1rem; max-width: 80rem; margin: auto; overflow-wrap: anywhere; }
-.wb-console *, .wb-shell * { box-sizing: border-box; min-width: 0; }
-.wb-console input, .wb-console select, .wb-console textarea { font: inherit; max-width: 100%; padding: .5rem; border: 1px solid #667085; border-radius: .25rem; }
-.wb-console button { font: inherit; padding: .5rem .75rem; margin: .25rem; cursor: pointer; }
-.wb-console label { display: block; margin-top: .5rem; }
-.wb-console a { color: #1849a9; }
-.wb-console :focus-visible { outline: 3px solid #1849a9; outline-offset: 2px; }
-.wb-console [role="alert"] { color: #a01818; }
-.wb-shell { max-width: 100%; min-width: 0; overflow-wrap: anywhere; }
-.wb-shell input, .wb-shell select { max-width: 100%; }
-.wb-shell nav a { display: block; padding: .6rem; }
-.wb-menu { display: none; }
-@media (max-width: 500px) {
-  .wb-console { padding: .5rem; }
-  .wb-menu { display: block; }
-  .wb-shell nav[data-open="false"] { display: none; }
+@import './tokens.css';
+
+/* Defaults belong to SDK roots and controls, never the embedding document or slots. */
+:where(.wb-ui) {
+  box-sizing: border-box;
+  min-width: 0;
+  color: var(--wb-foreground);
+  background: var(--wb-canvas);
+  font: var(--wb-font-weight) var(--wb-text-control)/var(--wb-line-height) var(--wb-font-sans);
+  font-synthesis: none;
+}
+:where(.wb-control, .wb-panel, .wb-field, .wb-actions, .wb-list-toolbar, .wb-list-item, .wb-shell > nav, .wb-auth-tools) {
+  box-sizing: border-box;
+  min-width: 0;
+}
+:where(.wb-control) {
+  max-width: 100%;
+  min-height: var(--wb-control-height);
+  border: 1px solid var(--wb-input);
+  border-radius: var(--wb-radius);
+  padding: calc(var(--wb-spacing) * 2.5) calc(var(--wb-spacing) * 3);
+  font: inherit;
+  color: var(--wb-foreground);
+  background: var(--wb-background);
+}
+:where(button.wb-control) { cursor: pointer; white-space: normal; overflow-wrap: anywhere; }
+:where(.wb-control:disabled) { opacity: .5; cursor: default; }
+:where(.wb-control[data-primary]) { background: var(--wb-primary); color: var(--wb-primary-foreground); border-color: transparent; }
+:where(.wb-control:focus-visible, .wb-shell > nav > a:focus-visible) { outline: var(--wb-focus-width) solid var(--wb-ring); outline-offset: var(--wb-focus-offset); }
+:where(.wb-page) { padding: var(--wb-page-padding); }
+:where(.wb-page > h1, .wb-auth-card > h1) {
+  font-size: var(--wb-heading-size);
+  font-weight: var(--wb-font-weight);
+  line-height: var(--wb-heading-line);
+  letter-spacing: var(--wb-heading-tracking);
+  margin: 0 0 calc(var(--wb-spacing) * 6);
+  overflow-wrap: anywhere;
+}
+:where(.wb-panel) { border: 1px solid var(--wb-border); border-radius: var(--wb-radius-panel); background: var(--wb-card); color: var(--wb-card-foreground); }
+:where(.wb-form, .wb-detail) { padding: calc(var(--wb-spacing) * 6); max-width: 820px; }
+:where(.wb-form > div:not(.wb-actions), .wb-detail > div:not(.wb-actions)) { margin-bottom: calc(var(--wb-spacing) * 6); }
+:where(.wb-field) { display: flex; flex-direction: column; gap: calc(var(--wb-spacing) * 2); overflow-wrap: anywhere; }
+:where(.wb-field > label) { color: var(--wb-muted-foreground); }
+:where(.wb-field > .wb-control) { width: 100%; }
+:where(.wb-actions) { display: flex; flex-wrap: wrap; gap: calc(var(--wb-spacing) * 2); border-top: 1px solid var(--wb-border); padding-top: calc(var(--wb-spacing) * 5); }
+:where(.wb-state[role='alert']) { color: var(--wb-destructive-text); }
+:where(.wb-list-count) { color: var(--wb-muted-foreground); margin: 0 0 calc(var(--wb-spacing) * 3); }
+:where(.wb-list-toolbar) { display: flex; flex-wrap: wrap; align-items: center; gap: calc(var(--wb-spacing) * 2); padding: calc(var(--wb-spacing) * 4); border-bottom: 1px solid var(--wb-border); }
+:where(.wb-list-toolbar > input) { flex: 1 1 200px; }
+:where(.wb-list-toolbar > select) { flex: 1 1 140px; }
+:where(.wb-list-toolbar > [data-primary]) { margin-left: auto; }
+:where(.wb-list) { list-style: none; padding: 0; margin: 0; }
+:where(.wb-list-item) { display: flex; flex-wrap: wrap; align-items: center; gap: calc(var(--wb-spacing) * 3); min-height: var(--wb-row-height); padding: calc(var(--wb-spacing) * 3) calc(var(--wb-spacing) * 5.5); border-bottom: 1px solid var(--wb-row-border); font-size: var(--wb-text-list); line-height: var(--wb-line-list); color: var(--wb-row-foreground); }
+:where(.wb-list-item:last-child) { border-bottom: 0; }
+:where(.wb-list-item > div) { flex: 1 1 140px; min-width: 0; }
+:where(.wb-record-link) { border: 0; padding: 0; background: transparent; min-height: 24px; text-align: left; text-decoration: underline; }
+:where(.wb-shell) { display: grid; grid-template-columns: var(--wb-sidebar-width) minmax(0, 1fr); min-height: 100vh; }
+:where(.wb-shell > nav) { grid-column: 1; grid-row: 1 / span 2; padding: calc(var(--wb-spacing) * 6) calc(var(--wb-spacing) * 4); background: var(--wb-sidebar); color: var(--wb-sidebar-foreground); }
+:where(.wb-shell > nav > a) { display: block; border-radius: var(--wb-radius); padding: calc(var(--wb-spacing) * 3); color: inherit; text-decoration: none; overflow-wrap: anywhere; }
+:where(.wb-shell > nav > a:hover) { text-decoration: underline; }
+:where(.wb-shell > .wb-page) { grid-column: 2; }
+:where(.wb-menu) { display: none; }
+:where(.wb-auth) { min-height: 100vh; }
+:where(.wb-auth-tools) { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: calc(var(--wb-spacing) * 3); padding: calc(var(--wb-spacing) * 4) calc(var(--wb-spacing) * 6.75); min-height: var(--wb-header-height); background: var(--wb-background); border-bottom: 1px solid var(--wb-border); }
+:where(.wb-auth-content) { display: grid; justify-items: center; padding: calc(var(--wb-spacing) * 12) calc(var(--wb-spacing) * 6); }
+:where(.wb-auth-card) { box-sizing: border-box; width: 100%; max-width: 440px; padding: calc(var(--wb-spacing) * 8); box-shadow: var(--wb-shadow); }
+:where(.wb-auth-card > p) { color: var(--wb-muted-foreground); }
+:where(.wb-auth-brand) { display: block; font-size: 24px; margin-bottom: calc(var(--wb-spacing) * 6); }
+:where(.wb-auth-card .wb-actions > [data-primary]) { width: 100%; }
+@media (max-width: 849px) {
+  :where(.wb-shell) { grid-template-columns: minmax(0, 1fr); align-content: start; }
+  :where(.wb-shell > .wb-page, .wb-shell > nav) { grid-column: 1; grid-row: auto; }
+  :where(.wb-menu) { display: block; justify-self: start; align-self: start; margin: calc(var(--wb-spacing) * 3.5); }
+  :where(.wb-shell > nav[data-open='false']) { display: none; }
+  :where(.wb-auth-tools) { min-height: var(--wb-header-height-mobile); padding: calc(var(--wb-spacing) * 2.5) calc(var(--wb-spacing) * 3.5); }
+}
+@media (max-width: 749px) {
+  :where(.wb-page) { padding: var(--wb-page-padding-mobile); }
+  :where(.wb-page > h1, .wb-auth-card > h1) { font-size: var(--wb-heading-size-mobile); }
+  :where(input.wb-control, select.wb-control, textarea.wb-control) { font-size: var(--wb-text-input-mobile); }
+  :where(.wb-list-toolbar > .wb-control) { flex: 1 1 100%; width: 100%; margin-left: 0; }
+  :where(.wb-list-toolbar) { padding: calc(var(--wb-spacing) * 3.5); }
+  :where(.wb-form, .wb-detail) { padding: calc(var(--wb-spacing) * 5); }
+  :where(.wb-auth-content) { padding: calc(var(--wb-spacing) * 6) calc(var(--wb-spacing) * 3.5); }
+  :where(.wb-auth-card) { padding: calc(var(--wb-spacing) * 6); }
 }

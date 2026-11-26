@@ -82,5 +82,7 @@
   "auth.invitations": "Pending invitations",
   "auth.noInvitations": "No pending invitations",
   "auth.openInvitation": "Open invitation",
-  "auth.failed": "Unable to complete request"
+  "auth.failed": "Unable to complete request",
+  "auth.signInTitle": "Sign in",
+  "auth.signInHelp": "We will send a sign-in link to your email."
 }

@@ -1,6 +1,6 @@
 declare const history: { state: unknown; pushState(state: unknown, unused: string, url: string): void; replaceState(state: unknown, unused: string, url: string): void }
 declare const location: { pathname: string; search: string }
-declare const document: { body: { textContent: string | null } }
+declare const document: { documentElement: { lang: string }; body: { textContent: string | null } }
 declare const window: { location: typeof location; localStorage: Storage; sessionStorage: Storage; dispatchEvent(event: Event): void }
 // @vitest-environment jsdom
 import { createElement as h, StrictMode, type ReactNode } from 'react'
@@ -238,4 +238,16 @@ test('ordinary pageshow leaves the current boot intact', async () => {
   act(() => transition('pageshow', false))
   expect(screen.getByText('APP')).toBeTruthy()
   expect(fetch.mock.calls.filter(([path]) => path === '/me')).toHaveLength(1)
+})
+
+
+test('document language follows active SDK language on the styled sign-in root', async () => {
+  history.replaceState(null, '', '/sign-in')
+  const current = view(async () => json({}))
+  const { container } = render(current.element)
+  expect((container as unknown as { querySelector(selector: string): unknown }).querySelector('.wb-auth .wb-panel .wb-field')).toBeTruthy()
+  expect(document.documentElement.lang).toBe('en')
+  await act(async () => { await current.i18n.changeLanguage('cs') })
+  expect(document.documentElement.lang).toBe('cs')
+  expect(screen.getByRole('heading', { name: 'Přihlášení' })).toBeTruthy()
 })

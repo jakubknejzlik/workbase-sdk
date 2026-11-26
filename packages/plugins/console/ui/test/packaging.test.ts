@@ -25,6 +25,11 @@ test('producer staging and the resulting tarball retain React/Vite exports and a
     const installed = JSON.parse(member('package.json'))
     const react = installed.exports['./console/ui/react'].replace(/^\.\//, ''), vite = installed.exports['./console/ui/vite'].replace(/^\.\//, '')
     expect(member(installed.exports['./console/ui/saved-views'].replace(/^\.\//, ''))).toContain('export function clearSavedViews')
+    expect(member(react)).toContain("import '../styles.css'");
+    expect(member('console/ui/src/styles.css')).toContain("@import './tokens.css'");
+    expect(member('console/ui/src/tokens.css')).toContain('Alata-Regular.ttf');
+    expect(member('console/ui/src/assets/fonts/Alata-OFL.txt')).toContain('SIL OPEN FONT LICENSE');
+    expect(member('console/ui/src/assets/fonts/Alata-Regular.ttf')).toBeTruthy();
     expect(member(react)).toContain('AuthShell'); expect(member(react)).toContain('useAuthDirty'); expect(member(vite)).toContain('resolveBuildSHA')
     for (const name of ['auth-shell', 'auth-dirty']) expect(member('console/ui/src/react/' + name + '.ts')).toBeTruthy()
     for (const name of ['build-reload', 'auth-storage']) expect(member('console/ui/src/' + name + '.ts')).toBeTruthy()

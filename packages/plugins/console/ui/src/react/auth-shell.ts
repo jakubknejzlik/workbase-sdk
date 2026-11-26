@@ -1,3 +1,4 @@
+declare const document: { documentElement: { lang: string } }
 import { clearSavedViews } from '../saved-views-storage'
 declare const location: { pathname: string; search: string; replace(path: string): void }
 declare const history: { replaceState(state: unknown, unused: string, url: string): void }
@@ -56,7 +57,7 @@ type Invitation = { id: string; state?: string; account_match: boolean | null; n
   organization?: { name: string | null }; inviter?: { display_name: string | null }; role?: string; target?: { entity: string } }
 type Profile = { firstName: string | null; lastName: string | null; capabilities: { canEditNames: boolean }; completeness: { complete: boolean } }
 type Auth = { request: Request; i18n: I18n; signOut: () => Promise<void> }
-function status(i18n: I18n, key: string) { return h('p', { role: 'status' }, i18n.t('sdk:auth.' + key)) }
+function status(i18n: I18n, key: string) { return h('p', { className: 'wb-state', role: 'status' }, i18n.t('sdk:auth.' + key)) }
 function SignIn({ auth, returnTo }: { auth: Auth; returnTo: string }) {
   const [email, setEmail] = useState(''), [sent, setSent] = useState(false), pending = useRef(false)
   useAuthDirty(!sent && !!email)
@@ -66,11 +67,11 @@ function SignIn({ auth, returnTo }: { auth: Auth; returnTo: string }) {
     try { await auth.request('/auth/sign-in/magic-link', { email, callbackURL: '/auth/complete' }) } catch { /* Deliberately indistinguishable. */ }
     finally { pending.current = false; setSent(true) }
   }
-  return sent ? status(auth.i18n, 'checkMail') : h('form', { onSubmit: (event: { preventDefault(): void }) => { event.preventDefault(); void submit() } },
-    h('label', null, auth.i18n.t('sdk:auth.email'), h('input', { type: 'email', required: true, value: email, onChange: (event: { target: { value: string } }) => setEmail(event.target.value) })),
-    h('button', { type: 'submit' }, auth.i18n.t('sdk:auth.signIn')))
+  return sent ? status(auth.i18n, 'checkMail') : h('form', { className: 'wb-auth-form', onSubmit: (event: { preventDefault(): void }) => { event.preventDefault(); void submit() } },
+    h('label', { className: 'wb-field' }, auth.i18n.t('sdk:auth.email'), h('input', { className: 'wb-control', type: 'email', required: true, value: email, onChange: (event: { target: { value: string } }) => setEmail(event.target.value) })),
+    h('div', { className: 'wb-actions' }, h('button', { className: 'wb-control', 'data-primary': true, type: 'submit' }, auth.i18n.t('sdk:auth.signIn'))))
 }
-function Logout({ auth }: { auth: Auth }) { return h('button', { type: 'button', onClick: () => { void auth.signOut() } }, auth.i18n.t('sdk:auth.signOut')) }
+function Logout({ auth }: { auth: Auth }) { return h('button', { className: 'wb-control', type: 'button', onClick: () => { void auth.signOut() } }, auth.i18n.t('sdk:auth.signOut')) }
 /** Completeness belongs exclusively to the profile response. No navigation occurs here. */
 function ProfileGate({ auth, required = false, children }: { auth: Auth; required?: boolean; children?: ReactNode }) {
   const [profile, setProfile] = useState<Profile>(), [failed, setFailed] = useState(false), [attempt, setAttempt] = useState(0)
@@ -89,11 +90,11 @@ function ProfileGate({ auth, required = false, children }: { auth: Auth; require
     finally { busy.current = false; setSaving(false) }
   }
   if (profile?.completeness.complete || !profile && failed && !required) return children
-  if (!profile) return h('div', null, status(auth.i18n, failed ? 'profileFailed' : 'loading'), failed && h('button', { type: 'button', onClick: () => { setFailed(false); setAttempt(value => value + 1) } }, auth.i18n.t('sdk:retry')))
+  if (!profile) return h('div', null, status(auth.i18n, failed ? 'profileFailed' : 'loading'), failed && h('button', { className: 'wb-control', type: 'button', onClick: () => { setFailed(false); setAttempt(value => value + 1) } }, auth.i18n.t('sdk:retry')))
   if (!profile.capabilities.canEditNames) return h('div', null, status(auth.i18n, 'idpNames'), h(Logout, { auth }))
-  return h('form', { onSubmit: (event: { preventDefault(): void }) => { event.preventDefault(); void submit() } }, status(auth.i18n, 'profileRequired'),
-    ...(['firstName', 'lastName'] as const).map(name => h('label', { key: name }, auth.i18n.t('sdk:auth.' + name), h('input', { required: true, value: name === 'firstName' ? firstName : lastName, onChange: (event: { target: { value: string } }) => (name === 'firstName' ? setFirst : setLast)(event.target.value) }))),
-    failed && status(auth.i18n, 'profileFailed'), h('button', { type: 'submit', disabled: saving }, auth.i18n.t('sdk:save')), h(Logout, { auth }))
+  return h('form', { className: 'wb-auth-form', onSubmit: (event: { preventDefault(): void }) => { event.preventDefault(); void submit() } }, status(auth.i18n, 'profileRequired'),
+    ...(['firstName', 'lastName'] as const).map(name => h('label', { key: name }, auth.i18n.t('sdk:auth.' + name), h('input', { className: 'wb-control', required: true, value: name === 'firstName' ? firstName : lastName, onChange: (event: { target: { value: string } }) => (name === 'firstName' ? setFirst : setLast)(event.target.value) }))),
+    failed && status(auth.i18n, 'profileFailed'), h('button', { className: 'wb-control', type: 'submit', disabled: saving }, auth.i18n.t('sdk:save')), h(Logout, { auth }))
 }
 function ActorGate({ auth, children }: { auth: Auth; children?: ReactNode }) {
   const { identity } = useRuntime()
@@ -143,14 +144,14 @@ function InvitationFlow({ auth, initial, go, select, displayName }: { auth: Auth
   if (invitation.account_match === null && !invitation.state) return h('div', null,
     h('h1', null, auth.i18n.t('sdk:auth.publicInvitation', { instance: displayName })),
     h('p', null, auth.i18n.t('sdk:auth.invitedEmail')),
-    h('button', { type: 'button', onClick: () => setLogin(true) }, auth.i18n.t('sdk:auth.signInToAccept')))
+    h('button', { className: 'wb-control', type: 'button', onClick: () => setLogin(true) }, auth.i18n.t('sdk:auth.signInToAccept')))
   const preview = h('div', null,
     h('dl', null, ...([
       ['organization', invitation.organization?.name], ['inviter', invitation.inviter?.display_name], ['role', invitation.role],
     ] as const).filter(([, value]) => value).map(([key, value]) => h('div', { key }, h('dt', null, auth.i18n.t('sdk:auth.' + key)), h('dd', null, value)))),
     invitation.target && h('p', null, auth.i18n.t('sdk:auth.target', { entity: invitation.target.entity })))
-  if (!resolved) return h('div', null, preview, h('button', { type: 'button', disabled: pending, onClick: () => { void resolve() } }, auth.i18n.t('sdk:auth.continue')))
-  const acceptButton = h('button', { type: 'button', disabled: pending, onClick: () => { void accept() } }, auth.i18n.t('sdk:auth.accept'))
+  if (!resolved) return h('div', null, preview, h('button', { className: 'wb-control', type: 'button', disabled: pending, onClick: () => { void resolve() } }, auth.i18n.t('sdk:auth.continue')))
+  const acceptButton = h('button', { className: 'wb-control', type: 'button', disabled: pending, onClick: () => { void accept() } }, auth.i18n.t('sdk:auth.accept'))
   return h(ProfileGate, { auth, required: true }, h('div', null, preview, acceptButton))
 }
 export type AuthShellProps = { manifest: Manifest; i18n: I18n; displayName?: string; children?: ReactNode; fetch?: Transport; navigate: (path: string) => void | Promise<unknown> }
@@ -184,7 +185,8 @@ export function AuthShell({ manifest, i18n, displayName, children, fetch: transp
   const reportDirty = useCallback((owner: symbol, dirty: boolean) => { if (dirty) drafts.current.add(owner); else drafts.current.delete(owner); if (!leaving.current) watcher.current?.flush() }, [])
   useEffect(() => { const current = browserBuild(transport, () => drafts.current.size > 0); watcher.current = current; return () => { current.stop(); watcher.current = null } }, [transport])
   const request = useCallback(requestWith(transport), [transport])
-  useSyncExternalStore(i18n.subscribe, i18n.language, i18n.language)
+  const language = useSyncExternalStore(i18n.subscribe, i18n.language, i18n.language)
+  useEffect(() => { if (typeof document !== 'undefined') document.documentElement.lang = language }, [language])
   useEffect(() => i18n.subscribe(() => authStorage.language.write(i18n.language())), [i18n])
   useEffect(() => { const change = () => setEntry(entry()); window.addEventListener('popstate', change); return () => window.removeEventListener('popstate', change) }, [])
   const go = useCallback(async (path: string) => { await navigate(path); setEntry(entry()) }, [navigate])
@@ -235,8 +237,8 @@ export function AuthShell({ manifest, i18n, displayName, children, fetch: transp
   else if (initial.path === '/invitation') content = h(InvitationFlow, { key: initial.key, auth, initial, go, select, displayName: displayName?.trim() || 'Workbase' })
   else if (initial.path === '/auth/complete') content = status(i18n, 'loading')
   else if (org) content = h(Session, { orgId: org, t: i18n.t, i18n, fetch: transport, onState: sessionState }, h(ActorGate, { auth }, children))
-  else if (memberships?.length) content = h('div', null, status(i18n, 'chooseOrg'), ...memberships.map(value => h('button', { key: value.organization_id, type: 'button', onClick: () => select(value.organization_id) }, value.organization_name ?? value.organization_id)))
-  else if (inbox) content = h('div', null, status(i18n, inbox.length ? 'invitations' : 'noInvitations'), ...inbox.map(value => h('button', { key: value.id, type: 'button', onClick: () => { void go(authReturnTo(value.navigation_target ?? '/', manifest.routes)) } }, i18n.t('sdk:auth.openInvitation'))))
+  else if (memberships?.length) content = h('div', null, status(i18n, 'chooseOrg'), ...memberships.map(value => h('button', { className: 'wb-control', key: value.organization_id, type: 'button', onClick: () => select(value.organization_id) }, value.organization_name ?? value.organization_id)))
+  else if (inbox) content = h('div', null, status(i18n, inbox.length ? 'invitations' : 'noInvitations'), ...inbox.map(value => h('button', { className: 'wb-control', key: value.id, type: 'button', onClick: () => { void go(authReturnTo(value.navigation_target ?? '/', manifest.routes)) } }, i18n.t('sdk:auth.openInvitation'))))
   else content = status(i18n, 'loading')
-  return h(AuthDirtyContext.Provider, { value: reportDirty }, h('div', { key: boot }, h(LanguageSwitcher, { i18n }), h(Logout, { auth }), failed && h('div', null, status(i18n, 'failed'), h('button', { type: 'button', onClick: () => { setFailed(false); setRetry(value => value + 1) } }, i18n.t('sdk:retry'))), content))
+  return h(AuthDirtyContext.Provider, { value: reportDirty }, h('div', { key: boot, className: 'wb-ui wb-auth' }, h('div', { className: 'wb-auth-tools' }, h(LanguageSwitcher, { i18n }), h(Logout, { auth })), failed && h('div', null, status(i18n, 'failed'), h('button', { className: 'wb-control', type: 'button', onClick: () => { setFailed(false); setRetry(value => value + 1) } }, i18n.t('sdk:retry'))), initial.path === '/sign-in' ? h('div', { className: 'wb-auth-content' }, h('section', { className: 'wb-panel wb-auth-card' }, h('span', { className: 'wb-auth-brand' }, displayName?.trim() || 'Workbase'), h('h1', null, i18n.t('sdk:auth.signInTitle')), h('p', null, i18n.t('sdk:auth.signInHelp')), content)) : content))
 }

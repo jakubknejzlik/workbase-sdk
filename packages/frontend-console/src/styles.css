@@ -120,7 +120,7 @@
 main:has([data-slot="list-page"]) { background-color: var(--canvas); }
 main:has([data-slot="list-page"]) h1 { font-weight: 400; }
 @media (min-width: 768px) {
-  main:has([data-slot="list-page"]) h1 { font-size: 2rem; line-height: 1.17; letter-spacing: -.95px; }
+  main:has([data-slot="list-page"]) h1 { font-size: var(--wb-heading-size); line-height: var(--wb-heading-line); letter-spacing: var(--wb-heading-tracking); }
   [data-slot="sidebar-wrapper"]:has([data-slot="list-page"]) [data-slot="sidebar-menu"] { gap: .25rem; }
   [data-slot="sidebar-wrapper"]:has([data-slot="list-page"]) [data-slot="sidebar-menu-button"] { min-height: 2.5rem; height: auto; padding: .625rem .75rem; font-size: .75rem; }
 }
@@ -134,7 +134,7 @@ main:has([data-slot="list-page"]) h1 { font-weight: 400; }
 [data-list-slot="toolbar"] .list-toolbar-filter:has(.wb-picker) { flex-basis: 8rem; }
 .list-v2-lookup-panel .wb-picker { min-width: 0; }
 .list-v2-actions { margin-left: auto; display: flex; min-width: 0; max-width: 100%; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; }
-[data-list-slot="toolbar"] :is(button, input) { min-height: 40px; }
+[data-list-slot="toolbar"] :is(button, input) { min-height: var(--wb-control-height); }
 [data-list-slot="toolbar"] button:not([data-filter-trigger]) { height: auto; white-space: normal; overflow-wrap: anywhere; }
 @container console-frame (max-width: 1200px) {
   [data-slot="list-page"] [data-list-slot="toolbar"] { gap: 8px; }
@@ -149,26 +149,26 @@ main:has([data-slot="list-page"]) h1 { font-weight: 400; }
 [data-list-density] td.sticky { background-color: var(--card); }
 [data-list-density] tr:hover td.sticky { background-color: var(--muted); }
 [data-list-density] :is(th, th button) { color: var(--quiet-foreground); }
-[data-list-density] { --list-row-height: 66px; }
-[data-list-density="compact"] { --list-row-height: 54px; }
+[data-list-density] { --list-row-height: var(--wb-row-height); }
+[data-list-density="compact"] { --list-row-height: var(--wb-row-height-compact); }
 /* Reference body metrics apply to sortable/plain headers and values alike. */
-[data-list-density] :is(table, td, th, th button, td button) { font-size: 12px; line-height: 17.76px; }
-[data-list-density] :is(th, td) { padding: 12px 11px; border-color: #eef1f7; }
+[data-list-density] :is(table, td, th, th button, td button) { font-size: var(--wb-text-list); line-height: var(--wb-line-list); }
+[data-list-density] :is(th, td) { padding: 12px 11px; border-color: var(--wb-row-border); }
 /* The measured first-cell inset is distinct from ordinary and action columns. */
 [data-list-density] :is(th, td):first-child { padding-left: 9px; }
 [data-list-density] :is(th, td).sticky { padding-right: 14px; }
-[data-list-density] td { color: #2a2f4f; }
-[data-list-density] tbody tr { border-color: #eef1f7; }
+[data-list-density] td { color: var(--wb-row-foreground); }
+[data-list-density] tbody tr { border-color: var(--wb-row-border); }
 @media (max-width: 1023px) {
   [data-list-density] :is(th, td) { padding-inline: 15px; }
   [data-list-density] :is(th, td):first-child { padding-left: 11px; }
   [data-list-density] :is(th, td).sticky { padding-right: 14px; }
 }
 @media (max-width: 767px) {
-  main:has([data-slot="list-page"]) h1 { font-size: 27px; line-height: 1.17; letter-spacing: -.95px; }
+  main:has([data-slot="list-page"]) h1 { font-size: var(--wb-heading-size-mobile); line-height: var(--wb-heading-line); letter-spacing: var(--wb-heading-tracking); }
 }
 [data-list-density] td { height: var(--list-row-height); }
-[data-list-density] th { height: 45px; font-weight: 400; background-color: var(--muted); }
+[data-list-density] th { height: var(--wb-table-header-height); font-weight: var(--wb-font-weight); background-color: var(--muted); }
 [data-slot="list-page"] [data-list-density] th { padding-block: 0; }
 [data-list-density] td [data-slot="badge"] { font-size: inherit; }
 [data-list-density] [data-slot="table-container"]:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
@@ -208,7 +208,7 @@ body:has([data-slot="list-page"]) [data-list-row-menu] [role="menuitem"] { min-h
 }
 
 /* #317 settings hierarchy and secondary navigation — start */
-[data-slot="settings-layout"] { padding: 22px 27px 48px; }
+[data-slot="settings-layout"] { padding: var(--wb-page-padding); }
 [data-slot="settings-navigation"] { max-width: 100%; }
 [data-slot="settings-navigation"] nav { align-items: stretch; padding-inline: 20px; scrollbar-width: thin; overscroll-behavior-x: contain; scroll-padding-inline: 8px; }
 .wb-settings-group { display: flex; flex: 0 0 auto; align-items: stretch; }
@@ -219,17 +219,17 @@ body:has([data-slot="list-page"]) [data-list-row-menu] [role="menuitem"] { min-h
 .wb-settings-link-active, .wb-settings-link[aria-current="page"] { color: var(--foreground); border-bottom-color: var(--foreground); }
 .wb-settings-link:focus-visible { outline: 2px solid var(--ring); outline-offset: -5px; border-radius: 6px; }
 .wb-settings-link svg { flex-shrink: 0; }
-[data-slot="settings-layout"] > h1 { font-size: 32px; line-height: 1.17; letter-spacing: -.95px; }
+[data-slot="settings-layout"] > h1 { font-size: var(--wb-heading-size); line-height: var(--wb-heading-line); letter-spacing: var(--wb-heading-tracking); }
 [data-slot="settings-heading"] p { margin-top: 8px; font-size: 13px; line-height: 1.7; }
 [data-slot="settings-page"].bg-card { padding: 22px; }
 [data-slot="settings-panel"] input { max-width: 100%; }
-[data-slot="settings-actions"] > button { height: auto; min-height: 40px; max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+[data-slot="settings-actions"] > button { height: auto; min-height: var(--wb-control-height); max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
 [data-slot="settings-panel"] [data-slot="settings-actions"]:empty { display: none; }
 @media (max-width: 749px) {
-  [data-slot="settings-layout"] { padding: 18px 14px 40px; }
+  [data-slot="settings-layout"] { padding: var(--wb-page-padding-mobile); }
   [data-slot="settings-navigation"] nav { padding-inline: 4px; }
   .wb-settings-link { max-width: 17rem; padding: 12px 14px; }
-  [data-slot="settings-layout"] > h1 { font-size: 27px; }
+  [data-slot="settings-layout"] > h1 { font-size: var(--wb-heading-size-mobile); }
   [data-slot="settings-page"].bg-card { padding: 18px; }
 }
 /* #317 settings hierarchy and secondary navigation — end */
@@ -254,14 +254,14 @@ body:has([data-slot="list-page"]) [data-list-row-menu] [role="menuitem"] { min-h
 /* End #315 A3c compact filter captions. */
 
 /* #316 C1 — detail heading and secondary identity */
-[data-slot="detail-page"] h1 { font-size: 32px; line-height: 1.17; letter-spacing: -.95px; }
+[data-slot="detail-page"] h1 { font-size: var(--wb-heading-size); line-height: var(--wb-heading-line); letter-spacing: var(--wb-heading-tracking); }
 .generated-detail-identity { display: flex; align-items: baseline; gap: 8px; min-width: 0; color: var(--muted-foreground); font-size: 12px; }
 .generated-detail-identity dt { flex-shrink: 0; }
 .generated-detail-identity dd { min-width: 0; }
 /* Reuse the identifier copy cell with a fully readable value in this header. */
 .generated-detail-identity span[title] { max-width: 100%; overflow: visible; white-space: normal; overflow-wrap: anywhere; text-overflow: clip; }
 @media (max-width: 767px) {
-  [data-slot="detail-page"] h1 { font-size: 27px; }
+  [data-slot="detail-page"] h1 { font-size: var(--wb-heading-size-mobile); }
 }
 /* End #316 C1 */
 
@@ -272,7 +272,7 @@ body:has([data-slot="list-page"]) [data-list-row-menu] [role="menuitem"] { min-h
 
 /* E3 dashboard actions */
 .dashboard-header-action { height: auto; min-height: 36px; max-width: 100%; white-space: normal; overflow-wrap: anywhere; text-align: left; }
-.dashboard-header-action[data-primary="true"] { background: #000050; color: #fff; }
+.dashboard-header-action[data-primary="true"] { background: var(--wb-foreground); color: #fff; }
 .dashboard-header-action[data-primary="true"]:hover { background: #151568; }
 .dashboard-work { container-type: inline-size; container-name: dashboard-work; display: grid; gap: 16px; min-width: 0; }
 .dashboard-priority { display: grid; gap: 16px; min-width: 0; align-items: start; }
@@ -280,7 +280,7 @@ body:has([data-slot="list-page"]) [data-list-row-menu] [role="menuitem"] { min-h
 .dashboard-action-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; min-width: 0; }
 .dashboard-action-grid:has(> div:only-child) { grid-template-columns: minmax(0, 1fr); }
 .dashboard-action-grid > div { display: flex; min-width: 0; container-type: inline-size; }
-.dashboard-action-grid .dashboard-action { display: flex; flex-direction: column; align-items: stretch; justify-content: space-between; gap: 14px; width: 100%; height: auto; min-height: 150px; padding: 18px; border: 1px solid #e3e3ed; border-radius: 18px; background: #fff; color: #000050; box-shadow: 0 1px 0 rgba(8,21,64,.02); white-space: normal; text-align: left; font-weight: 400; }
+.dashboard-action-grid .dashboard-action { display: flex; flex-direction: column; align-items: stretch; justify-content: space-between; gap: 14px; width: 100%; height: auto; min-height: 150px; padding: 18px; border: 1px solid var(--wb-border); border-radius: 18px; background: #fff; color: var(--wb-foreground); box-shadow: 0 1px 0 rgba(8,21,64,.02); white-space: normal; text-align: left; font-weight: 400; }
 .dashboard-action-grid .dashboard-action[data-primary="true"] { background: linear-gradient(180deg, #fff 0%, #f6fffb 100%); }
 .dashboard-action-grid .dashboard-action:hover { background: #f8fffc; border-color: #9aeed0; }
 .dashboard-action-top { display: flex; flex-wrap: wrap; align-items: start; gap: 14px; min-width: 0; }
@@ -292,7 +292,7 @@ body:has([data-slot="list-page"]) [data-list-row-menu] [role="menuitem"] { min-h
 .dashboard-action-copy { display: grid; flex: 1 1 min-content; min-width: 0; gap: 5px; overflow-wrap: break-word; }
 .dashboard-action-title { font-size: 24px; line-height: 1.12; }
 .dashboard-action-description { font-size: 13px; line-height: 1.45; color: #6b7692; }
-.dashboard-action-arrow { display: flex; align-self: end; color: #000050; }
+.dashboard-action-arrow { display: flex; align-self: end; color: var(--wb-foreground); }
 .dashboard-action-arrow > svg { width: 18px; height: 18px; }
 @container dashboard-actions (max-width: 377px) {
   .dashboard-action-grid { grid-template-columns: minmax(0, 1fr); }

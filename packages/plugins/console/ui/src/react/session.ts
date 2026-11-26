@@ -80,5 +80,5 @@ export function Session({ orgId, timeoutMs = 10000, onState, ...props }: Props) 
     else { generation.current++; controller.current?.abort(); publish({ kind: 'unauthenticated' }) }
   }, [refresh, publish, readyScope])
   if (state.kind === 'ready') return h(ConsoleProvider, { ...props, caps: state.caps, identity: { actorId: state.actorId, orgId }, onAuthorizationFailure: authorizationFailure }, props.children)
-  return h('div', { role: state.kind === 'loading' ? 'status' : 'alert' }, props.t('sdk:' + state.kind), state.kind === 'failed' && h('button', { type: 'button', onClick: () => { recovery.current = null; void refresh(true) } }, props.t('sdk:retry')))
+  return h('div', { className: 'wb-ui wb-state', role: state.kind === 'loading' ? 'status' : 'alert' }, props.t('sdk:' + state.kind), state.kind === 'failed' && h('button', { className: 'wb-control', type: 'button', onClick: () => { recovery.current = null; void refresh(true) } }, props.t('sdk:retry')))
 }

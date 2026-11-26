@@ -43,7 +43,7 @@ export function AccessCard({ access, t: translate }: { account?: unknown; access
     try { if (outbox) await clipboard.navigator?.clipboard?.writeText(outbox) }
     catch (error) { setFailure(error) }
   }
-  return h('section', { 'aria-label': translate('sdk:card.title') },
+  return h('section', { className: 'wb-ui wb-access', 'aria-label': translate('sdk:card.title') },
     h('h2', null, translate('sdk:card.title')),
     h('p', null, translate('sdk:card.' + state.state)),
     state.account && h('p', null, state.account.display_name + ' · ' + state.account.email),
@@ -52,12 +52,12 @@ export function AccessCard({ access, t: translate }: { account?: unknown; access
     ...['invite', 'cancel_invite', 'link_account', 'unlink_account'].filter(name => Object.hasOwn(actions, name)).map(name => {
       const action = actions[name], reason = !action.enabled && action.reason
       return h('div', { key: name },
-        name === 'invite' && action.enabled && h('label', null, translate('sdk:card.email'), h('input', { type: 'email', value: email, disabled: pending, onChange: (event: { target: { value: string } }) => setEmail(event.target.value) })),
-        name === 'link_account' && members !== null && access.candidates && h('div', null, h('label', { htmlFor: id + '-account' }, translate('sdk:card.account')), h('select', { id: id + '-account', value: selected, disabled: pending, onChange: (event: { target: { value: string } }) => setSelected(event.target.value) }, h('option', { value: '' }, translate('sdk:card.choose')), ...members.map(member => h('option', { key: member.user_id, value: member.user_id }, member.email)))),
-        h('button', { type: 'button', disabled: pending || !action.enabled || name === 'link_account' && !access.candidates, 'aria-describedby': reason ? id + '-' + name : undefined, onClick: () => { void run(name) } }, translate('sdk:card.' + name)),
+        name === 'invite' && action.enabled && h('label', null, translate('sdk:card.email'), h('input', { className: 'wb-control', type: 'email', value: email, disabled: pending, onChange: (event: { target: { value: string } }) => setEmail(event.target.value) })),
+        name === 'link_account' && members !== null && access.candidates && h('div', null, h('label', { htmlFor: id + '-account' }, translate('sdk:card.account')), h('select', { className: 'wb-control', id: id + '-account', value: selected, disabled: pending, onChange: (event: { target: { value: string } }) => setSelected(event.target.value) }, h('option', { value: '' }, translate('sdk:card.choose')), ...members.map(member => h('option', { key: member.user_id, value: member.user_id }, member.email)))),
+        h('button', { className: 'wb-control', type: 'button', disabled: pending || !action.enabled || name === 'link_account' && !access.candidates, 'aria-describedby': reason ? id + '-' + name : undefined, onClick: () => { void run(name) } }, translate('sdk:card.' + name)),
         name === 'link_account' && action.enabled && !access.candidates && h('span', null, translate('sdk:card.candidatesUnavailable')),
         reason && h('span', { id: id + '-' + name }, translate(reasonKey(reason))))
     }),
     !!failure && h('p', { role: 'alert' }, translate(failure instanceof ApiFailure && failure.reason ? reasonKey(failure.reason) : failure instanceof ApiFailure && failure.status === 400 ? 'sdk:validation' : 'sdk:network')),
-    outbox && h('div', null, h('label', null, translate('sdk:card.outbox'), h('input', { readOnly: true, value: outbox, onFocus: (event: { target: { select(): void } }) => event.target.select() })), h('button', { type: 'button', onClick: () => { void copy() } }, translate('sdk:card.copy'))))
+    outbox && h('div', null, h('label', null, translate('sdk:card.outbox'), h('input', { className: 'wb-control', readOnly: true, value: outbox, onFocus: (event: { target: { select(): void } }) => event.target.select() })), h('button', { className: 'wb-control', type: 'button', onClick: () => { void copy() } }, translate('sdk:card.copy'))))
 }

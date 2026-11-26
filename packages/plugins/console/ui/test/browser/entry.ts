@@ -1,7 +1,6 @@
 declare const location: { search: string }
 declare const document: { getElementById(id: string): Element | null }
 import { createElement as h } from 'react'
-import '@workbasehq/plugins/console/ui/styles.css'
 import { createRoot } from 'react-dom/client'
 import { createRootRoute, createRoute, createRouter, Outlet, RouterProvider } from '@tanstack/react-router'
 import { AuthShell, createAuthI18n, Shell, RouteView, AccessCard, LanguageSwitcher } from '../../src/react'
