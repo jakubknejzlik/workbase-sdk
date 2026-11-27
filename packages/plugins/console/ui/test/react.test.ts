@@ -355,3 +355,19 @@ test('generic constraint_conflict retains the current network fallback', async (
   expect(await screen.findByText('sdk:network')).toBeTruthy()
   expect((screen.getByLabelText('domain:field.probe.name') as unknown as { value: string }).value).toBe('Draft')
 })
+
+test('owned visual hooks preserve authored field and slot order without a host class', async () => {
+  const definition = route('create', ['extra', { kind: 'slot', id: 'sentinel', props: {} }, 'name'])
+  const { container } = render(h(ConsoleProvider, {
+    caps: grants({ probe: meta }), identity: { actorId: 'a', orgId: 'one' }, t,
+    slots: { sentinel: { contexts: ['record'], props: {}, component: () => h('button', { 'data-sentinel': true }, 'Authored') } },
+  }, h(PageView, { definition, route: definition, entities: { probe: meta }, params: {}, search: {}, navigate })))
+  const dom = container as unknown as { querySelector(selector: string): { classList: { contains(value: string): boolean } } | null; querySelectorAll(selector: string): { textContent: string | null; getAttribute(name: string): string | null }[] }
+  expect(dom.querySelector('.wb-page')).toBeTruthy()
+  expect(dom.querySelector('.wb-panel.wb-form')).toBeTruthy()
+  const fields = [...dom.querySelectorAll('.wb-field label')].map(node => node.textContent)
+  expect(fields).toEqual(['domain:field.probe.extra', 'domain:field.probe.name'])
+  expect([...dom.querySelectorAll('form input, form [data-sentinel]')].map(node => node.getAttribute('aria-label') ?? node.textContent)).toEqual(['domain:field.probe.extra', 'Authored', 'domain:field.probe.name'])
+  expect(dom.querySelector('[data-sentinel]')?.classList.contains('wb-control')).toBe(false)
+  expect([...dom.querySelectorAll('.wb-actions button')].map(node => node.textContent)).toEqual(['sdk:save', 'sdk:back', 'sdk:cancel'])
+})

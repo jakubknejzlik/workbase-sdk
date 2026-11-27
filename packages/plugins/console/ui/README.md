@@ -359,3 +359,25 @@ The V3 `ListView` in this package has a separate binding/client model and does n
 reuse that generated list. Its saved-view controls and an adapter to the shared
 validated `ListSearch` pipeline remain an open integration point; this change
 exports the storage protocol and wires cleanup, without changing V3 list routing.
+
+
+## Default visual foundation
+
+The public React entry loads the shared V3 stylesheet automatically. A newly
+scaffolded standalone console needs no host CSS import or theme configuration.
+Existing imports of `@workbasehq/plugins/console/ui/styles.css` remain compatible.
+The non-React contract, checker and CLI do not load CSS.
+
+Shared light/dark roles are exported as
+`@workbasehq/plugins/console/ui/tokens.css`. Alata Regular and its OFL licence
+are bundled at `console/assets/assets/Alata-Regular.ttf` and
+`console/assets/licenses/alata/OFL.txt` in the plugins package; the browser makes no remote font request. See the package
+NOTICE for provenance. Optional host overrides can set inherited `--wb-*`
+properties; the SDK uses low-specificity owned hooks and does not reset host or
+slot elements. Use the host's existing dark class to select dark roles.
+
+`AuthShell` owns the standalone document margin while mounted and restores the
+previous margin on unmount. Embedded components do not activate this lifecycle.
+`AuthShell` synchronizes the document `lang` with the active SDK language,
+including persisted preferences and language changes. The template HTML's
+initial language is only a fallback before the runtime mounts.

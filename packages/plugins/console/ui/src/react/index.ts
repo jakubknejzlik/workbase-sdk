@@ -1,3 +1,5 @@
+/// <reference path="../css.d.ts" />
+import '../styles.css'
 import { createContext, createElement as h, useContext, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { QueryClient, QueryClientProvider, useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useBlocker, useNavigate } from '@tanstack/react-router'
@@ -74,12 +76,12 @@ export function useList(entity: string, metadata: EntityMeta, bind: Record<strin
   return { state, more: () => { void query.fetchNextPage() }, hasMore: query.hasNextPage, loadingMore: query.isFetchingNextPage }
 }
 type FieldProps = { field: FieldMeta; name: string; t: Translate; enumKey: string; value: unknown; change: (value: unknown) => void; error?: string }
-const input = (type: string, numeric = false) => ({ name, value, change, error }: FieldProps) => h('input', { 'aria-label': name, 'aria-invalid': !!error, type, value: value == null ? '' : String(value), onChange: (e: { target: { value: string } }) => change(numeric && e.target.value !== '' ? Number(e.target.value) : e.target.value) })
+const input = (type: string, numeric = false) => ({ name, value, change, error }: FieldProps) => h('input', { className: 'wb-control', 'aria-label': name, 'aria-invalid': !!error, type, value: value == null ? '' : String(value), onChange: (e: { target: { value: string } }) => change(numeric && e.target.value !== '' ? Number(e.target.value) : e.target.value) })
 const structuralStyle = { row: { display: 'flex', flexWrap: 'wrap' as const, gap: '1rem' }, columns: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 18rem), 1fr))', gap: '1rem' } }
 const fieldRenderers: Record<string, (props: FieldProps) => ReactNode> = {
   string: input('text'), text: input('text'), int: input('number', true), float: input('number', true), datetime: input('text'),
-  bool: ({ name, value, change, error, t: translate }) => h('select', { 'aria-label': name, 'aria-invalid': !!error, value: value == null ? '' : String(value), onChange: (e: { target: { value: string } }) => change(e.target.value === '' ? null : e.target.value === 'true') }, ...['', 'true', 'false'].map(v => h('option', { key: v, value: v }, v ? translate('sdk:' + v) : ''))),
-  enum: ({ field, name, value, change, error, t: translate, enumKey }) => h('select', { 'aria-label': name, 'aria-invalid': !!error, value: value == null ? '' : String(value), onChange: (e: { target: { value: string } }) => change(e.target.value) }, h('option', { value: '' }, ''), ...field.values!.map(v => h('option', { key: v, value: v }, translate(enumKey + v)))),
+  bool: ({ name, value, change, error, t: translate }) => h('select', { className: 'wb-control', 'aria-label': name, 'aria-invalid': !!error, value: value == null ? '' : String(value), onChange: (e: { target: { value: string } }) => change(e.target.value === '' ? null : e.target.value === 'true') }, ...['', 'true', 'false'].map(v => h('option', { key: v, value: v }, v ? translate('sdk:' + v) : ''))),
+  enum: ({ field, name, value, change, error, t: translate, enumKey }) => h('select', { className: 'wb-control', 'aria-label': name, 'aria-invalid': !!error, value: value == null ? '' : String(value), onChange: (e: { target: { value: string } }) => change(e.target.value) }, h('option', { value: '' }, ''), ...field.values!.map(v => h('option', { key: v, value: v }, translate(enumKey + v)))),
   ref: () => null,
 }
 export type RenderContext = Runtime & { metadata: EntityMeta; entity: string; mode?: Page['mode']; record: Record<string, unknown>; draft?: Record<string, unknown>; change?: (name: string, value: unknown) => void; issues?: Issue[] }
@@ -106,7 +108,7 @@ export function renderNode(node: Node, ctx: RenderContext): ReactNode {
   const editable = permission.writable(ctx.entity, node) && !!ctx.change && field && !field.readOnly && !field.computed && !field.userLink
   if (!renderer || editable && field.type === 'ref') return h('p', { role: 'alert' }, ctx.t('sdk:unsupported') + ': ' + (field?.type ?? node))
   const error = ctx.issues?.filter(issue => issue.path[0] === node).map(issue => issue.code).join(', ')
-  return h('div', null, h('label', null, ctx.t('domain:field.' + ctx.entity + '.' + node)), editable ? renderer({ field, name: ctx.t('domain:field.' + ctx.entity + '.' + node), t: ctx.t, enumKey: 'domain:enum.' + ctx.entity + '.' + node + '.', value: ctx.draft?.[node], change: value => ctx.change!(node, value), error }) : h('span', null, field.type === 'enum' && ctx.record[node] != null ? ctx.t('domain:enum.' + ctx.entity + '.' + node + '.' + ctx.record[node]) : String(ctx.record[node] ?? '')), error && h('span', { role: 'alert' }, ctx.t(error === 'required' ? 'sdk:required' : 'sdk:validation')))
+  return h('div', { className: 'wb-field' }, h('label', null, ctx.t('domain:field.' + ctx.entity + '.' + node)), editable ? renderer({ field, name: ctx.t('domain:field.' + ctx.entity + '.' + node), t: ctx.t, enumKey: 'domain:enum.' + ctx.entity + '.' + node + '.', value: ctx.draft?.[node], change: value => ctx.change!(node, value), error }) : h('span', null, field.type === 'enum' && ctx.record[node] != null ? ctx.t('domain:enum.' + ctx.entity + '.' + node + '.' + ctx.record[node]) : String(ctx.record[node] ?? '')), error && h('span', { role: 'alert' }, ctx.t(error === 'required' ? 'sdk:required' : 'sdk:validation')))
 }
 function ResolvedSlot({ slot, props, ctx }: { slot: Slot; props: Record<string, unknown>; ctx: RenderContext }) {
   const [controller] = useState(() => new AbortController())
@@ -138,16 +140,16 @@ function RecordAction({ ctx, name }: { ctx: RenderContext; name: string }) {
     catch (error) { if (!controller.current.signal.aborted) setFailure(error) }
     finally { if (!controller.current.signal.aborted) setPending(false) }
   }
-  return h('div', null, h('button', { type: 'button', disabled: pending || !action.enabled, 'aria-describedby': reason ? reasonId : undefined, onClick: () => { void run() } }, ctx.t('ui:actions.' + name)),
+  return h('div', null, h('button', { className: 'wb-control', type: 'button', disabled: pending || !action.enabled, 'aria-describedby': reason ? reasonId : undefined, onClick: () => { void run() } }, ctx.t('ui:actions.' + name)),
     reason && h('span', { id: reasonId }, ctx.t(reasonKey(reason))), !!failure && message(failureState(failure), ctx.t))
 }
 function Tabs({ node, ctx }: { node: Exclude<Node, string | { kind: 'slot' } | { kind: 'action' }>; ctx: RenderContext }) {
   const [active, setActive] = useState(0)
   return h('div', null, 'title' in node && node.title && h('h2', null, ctx.t('ui:' + node.title)),
-    h('div', { role: 'tablist' }, ...node.children.map((child, i) => h('button', { key: i, type: 'button', role: 'tab', 'aria-selected': active === i, onClick: () => setActive(i) }, typeof child !== 'string' && 'title' in child && child.title ? ctx.t('ui:' + child.title) : String(i + 1)))),
+    h('div', { role: 'tablist' }, ...node.children.map((child, i) => h('button', { className: 'wb-control', key: i, type: 'button', role: 'tab', 'aria-selected': active === i, onClick: () => setActive(i) }, typeof child !== 'string' && 'title' in child && child.title ? ctx.t('ui:' + child.title) : String(i + 1)))),
     h('div', { role: 'tabpanel' }, node.children[active] && renderNode(node.children[active], ctx)))
 }
-function message(state: State<unknown>, translate: Runtime['t']) { return state.kind === 'ready' ? null : h('p', { role: state.kind === 'loading' ? 'status' : 'alert' }, translate('sdk:' + state.kind)) }
+function message(state: State<unknown>, translate: Runtime['t']) { return state.kind === 'ready' ? null : h('p', { className: 'wb-state', role: state.kind === 'loading' ? 'status' : 'alert' }, translate('sdk:' + state.kind)) }
 function path(link: ResolvedLink | undefined, id?: string) {
   if (!link) return undefined
   return buildPath(link.to, Object.fromEntries(Object.keys(link.bind).map(name => [name, id ?? ''])))
@@ -191,20 +193,20 @@ function Form({ props, metadata, initial, reload }: { props: ViewProps; metadata
   const state = failure ? failureState(failure) : undefined
   const ctx: RenderContext = { ...runtime, slots: props.slots ?? runtime.slots, metadata, entity: definition.entity!, mode: definition.mode, record: { ...base, actions: initial.actions, access: initial.access }, draft, change: (name, value) => setDraft(current => ({ ...current, [name]: value })), issues: state?.kind === 'validation' ? state.issues : [] }
   const singularKey = 'domain:entity.' + definition.entity + '.singular'
-  return h('form', { 'aria-label': translate.exists?.(singularKey) ? translate(singularKey) : undefined, noValidate: true, onSubmit: (e: { preventDefault(): void }) => { e.preventDefault(); void save() } },
-    conflict ? h('div', { role: 'alert' }, translate('sdk:conflict'), h('button', { type: 'button', disabled: saving, onClick: () => { void reloadCopy() } }, translate('sdk:reloadServerCopy'))) : state && message(state, translate),
+  return h('form', { className: 'wb-ui wb-panel wb-form', 'aria-label': translate.exists?.(singularKey) ? translate(singularKey) : undefined, noValidate: true, onSubmit: (e: { preventDefault(): void }) => { e.preventDefault(); void save() } },
+    conflict ? h('div', { role: 'alert' }, translate('sdk:conflict'), h('button', { className: 'wb-control', type: 'button', disabled: saving, onClick: () => { void reloadCopy() } }, translate('sdk:reloadServerCopy'))) : state && message(state, translate),
     ...definition.layout.map((node, i) => h('div', { key: i }, renderNode(node, ctx))),
-    h('button', { type: 'submit', disabled: saving }, translate('sdk:save')),
-    h('button', { type: 'button', disabled: saving, onClick: () => leave(definition.mode === 'create' ? path(route.links.list) : destination(String(base.id))) }, translate('sdk:back')),
-    h('button', { type: 'button', disabled: saving, onClick: () => leave(definition.mode === 'create' ? path(route.links.list) : destination(String(base.id))) }, translate('sdk:cancel')))
+    h('div', { className: 'wb-actions' }, h('button', { className: 'wb-control', 'data-primary': true, type: 'submit', disabled: saving }, translate('sdk:save')),
+    h('button', { className: 'wb-control', type: 'button', disabled: saving, onClick: () => leave(definition.mode === 'create' ? path(route.links.list) : destination(String(base.id))) }, translate('sdk:back')),
+    h('button', { className: 'wb-control', type: 'button', disabled: saving, onClick: () => leave(definition.mode === 'create' ? path(route.links.list) : destination(String(base.id))) }, translate('sdk:cancel'))))
 }
 function RecordView({ props, metadata, id }: { props: ViewProps; metadata: EntityMeta; id: string }) {
   const runtime = useRuntime(), { state, reload } = useRecord(props.definition.entity!, id)
   if (state.kind !== 'ready') return message(state, runtime.t)
   if (props.definition.mode === 'edit') return h(Form, { props, metadata, initial: state.data, reload })
   const ctx = { ...runtime, slots: props.slots ?? runtime.slots, metadata, entity: props.definition.entity!, record: state.data, mode: props.definition.mode }
-  return h('div', null, ...props.definition.layout.map((node, i) => h('div', { key: i }, renderNode(node, ctx))),
-    props.route.links.edit && gate(runtime.caps, { entities: props.entities }).allows({ ...props.definition, mode: 'edit' }) && h('button', { onClick: () => props.navigate(path(props.route.links.edit, state.data.id)!) }, runtime.t('sdk:edit')))
+  return h('div', { className: 'wb-ui wb-panel wb-detail' }, ...props.definition.layout.map((node, i) => h('div', { key: i }, renderNode(node, ctx))),
+    props.route.links.edit && gate(runtime.caps, { entities: props.entities }).allows({ ...props.definition, mode: 'edit' }) && h('button', { className: 'wb-control', onClick: () => props.navigate(path(props.route.links.edit, state.data.id)!) }, runtime.t('sdk:edit')))
 }
 function ListView({ props, metadata }: { props: ViewProps; metadata: EntityMeta }) {
   const runtime = useRuntime(), { t: translate } = runtime, binding = Object.values(props.definition.data).find(binding => binding.kind === 'list')
@@ -214,16 +216,17 @@ function ListView({ props, metadata }: { props: ViewProps; metadata: EntityMeta 
   const createPath = create?.length === 1 && !Object.keys(create[0].params).length ? buildPath(create[0].path, {}) : undefined
   const objectKey = 'domain:entity.' + props.definition.entity + '.object'
   useEffect(() => setBind(resolved), [canonicalJSON(resolved)])
-  return h('div', null,
-    h('p', null, translate('domain:entity.' + props.definition.entity, { count: state.kind === 'ready' ? state.data.length : 0 })),
-    createPath && h('button', { onClick: () => props.navigate(createPath) }, translate.exists?.(objectKey) ? translate('sdk:createEntity', { object: translate(objectKey) }) : translate('sdk:create')),
-    metadata.displayField !== 'id' && h('input', { 'aria-label': translate('sdk:search'), value: bind.search ?? '', onChange: (e: { target: { value: string } }) => setBind(current => ({ ...current, search: e.target.value })) }),
-    h('select', { 'aria-label': translate('sdk:sort'), value: bind.sort || metadata.displayField, onChange: (e: { target: { value: string } }) => setBind(current => ({ ...current, sort: e.target.value })) }, ...[...new Set(['id', ...Object.keys(metadata.fields)])].map(field => h('option', { key: field, value: field }, field === 'id' ? translate('sdk:identifier') : translate('domain:field.' + props.definition.entity + '.' + field)))),
-    h('select', { 'aria-label': translate('sdk:direction'), value: bind.dir || 'asc', onChange: (e: { target: { value: string } }) => setBind(current => ({ ...current, dir: e.target.value })) }, ...['asc', 'desc'].map(dir => h('option', { key: dir, value: dir }, translate('sdk:' + dir)))),
-    message(state, translate), state.kind === 'ready' && h('ul', null, ...state.data.map(record => h('li', { key: record.id },
-      props.route.links.detail && h('button', { onClick: () => props.navigate(path(props.route.links.detail, record.id)!) }, String(record[metadata.displayField] ?? record.id)),
+  return h('div', { className: 'wb-ui' },
+    h('p', { className: 'wb-list-count' }, translate('domain:entity.' + props.definition.entity, { count: state.kind === 'ready' ? state.data.length : 0 })),
+    h('div', { className: 'wb-panel' }, h('div', { className: 'wb-list-toolbar' },
+    metadata.displayField !== 'id' && h('input', { className: 'wb-control', 'aria-label': translate('sdk:search'), placeholder: translate('sdk:search'), value: bind.search ?? '', onChange: (e: { target: { value: string } }) => setBind(current => ({ ...current, search: e.target.value })) }),
+    h('select', { className: 'wb-control', 'aria-label': translate('sdk:sort'), value: bind.sort || metadata.displayField, onChange: (e: { target: { value: string } }) => setBind(current => ({ ...current, sort: e.target.value })) }, ...[...new Set(['id', ...Object.keys(metadata.fields)])].map(field => h('option', { key: field, value: field }, field === 'id' ? translate('sdk:identifier') : translate('domain:field.' + props.definition.entity + '.' + field)))),
+    h('select', { className: 'wb-control', 'aria-label': translate('sdk:direction'), value: bind.dir || 'asc', onChange: (e: { target: { value: string } }) => setBind(current => ({ ...current, dir: e.target.value })) }, ...['asc', 'desc'].map(dir => h('option', { key: dir, value: dir }, translate('sdk:' + dir)))),
+    createPath && h('button', { className: 'wb-control', 'data-primary': true, onClick: () => props.navigate(createPath) }, translate.exists?.(objectKey) ? translate('sdk:createEntity', { object: translate(objectKey) }) : translate('sdk:create'))),
+    message(state, translate), state.kind === 'ready' && h('ul', { className: 'wb-list' }, ...state.data.map(record => h('li', { className: 'wb-list-item', key: record.id },
+      props.route.links.detail && h('button', { className: 'wb-control wb-record-link', onClick: () => props.navigate(path(props.route.links.detail, record.id)!) }, String(record[metadata.displayField] ?? record.id)),
       ...props.definition.layout.map((node, i) => h('div', { key: i }, renderNode(node, { ...runtime, slots: props.slots ?? runtime.slots, metadata, entity: props.definition.entity!, record, mode: 'list' })))))),
-    hasMore && h('button', { disabled: loadingMore, onClick: more }, translate('sdk:loadMore')))
+    hasMore && h('button', { className: 'wb-control', disabled: loadingMore, onClick: more }, translate('sdk:loadMore'))))
 }
 /** Standalone view also permits a host to inject its own navigation. */
 export function PageView(input: ViewProps) {
@@ -237,7 +240,7 @@ export function PageView(input: ViewProps) {
   const id = binding?.bind.id && String(props.params[binding.bind.id.name] ?? props.search[binding.bind.id.name] ?? '')
   const back = path(route.links.list)
   const content = definition.kind === 'customPage' ? h(definition.component!) : !metadata ? h('div', null, ...definition.layout.map((node, i) => h('div', { key: i }, renderNode(node, { ...runtime, slots: props.slots ?? runtime.slots, metadata: { displayField: '', fields: {} }, entity: '', record: {} })))) : definition.mode === 'list' ? h(ListView, { props, metadata }) : definition.mode === 'create' ? h(Form, { props, metadata, initial: {} }) : id ? h(RecordView, { key: definition.entity + ':' + id, props, metadata, id }) : h('p', { role: 'alert' }, translate('sdk:notFound'))
-  return h('main', null, h('h1', null, translate('ui:' + definition.title)), back && !['create', 'edit'].includes(definition.mode ?? '') && h('button', { onClick: () => props.navigate(back) }, translate('sdk:back')), content)
+  return h('main', { className: 'wb-ui wb-page' }, h('h1', null, translate('ui:' + definition.title)), back && !['create', 'edit'].includes(definition.mode ?? '') && h('button', { className: 'wb-control', onClick: () => props.navigate(back) }, translate('sdk:back')), content)
 }
 /** Generated wrappers run inside TanStack Router; browser back also guards drafts. */
 export function RouteView(props: Omit<ViewProps, 'navigate' | 'onDirty'>) {
@@ -249,5 +252,5 @@ export function RouteView(props: Omit<ViewProps, 'navigate' | 'onDirty'>) {
 /** Language choice is in memory; profile persistence belongs to the host. */
 export function LanguageSwitcher({ i18n }: { i18n: I18n }) {
   const language = useSyncExternalStore(i18n.subscribe, i18n.language, i18n.language)
-  return i18n.languages.length > 1 ? h('select', { 'aria-label': i18n.t('sdk:language'), value: language, onChange: (event: { target: { value: string } }) => { void i18n.changeLanguage(event.target.value) } }, ...i18n.languages.map(lang => h('option', { key: lang, value: lang }, lang))) : null
+  return i18n.languages.length > 1 ? h('select', { className: 'wb-control', 'aria-label': i18n.t('sdk:language'), value: language, onChange: (event: { target: { value: string } }) => { void i18n.changeLanguage(event.target.value) } }, ...i18n.languages.map(lang => h('option', { key: lang, value: lang }, lang))) : null
 }

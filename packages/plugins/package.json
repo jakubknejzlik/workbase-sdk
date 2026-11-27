@@ -35,6 +35,10 @@
     "./console/ui/styles.css": {
       "types": "./console/ui/src/styles.d.ts",
       "default": "./console/ui/src/styles.css"
+    },
+    "./console/ui/tokens.css": {
+      "types": "./console/ui/src/styles.d.ts",
+      "default": "./console/ui/src/tokens.css"
     }
   },
   "dependencies": {

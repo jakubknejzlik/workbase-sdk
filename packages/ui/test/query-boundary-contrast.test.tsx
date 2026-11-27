@@ -7,8 +7,16 @@ import { QueryBoundary } from '../src/query-boundary'
 type RGB = [number, number, number]
 const css = readFileSync(resolve(import.meta.dirname, '../src/styles.css'), 'utf8')
 const declarations = (block: string) => Object.fromEntries([...block.matchAll(/(--[\w-]+):\s*([^;]+);/g)].map(([, name, value]) => [name, value]))
-const root = declarations(css.match(/:root\s*\{([^}]+)\}/)![1])
-const dark = declarations(css.match(/\.dark\s*\{([^}]+)\}/)![1])
+const shared = readFileSync(resolve(import.meta.dirname, '../../plugins/console/ui/src/tokens.css'), 'utf8')
+function theme(selector: RegExp) {
+  const tokens = Object.assign({}, ...[shared, css].flatMap(source => [...source.matchAll(selector)].map(match => declarations(match[1]))))
+  function resolveToken(value: string): string {
+    return value.replace(/var\((--[\w-]+)\)/g, (_, name) => resolveToken(tokens[name]))
+  }
+  return Object.fromEntries(Object.entries(tokens).map(([name, value]) => [name, resolveToken(value as string)]))
+}
+const root = theme(/:root\s*\{([^}]+)\}/g)
+const dark = theme(/(?:\.dark|:root)\s*\{([^}]+)\}/g)
 const colors = declarations(css.match(/@theme inline\s*\{([^}]+)\}/)![1])
 
 // Convert the actual theme's OKLCH tokens to sRGB, clipping out-of-gamut channels.

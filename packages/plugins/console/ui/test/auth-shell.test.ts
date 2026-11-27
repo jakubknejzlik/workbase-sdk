@@ -1,8 +1,9 @@
 declare const history: { state: unknown; pushState(state: unknown, unused: string, url: string): void; replaceState(state: unknown, unused: string, url: string): void }
 declare const location: { pathname: string; search: string }
-declare const document: { body: { textContent: string | null } }
+declare const document: { documentElement: { lang: string; style: typeof document.body.style; hasAttribute(name: string): boolean }; body: { textContent: string | null; style: { length: number; item(index: number): string; margin: string; cssText: string; setProperty(name: string, value: string, priority?: string): void; removeProperty(name: string): string; getPropertyPriority(name: string): string; getPropertyValue(name: string): string } } }
 declare const window: { location: typeof location; localStorage: Storage; sessionStorage: Storage; dispatchEvent(event: Event): void }
 // @vitest-environment jsdom
+import { readFileSync } from 'node:fs'
 import { createElement as h, StrictMode, type ReactNode } from 'react'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, afterEach, expect, test, vi } from 'vitest'
@@ -238,4 +239,73 @@ test('ordinary pageshow leaves the current boot intact', async () => {
   act(() => transition('pageshow', false))
   expect(screen.getByText('APP')).toBeTruthy()
   expect(fetch.mock.calls.filter(([path]) => path === '/me')).toHaveLength(1)
+})
+
+
+test('document language follows active SDK language on the styled sign-in root', async () => {
+  history.replaceState(null, '', '/sign-in')
+  const current = view(async () => json({}))
+  const { container } = render(current.element)
+  expect((container as unknown as { querySelector(selector: string): unknown }).querySelector('.wb-auth .wb-panel .wb-field')).toBeTruthy()
+  expect(document.documentElement.lang).toBe('en')
+  await act(async () => { await current.i18n.changeLanguage('cs') })
+  expect(document.documentElement.lang).toBe('cs')
+  expect(screen.getByRole('heading', { name: 'Přihlášení' })).toBeTruthy()
+})
+
+
+for (const strict of [false, true]) {
+  test.each([
+    '', 'margin:13px!important', 'margin-top:21px',
+    'margin:13px;margin-top:21px!important', 'margin-left:5px',
+    'margin-top:7px!important;margin-right:9px',
+    'margin-top:21px;margin-block-start:30px',
+    'margin-block-start:30px;margin-top:21px',
+    'margin-top:21px;margin-block-start:30px!important', 'margin-inline-start:7px',
+    'margin-block-start:30px;all:initial', 'all:initial;margin-block-start:30px',
+    'margin-top:21px!important;all:initial', 'all:initial!important;margin-block-start:30px',
+    String.raw`--host\:token:41px!important;--semi\;colon:retained;--with\ space:kept;width:var(--host\:token)`,
+  ])(`AuthShell never writes host inline styles (StrictMode=${strict}): %s`, css => {
+    history.replaceState(null, '', '/sign-in')
+    const styles = [document.body.style, document.documentElement.style]
+    const originals = styles.map(style => style.cssText)
+    styles.forEach(style => { style.cssText = css })
+    const before = styles.map(style => style.cssText)
+    const writes = styles.flatMap(style => [
+      vi.spyOn(style, 'setProperty'), vi.spyOn(style, 'removeProperty'),
+      vi.spyOn(style, 'cssText', 'set'),
+    ])
+    const mounted = render(view(async () => json({}), strict).element)
+    try {
+      expect(styles.map(style => style.cssText)).toEqual(before)
+      expect(document.documentElement.hasAttribute('data-workbase-auth-shell')).toBe(true)
+      mounted.rerender(view(async () => json({}), strict).element)
+      expect(styles.map(style => style.cssText)).toEqual(before)
+      mounted.unmount()
+      expect(styles.map(style => style.cssText)).toEqual(before)
+      expect(document.documentElement.hasAttribute('data-workbase-auth-shell')).toBe(false)
+      writes.forEach(write => expect(write).not.toHaveBeenCalled())
+    } finally {
+      mounted.unmount()
+      writes.forEach(write => write.mockRestore())
+      styles.forEach((style, index) => { style.cssText = originals[index] })
+    }
+  })
+  test(`AuthShell attribute counts concurrent shells (StrictMode=${strict})`, () => {
+    history.replaceState(null, '', '/sign-in')
+    const first = render(view(async () => json({}), strict).element)
+    const second = render(view(async () => json({}), strict).element)
+    expect(document.documentElement.hasAttribute('data-workbase-auth-shell')).toBe(true)
+    first.unmount()
+    expect(document.documentElement.hasAttribute('data-workbase-auth-shell')).toBe(true)
+    second.unmount()
+    expect(document.documentElement.hasAttribute('data-workbase-auth-shell')).toBe(false)
+  })
+}
+
+// Keep every selector component inside :where(): earlier ordinary host rules win.
+test('standalone body margin default has zero specificity', () => {
+  const css = readFileSync('packages/plugins/console/ui/src/styles.css', 'utf8')
+  const selector = css.match(/([^{};]+)\{\s*margin: 0;\s*\}/)?.[1].replace(/\/\*[\s\S]*?\*\//g, '').trim()
+  expect(selector).toBe(':where(html[data-workbase-auth-shell] body)')
 })

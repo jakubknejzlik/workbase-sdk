@@ -2,3 +2,13 @@ Workbase SDK (@workbasehq/plugins)
 Copyright 2026 Jakub Knejzlík
 
 Licensed under the Apache License, Version 2.0. See LICENSE.
+
+Public V3 visual foundation
+Shared styles retain the upstream source attribution in the bundled console NOTICE.
+Existing upstream license and notice headers are retained where present.
+
+Alata Regular v1.005 (unmodified TrueType font, font/ttf)
+Copyright 2019 The Alata Project Authors (https://github.com/SorkinType/Alata)
+Licensed under the SIL Open Font License, Version 1.1.
+See console/assets/licenses/alata/OFL.txt; the font is console/assets/assets/Alata-Regular.ttf.
+Source: https://github.com/google/fonts/tree/main/ofl/alata
