@@ -168,9 +168,12 @@ main:has([data-slot="list-page"]) h1 { font-weight: 400; }
   main:has([data-slot="list-page"]) h1 { font-size: 27px; line-height: 1.17; letter-spacing: -.95px; }
 }
 [data-list-density] td { height: var(--list-row-height); }
+/* Leave room for the 36px row action inside the 54px compact row. */
+[data-slot="list-page"] [data-list-density="compact"] td { padding-block: 8px; }
 [data-list-density] th { height: 45px; font-weight: 400; background-color: var(--muted); }
 [data-slot="list-page"] [data-list-density] th { padding-block: 0; }
 [data-list-density] td [data-slot="badge"] { font-size: inherit; }
+[data-list-density] td [data-list-badge] { line-height: inherit; }
 [data-list-density] [data-slot="table-container"]:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
 [data-list-density] [data-overflow-edge="end"], [data-list-density] [data-overflow-edge="both"] { border-right: 3px solid var(--border); }
 [data-list-density] [data-overflow-edge="start"], [data-list-density] [data-overflow-edge="both"] { border-left: 3px solid var(--border); }

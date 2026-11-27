@@ -67,3 +67,28 @@ it('writes evidence only to the exact LIST_V2_OUTPUT when both overrides are exp
 it('still rejects evidence inside the repository', () => {
   expect(() => probe({ ...environment(), LIST_V2_OUTPUT: resolve('test-results') })).toThrow(/LIST_V2_OUTPUT must be outside the repository/)
 })
+
+// Collection must remain portable after upload/download; producer paths are stale there.
+it('verifies root and A1/A2/A3a hashes in a relocated evidence tree', async () => {
+  const { checkListV2Evidence } = await import('../check-list-v2-evidence')
+  const { createHash } = await import('node:crypto')
+  const { writeFileSync } = await import('node:fs')
+  const sha = 'a'.repeat(40)
+  mkdirSync(join(root, sha))
+  const manifest: Record<string, unknown> = {}
+  for (const relativePath of ['root.png', ...['A1', 'A2', 'A3a'].map(section => `${sha}/${section}.png`)]) {
+    const bytes = Buffer.from(`synthetic capture ${relativePath}`)
+    writeFileSync(join(root, relativePath), bytes)
+    manifest[relativePath] = { relativePath, path: `/old-producer/${relativePath}`, sha256: createHash('sha256').update(bytes).digest('hex') }
+  }
+  writeFileSync(join(root, 'manifest.json'), JSON.stringify(manifest))
+  expect(checkListV2Evidence(root)).toEqual({ captures: 4, matched: 4 })
+})
+it.each(['missing', 'mismatch', 'traversal', 'empty'] as const)('fails visibly for %s evidence even when acceptance failed', async mode => {
+  const { checkListV2Evidence } = await import('../check-list-v2-evidence')
+  const { writeFileSync } = await import('node:fs')
+  const relativePath = mode === 'traversal' ? '../outside.png' : 'capture.png'
+  if (mode === 'mismatch') writeFileSync(join(root, relativePath), 'changed bytes')
+  writeFileSync(join(root, 'manifest.json'), JSON.stringify({ checks: { acceptance: { status: 'failed' } }, ...(mode === 'empty' ? {} : { A1: { capture: { relativePath, sha256: 'a'.repeat(64) } } }) }))
+  expect(() => checkListV2Evidence(root)).toThrow(/List v2 evidence incomplete/)
+})
