@@ -3,6 +3,7 @@ declare const location: { pathname: string; search: string }
 declare const document: { documentElement: { lang: string; style: typeof document.body.style; hasAttribute(name: string): boolean }; body: { textContent: string | null; style: { length: number; item(index: number): string; margin: string; cssText: string; setProperty(name: string, value: string, priority?: string): void; removeProperty(name: string): string; getPropertyPriority(name: string): string; getPropertyValue(name: string): string } } }
 declare const window: { location: typeof location; localStorage: Storage; sessionStorage: Storage; dispatchEvent(event: Event): void }
 // @vitest-environment jsdom
+import { readFileSync } from 'node:fs'
 import { createElement as h, StrictMode, type ReactNode } from 'react'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, afterEach, expect, test, vi } from 'vitest'
@@ -301,3 +302,10 @@ for (const strict of [false, true]) {
     expect(document.documentElement.hasAttribute('data-workbase-auth-shell')).toBe(false)
   })
 }
+
+// Keep every selector component inside :where(): earlier ordinary host rules win.
+test('standalone body margin default has zero specificity', () => {
+  const css = readFileSync('packages/plugins/console/ui/src/styles.css', 'utf8')
+  const selector = css.match(/([^{};]+)\{\s*margin: 0;\s*\}/)?.[1].replace(/\/\*[\s\S]*?\*\//g, '').trim()
+  expect(selector).toBe(':where(html[data-workbase-auth-shell] body)')
+})
