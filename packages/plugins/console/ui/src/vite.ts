@@ -62,6 +62,8 @@ export async function extractManifest(root: string, options: { sdkResolutionRoot
   // The server does not exist until the complete source graph has passed.
   const server = await createServer({
     root, configFile: false, logLevel: 'silent', appType: 'custom',
+    // Manifest extraction only loads SSR modules; never start a client pre-bundle.
+    optimizeDeps: { noDiscovery: true, include: [] },
     plugins: [componentStubs(sources)],
     resolve: { alias: [{ find: /^@workbasehq\/plugins\/console\/ui$/, replacement: fileURLToPath(new URL('./index.ts', import.meta.url)) }] },
     server: { middlewareMode: true, watch: null, ws: false },
