@@ -303,7 +303,7 @@ it('209 generated list gives record and access controls distinct visible and acc
   expect(screen.getAllByRole('menuitem').map(item => item.textContent)).toEqual(['Delete'])
 })
 
-it.each(['comfortable', 'compact'])('291 %s list cells, access control and all headers share text-sm typography tokens', async density => {
+it.each(['comfortable', 'compact'])('315 A1 %s list cells, access control and all headers share measured typography', async density => {
   await mount({ list: true, recordActions: true, status: { state: 'invited', can_invite: true, can_cancel: true, invitation: { id: 'pending', email: 'alex@example.test' }, inconsistency: null } })
   const access = await screen.findByRole('button', { name: /alex@example.test.*Application access actions/ })
   const table = screen.getByRole('table')
@@ -312,15 +312,12 @@ it.each(['comfortable', 'compact'])('291 %s list cells, access control and all h
   style.textContent = readFileSync(`${import.meta.dirname}/../src/styles.css`, 'utf8')
   document.head.append(style)
   try {
-    const typography = Array.from(style.sheet!.cssRules).find(rule => 'style' in rule && (rule as CSSStyleRule).style.getPropertyValue('font-size') === 'var(--text-sm)') as CSSStyleRule
-    expect(typography).toBeTruthy()
-    expect(typography.style.getPropertyValue('line-height')).toBe('var(--text-sm--line-height)')
-    // Exercise the rendered shared rule for cells, access and both header paths.
+    // A1 keeps the measured 12px / 17.76px typography in both densities.
     const headers = screen.getAllByRole('columnheader')
     expect(headers.some(header => header.querySelector('button'))).toBe(true)
     expect(headers.some(header => !header.querySelector('button'))).toBe(true)
     for (const element of [table, ...screen.getAllByRole('cell'), access, ...headers, ...headers.flatMap(header => Array.from(header.querySelectorAll('button')))]) {
-      expect(element.matches(typography.selectorText)).toBe(true)
+      expect(getComputedStyle(element)).toMatchObject({ fontSize: '12px', lineHeight: '17.76px' })
     }
   } finally { style.remove() }
 })
